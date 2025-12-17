@@ -21,6 +21,9 @@ target_sources(
         terminal/user_control_engine.cpp
         terminal/ssh_channel.cpp
         components/progress_bar.cpp
+        file_explorer/side_model.cpp
+        file_explorer/remote_side_model.cpp
+        file_explorer/local_side_model.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/frontend/include)

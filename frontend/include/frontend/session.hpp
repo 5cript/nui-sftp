@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nui-file-explorer/side.hpp>
+
 #include <persistence/state_holder.hpp>
 #include <persistence/state/terminal_engine.hpp>
 #include <persistence/state/termios.hpp>
@@ -7,6 +9,8 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/file_explorer/local_side_model.hpp>
+#include <frontend/file_explorer/remote_side_model.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <ids/ids.hpp>
 
@@ -51,8 +55,6 @@ class Session
     void onFileExplorerConnectionClose();
     void onTerminalConnectionClose();
     void onBeforeTerminalConnectionClose();
-    void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>>);
-    void navigateTo(std::filesystem::path path);
     void openSftp();
     void closeSelf();
     void initializeLayout();
@@ -64,6 +66,12 @@ class Session
     void createExecutingEngine();
     void createSshEngine();
     void fallbackToUserControlEngine();
+
+    NuiFileExplorer::Side& remoteFileGridSide();
+    NuiFileExplorer::Side& localFileGridSide();
+
+    RemoteSideModel& remoteSideModel();
+    LocalSideModel& localSideModel();
 
   private:
     struct Implementation;

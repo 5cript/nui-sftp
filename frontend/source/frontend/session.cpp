@@ -9,6 +9,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
+#include <frontend/file_explorer/remote_side_model.hpp>
 #include <nui-file-explorer/file_grid.hpp>
 #include <persistence/state_holder.hpp>
 #include <constants/layouts.hpp>
@@ -56,9 +57,6 @@ struct Session::Implementation
     // File Explorer Things:
     NuiFileExplorer::FileGrid fileGrid;
     std::shared_ptr<Nui::Dom::Element> fileExplorer;
-    std::filesystem::path currentPath;
-    std::unique_ptr<FileEngine> fileEngine;
-    std::filesystem::path preNavigatePath;
 
     // Operation Queue for File Explorer
     OperationQueue operationQueue;
@@ -105,11 +103,11 @@ struct Session::Implementation
         , confirmDialog{confirmDialog}
         , fileGrid{{
               .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-          }}
+         },
+            std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog),
+            std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog),
+        }
         , fileExplorer{}
-        , currentPath{}
-        , fileEngine{}
-        , preNavigatePath{}
         , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog}
         , operationQueueElement{}
         , layoutHost{}
@@ -143,6 +141,15 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
         }
     );
     // clang-format on
+}
+
+NuiFileExplorer::Side& Session::remoteFileGridSide()
+{
+    return impl_->fileGrid.rightSide();
+}
+NuiFileExplorer::Side& Session::localFileGridSide()
+{
+    return impl_->fileGrid.leftSide();
 }
 
 auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
@@ -203,203 +210,6 @@ Session::Session(
 
 void Session::setupFileGrid()
 {
-    impl_->fileGrid.onActivateItem([this](auto const& item) {
-        // TODO: what about files?:
-        if (item.type != NuiFileExplorer::FileGrid::Item::Type::Directory)
-            return;
-
-        if (item.path == ".")
-            return;
-        if (item.path == "..")
-            return navigateTo(impl_->currentPath.parent_path());
-
-        navigateTo(impl_->currentPath / item.path);
-    });
-
-    impl_->fileGrid.onDelete([this](auto const& items) {
-        using namespace std::string_literals;
-
-        Log::info("Delete items requested: {}", items.size());
-        for (const auto& item : items)
-        {
-            Log::info("Item: {}", item.path.generic_string());
-        }
-
-        if (items.empty())
-        {
-            Log::error("No items selected for deletion");
-            return;
-        }
-
-        const auto itemSize = items.size();
-        std::string confirmText = fmt::format(
-            "Are you sure you want to delete {} {} {}?:",
-            itemSize > 1 ? "the following" : items.front().path.generic_string(),
-            itemSize == 1 ? ""s : std::to_string(itemSize),
-            itemSize == 1 ? "" : "items");
-
-        std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-        for (const auto& item : items)
-        {
-            listItems.push_back({item.path.generic_string(), ""});
-        }
-
-        impl_->confirmDialog->open(
-            {.state = ConfirmDialog::State::Information,
-             .headerText = "Delete Items?",
-             .text = confirmText,
-             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-             .listItems = listItems,
-             .onClose = [items](ConfirmDialog::Button button) {
-                 if (button != ConfirmDialog::Button::Yes)
-                 {
-                     Log::info("Delete items cancelled");
-                     return;
-                 }
-
-                 Log::info("Deleting items");
-                 // TODO: ...
-             }});
-    });
-
-    impl_->fileGrid.onDownload([this](auto const& items) {
-        Log::info("Download items requested: {}", items.size());
-        for (const auto& item : items)
-        {
-            Log::debug("Item: {}", item.path.generic_string());
-        }
-
-        if (items.empty())
-        {
-            Log::error("No items selected for download");
-            return;
-        }
-
-        const auto itemsSize = items.size();
-        std::string confirmText = fmt::format(
-            "Are you sure you want to download {} {} {}?:",
-            itemsSize > 1 ? "the following" : items.front().path.generic_string(),
-            itemsSize == 1 ? "" : std::to_string(itemsSize),
-            itemsSize == 1 ? "" : "items");
-
-        std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-        for (const auto& item : items)
-        {
-            listItems.push_back({item.path.generic_string(), ""});
-        }
-
-        impl_->confirmDialog->open(
-            {.state = ConfirmDialog::State::Information,
-             .headerText = "Download Items?",
-             .text = confirmText,
-             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-             .listItems = listItems,
-             .onClose = [this, items](ConfirmDialog::Button button) {
-                 if (button != ConfirmDialog::Button::Yes)
-                 {
-                     Log::info("Download items cancelled");
-                     return;
-                 }
-
-                 std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems;
-                 std::transform(
-                     items.begin(), items.end(), std::back_inserter(downloadItems), [this](auto const& item) {
-                         // TODO: Proper target path handling:
-                         return std::make_pair(
-                             impl_->currentPath / item.path, "D:/DownloadTemp" / item.path.filename());
-                     });
-
-                 Log::info("Downloading items");
-                 for (const auto& item : downloadItems)
-                 {
-                     Log::info("Downloading '{}' to '{}'", item.first.generic_string(), item.second.generic_string());
-                     impl_->operationQueue.enqueueDownload(
-                         item.first, item.second, [this](std::optional<Ids::OperationId> const& opId) {
-                             if (!opId)
-                             {
-                                 Log::error("Failed to create download operation");
-                                 impl_->confirmDialog->open({
-                                     .state = ConfirmDialog::State::Negative,
-                                     .headerText = "Download Failed",
-                                     .text = "Failed to create download operation",
-                                     .buttons = ConfirmDialog::Button::Ok,
-                                 });
-                                 return;
-                             }
-                             Log::info("Download operation created with id: {}", opId->value());
-                         });
-                 }
-             }});
-    });
-
-    impl_->fileGrid.onUpload([this](auto const& destinationDir, auto const& items) {
-        Log::info("Upload items requested: {}", items.size());
-        for (const auto& item : items)
-        {
-            Log::debug("Item: {}", item.path.generic_string());
-        }
-
-        const auto itemsSize = items.size();
-        std::string confirmText = fmt::format(
-            "Are you sure you want to upload {} {} {}?:",
-            itemsSize > 1 ? "the following" : items.front().path.generic_string(),
-            itemsSize == 1 ? "" : std::to_string(itemsSize),
-            itemsSize == 1 ? "" : "items");
-
-        std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-        for (const auto& item : items)
-        {
-            listItems.push_back({item.path.generic_string(), ""});
-        }
-
-        impl_->confirmDialog->open(
-            {.state = ConfirmDialog::State::Information,
-             .headerText = "Upload Items?",
-             .text = confirmText,
-             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-             .listItems = listItems,
-             .onClose = [this, items, destinationDir](ConfirmDialog::Button button) {
-                 if (button != ConfirmDialog::Button::Yes)
-                 {
-                     Log::info("Upload items cancelled");
-                     return;
-                 }
-
-                 // pair <remote, local>
-                 std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems;
-                 std::transform(
-                     items.begin(),
-                     items.end(),
-                     std::back_inserter(uploadItems),
-                     [this, destinationDir](auto const& item) {
-                         return std::make_pair(destinationDir / item.path.filename(), item.path);
-                     });
-
-                 Log::info("Uploading items");
-                 for (const auto& item : uploadItems)
-                 {
-                     Log::info("Uploading '{}' to '{}'", item.second.generic_string(), item.first.generic_string());
-                     impl_->operationQueue.enqueueUpload(
-                         item.first /* remote */,
-                         item.second /* local */,
-                         [this](std::optional<Ids::OperationId> const& opId) {
-                             if (!opId)
-                             {
-                                 Log::error("Failed to create upload operation");
-                                 impl_->confirmDialog->open({
-                                     .state = ConfirmDialog::State::Negative,
-                                     .headerText = "Upload Failed",
-                                     .text = "Failed to create upload operation",
-                                     .buttons = ConfirmDialog::Button::Ok,
-                                 });
-                                 return;
-                             }
-                             Log::info("Upload operation created with id: {}", opId->value());
-                         });
-                 }
-             }});
-    });
-
     impl_->fileGrid.onError([this](auto const& message) {
         Log::error("File grid error: {}", message);
         impl_->confirmDialog->open({
@@ -410,105 +220,11 @@ void Session::setupFileGrid()
         });
     });
 
-    impl_->fileGrid.onRename([this](auto const& item) {
-        Log::info("Rename item requested: {}", item.path.generic_string());
-
-        impl_->inputDialog->open({
-            .whatFor = "Rename",
-            .prompt = "Enter the new name for " + item.path.filename().string(),
-            .headerText = "Rename " + item.path.filename().string(),
-            .isPassword = false,
-            .onConfirm =
-                [item](std::optional<std::string> const& name) {
-                    if (!name)
-                        return;
-
-                    Log::info("Renaming item to: {}", *name);
-                    // TODO: ...
-                },
-        });
+    remoteSideModel().setItemUpdateFunction([this](bool sorted) {
+        remoteFileGridSide().updateItems(sorted);
     });
-
-    impl_->fileGrid.onProperties([](auto const& item) {
-        Log::info("Properties requested: {}", item.path.generic_string());
-
-        // TODO: ...
-    });
-
-    impl_->fileGrid.onNewItem([this](auto type) {
-        Log::info("New item requested: {}", static_cast<int>(type));
-        if (type == NuiFileExplorer::FileGrid::Item::Type::Directory)
-        {
-            impl_->inputDialog->open({
-                .whatFor = "New directory",
-                .prompt = "Enter the name of the new directory",
-                .headerText = "Create a new directory",
-                .isPassword = false,
-                .onConfirm =
-                    [this](std::optional<std::string> const& name) {
-                        if (!name)
-                            return;
-
-                        Log::info("Creating new directory: {}", *name);
-                        if (name->find('/') != std::string::npos)
-                        {
-                            Log::error("Invalid directory name (cannot contain slashes): {}", *name);
-                            return;
-                        }
-                        impl_->fileEngine->createDirectory(impl_->currentPath / *name, [this](bool success) {
-                            if (!success)
-                            {
-                                Log::error("Failed to create directory");
-                                return;
-                            }
-                            // Refresh list from server:
-                            navigateTo(impl_->currentPath);
-                        });
-                    },
-            });
-        }
-        else if (type == NuiFileExplorer::FileGrid::Item::Type::Regular)
-        {
-            impl_->inputDialog->open({
-                .whatFor = "New file",
-                .prompt = "Enter the name of the new file",
-                .headerText = "Create a new file",
-                .isPassword = false,
-                .onConfirm =
-                    [this](std::optional<std::string> const& name) {
-                        if (!name)
-                            return;
-
-                        Log::info("Creating new file: {}", *name);
-                        if (name->find('/') != std::string::npos)
-                        {
-                            Log::error("Invalid file name (cannot contain slashes): {}", *name);
-                            return;
-                        }
-                        impl_->fileEngine->createFile(impl_->currentPath / *name, [this](bool success) {
-                            if (!success)
-                            {
-                                Log::error("Failed to create file");
-                                return;
-                            }
-                            // Refresh list from server:
-                            navigateTo(impl_->currentPath);
-                        });
-                    },
-            });
-        }
-        else
-        {
-            // TODO: create file
-        }
-    });
-
-    impl_->fileGrid.onRefresh([this]() {
-        navigateTo(impl_->currentPath);
-    });
-
-    impl_->fileGrid.onPathChange([this](std::filesystem::path const& path) {
-        navigateTo(path);
+    localSideModel().setItemUpdateFunction([this](bool sorted) {
+        localFileGridSide().updateItems(sorted);
     });
 }
 
@@ -564,64 +280,6 @@ Session::~Session() = default;
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(Session);
 
-void Session::onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries)
-{
-    if (!directoryEntries)
-    {
-        Log::error("Failed to list directory");
-        // undo the navigation:
-        impl_->currentPath = impl_->preNavigatePath;
-        navigateTo(impl_->currentPath);
-        return;
-    }
-
-    std::erase_if(*directoryEntries, [](auto const& entry) {
-        return entry.path.filename() == ".";
-    });
-
-    std::vector<NuiFileExplorer::FileGrid::Item> items{};
-    std::transform(
-        begin(*directoryEntries), end(*directoryEntries), std::back_inserter(items), [this](auto const& entry) {
-            return NuiFileExplorer::FileGrid::Item{
-                .path = entry.path,
-                .icon = [&entry, this]() -> std::string {
-                    const auto type = static_cast<NuiFileExplorer::FileGrid::Item::Type>(entry.type);
-                    if (type == NuiFileExplorer::FileGrid::Item::Type::Directory)
-                        return "nui://app.example/icons/folder_main.png";
-                    if (type == NuiFileExplorer::FileGrid::Item::Type::BlockDevice)
-                        return "nui://app.example/icons/hard_drive.png";
-
-                    if (impl_->uiOptions.fileGridExtensionIcons.contains(entry.path.extension().string()))
-                    {
-                        return "nui://app.example/" +
-                            impl_->uiOptions.fileGridExtensionIcons.at(entry.path.extension().string());
-                    }
-
-                    return "nui://app.example/icons/file.png";
-                }(),
-                .type = static_cast<NuiFileExplorer::FileGrid::Item::Type>(entry.type),
-                .permissions = entry.permissions,
-                .ownerId = entry.uid,
-                .groupId = entry.gid,
-                .atime = entry.atime,
-                .size = entry.size,
-            };
-        });
-
-    impl_->fileGrid.items(items);
-}
-
-void Session::navigateTo(std::filesystem::path path)
-{
-    path = path.lexically_normal();
-    Log::info("Navigating to: {}", path.generic_string());
-    impl_->preNavigatePath = impl_->currentPath;
-    impl_->currentPath = path;
-    impl_->fileEngine->listDirectory(
-        impl_->currentPath, std::bind(&Session::onDirectoryListing, this, std::placeholders::_1));
-    impl_->fileGrid.path(path.generic_string());
-}
-
 void Session::openSftp()
 {
     if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
@@ -630,10 +288,11 @@ void Session::openSftp()
         if (opts.openSftpByDefault)
         {
             Log::info("Opening SFTP by default");
-            auto* engine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
-            impl_->fileEngine = std::make_unique<SftpFileEngine>(engine);
-            impl_->operationQueue.activate(impl_->fileEngine.get(), engine->sshSessionId());
-            navigateTo(opts.defaultDirectory.value_or("/"));
+            auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
+            remoteSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
+            impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
+            remoteSideModel().operationQueue(&impl_->operationQueue);
+            remoteFileGridSide().path(opts.defaultDirectory.value_or("/"));
         }
     }
     else
@@ -728,9 +387,9 @@ void Session::onTerminalConnectionClose()
 
     impl_->terminal.value().reset();
 
-    if (impl_->fileEngine)
+    if (auto* fileEngine = remoteSideModel().engine(); fileEngine)
     {
-        impl_->fileEngine->dispose();
+        fileEngine->dispose();
     }
     else
     {
@@ -745,7 +404,7 @@ void Session::onFileExplorerConnectionClose()
 
     Log::debug("onFileExplorerConnectionClose");
 
-    impl_->fileEngine.reset();
+    remoteSideModel().engine({});
 
     if (impl_->terminal.value())
     {
@@ -761,13 +420,13 @@ void Session::managerShutdown(std::function<void()> onShutdown)
 {
     const bool isExecutingEngine = std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine);
 
-    if (!isExecutingEngine && (impl_->terminal.value() || impl_->fileEngine))
+    if (!isExecutingEngine && (impl_->terminal.value() || remoteSideModel().engine()))
     {
         if (impl_->terminal.value())
         {
             Log::info("Waiting for terminal engine to close");
         }
-        if (impl_->fileEngine)
+        if (auto* fileEngine = remoteSideModel().engine(); fileEngine)
         {
             Log::info("Waiting for file engine to close");
         }
@@ -1020,4 +679,13 @@ Nui::ElementRenderer Session::operator()(bool visible)
     }(
     );
     // clang-format on
+}
+
+RemoteSideModel& Session::remoteSideModel()
+{
+    return static_cast<RemoteSideModel&>(remoteFileGridSide().model());
+}
+LocalSideModel& Session::localSideModel()
+{
+    return static_cast<LocalSideModel&>(localFileGridSide().model());
 }
