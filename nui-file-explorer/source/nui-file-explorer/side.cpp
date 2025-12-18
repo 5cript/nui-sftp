@@ -131,6 +131,7 @@ namespace NuiFileExplorer
 
         // clang-format off
         return div {
+            class_ = "nui-file-grid-side"
         }(
             [this]() -> Nui::ElementRenderer {
                 if (impl_->settings.pathBarOnTop)
@@ -139,8 +140,7 @@ namespace NuiFileExplorer
             }(),
             headMenu(),
             div{
-                class_ = "nui-file-grid-side",
-                style = "position: relative; overflow-y: scroll",
+                class_ = "nui-file-grid-side-content",
             }(
                 contextMenu(),
                 div{

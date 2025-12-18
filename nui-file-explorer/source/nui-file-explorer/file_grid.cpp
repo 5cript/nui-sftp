@@ -98,8 +98,7 @@ namespace NuiFileExplorer
                     std::swap(left, right);
 
                 return div{
-                    class_ = "nui-file-grid-content",
-                    style = "width: 100%; flex-grow: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;",
+                    class_ = "nui-file-grid-content"
                 }(
                     (*left)(),
                     (*right)()
