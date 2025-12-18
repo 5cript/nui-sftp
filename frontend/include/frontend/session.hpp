@@ -56,6 +56,7 @@ class Session
     void onTerminalConnectionClose();
     void onBeforeTerminalConnectionClose();
     void openSftp();
+    void openLocalFilesystem();
     void closeSelf();
     void initializeLayout();
 

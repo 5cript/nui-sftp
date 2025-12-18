@@ -9,6 +9,21 @@ RemoteSideModel::RemoteSideModel(
     : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
 {}
 
+void RemoteSideModel::engine(std::unique_ptr<FileEngine> fileEngine)
+{
+    fileEngine_ = std::move(fileEngine);
+}
+
+FileEngine* RemoteSideModel::engine()
+{
+    return fileEngine_.get();
+}
+
+bool RemoteSideModel::isComplete() const
+{
+    return fileEngine_ != nullptr && SideModel::isComplete();
+}
+
 void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
@@ -24,6 +39,7 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 
     navigateTo(currentPath_ / item.path);
 }
+
 void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
 {
     CHECK_COMPLETE();
@@ -94,6 +110,7 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
         // TODO: create file
     }
 }
+
 void RemoteSideModel::onError(std::string const& error)
 {
     Log::error("File grid error (remote side): {}", error);
@@ -103,18 +120,6 @@ void RemoteSideModel::onError(std::string const& error)
         .text = error,
         .buttons = ConfirmDialog::Button::Ok,
     });
-}
-const std::vector<NuiFileExplorer::Item>& RemoteSideModel::items() const
-{
-    return items_;
-}
-void RemoteSideModel::onPathChange(std::filesystem::path const& path)
-{
-    navigateTo(path);
-}
-void RemoteSideModel::onRefresh()
-{
-    navigateTo(currentPath_);
 }
 
 void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
@@ -165,6 +170,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
              // TODO: ...
          }});
 }
+
 void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items)
 {
     CHECK_COMPLETE();
@@ -235,6 +241,7 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
              }
          }});
 }
+
 void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
@@ -256,6 +263,7 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
             },
     });
 }
+
 void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
@@ -264,56 +272,7 @@ void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
 
     // TODO: ...
 }
-void RemoteSideModel::onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries)
-{
-    CHECK_COMPLETE();
 
-    if (!directoryEntries)
-    {
-        Log::error("Failed to list directory");
-        // undo the navigation:
-        currentPath_ = preNavigatePath_;
-        navigateTo(currentPath_);
-        return;
-    }
-
-    std::erase_if(*directoryEntries, [](auto const& entry) {
-        return entry.path.filename() == ".";
-    });
-
-    std::vector<NuiFileExplorer::Item> items{};
-    std::transform(
-        begin(*directoryEntries), end(*directoryEntries), std::back_inserter(items), [this](auto const& entry) {
-            return NuiFileExplorer::Item{
-                .path = entry.path,
-                .icon = [&entry, this]() -> std::string {
-                    const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
-                    if (type == NuiFileExplorer::Item::Type::Directory)
-                        return "nui://app.example/icons/folder_main.png";
-                    if (type == NuiFileExplorer::Item::Type::BlockDevice)
-                        return "nui://app.example/icons/hard_drive.png";
-
-                    if (uiOptions_.fileGridExtensionIcons.contains(entry.path.extension().string()))
-                    {
-                        return "nui://app.example/" +
-                            uiOptions_.fileGridExtensionIcons.at(entry.path.extension().string());
-                    }
-
-                    return "nui://app.example/icons/file.png";
-                }(),
-                .type = static_cast<NuiFileExplorer::Item::Type>(entry.type),
-                .permissions = entry.permissions,
-                .ownerId = entry.uid,
-                .groupId = entry.gid,
-                .atime = entry.atime,
-                .size = entry.size,
-            };
-        });
-
-    items_ = std::move(items);
-    if (refreshCallback_)
-        refreshCallback_(true);
-}
 void RemoteSideModel::navigateTo(std::filesystem::path const& path)
 {
     CHECK_COMPLETE();

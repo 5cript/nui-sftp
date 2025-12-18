@@ -19,7 +19,7 @@
         { \
             auto loc = std::source_location::current(); \
             Log::error( \
-                "RemoteSideModel is used before the setup is complete. ({}:{} {})", \
+                "SideModel is used before the setup is complete. ({}:{} {})", \
                 loc.file_name(), \
                 loc.line(), \
                 loc.function_name()); \
@@ -42,24 +42,31 @@ class SideModel : public NuiFileExplorer::ISideModel
     SideModel(SideModel&&) = default;
     SideModel& operator=(SideModel&&) = default;
 
-    void engine(std::unique_ptr<FileEngine> fileEngine);
-    FileEngine* engine();
-
     void operationQueue(OperationQueue* operationQueue);
     OperationQueue* operationQueue();
 
     void setItemUpdateFunction(std::function<void(bool)> doUpdate) override;
+    const std::vector<NuiFileExplorer::Item>& items() const override;
+    void onPathChange(std::filesystem::path const& path) override
+    {
+        navigateTo(path);
+    }
+    void onRefresh() override
+    {
+        navigateTo(currentPath_);
+    }
 
   protected:
     // Design smell:
-    bool isComplete() const;
+    virtual bool isComplete() const;
+
+    void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
 
   protected:
     Persistence::UiOptions uiOptions_;
     ConfirmDialog* confirmDialog_;
     InputDialog* inputDialog_;
     std::vector<NuiFileExplorer::Item> items_{};
-    std::unique_ptr<FileEngine> fileEngine_{nullptr};
     OperationQueue* operationQueue_{nullptr};
     std::filesystem::path currentPath_{};
     std::filesystem::path preNavigatePath_{};

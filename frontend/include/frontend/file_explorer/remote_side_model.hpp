@@ -13,11 +13,11 @@ class RemoteSideModel : public SideModel
   public:
     RemoteSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog);
 
+    void engine(std::unique_ptr<FileEngine> fileEngine);
+    FileEngine* engine();
+
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
-    const std::vector<NuiFileExplorer::Item>& items() const override;
-    void onPathChange(std::filesystem::path const& path) override;
-    void onRefresh() override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items) override;
     void onRename(NuiFileExplorer::Item const& item) override;
@@ -25,5 +25,8 @@ class RemoteSideModel : public SideModel
     void onError(std::string const& error) override;
 
     void navigateTo(std::filesystem::path const& path) override;
-    void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
+    bool isComplete() const override;
+
+  private:
+    std::unique_ptr<FileEngine> fileEngine_{nullptr};
 };

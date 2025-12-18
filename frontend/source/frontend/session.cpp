@@ -280,6 +280,41 @@ Session::~Session() = default;
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(Session);
 
+void Session::openLocalFilesystem()
+{
+    // initial navigate to default path:
+    Nui::RpcClient::callWithBackChannel("RpcFilesystem::getHome", [this](Nui::val response) {
+        if (!response.hasOwnProperty("success"))
+        {
+            Log::error("Invalid response from RpcFilesystem::getHome");
+            return;
+        }
+
+        const auto success = response["success"].as<bool>();
+        if (!success)
+        {
+            const auto error = response["error"].as<std::string>();
+            Log::error("Failed to get home directory: {}", error);
+            return;
+        }
+
+        if (!response.hasOwnProperty("path"))
+        {
+            Log::error("Invalid response from RpcFilesystem::getHome: missing 'path'");
+            impl_->confirmDialog->open({
+                .state = ConfirmDialog::State::Negative,
+                .headerText = "Get Home Directory Failed",
+                .text = "Invalid response from backend: missing 'path'",
+                .buttons = ConfirmDialog::Button::Ok,
+            });
+            return;
+        }
+
+        const auto homePath = response["path"].as<std::string>();
+        localFileGridSide().path(homePath);
+    });
+}
+
 void Session::openSftp()
 {
     if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
@@ -293,6 +328,7 @@ void Session::openSftp()
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             remoteFileGridSide().path(opts.defaultDirectory.value_or("/"));
+            openLocalFilesystem();
         }
     }
     else

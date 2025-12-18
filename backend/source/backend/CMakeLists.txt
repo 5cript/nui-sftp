@@ -7,6 +7,7 @@ add_library(
         process/environment.cpp
         session_manager.cpp
         session.cpp
+        rpc_filesystem.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp

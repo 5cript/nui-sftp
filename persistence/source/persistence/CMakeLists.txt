@@ -11,6 +11,7 @@ add_library(
         state/termios.cpp
         state/ui_options.cpp
         state/queue_options.cpp
+        state/local_filesystem_options.cpp
         state_holder.cpp
 )
 

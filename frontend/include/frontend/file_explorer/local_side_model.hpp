@@ -14,9 +14,6 @@ class LocalSideModel : public SideModel
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
-    const std::vector<NuiFileExplorer::Item>& items() const override;
-    void onPathChange(std::filesystem::path const& path) override;
-    void onRefresh() override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items) override;
     void onRename(NuiFileExplorer::Item const& item) override;

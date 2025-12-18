@@ -146,7 +146,8 @@ namespace
 }
 
 Main::Main(int const, char const* const* argv)
-    : programDir_{std::filesystem::path{argv[0]}.parent_path()}
+    : shuttingDown_{false}
+    , programDir_{std::filesystem::path{argv[0]}.parent_path()}
     , stateHolder_{}
     , window_{
           Nui::WindowOptions{
@@ -156,19 +157,36 @@ Main::Main(int const, char const* const* argv)
           },
       }
     , hub_{window_}
+    , rpcFilesystem_{nullptr}
     , processes_{window_.getExecutor(), window_, hub_}
     , prompter_{hub_}
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
-    , shuttingDown_{false}
     , childSignalTimer_{window_.getExecutor()}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
 
-    stateHolder_.load([](bool success, Persistence::StateHolder& holder) {
+    stateHolder_.load([this](bool success, Persistence::StateHolder& holder) {
         if (!success)
+        {
+            rpcFilesystem_ = std::make_unique<RpcFilesystem>(
+                window_.getExecutor(),
+                window_,
+                hub_,
+                // prevent all:
+                Persistence::LocalFilesystemOptions{
+                    .preventDeletion = true,
+                    .preventRename = true,
+                    .preventCreateFile = true,
+                    .preventCreateDirectory = true,
+                });
+
             return;
+        }
 
         Log::setLevel(holder.stateCache().logLevel);
+
+        rpcFilesystem_ = std::make_unique<RpcFilesystem>(
+            window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions);
     });
 }
 Main::~Main()

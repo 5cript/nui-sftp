@@ -3,6 +3,7 @@
 #include <backend/process/process_store.hpp>
 #include <backend/session_manager.hpp>
 #include <persistence/state_holder.hpp>
+#include <backend/rpc_filesystem.hpp>
 #include <backend/password/password_prompter.hpp>
 #include <ssh/async/processing_thread.hpp>
 
@@ -32,13 +33,14 @@ class Main
     void startChildSignalTimer();
 
   private:
+    std::atomic_bool shuttingDown_;
     std::filesystem::path programDir_;
     Persistence::StateHolder stateHolder_;
     Nui::Window window_;
     Nui::RpcHub hub_;
+    std::unique_ptr<RpcFilesystem> rpcFilesystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
     std::shared_ptr<SessionManager> sshSessionManager_;
-    std::atomic_bool shuttingDown_;
     boost::asio::steady_timer childSignalTimer_;
 };
