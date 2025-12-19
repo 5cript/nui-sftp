@@ -226,6 +226,8 @@ void Session::setupFileGrid()
     localSideModel().setItemUpdateFunction([this](bool sorted) {
         localFileGridSide().updateItems(sorted);
     });
+    remoteSideModel().setLocalModel(&localSideModel());
+    localSideModel().setRemoteModel(&remoteSideModel());
 }
 
 void Session::createSshEngine()
@@ -327,6 +329,7 @@ void Session::openSftp()
             remoteSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
+            localSideModel().operationQueue(&impl_->operationQueue);
             remoteFileGridSide().path(opts.defaultDirectory.value_or("/"));
             openLocalFilesystem();
         }

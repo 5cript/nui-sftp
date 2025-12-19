@@ -30,10 +30,10 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
     {
         Log::error("Failed to list directory");
         // undo the navigation:
-        if (currentPath_ != preNavigatePath_)
+        if (currentPath_.value() != preNavigatePath_)
         {
             currentPath_ = preNavigatePath_;
-            navigateTo(currentPath_);
+            navigateTo(currentPath_.value());
         }
         return;
     }

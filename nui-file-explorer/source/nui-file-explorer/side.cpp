@@ -97,7 +97,6 @@ namespace NuiFileExplorer
         };
 
         std::weak_ptr<Nui::Dom::BasicElement> contextMenuView{};
-        Nui::Observed<std::filesystem::path> path{};
         std::vector<Item> contextMenuClickItems{};
 
         void sortItems()
@@ -325,14 +324,13 @@ namespace NuiFileExplorer
 
     void Side::path(std::filesystem::path const& path)
     {
-        impl_->path = path;
         model().navigateTo(path);
         // Do NOT call onPathChange here. That is intentional.
     }
 
     std::filesystem::path Side::path()
     {
-        return impl_->path.value();
+        return model().currentPath().value();
     }
 
     std::vector<std::filesystem::path> Side::selectedPaths() const
@@ -613,8 +611,8 @@ namespace NuiFileExplorer
             }(),
             input{
                 type = "text",
-                "value"_prop = observe(impl_->path).generate([this](){
-                    return impl_->path->generic_string();
+                "value"_prop = observe(model().currentPath()).generate([this](){
+                    return model().currentPath().value().generic_string();
                 }),
                 "keyup"_event = [this](Nui::val event){
                     if (event["key"].as<std::string>() == "Enter")

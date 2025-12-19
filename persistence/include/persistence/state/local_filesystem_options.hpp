@@ -3,6 +3,7 @@
 #include <persistence/state_core.hpp>
 
 #include <optional>
+#include <filesystem>
 
 namespace Persistence
 {
@@ -13,6 +14,7 @@ namespace Persistence
         std::optional<bool> preventRename{std::nullopt};
         std::optional<bool> preventCreateFile{std::nullopt};
         std::optional<bool> preventCreateDirectory{std::nullopt};
+        std::optional<std::string> homeOverride{std::nullopt};
 
         void useDefaultsFrom(LocalFilesystemOptions const& other);
     };

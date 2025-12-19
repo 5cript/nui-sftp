@@ -15,6 +15,7 @@ RpcFilesystem::RpcFilesystem(
     , options_{std::move(options)}
 {
     registerRemove();
+    registerRemoveMultiple();
     registerRename();
     registerListFiles();
     registerCreateFile();
@@ -71,7 +72,7 @@ void RpcFilesystem::registerRemove()
 void RpcFilesystem::registerRemoveMultiple()
 {
     on("RpcFilesystem::removeSome").perform([this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters) {
-        if (!options_.preventDeletion.value_or(false))
+        if (options_.preventDeletion.value_or(true))
         {
             Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
             return reply.error("File deletion is prevented by configuration.");
@@ -115,7 +116,7 @@ void RpcFilesystem::registerRemoveMultiple()
 void RpcFilesystem::registerRename()
 {
     on("RpcFilesystem::rename").perform([this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters) {
-        if (!options_.preventRename.value_or(false))
+        if (options_.preventRename.value_or(false))
         {
             Log::warn("RpcFilesystem::rename called but renaming is prevented by configuration.");
             return reply.error("File renaming is prevented by configuration.");
@@ -123,8 +124,8 @@ void RpcFilesystem::registerRename()
 
         Log::info("RpcFilesystem::rename called with parameters: {}", parameters.dump(4));
 
-        if (!RpcHelper::ParameterVerifyView{reply, "RpcFilesystem::rename", parameters}.hasValueDeep(
-                "oldPath", "newPath"))
+        auto view = RpcHelper::ParameterVerifyView{reply, "RpcFilesystem::rename", parameters};
+        if (!view.hasValueDeep("oldPath") || !view.hasValueDeep("newPath"))
         {
             Log::error("RpcFilesystem::rename missing required parameters 'oldPath' and/or 'newPath'.");
             return reply.error("Missing required parameters 'oldPath' and/or 'newPath'.");
@@ -158,6 +159,7 @@ void RpcFilesystem::registerListFiles()
         }
 
         const auto directoryPath = parameters["path"].get<std::string>();
+        const auto fileNameOnly = parameters.value("fileNameOnly", false);
         nlohmann::json fileList = nlohmann::json::array();
 
         std::error_code ec;
@@ -169,8 +171,15 @@ void RpcFilesystem::registerListFiles()
                 return reply.error(ec.message());
             }
 
-            const auto u8String = entry.path().generic_u8string();
-            std::string path{u8String.begin(), u8String.end()};
+            const auto path = [&]() -> std::string {
+                if (fileNameOnly)
+                {
+                    const auto u8String = entry.path().filename().generic_u8string();
+                    return {u8String.begin(), u8String.end()};
+                }
+                const auto u8String = entry.path().generic_u8string();
+                return {u8String.begin(), u8String.end()};
+            }();
 
             fileList.push_back({
                 {"path", path},
@@ -186,7 +195,7 @@ void RpcFilesystem::registerListFiles()
 void RpcFilesystem::registerCreateFile()
 {
     on("RpcFilesystem::createFile").perform([this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters) {
-        if (!options_.preventCreateFile.value_or(false))
+        if (options_.preventCreateFile.value_or(false))
         {
             Log::warn("RpcFilesystem::createFile called but file creation is prevented by configuration.");
             return reply.error("File creation is prevented by configuration.");
@@ -217,7 +226,7 @@ void RpcFilesystem::registerCreateFile()
 void RpcFilesystem::registerCreateDirectory()
 {
     on("RpcFilesystem::createDirectory").perform([this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters) {
-        if (!options_.preventCreateDirectory.value_or(false))
+        if (options_.preventCreateDirectory.value_or(false))
         {
             Log::warn("RpcFilesystem::createDirectory called but directory creation is prevented by configuration.");
             return reply.error("Directory creation is prevented by configuration.");
@@ -276,10 +285,17 @@ void RpcFilesystem::registerProperties()
 
 void RpcFilesystem::registerGetHome()
 {
-    on("RpcFilesystem::getHome").perform([](RpcHelper::RpcOnce&& reply) {
+    on("RpcFilesystem::getHome").perform([options = this->options_](RpcHelper::RpcOnce&& reply) {
         Log::info("RpcFilesystem::getHome called.");
 
-        const auto home = Nui::resolvePath("%userprofile%");
+        if (options.homeOverride.has_value())
+        {
+            std::filesystem::path homePath = *options.homeOverride;
+            Log::info("Returning overridden home directory path: {}", homePath.generic_string());
+            return reply({{"success", true}, {"path", homePath.generic_string()}});
+        }
+
+        auto home = Nui::resolvePath("%userprofile%");
 
         Log::info("Returning initial directory path: {}", home.generic_string());
         return reply({{"success", true}, {"path", home.generic_string()}});

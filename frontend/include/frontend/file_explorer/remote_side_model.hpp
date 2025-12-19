@@ -25,8 +25,10 @@ class RemoteSideModel : public SideModel
     void onError(std::string const& error) override;
 
     void navigateTo(std::filesystem::path const& path) override;
+    void setLocalModel(SideModel* model);
     bool isComplete() const override;
 
   private:
     std::unique_ptr<FileEngine> fileEngine_{nullptr};
+    SideModel* localModel_{nullptr};
 };

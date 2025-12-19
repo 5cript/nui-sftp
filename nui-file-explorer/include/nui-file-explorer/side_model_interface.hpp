@@ -2,6 +2,7 @@
 
 #include <nui-file-explorer/item.hpp>
 #include <nui-file-explorer/flavor.hpp>
+#include <nui/event_system/observed_value.hpp>
 
 #include <functional>
 #include <filesystem>
@@ -20,10 +21,17 @@ namespace NuiFileExplorer
         ISideModel& operator=(ISideModel const&) = default;
         ISideModel& operator=(ISideModel&&) = default;
 
+        /**
+         * @brief Returns the current path.
+         *
+         * @return Nui::Observed<std::filesystem::path> const&
+         */
+        virtual Nui::Observed<std::filesystem::path> const& currentPath() const = 0;
+
         virtual void setItemUpdateFunction(std::function<void(bool)> doUpdate) = 0;
 
         /**
-         * @brief Navigate to the given path.
+         * @brief Navigate to the given (full) path.
          *
          * @param path
          */

@@ -425,7 +425,14 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 {
     // Assumed in strand
 
-    const auto stat = std::filesystem::status(localPath);
+    std::error_code ec;
+    const auto stat = std::filesystem::status(localPath, ec);
+
+    if (ec)
+    {
+        Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
+    }
 
     const auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
     const auto defaultOptions = UploadOperation::UploadOperationOptions{};

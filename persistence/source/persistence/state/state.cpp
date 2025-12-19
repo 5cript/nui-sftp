@@ -17,6 +17,7 @@ namespace Persistence
         j["sftpOptions"] = state.sftpOptions;
         j["sshSessionOptions"] = state.sshSessionOptions;
         j["uiOptions"] = state.uiOptions;
+        j["localFilesystemOptions"] = state.localFilesystemOptions;
         j["logLevel"] = [&]() {
             return Log::levelToString(state.logLevel);
         }();
@@ -50,6 +51,9 @@ namespace Persistence
 
         if (j.contains("queueOptions"))
             j.at("queueOptions").get_to(state.queueOptions);
+
+        if (j.contains("localFilesystemOptions"))
+            j.at("localFilesystemOptions").get_to(state.localFilesystemOptions);
     }
 
     State State::fullyResolve() const

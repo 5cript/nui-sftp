@@ -12,6 +12,8 @@ namespace Persistence
             preventCreateFile = other.preventCreateFile;
         if (!preventCreateDirectory.has_value() && other.preventCreateDirectory.has_value())
             preventCreateDirectory = other.preventCreateDirectory;
+        if (!homeOverride.has_value() && other.homeOverride.has_value())
+            homeOverride = other.homeOverride;
     }
     void to_json(nlohmann::json& j, LocalFilesystemOptions const& options)
     {
@@ -24,6 +26,8 @@ namespace Persistence
             j["preventCreateFile"] = options.preventCreateFile.value();
         if (options.preventCreateDirectory.has_value())
             j["preventCreateDirectory"] = options.preventCreateDirectory.value();
+        if (options.homeOverride.has_value())
+            j["homeOverride"] = options.homeOverride.value();
     }
     void from_json(nlohmann::json const& j, LocalFilesystemOptions& options)
     {
@@ -35,5 +39,7 @@ namespace Persistence
             options.preventCreateFile = j.at("preventCreateFile").get<bool>();
         if (j.contains("preventCreateDirectory"))
             options.preventCreateDirectory = j.at("preventCreateDirectory").get<bool>();
+        if (j.contains("homeOverride"))
+            options.homeOverride = j.at("homeOverride").get<std::string>();
     }
 }

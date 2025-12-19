@@ -19,9 +19,14 @@ FileEngine* RemoteSideModel::engine()
     return fileEngine_.get();
 }
 
+void RemoteSideModel::setLocalModel(SideModel* model)
+{
+    localModel_ = model;
+}
+
 bool RemoteSideModel::isComplete() const
 {
-    return fileEngine_ != nullptr && SideModel::isComplete();
+    return fileEngine_ != nullptr && localModel_ != nullptr && SideModel::isComplete();
 }
 
 void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
@@ -35,9 +40,10 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
     if (item.path == ".")
         return;
     if (item.path == "..")
-        return navigateTo(currentPath_.parent_path());
+        return navigateTo(currentPath_.value().parent_path());
 
-    navigateTo(currentPath_ / item.path);
+    Log::debug("Remote onActivateItem: {}.", item.path.generic_string());
+    navigateTo(currentPath_.value() / item.path);
 }
 
 void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
@@ -63,14 +69,14 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         Log::error("Invalid directory name (cannot contain slashes): {}", *name);
                         return;
                     }
-                    fileEngine_->createDirectory(currentPath_ / *name, [this](bool success) {
+                    fileEngine_->createDirectory(currentPath_.value() / *name, [this](bool success) {
                         if (!success)
                         {
                             Log::error("Failed to create directory");
                             return;
                         }
                         // Refresh list from server:
-                        navigateTo(currentPath_);
+                        navigateTo(currentPath_.value());
                     });
                 },
         });
@@ -93,14 +99,14 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         Log::error("Invalid file name (cannot contain slashes): {}", *name);
                         return;
                     }
-                    fileEngine_->createFile(currentPath_ / *name, [this](bool success) {
+                    fileEngine_->createFile(currentPath_.value() / *name, [this](bool success) {
                         if (!success)
                         {
                             Log::error("Failed to create file");
                             return;
                         }
                         // Refresh list from server:
-                        navigateTo(currentPath_);
+                        navigateTo(currentPath_.value());
                     });
                 },
         });
@@ -188,11 +194,14 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
     }
 
     const auto itemsSize = items.size();
+
+    const auto destinationDir = localModel_->currentPath().value();
     std::string confirmText = fmt::format(
-        "Are you sure you want to download {} {} {}?:",
+        "Are you sure you want to download {} {} {} to {}?:",
         itemsSize > 1 ? "the following" : items.front().path.generic_string(),
         itemsSize == 1 ? "" : std::to_string(itemsSize),
-        itemsSize == 1 ? "" : "items");
+        itemsSize == 1 ? "" : "items",
+        destinationDir.generic_string());
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
@@ -206,7 +215,7 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
          .text = confirmText,
          .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
          .listItems = listItems,
-         .onClose = [this, items](ConfirmDialog::Button button) {
+         .onClose = [this, items, destinationDir](ConfirmDialog::Button button) {
              if (button != ConfirmDialog::Button::Yes)
              {
                  Log::info("Download items cancelled");
@@ -214,10 +223,14 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
              }
 
              std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems;
-             std::transform(items.begin(), items.end(), std::back_inserter(downloadItems), [this](auto const& item) {
-                 // TODO: Proper target path handling:
-                 return std::make_pair(currentPath_ / item.path, "D:/DownloadTemp" / item.path.filename());
-             });
+             std::transform(
+                 items.begin(),
+                 items.end(),
+                 std::back_inserter(downloadItems),
+                 [this, destinationDir](auto const& item) {
+                     // TODO: Proper target path handling:
+                     return std::make_pair(currentPath_.value() / item.path, destinationDir / item.path.filename());
+                 });
 
              Log::info("Downloading items");
              for (const auto& item : downloadItems)
@@ -279,8 +292,8 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
 
     auto lexicallyNormal = path.lexically_normal();
     Log::info("Navigating to: {}", lexicallyNormal.generic_string());
-    preNavigatePath_ = currentPath_;
+    preNavigatePath_ = currentPath_.value();
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
-        currentPath_, std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1));
+        currentPath_.value(), std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1));
 }

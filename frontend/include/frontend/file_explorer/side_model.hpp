@@ -53,14 +53,18 @@ class SideModel : public NuiFileExplorer::ISideModel
     }
     void onRefresh() override
     {
-        navigateTo(currentPath_);
+        navigateTo(currentPath_.value());
+    }
+    Nui::Observed<std::filesystem::path> const& currentPath() const override
+    {
+        return currentPath_;
     }
 
   protected:
     // Design smell:
     virtual bool isComplete() const;
 
-    void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
+    virtual void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
 
   protected:
     Persistence::UiOptions uiOptions_;
@@ -68,7 +72,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     InputDialog* inputDialog_;
     std::vector<NuiFileExplorer::Item> items_{};
     OperationQueue* operationQueue_{nullptr};
-    std::filesystem::path currentPath_{};
+    Nui::Observed<std::filesystem::path> currentPath_{};
     std::filesystem::path preNavigatePath_{};
     std::function<void(bool)> refreshCallback_{nullptr};
 };
