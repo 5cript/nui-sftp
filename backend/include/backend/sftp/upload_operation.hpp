@@ -25,12 +25,7 @@ class UploadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    SecureShell::ProcessingStrand* strand() const override
-    {
-        if (auto stream = fileStream_.lock(); stream)
-            return stream->strand();
-        return nullptr;
-    }
+    SecureShell::ProcessingStrand* strand() const override;
 
     UploadOperation(SecureShell::SftpSession& sftp, UploadOperationOptions options);
     ~UploadOperation() override;

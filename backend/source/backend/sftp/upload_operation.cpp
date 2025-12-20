@@ -28,12 +28,15 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
 UploadOperation::~UploadOperation()
 {
     std::ignore = cancel(false);
+    if (auto* stra = strand(); stra)
+        stra->pushPromiseTask([]() {}).get();
+}
 
-    if (auto stream = fileStream_.lock(); stream)
-    {
-        // wait for all tasks of the operation to finish
-        stream->strand()->pushPromiseTask([]() {}).get();
-    }
+SecureShell::ProcessingStrand* UploadOperation::strand() const
+{
+    if (!sftp_)
+        return nullptr;
+    return sftp_->strand();
 }
 
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::work()
@@ -296,6 +299,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
         Log::error("Failed to open remote sftp file for upload: {}", openResult.error().message);
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
     }
+
+    fileStream_ = openResult.value();
 
     return {};
 }
