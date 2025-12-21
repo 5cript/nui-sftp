@@ -47,7 +47,7 @@ else()
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
-    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/process")
+    # add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/process")
 
     # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
     # And there is no need on linux.

@@ -36,7 +36,7 @@ target_sources(
         main.cpp
 )
 
-find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS system filesystem asio)
+find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS system filesystem asio process)
 
 target_include_directories(backend PUBLIC "${CMAKE_SOURCE_DIR}/backend/include")
 

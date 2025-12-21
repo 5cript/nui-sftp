@@ -57,7 +57,7 @@ namespace SecureShell
          *
          * @param buffer
          * @param bufferSize
-         * @return std::future<std::expected<std::size_t, SftpError>>
+         * @return std::future<std::expected<std::size_t, SftpError>> The number of bytes read or an error.
          */
         virtual std::future<std::expected<std::size_t, SftpError>> readSome(char* buffer, std::size_t bufferSize) = 0;
 

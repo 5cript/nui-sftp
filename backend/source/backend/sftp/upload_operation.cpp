@@ -81,7 +81,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             // No More to write?
             else
             {
-                Log::info("UploadOperation: Data writing completed.");
+                Log::debug("UploadOperation: Data writing completed.");
                 state_ = Finalizing;
                 [[fallthrough]];
             }
@@ -95,7 +95,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 return enterErrorState<WorkStatus>(finalizeResult.error());
             }
             state_ = Completed;
-            Log::info("UploadOperation: Operation completed successfully.");
+            Log::debug("UploadOperation: Operation completed successfully.");
             return WorkStatus::Complete;
         }
         case (Completed):
@@ -226,12 +226,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
     {
         if (tempResult->size > static_cast<std::uint64_t>(leftToUpload_))
         {
-            Log::info("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
+            Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
             // Do not adopt file
         }
         else if (tryContinue_)
         {
-            Log::info("UploadOperation: Continuing upload to existing temp file.");
+            Log::debug("UploadOperation: Continuing upload to existing temp file.");
 
             auto openFut = sftp_->openFile(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
 
@@ -281,7 +281,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
     }
 
     // Open temp file part regularly, freshly:
-    Log::info("UploadOperation: Starting new upload to '{}'.", tempPath);
+    Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath);
     auto openFut = sftp_->openFile(
         tempPath,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
@@ -344,7 +344,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return enterErrorState(std::move(openResult).error());
     }
 
-    Log::info(
+    Log::debug(
         "UploadOperation: Prepared upload of '{}' to '{}'.", remotePath_.generic_string(), localPath_.generic_string());
 
     return {};
@@ -417,6 +417,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
                     remotePath_.generic_string());
                 return std::unexpected(Error{.type = ErrorType::FileExists});
             }
+            else
+            {
+                sftp_->removeFile(remotePath_);
+            }
         }
     }
 
@@ -434,7 +438,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
-    Log::info(
+    Log::debug(
         "UploadOperation: Finalized upload of '{}' to '{}'.",
         remotePath_.generic_string(),
         localPath_.generic_string());

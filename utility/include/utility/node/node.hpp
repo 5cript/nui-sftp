@@ -1,13 +1,8 @@
 #pragma once
 
-#include <utility/temporary_directory.hpp>
-
 #include <boost/asio.hpp>
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#include <boost/process/v2.hpp>
-#pragma clang diagnostic pop
+#include <utility/temporary_directory.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -26,13 +21,14 @@ namespace SecureShell::Test
         boost::asio::writable_pipe stdinPipe;
         boost::asio::readable_pipe stdoutPipe;
         boost::asio::readable_pipe stderrPipe;
-        std::unique_ptr<boost::process::v2::process> mainModule;
+        std::unique_ptr<void, void (*)(void*)> mainModule;
         std::atomic_bool killed = false;
         unsigned short port = 0;
         int code = 0;
 
         void command(std::string const& command);
         void terminate();
+        int wait();
     };
 
     void npmInstall(

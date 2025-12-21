@@ -75,10 +75,10 @@ std::string ProcessStore::emplace(
             arguments,
             environment,
             defaultExitWaitTimeout,
-            [launcher = std::move(launcher)](
+            [launcher = std::make_shared<bp2::windows::default_launcher>(std::move(launcher))](
                 auto executor, auto const& executable, auto const& arguments, auto const& env) mutable {
                 return std::make_unique<bp2::process>(
-                    launcher(executor, executable, arguments, bp2::process_environment{env}));
+                    (*launcher)(executor, executable, arguments, bp2::process_environment{env}));
             });
         pty2.closeOtherPipeEnd();
 #else

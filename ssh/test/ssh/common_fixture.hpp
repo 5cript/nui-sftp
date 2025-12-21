@@ -2,9 +2,14 @@
 
 #include <gtest/gtest.h>
 
-#include "utility/node.hpp"
+#include <utility/node/node.hpp>
 #include <ssh/session.hpp>
 #include <nui/utility/scope_exit.hpp>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#include <boost/process.hpp>
+#pragma clang diagnostic pop
 
 #include <filesystem>
 #include <fstream>
@@ -64,7 +69,9 @@ namespace SecureShell::Test
                 auto resultShareCopy = result;
                 processResultAvailable.set_value();
                 if (resultShareCopy->mainModule)
-                    resultShareCopy->code = resultShareCopy->mainModule->wait();
+                {
+                    resultShareCopy->wait();
+                }
                 else
                 {
                     // ???

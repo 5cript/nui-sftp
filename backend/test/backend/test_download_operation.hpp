@@ -69,16 +69,17 @@ namespace Test
 
         void giveMockExpectedRead(std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> const& mock)
         {
-            EXPECT_CALL(*mock, readAll(testing::_))
+            EXPECT_CALL(*mock, readSome(testing::_, testing::_))
                 .WillRepeatedly(
-                    [this](std::function<bool(std::string_view data)> cb)
+                    [this](char const* buffer, std::size_t size)
                         -> std::future<std::expected<std::size_t, SecureShell::SftpError>> {
-                        onRead_ = std::move(cb);
                         readPromise_ = {};
                         if (!readCycleQueue_.empty())
                         {
-                            readCycleQueue_.front()();
+                            auto data = readCycleQueue_.front();
+                            std::memcpy(const_cast<char*>(buffer), data.data(), std::min(size, data.size()));
                             readCycleQueue_.pop();
+                            readPromise_.set_value(data.size());
                         }
                         return readPromise_.get_future();
                     });
@@ -86,34 +87,9 @@ namespace Test
 
         void enqueueFakeReadCycle(std::optional<std::size_t> chunkSizeOpt = std::nullopt)
         {
-            readCycleQueue_.push([this, chunkSizeOpt]() {
-                auto chunkSize = fakeFileContent_.size();
-                if (chunkSizeOpt)
-                    chunkSize = chunkSizeOpt.value();
-
-                if (readOffset_ + chunkSize > fakeFileContent_.size())
-                    chunkSize = fakeFileContent_.size() - readOffset_;
-
-                // EOF:
-                if (chunkSize == 0)
-                {
-                    readPromise_.set_value(readOffset_);
-                    onReadResult_ = onRead_({});
-                    return;
-                }
-
-                if (onRead_)
-                {
-                    onReadResult_ = onRead_(std::string_view{fakeFileContent_}.substr(readOffset_, chunkSize));
-                    readOffset_ += chunkSize;
-                    readPromise_.set_value(readOffset_);
-                    return;
-                }
-                else
-                {
-                    throw std::runtime_error("No read callback set.");
-                }
-            });
+            std::size_t chunkSize = chunkSizeOpt.value_or(fakeFileContent_.size());
+            readCycleQueue_.push(fakeFileContent_.substr(readOffset_, chunkSize));
+            readOffset_ += chunkSize;
         }
 
         std::string readFile(std::filesystem::path const& path)
@@ -128,9 +104,8 @@ namespace Test
         SecureShell::ProcessingThread processingThread_{};
         std::unique_ptr<SecureShell::ProcessingStrand> strand_{processingThread_.createStrand()};
         std::promise<std::expected<std::size_t, SecureShell::SftpError>> readPromise_{};
-        std::function<bool(std::string_view data)> onRead_{};
         std::size_t readOffset_{0};
-        std::queue<std::function<void()>> readCycleQueue_{};
+        std::queue<std::string> readCycleQueue_{};
         bool onReadResult_{true};
     };
 
