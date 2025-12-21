@@ -57,7 +57,7 @@ Still under construction :construction:
 ## File View UI
 - [x] Grid view.
 - [ ] Table view.
-- [ ] Split UI into local and remote views.
+- [x] Split UI into local and remote views.
 - [ ] Improve selection of multiple items.
 - [ ] Upload drag and drop.
 - [ ] Download drag and drop?
