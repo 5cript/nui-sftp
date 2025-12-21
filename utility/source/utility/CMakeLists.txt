@@ -12,7 +12,25 @@ if(EMSCRIPTEN)
     # This allows for better exception handling in frontend parts.
     target_link_libraries(utility PUBLIC nui-frontend)
 else()
-    target_link_libraries(utility PUBLIC nui-backend)
+    target_sources(
+        utility
+        PRIVATE
+        node/node.cpp
+    )
+
+    find_package(Boost CONFIG 1.89.0 REQUIRED COMPONENTS process)
+
+    find_program(NODE node)
+    find_program(NPM npm)
+    find_program(CMD cmd)
+
+    target_link_libraries(utility PUBLIC nui-backend Boost::process)
 endif()
 
-target_link_libraries(utility PUBLIC core-target nlohmann_json::nlohmann_json)
+target_compile_definitions(utility PRIVATE -DNODE_EXECUTABLE="${NODE}" -DNPM_EXECUTABLE="${NPM}")
+target_compile_definitions(utility PRIVATE -DCMD_EXECUTABLE="${CMD}" -DMSYS2_BASH="${MSYS2_BASH}")
+
+target_link_libraries(utility PUBLIC
+    core-target
+    nlohmann_json::nlohmann_json
+)

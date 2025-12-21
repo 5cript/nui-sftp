@@ -110,8 +110,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             // Do not enter error state here, it would overwrite the error state.
             return std::unexpected(Error{.type = ErrorType::CannotWorkFailedOperation});
         }
-        default:
+        case (Canceled):
         {
+            Log::warn("DownloadOperation: Operation was canceled.");
+            // Do not enter error state here, it would overwrite the cancel state.
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
         }
     }
     Log::error("DownloadOperation: Unknown operation state: {}", static_cast<int>(state_));

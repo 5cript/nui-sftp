@@ -2,7 +2,7 @@
 #include "test_ssh_session.hpp"
 #include "test_sftp.hpp"
 
-#include "utility/node.hpp"
+#include <utility/node/node.hpp>
 
 #include <gtest/gtest.h>
 

@@ -1,5 +1,6 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/upload_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/bulk_download_operation.hpp>
 
@@ -12,6 +13,10 @@ auto Operation::visit(FunctionT&& func) const
         case Download:
         {
             return func(static_cast<DownloadOperation const&>(*this));
+        }
+        case Upload:
+        {
+            return func(static_cast<UploadOperation const&>(*this));
         }
         case Scan:
         {

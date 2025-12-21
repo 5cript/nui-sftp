@@ -43,6 +43,7 @@ void Session::start()
         self->registerRpcSftpCreateDirectory();
         self->registerRpcSftpCreateFile();
         self->registerRpcSftpAddDownloadOperation();
+        self->registerRpcSftpAddUploadOperation();
         self->registerOperationQueuePauseUnpause();
         self->operationQueue_->registerRpc();
 
@@ -473,6 +474,53 @@ void Session::registerRpcSftpAddDownloadOperation()
                         newOperationIdString,
                         remotePath,
                         localPath);
+
+                    self->resetQueueThrottle();
+                    reply({{"success", true}});
+                },
+                std::move(reply));
+        });
+}
+
+void Session::registerRpcSftpAddUploadOperation()
+{
+    on(fmt::format("Session::{}::sftp::addUpload", id_.value()))
+        .perform([weak = weak_from_this()](
+                     RpcHelper::RpcOnce&& reply,
+                     std::string const& channelIdString,
+                     std::string const& newOperationIdString,
+                     std::string const& localPath,
+                     std::string const& remotePath) {
+            auto self = weak.lock();
+            if (!self)
+                return reply({{"error", "Session no longer exists"}});
+
+            self->withSftpChannelDo(
+                Ids::makeChannelId(channelIdString),
+                [weak = self->weak_from_this(), newOperationIdString, localPath, remotePath](
+                    RpcHelper::RpcOnce&& reply, auto&& channel) {
+                    auto self = weak.lock();
+                    if (!self)
+                        return reply({{"error", "Session no longer exists"}});
+
+                    const auto result = self->operationQueue_->addUploadOperation(
+                        *channel, Ids::makeOperationId(newOperationIdString), localPath, remotePath);
+
+                    if (!result.has_value())
+                    {
+                        Log::error(
+                            "Failed to add upload operation for file '{}' to '{}': {}",
+                            localPath,
+                            remotePath,
+                            result.error().toString());
+                        return reply({{"error", result.error().toString()}});
+                    }
+
+                    Log::info(
+                        "Added upload operation with id '{}' for file '{}' to '{}'",
+                        newOperationIdString,
+                        localPath,
+                        remotePath);
 
                     self->resetQueueThrottle();
                     reply({{"success", true}});

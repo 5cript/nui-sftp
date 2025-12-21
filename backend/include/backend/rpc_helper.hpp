@@ -108,6 +108,27 @@ namespace RpcHelper
             });
         }
 
+        void error(std::string const& message) const
+        {
+            if (called_)
+            {
+                Log::warn("RPC response with id '{}' already sent. Not sending error: {}", responseId_, message);
+                return;
+            }
+            called_ = true;
+
+            wnd_->runInJavascriptThread([hub = hub_, responseId = std::move(responseId_), message]() {
+                try
+                {
+                    hub->callRemote(responseId, {{"success", false}, {"error", message}});
+                }
+                catch (const std::exception& e)
+                {
+                    Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
+                }
+            });
+        }
+
       private:
         Nui::Window* wnd_;
         Nui::RpcHub* hub_;

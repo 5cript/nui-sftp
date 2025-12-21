@@ -7,25 +7,23 @@ add_executable(
 
 find_package(GTest CONFIG REQUIRED)
 
-find_package(Boost CONFIG REQUIRED COMPONENTS filesystem asio system process)
-
 target_link_libraries(
     nui-scp-backend-test
     PUBLIC
         secure-shell
+        utility
         backend
         GTest::GTest
         GTest::gmock_main
         GTest::Main
-        Boost::filesystem
-        Boost::asio
-        Boost::system
-        Boost::process
 )
 
 if (WIN32)
     target_link_libraries(nui-scp-backend-test PUBLIC ws2_32)
 endif()
+
+# For sftp_server.mjs bundled
+add_dependencies(nui-scp-backend-test nui-scp-ssh-test)
 
 set_target_properties(nui-scp-backend-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
 

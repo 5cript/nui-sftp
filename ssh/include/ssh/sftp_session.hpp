@@ -179,4 +179,9 @@ namespace SecureShell
         sftp_session session_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
     };
+
+    constexpr inline auto operator|(SftpSession::OpenType a, SftpSession::OpenType b)
+    {
+        return static_cast<SftpSession::OpenType>(static_cast<int>(a) | static_cast<int>(b));
+    }
 }

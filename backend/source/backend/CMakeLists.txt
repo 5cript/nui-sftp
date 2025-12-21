@@ -7,8 +7,10 @@ add_library(
         process/environment.cpp
         session_manager.cpp
         session.cpp
+        rpc_filesystem.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
+        sftp/upload_operation.cpp
         sftp/scan_operation.cpp
         sftp/bulk_download_operation.cpp
 )
@@ -34,7 +36,7 @@ target_sources(
         main.cpp
 )
 
-find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS system filesystem asio)
+find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS system filesystem asio process)
 
 target_include_directories(backend PUBLIC "${CMAKE_SOURCE_DIR}/backend/include")
 

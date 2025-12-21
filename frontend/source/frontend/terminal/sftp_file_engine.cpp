@@ -199,3 +199,45 @@ void SftpFileEngine::addDownload(
             localPath.generic_string());
     });
 }
+
+void SftpFileEngine::addUpload(
+    std::filesystem::path const& remotePath,
+    std::filesystem::path const& localPath,
+    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated)
+{
+    Log::info("Requesting to add upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
+    lazyOpen([this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId) {
+        if (!channelId)
+        {
+            Log::error("Cannot add upload, no channel");
+            onOperationCreated(std::nullopt);
+            return;
+        }
+
+        const auto operationId = Ids::generateOperationId();
+
+        Log::info(
+            "Adding upload (with ID '{}'): {} -> {}",
+            operationId.value(),
+            localPath.generic_string(),
+            remotePath.generic_string());
+
+        Nui::RpcClient::callWithBackChannel(
+            fmt::format("Session::{}::sftp::addUpload", impl_->engine->sshSessionId().value()),
+            [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val) {
+                Nui::Console::log(val);
+
+                if (val.hasOwnProperty("error"))
+                {
+                    Log::error("(Frontend) Failed to add upload: {}", val["error"].as<std::string>());
+                    onOperationCreated(std::nullopt);
+                    return;
+                }
+                onOperationCreated(operationId);
+            },
+            channelId.value().value(),
+            operationId.value(),
+            localPath.generic_string(),
+            remotePath.generic_string());
+    });
+}

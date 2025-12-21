@@ -262,14 +262,15 @@ const server = new Server({
                         data,
                         Buffer.from(result.content.slice(offset + data.length))
                     ]).toString('utf8');
+                    result.stat.size = result.content.length;
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
 
-                    logMessage('Write to file at offset ${offset}: ${inspect(data)}');
+                    logMessage(`Write to file at offset ${offset}: ${data.toString('utf8')}`);
                 });
 
                 sftpStream.on('READ', (reqid, handleRaw, offset, length) => {
-                    logMessage('READ', handleRaw, offset, length);
+                    logMessage('READ: ', handleRaw, offset, length);
 
                     const handleString = handleRaw.toString('utf8');
                     if (!handles.has(handleString)) {
@@ -279,6 +280,7 @@ const server = new Server({
 
                     const handle = handles.get(handleString);
                     if (!handle) {
+                        logMessage('Invalid handle').trace();
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
@@ -290,11 +292,12 @@ const server = new Server({
 
                     const size = result.stat.size;
                     if (offset >= size) {
-                        logMessage('EOF');
+                        logMessage(`Offset ${offset} beyond end of file ${size}: sending EOF.`);
                         return sftpStream.status(reqid, STATUS_CODE.EOF);
                     }
 
                     const data = Buffer.from(result.content.slice(offset, Math.min(offset + length, size)), 'utf8');
+                    logMessage(`Read ${data.length} bytes from offset ${offset}`);
 
                     sftpStream.data(reqid, data);
                 });
@@ -342,7 +345,7 @@ const server = new Server({
 
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
-                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                     }
 
                     if (result.type === 'symlink') {

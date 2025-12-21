@@ -3,7 +3,6 @@ include(GoogleTest)
 add_executable(
     nui-scp-ssh-test
     main.cpp
-    utility/node.cpp
 )
 
 find_package(Boost CONFIG REQUIRED COMPONENTS filesystem asio system process)
@@ -38,10 +37,21 @@ add_custom_command(
     OUTPUT
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/shell.mjs"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/sftp.mjs"
+        "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/sftp.mjs"
+        "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/shell.mjs"
+        "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/key.private"
+        "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/key.public"
     COMMAND ${NPM} run build
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BUILD_DIR}/ssh_server"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/sftp.mjs" "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/sftp.mjs"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/shell.mjs" "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/shell.mjs"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/key.private" "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/key.private"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/key.public" "${CMAKE_CURRENT_BUILD_DIR}/ssh_server/key.public"
     WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers"
     DEPENDS
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package.json"
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/sftp_server.mjs"
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/shell_emulator.mjs"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package-lock.json"
 )
 add_custom_target(

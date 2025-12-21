@@ -1,16 +1,29 @@
-#include "node.hpp"
+#include <utility/node/node.hpp>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#include <boost/process.hpp>
+#pragma clang diagnostic pop
 
 #include <boost/asio/deadline_timer.hpp>
 
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 constexpr static std::string_view node = NODE_EXECUTABLE;
-constexpr static std::string_view npm = NPM_EXECUTABLE;
 using namespace std::string_literals;
 
 namespace SecureShell::Test
 {
+    namespace
+    {
+        boost::process::process* process(NodeProcessResult& result)
+        {
+            return static_cast<boost::process::process*>(result.mainModule.get());
+        }
+    }
+
     namespace bp2 = boost::process::v2;
 
     void NodeProcessResult::command(std::string const& command)
@@ -35,6 +48,13 @@ namespace SecureShell::Test
         }
     }
 
+    int NodeProcessResult::wait()
+    {
+        if (mainModule)
+            return process(*this)->wait();
+        return std::numeric_limits<int>::min();
+    }
+
     void NodeProcessResult::terminate()
     {
         if (killed)
@@ -42,7 +62,7 @@ namespace SecureShell::Test
         killed = true;
         try
         {
-            mainModule->terminate();
+            process(*this)->terminate();
         }
         catch (std::exception const& e)
         {
@@ -106,19 +126,23 @@ namespace SecureShell::Test
             boost::asio::writable_pipe{executor},
             boost::asio::readable_pipe{executor},
             boost::asio::readable_pipe{executor},
-            nullptr);
+            std::unique_ptr<void, void (*)(void*)>{nullptr, +[](void*) {}});
 
-        result->mainModule = std::make_unique<boost::process::v2::process>(
-            executor,
-            node,
-            std::vector<std::string>{"main.mjs", "--log-file=./log.txt"},
-            bp2::process_environment{bp2::environment::current()},
-            bp2::process_start_dir{isolateDirectory.path().generic_string()},
-            bp2::process_stdio{
-                .in = result->stdinPipe,
-                .out = result->stdoutPipe,
-                .err = result->stderrPipe,
-            });
+        result->mainModule = std::unique_ptr<void, void (*)(void*)>{
+            new boost::process::v2::process{
+                executor,
+                node,
+                std::vector<std::string>{"main.mjs", "--log-file=./log.txt"},
+                bp2::process_environment{bp2::environment::current()},
+                bp2::process_start_dir{isolateDirectory.path().generic_string()},
+                bp2::process_stdio{
+                    .in = result->stdinPipe,
+                    .out = result->stdoutPipe,
+                    .err = result->stderrPipe,
+                }},
+            [](void* p) {
+                delete static_cast<boost::process::v2::process*>(p);
+            }};
 
         result->timer.async_wait([weak = std::weak_ptr{result}](boost::system::error_code const& ec) {
             if (ec)
@@ -128,7 +152,7 @@ namespace SecureShell::Test
                 result->killed = true;
                 try
                 {
-                    result->mainModule->terminate();
+                    process(*result)->terminate();
                 }
                 catch (std::exception const& e)
                 {

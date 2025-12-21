@@ -5,6 +5,8 @@ add_library(
     STATIC
         "${CMAKE_CURRENT_LIST_DIR}/file_grid.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/dropdown_menu.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/side.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/flavor.cpp"
 )
 
 target_link_libraries(

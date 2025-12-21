@@ -50,6 +50,12 @@ class OperationQueue
         std::filesystem::path const& localPath,
         std::filesystem::path const& remotePath);
 
+    std::expected<void, Operation::Error> addUploadOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        std::filesystem::path const& localPath,
+        std::filesystem::path const& remotePath);
+
     void registerRpc();
 
     bool paused() const;

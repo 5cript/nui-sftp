@@ -326,6 +326,65 @@ namespace
         std::filesystem::path remotePath_;
     };
 
+    class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
+    {
+      public:
+        DisplayedUploadOperation(
+            long long max,
+            Ids::OperationId operationId,
+            std::filesystem::path localPath,
+            std::filesystem::path remotePath,
+            std::function<void(OperationCard const& operation)> doRemoveSelf,
+            std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown)
+            : OperationCard{SharedData::OperationType::Upload, std::move(operationId), std::move(doRemoveSelf), std::move(doDeletionCountdown)}
+            , progressBar_{{
+                  .height = std::string{progressHeight},
+                  .min = 0,
+                  .max = max,
+                  .showMinMax = true,
+                  .byteMode = true,
+              }}
+            , localPath_{std::move(localPath)}
+            , remotePath_{std::move(remotePath)}
+        {}
+
+        Nui::ElementRenderer body() const override
+        {
+            using namespace Nui::Elements;
+            using namespace Nui::Attributes;
+            using Nui::Elements::div;
+            using Nui::Elements::span;
+
+            // clang-format off
+            return div{
+                bodyClass()
+            }(
+                progressBar_()
+            );
+            // clang-format on
+        }
+
+        void setProgress(long long current)
+        {
+            progressBar_.setProgress(current);
+        }
+
+        std::string title() const override
+        {
+            return fmt::format("Upload '{}' to '{}'", localPath_.generic_string(), remotePath_.generic_string());
+        }
+
+        bool warrantsCancelConfirm() const override
+        {
+            return !isCompletedState() && progressBar_.max() > 10'000'000; // 10 MB
+        }
+
+      private:
+        Components::ProgressBar progressBar_;
+        std::filesystem::path localPath_;
+        std::filesystem::path remotePath_;
+    };
+
     class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
     {
       public:
@@ -670,17 +729,16 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value()),
                 [this, operationId](SharedData::ErrorOrSuccess<> const& result) {
-                    if (result)
+                    if (!result)
                     {
-                        auto* operation = impl_->operations.at(operationId);
-                        if (operation)
-                            operation->state(SharedData::OperationState::Canceled);
-                        Nui::globalEventContext.executeActiveEventsImmediately();
+                        return Log::error(
+                            "Failed to cancel operation id {}: {}", operationId.value(), result.error.value());
                     }
-                    else
-                    {
-                        Log::error("Failed to cancel operation id {}: {}", operationId.value(), result.error.value());
-                    }
+
+                    auto* operation = impl_->operations.at(operationId);
+                    if (operation)
+                        operation->state(SharedData::OperationState::Canceled);
+                    Nui::globalEventContext.executeActiveEventsImmediately();
                 },
                 operationId);
         };
@@ -768,6 +826,25 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 *added.localPath,
                 *added.remotePath,
                 [this](OperationCard<DisplayedDownloadOperation> const& operation) {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean);
+        }
+        else if (added.type == SharedData::OperationType::Upload)
+        {
+            if (!added.localPath || !added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for operation id: {} without localPath or remotePath",
+                    added.operationId.value());
+                return {};
+            }
+            return std::make_unique<DisplayedUploadOperation>(
+                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
+                added.operationId,
+                *added.localPath,
+                *added.remotePath,
+                [this](OperationCard<DisplayedUploadOperation> const& operation) {
                     cancelOperation(operation);
                 },
                 impl_->autoClean);
@@ -1091,17 +1168,19 @@ void OperationQueue::enqueueDownload(
     impl_->fileEngine->addDownload(remotePath, localPath, std::move(onComplete));
 }
 void OperationQueue::enqueueUpload(
-    std::filesystem::path const&,
-    std::filesystem::path const&,
+    std::filesystem::path const& remotePath,
+    std::filesystem::path const& localPath,
     std::function<void(std::optional<Ids::OperationId> const&)> onComplete)
 {
     if (!impl_->fileEngine)
     {
-        Log::error("No file engine set for operation queue, cannot enqueue download");
+        Log::error("No file engine set for operation queue, cannot enqueue upload");
         onComplete(std::nullopt);
         return;
     }
-    // TODO: Implement
+
+    Log::info("Frontend Operation Queue upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
+    impl_->fileEngine->addUpload(remotePath, localPath, std::move(onComplete));
 }
 void OperationQueue::enqueueRename(
     std::filesystem::path const&,

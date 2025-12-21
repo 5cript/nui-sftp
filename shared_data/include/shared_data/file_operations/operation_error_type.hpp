@@ -13,8 +13,10 @@ namespace SharedData
     BOOST_DEFINE_ENUM_CLASS(
         OperationErrorType,
         ImplementationError, // This should never occur, it indicates a bug in the program:
+        NotImplemented,
         FileExists,
         FileNotFound,
+        FileSeekFailure,
         OpenFailure,
         FileStreamExpired,
         FileStatFailed,

@@ -20,6 +20,58 @@ namespace SharedData
         Fifo = 8
     };
 
+    inline FileType fileTypeFromStdFilesystemType(std::filesystem::file_type type)
+    {
+        using enum std::filesystem::file_type;
+        switch (type)
+        {
+            case (regular):
+                return FileType::Regular;
+            case (directory):
+                return FileType::Directory;
+            case (symlink):
+                return FileType::Symlink;
+            case (block):
+                return FileType::BlockDevice;
+            case (character):
+                return FileType::CharDevice;
+            case (fifo):
+                return FileType::Fifo;
+            case (socket):
+                return FileType::Socket;
+            case (unknown):
+                return FileType::Unknown;
+            default:
+                return FileType::Unknown;
+        }
+    }
+
+    inline std::string fileTypeToString(FileType type)
+    {
+        switch (type)
+        {
+            case FileType::Regular:
+                return "Regular File";
+            case FileType::Directory:
+                return "Directory";
+            case FileType::Symlink:
+                return "Symbolic Link";
+            case FileType::Special:
+                return "Special File";
+            case FileType::Socket:
+                return "Socket";
+            case FileType::CharDevice:
+                return "Character Device";
+            case FileType::BlockDevice:
+                return "Block Device";
+            case FileType::Fifo:
+                return "FIFO";
+            case FileType::Unknown:
+            default:
+                return "Unknown";
+        }
+    }
+
     struct DirectoryEntry
     {
         using FileType = SharedData::FileType;

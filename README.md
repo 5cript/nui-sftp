@@ -1,6 +1,6 @@
-# nui-scp
+# nui-sftp
 
-This project will contain a cross platform SSH and SFTP/SCP client.
+This project will contain a cross platform SSH and SFTP client.
 Still under construction :construction:
 
 # Todo List
@@ -36,9 +36,12 @@ Still under construction :construction:
 - [x] Single file downloads.
 - [x] Bulk download.
 - [ ] Implement handling of symlinks in bulk downloads.
+- [ ] Implement handling of symlinks in regular downloads.
+- [ ] Implement handling of symlinks in bulk uploads.
+- [ ] Implement handling of symlinks in regular uploads.
 - [ ] Implement bulk download to archives.
-- [ ] Forward download options for bulk downloads.
-- [ ] Single file uploads.
+- [x] Forward download options for bulk downloads.
+- [x] Single file uploads.
 - [ ] Bulk uploads.
 - [x] Delete file.
 - [ ] Rename file.
@@ -54,7 +57,7 @@ Still under construction :construction:
 ## File View UI
 - [x] Grid view.
 - [ ] Table view.
-- [ ] Split UI into local and remote views.
+- [x] Split UI into local and remote views.
 - [ ] Improve selection of multiple items.
 - [ ] Upload drag and drop.
 - [ ] Download drag and drop?

@@ -42,8 +42,8 @@ class OperationQueue
         std::filesystem::path const& localPath,
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
     void enqueueUpload(
-        std::filesystem::path const& localPath,
         std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath,
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
     void enqueueRename(
         std::filesystem::path const& oldPath,

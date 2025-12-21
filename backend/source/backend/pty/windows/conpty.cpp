@@ -157,7 +157,6 @@ namespace ConPTY
         si.StartupInfo.hStdInput = 0;
         si.StartupInfo.hStdOutput = 0;
         si.StartupInfo.hStdError = 0;
-        launcher.inherit_handles = false;
         si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
 
         if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &bytesRequired))

@@ -1,5 +1,6 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <shared_data/file_operations/download_progress.hpp>
+#include <shared_data/file_operations/upload_progress.hpp>
 #include <shared_data/file_operations/bulk_download_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
@@ -45,6 +46,13 @@ namespace
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
                         .error = error,
+                    };
+                },
+                [reason, operationId, error](UploadOperation const&) {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
                     };
                 },
                 [reason, operationId](std::nullopt_t) {
@@ -229,6 +237,9 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::SftpError, .sftpError = result.error()});
     }
 
+    const auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{});
+    const auto defaultOptions = DownloadOperation::DownloadOperationOptions{};
+
     if (result->isRegularFile())
     {
         const auto fileSize = result->size;
@@ -247,9 +258,6 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             return std::unexpected(
                 Operation::Error{.type = Operation::ErrorType::SftpError, .sftpError = openResult.error()});
         }
-
-        const auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::TransferOptions{});
-        const auto defaultOptions = DownloadOperation::DownloadOperationOptions{};
 
         auto operation = std::make_unique<DownloadOperation>(
             std::move(openResult).value(),
@@ -369,7 +377,15 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .individualOptions =
                     DownloadOperation::DownloadOperationOptions{
-                        // TODO: Not just defaults.
+                        .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
+                        .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
+                        .reserveSpace = transferOptions.reserveSpace.value_or(defaultOptions.reserveSpace),
+                        .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
+                        .inheritPermissions =
+                            transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                        .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
+                        .permissions = transferOptions.customPermissions ? transferOptions.customPermissions
+                                                                         : defaultOptions.permissions,
                     },
             });
 
@@ -397,6 +413,88 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     else
     {
         Log::error("Remote path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(result->type));
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
+    }
+}
+
+std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    std::filesystem::path const& localPath,
+    std::filesystem::path const& remotePath)
+{
+    // Assumed in strand
+
+    std::error_code ec;
+    const auto stat = std::filesystem::status(localPath, ec);
+
+    if (ec)
+    {
+        Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
+    }
+
+    const auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
+    const auto defaultOptions = UploadOperation::UploadOperationOptions{};
+
+    if (stat.type() == std::filesystem::file_type::regular)
+    {
+        auto operation = std::make_unique<UploadOperation>(
+            sftp,
+            UploadOperation::UploadOperationOptions{
+                .progressCallback =
+                    [weak = weak_from_this(), operationId](auto min, auto max, auto current) {
+                        auto self = weak.lock();
+                        if (!self)
+                            return;
+
+                        self->hub_->callRemote(
+                            fmt::format("OperationQueue::{}::onUploadProgress", self->sessionId_.value()),
+                            SharedData::UploadProgress{
+                                .operationId = operationId,
+                                .min = min,
+                                .max = max,
+                                .current = current,
+                            });
+
+                        Log::debug(
+                            "Uploaded {} / {} bytes ({}%)",
+                            current - min,
+                            max - min,
+                            (current - min) * 100 / (max - min));
+                    },
+                .remotePath = remotePath,
+                .localPath = localPath,
+                .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
+                .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
+                .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
+                .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                .permissions =
+                    transferOptions.customPermissions ? transferOptions.customPermissions : defaultOptions.permissions,
+                .futureTimeout = sftpOpts_.operationTimeout,
+            });
+
+        operations_.emplace_back(operationId, std::move(operation));
+
+        hub_->callRemote(
+            fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+            SharedData::OperationAdded{
+                .operationId = operationId,
+                .type = SharedData::OperationType::Upload,
+                .localPath = localPath,
+                .remotePath = remotePath});
+
+        return {};
+    }
+    else if (stat.type() == std::filesystem::file_type::directory)
+    {
+        // TODO: Bulk upload!
+        Log::error("Bulk upload is not implemented yet.");
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::NotImplemented});
+    }
+    else
+    {
+        Log::error("Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type()));
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
     }
 }
