@@ -1,8 +1,11 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <gimo_ext/StdOptional.hpp>
+#include <gimo.hpp>
 
 #include <string>
+#include <optional>
 
 namespace Utility
 {
@@ -29,8 +32,18 @@ namespace Utility
             return OrderOfMagnitude::Tera;
     }
 
-    inline std::string formatBytes(long long value, OrderOfMagnitude magnitude)
+    inline std::string formatBytes(long long value, std::optional<OrderOfMagnitude> const& magnitudeOpt = std::nullopt)
     {
+        const auto magnitude = *gimo::apply(
+            magnitudeOpt,
+            gimo::or_else(
+                [&value]()
+                {
+                    return std::optional{determineOrderOfMagnitude(value)};
+                }
+            )
+        );
+
         switch (magnitude)
         {
             case OrderOfMagnitude::None:
