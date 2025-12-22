@@ -13,6 +13,7 @@ target_link_libraries(
     nui-file-explorer
     PRIVATE
         nui-frontend
+        utility
 )
 
 target_include_directories(

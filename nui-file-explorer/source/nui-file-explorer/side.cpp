@@ -5,6 +5,9 @@
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/api/console.hpp>
 
+#include <utility/enum_string_convert.hpp>
+#include <utility/format_bytes.hpp>
+
 using namespace std::string_literals;
 
 namespace NuiFileExplorer
@@ -39,7 +42,8 @@ namespace NuiFileExplorer
                 // Soft Link ?
                 // Hard Link ?
             },
-            [this](std::string const& item) {
+            [this](std::string const& item)
+            {
                 Nui::Console::log("New clicked: ", item);
                 if (item == "File")
                 {
@@ -50,7 +54,8 @@ namespace NuiFileExplorer
                     model->onNewItem(Item::Type::Directory);
                 }
             },
-            [this]() {
+            [this]()
+            {
                 sortMenu.close();
                 viewMenu.close();
             },
@@ -61,14 +66,16 @@ namespace NuiFileExplorer
                 "Name",
                 // More...
             },
-            [this](std::string const& item) {
+            [this](std::string const& item)
+            {
                 if (item == "Name")
                 {
                     sortItems();
                     this->items.modifyNow();
                 }
             },
-            [this]() {
+            [this]()
+            {
                 newItemMenu.close();
                 viewMenu.close();
             },
@@ -80,7 +87,8 @@ namespace NuiFileExplorer
                 "Table",
                 "Tiles",
             },
-            [this](std::string const& item) {
+            [this](std::string const& item)
+            {
                 if (item == "Icons")
                     flavor = Flavor::Icons;
                 if (item == "Table")
@@ -89,7 +97,8 @@ namespace NuiFileExplorer
                     flavor = Flavor::Tiles;
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
-            [this]() {
+            [this]()
+            {
                 newItemMenu.close();
                 sortMenu.close();
             },
@@ -102,11 +111,16 @@ namespace NuiFileExplorer
         void sortItems()
         {
             auto& items = this->items.value();
-            std::sort(items.begin(), items.end(), [](auto const& lhs, auto const& rhs) {
-                if (lhs.item.type != rhs.item.type)
-                    return lhs.item.type > rhs.item.type;
-                return lhs.item.path.filename().string() < rhs.item.path.filename().string();
-            });
+            std::sort(
+                items.begin(),
+                items.end(),
+                [](auto const& lhs, auto const& rhs)
+                {
+                    if (lhs.item.type != rhs.item.type)
+                        return lhs.item.type > rhs.item.type;
+                    return lhs.item.path.filename().string() < rhs.item.path.filename().string();
+                }
+            );
         }
 
         Implementation(Settings settings, std::unique_ptr<ISideModel> model)
@@ -177,9 +191,15 @@ namespace NuiFileExplorer
         const auto& items = impl_->model->items();
 
         impl_->items.value().clear();
-        std::transform(items.begin(), items.end(), std::back_inserter(impl_->items.value()), [](auto const& item) {
-            return ItemWithInternals{item};
-        });
+        std::transform(
+            items.begin(),
+            items.end(),
+            std::back_inserter(impl_->items.value()),
+            [](auto const& item)
+            {
+                return ItemWithInternals{item};
+            }
+        );
         if (sorted)
             impl_->sortItems();
 
@@ -221,8 +241,74 @@ namespace NuiFileExplorer
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        using Nui::Elements::span;
 
-        return Nui::Elements::div{}();
+        auto makeTableResizer = []() -> Nui::ElementRenderer
+        {
+            return div{
+                class_ = "nui-file-grid-resizer",
+                "mousedown"_event = [](Nui::val event)
+                {
+                    event.call<void>("stopPropagation");
+
+                    const auto startX = event["clientX"].as<int>();
+                    // FIXME: not here!
+                    std::vector<int> startWidths = {120, 100, 100, 280};
+
+                    // TODO: ...
+                }
+            }();
+        };
+
+        // clang-format off
+        return Nui::Elements::div{class_ = "nui-file-grid-table"}(
+            div{
+                class_ = "nui-file-grid-table-header"
+            }(
+                div{}(span{}("Name"), makeTableResizer()),
+                div{}(span{}("Type"), makeTableResizer()),
+                div{}(span{}("Size"), makeTableResizer()),
+                div{}(span{}("Modified"))
+            ),
+            div{
+                class_ = "nui-file-grid-table-rows"
+            }(
+                impl_->items.map([](auto, auto const& item){
+                    return div{
+                        class_ = "nui-file-grid-table-row"
+                    }(
+                        div{
+                            class_ = "nui-file-grid-table-cell"
+                        }(
+                            img{
+                                src = item.item.icon,
+                                alt = "???",
+                                width = "16",
+                                height = "16",
+                                style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
+                            }(),
+                            span{}(item.item.path.filename().string())
+                        ),
+                        div{
+                            class_ = "nui-file-grid-table-cell"
+                        }(
+                            span{}(Utility::enumToString(item.item.type))
+                        ),
+                        div{
+                            class_ = "nui-file-grid-table-cell"
+                        }(
+                            span{}(Utility::formatBytes(item.item.size))
+                        ),
+                        div{
+                            class_ = "nui-file-grid-table-cell"
+                        }(
+                            span{}(std::to_string(item.item.atime))
+                        )
+                    );
+                })
+            )
+        );
+        // clang-format on
     }
 
     void Side::deselectAll(bool rerender)
@@ -288,9 +374,14 @@ namespace NuiFileExplorer
             {
                 Nui::Console::log("Context menu item: ", item->path.string());
                 auto selected = selectedItems();
-                if (std::find_if(selected.begin(), selected.end(), [&item](auto const& i) {
-                        return i.path == item->path;
-                    }) == selected.end())
+                if (std::find_if(
+                        selected.begin(),
+                        selected.end(),
+                        [&item](auto const& i)
+                        {
+                            return i.path == item->path;
+                        }
+                    ) == selected.end())
                 {
                     deselectAll();
                     impl_->contextMenuClickItems = {item.value()};
@@ -308,10 +399,13 @@ namespace NuiFileExplorer
                 std::remove_if(
                     impl_->contextMenuClickItems.begin(),
                     impl_->contextMenuClickItems.end(),
-                    [](auto const& item) {
+                    [](auto const& item)
+                    {
                         return item.path.filename() == "..";
-                    }),
-                impl_->contextMenuClickItems.end());
+                    }
+                ),
+                impl_->contextMenuClickItems.end()
+            );
 
             // contextMenuClickItems
 
@@ -337,9 +431,15 @@ namespace NuiFileExplorer
     {
         std::vector<Item> selectedItems = this->selectedItems();
         std::vector<std::filesystem::path> result(selectedItems.size());
-        std::transform(selectedItems.begin(), selectedItems.end(), result.begin(), [](auto const& item) {
-            return item.path;
-        });
+        std::transform(
+            selectedItems.begin(),
+            selectedItems.end(),
+            result.begin(),
+            [](auto const& item)
+            {
+                return item.path;
+            }
+        );
         return result;
     }
 

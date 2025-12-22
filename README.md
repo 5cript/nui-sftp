@@ -61,4 +61,6 @@ Still under construction :construction:
 - [ ] Improve selection of multiple items.
 - [ ] Upload drag and drop.
 - [ ] Download drag and drop?
+- [ ] Filtering files.
+- [ ] Sorting files.
 - [ ] ...Miscellaneous menu items.

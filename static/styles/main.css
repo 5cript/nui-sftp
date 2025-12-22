@@ -62,6 +62,10 @@ body {
     --nui-file-grid-dropdown-item-color: var(--sapTextColor);
     --nui-file-grid-dropdown-content-font-size: var(--sapFontLargeSize);
     --nui-file-grid-context-menu-background: var(--sapGroup_ContentBackground);
+    --nui-file-grid-table-header-background: var(--sapButton_Background);
+    --nui-file-grid-table-header-color: var(--sapButton_TextColor);
+    --nui-file-grid-table-cell-background: var(--sapGroup_ContentBackground);
+    --nui-file-grid-table-cell-color: var(--sapTextColor);
 
     --opq-card: #0b1220;
     --opq-muted: #98a2b3;
