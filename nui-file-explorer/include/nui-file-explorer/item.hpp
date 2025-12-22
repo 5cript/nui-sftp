@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility/describe.hpp>
+
 #include <filesystem>
 #include <string>
 #include <cstdint>
@@ -30,4 +32,16 @@ namespace NuiFileExplorer
         std::uint64_t atime = 0;
         std::uint64_t size = 0;
     };
+
+    BOOST_DESCRIBE_ENUM(
+        Item::Type,
+        Regular,
+        Directory,
+        Symlink,
+        Special,
+        Unknown,
+        Socket,
+        CharDevice,
+        BlockDevice,
+        Fifo)
 }
