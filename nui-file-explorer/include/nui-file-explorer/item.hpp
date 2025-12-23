@@ -43,5 +43,6 @@ namespace NuiFileExplorer
         Socket,
         CharDevice,
         BlockDevice,
-        Fifo)
+        Fifo
+    )
 }

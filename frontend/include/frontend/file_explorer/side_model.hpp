@@ -22,7 +22,8 @@
                 "SideModel is used before the setup is complete. ({}:{} {})", \
                 loc.file_name(), \
                 loc.line(), \
-                loc.function_name()); \
+                loc.function_name() \
+            ); \
             return; \
         } \
     } while (false)

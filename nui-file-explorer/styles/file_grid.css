@@ -78,13 +78,13 @@
 }
 
 .nui-file-grid-item-icons:hover {
-    background-color: var(--nui-file-grid-item-highlight);
+    background-color: var(--nui-file-grid-context-menu-item-hover-background);
+    color: var(--nui-file-grid-context-menu-item-hover-color);
 }
 
 .nui-file-grid-item-icons:is(.selected) {
     background-color: var(--nui-file-grid-item-highlight);
     border: 1px solid var(--nui-file-grid-border-color);
-    border-radius: var(--nui-file-grid-border-color);
 }
 
 .nui-file-grid-head {
@@ -187,12 +187,22 @@
 }
 
 .nui-file-grid-table-row {
-    user-select: all;
+    background-color: var(--nui-file-grid-table-cell-background, #303030);
+    color: var(--nui-file-grid-table-cell-color, #efefef);
+}
+
+.nui-file-grid-table-row:hover {
+    background-color: var(--nui-file-grid-item-highlight);
+}
+
+.nui-file-grid-table-row:is(.selected) {
+    background-color: var(--nui-file-grid-item-highlight);
 }
 
 .nui-file-grid-table-header,
 .nui-file-grid-table-row {
     display: grid;
+    user-select: none;
     grid-template-columns: var(--cols);
 }
 
@@ -201,20 +211,38 @@
     /* passive wrapper */
 }
 
-.nui-file-grid-table-cell {
-    padding: 8px;
-    border-bottom: 1px solid var(--nui-file-grid-border-color);
-    background-color: var(--nui-file-grid-table-cell-background, #303030);
-    color: var(--nui-file-grid-table-cell-color, #efefef);
-    cursor: pointer;
-    padding: 6px 8px;
-    border-right: 1px solid #ddd;
-    white-space: nowrap;
-    position: relative;
+.nui-file-grid-table-header-cell {
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid hsl(0 100% 100% / 0.1)
 }
 
-.nui-file-grid-table-cell:nth-of-type(2n) {
-    background-color: hsl(0 0% 0% / 0.1)
+.nui-file-grid-table-cell {
+    padding-left: 8px;
+    padding-right: 8px;
+    cursor: pointer;
+    border-right: 1px solid hsl(0 100% 100% / 0.1);
+    white-space: nowrap;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.nui-file-grid-table-cell>img {
+    margin-right: 4px;
+}
+
+.nui-file-grid-table-cell>span {
+    user-select: text;
+}
+
+.nui-file-grid-table-row:nth-of-type(2n) {
+    background-color: hsl(0 100% 100% / 0.05)
+}
+
+.nui-file-grid-table-row:is(.selected):nth-of-type(2n) {
+    background-color: var(--nui-file-grid-item-highlight);
 }
 
 .nui-file-grid-resizer {
@@ -224,4 +252,26 @@
     width: 5px;
     height: 100%;
     cursor: col-resize;
+}
+
+.nui-file-grid-sort-indicator {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+    font-size: 0.65em;
+    margin-right: 4px;
+}
+
+.nui-file-grid-arrow {
+    color: #bbb;
+    transition: color 120ms ease;
+}
+
+.sorted-asc .nui-file-grid-arrow.nfg-up {
+    color: var(--nui-file-grid-table-sort-highlight);
+    /* blue */
+}
+
+.sorted-desc .nui-file-grid-arrow.nfg-down {
+    color: var(--nui-file-grid-table-sort-highlight);
 }

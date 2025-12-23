@@ -66,6 +66,9 @@ body {
     --nui-file-grid-table-header-color: var(--sapButton_TextColor);
     --nui-file-grid-table-cell-background: var(--sapGroup_ContentBackground);
     --nui-file-grid-table-cell-color: var(--sapTextColor);
+    --nui-file-grid-context-menu-item-hover-background: var(--sapButton_Hover_Background);
+    --nui-file-grid-context-menu-item-hover-color: var(--sapButton_Hover_Text);
+    --nui-file-grid-table-sort-highlight: var(--sapHighlightColor);
 
     --opq-card: #0b1220;
     --opq-muted: #98a2b3;

@@ -18,6 +18,17 @@ namespace NuiFileExplorer
             bool pathBarOnTop = false;
         };
 
+        struct ItemWithInternals
+        {
+            Item item;
+            std::shared_ptr<Nui::Observed<bool>> selected;
+
+            explicit ItemWithInternals(Item const& item)
+                : item{item}
+                , selected{std::make_shared<Nui::Observed<bool>>(false)}
+            {}
+        };
+
         enum class IconSize : unsigned int
         {
             Small = 16,
@@ -128,6 +139,8 @@ namespace NuiFileExplorer
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
         void onContextMenu(std::optional<Item> const& item, Nui::val event);
+
+        void onItemClicked(ItemWithInternals const& item, Nui::val event);
 
       private:
         struct Implementation;

@@ -9,6 +9,12 @@ add_library(
         "${CMAKE_CURRENT_LIST_DIR}/flavor.cpp"
 )
 
+set_source_files_properties(
+    "${CMAKE_CURRENT_LIST_DIR}/file_grid.cpp"
+    PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/../../styles/file_grid.css"
+)
+
 target_link_libraries(
     nui-file-explorer
     PRIVATE

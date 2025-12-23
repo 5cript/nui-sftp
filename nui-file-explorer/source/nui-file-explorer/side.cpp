@@ -4,6 +4,7 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/api/console.hpp>
+#include <nui/event_system/listen.hpp>
 
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
@@ -14,15 +15,19 @@ namespace NuiFileExplorer
 {
     namespace
     {
-        struct ItemWithInternals
+        std::string secondsSinceEpochToReadable(std::uint64_t epochSeconds)
         {
-            Item item;
-            std::shared_ptr<Nui::Observed<bool>> selected;
+            return Nui::val::global("Date")
+                .new_(static_cast<double>(epochSeconds) * 1000)
+                .call<std::string>("toLocaleString");
+        }
 
-            explicit ItemWithInternals(Item const& item)
-                : item{item}
-                , selected{std::make_shared<Nui::Observed<bool>>(false)}
-            {}
+        enum class SortCriterion
+        {
+            Name,
+            Type,
+            Size,
+            Atime
         };
     }
 
@@ -35,6 +40,8 @@ namespace NuiFileExplorer
         Nui::Observed<Flavor> flavor{Flavor::Icons};
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
         Nui::Observed<unsigned int> iconSpacing{32u};
+        Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
+
         DropdownMenu newItemMenu{
             {
                 "File",
@@ -110,15 +117,86 @@ namespace NuiFileExplorer
 
         void sortItems()
         {
+            const auto [criterion, ascending] = sorting.value();
+            switch (criterion)
+            {
+                case SortCriterion::Name:
+                    sortByName(ascending);
+                    break;
+                case SortCriterion::Type:
+                    sortByType(ascending);
+                    break;
+                case SortCriterion::Size:
+                    sortBySize(ascending);
+                    break;
+                case SortCriterion::Atime:
+                    sortByAtime(ascending);
+                    break;
+            }
+        }
+
+        auto partitionItems()
+        {
             auto& items = this->items.value();
-            std::sort(
+            return std::stable_partition(
                 items.begin(),
                 items.end(),
-                [](auto const& lhs, auto const& rhs)
+                [](auto const& lhs)
                 {
-                    if (lhs.item.type != rhs.item.type)
-                        return lhs.item.type > rhs.item.type;
-                    return lhs.item.path.filename().string() < rhs.item.path.filename().string();
+                    return lhs.item.type == Item::Type::Directory;
+                }
+            );
+        }
+
+        void sortByPredicate(auto const& predicate)
+        {
+            auto& items = this->items.value();
+            auto partitionBorder = partitionItems();
+            std::sort(items.begin(), partitionBorder, predicate);
+            std::sort(partitionBorder, items.end(), predicate);
+        }
+
+        void sortByName(bool ascending)
+        {
+            sortByPredicate(
+                [ascending](auto const& lhs, auto const& rhs)
+                {
+                    if (ascending)
+                        return lhs.item.path.filename().string() < rhs.item.path.filename().string();
+                    return lhs.item.path.filename().string() > rhs.item.path.filename().string();
+                }
+            );
+        }
+        void sortByType(bool ascending)
+        {
+            sortByPredicate(
+                [ascending](auto const& lhs, auto const& rhs)
+                {
+                    if (ascending)
+                        return static_cast<int>(lhs.item.type) < static_cast<int>(rhs.item.type);
+                    return static_cast<int>(lhs.item.type) > static_cast<int>(rhs.item.type);
+                }
+            );
+        }
+        void sortBySize(bool ascending)
+        {
+            sortByPredicate(
+                [ascending](auto const& lhs, auto const& rhs)
+                {
+                    if (ascending)
+                        return lhs.item.size < rhs.item.size;
+                    return lhs.item.size > rhs.item.size;
+                }
+            );
+        }
+        void sortByAtime(bool ascending)
+        {
+            sortByPredicate(
+                [ascending](auto const& lhs, auto const& rhs)
+                {
+                    if (ascending)
+                        return lhs.item.atime < rhs.item.atime;
+                    return lhs.item.atime > rhs.item.atime;
                 }
             );
         }
@@ -235,6 +313,103 @@ namespace NuiFileExplorer
         return impl_->iconSpacing.value();
     }
 
+    void Side::onItemClicked(ItemWithInternals const& item, Nui::val event)
+    {
+        event.call<void>("stopPropagation");
+        closeMenus();
+
+        if (event["ctrlKey"].as<bool>())
+        {
+            *item.selected = !item.selected->value();
+        }
+        else if (event["shiftKey"].as<bool>())
+        {
+            // find self:
+            auto self = std::find_if(
+                impl_->items.value().begin(),
+                impl_->items.value().end(),
+                [&item](auto const& i)
+                {
+                    return i.item.path == item.item.path;
+                }
+            );
+
+            // go backwards and forwards until we find another selected item:
+            auto forwardSeeker = self + 1;
+            auto backwardSeeker = self - 1;
+            decltype(self) otherSelected = impl_->items.value().end();
+
+            if (self == impl_->items.value().end())
+                return;
+            if (self == impl_->items.value().begin())
+                backwardSeeker = impl_->items.value().begin();
+            else if (self == impl_->items.value().end() - 1)
+                forwardSeeker = impl_->items.value().end() - 1;
+
+            while (forwardSeeker != impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
+            {
+                if (forwardSeeker->selected->value())
+                {
+                    otherSelected = forwardSeeker;
+                    break;
+                }
+                if (backwardSeeker->selected->value())
+                {
+                    otherSelected = backwardSeeker;
+                    break;
+                }
+                ++forwardSeeker;
+                --backwardSeeker;
+            }
+
+            if (otherSelected == impl_->items.value().end() && forwardSeeker != impl_->items.value().end())
+            {
+                for (; forwardSeeker != impl_->items.value().end(); ++forwardSeeker)
+                {
+                    if (forwardSeeker->selected->value())
+                    {
+                        otherSelected = forwardSeeker;
+                        break;
+                    }
+                }
+            }
+            else if (otherSelected == impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
+            {
+                for (; backwardSeeker != impl_->items.value().begin(); --backwardSeeker)
+                {
+                    if (backwardSeeker->selected->value())
+                    {
+                        otherSelected = backwardSeeker;
+                        break;
+                    }
+                }
+                if (backwardSeeker == impl_->items.value().begin() && otherSelected == impl_->items.value().end() &&
+                    backwardSeeker->selected->value())
+                    otherSelected = impl_->items.value().begin();
+            }
+
+            for (auto& item : impl_->items.value())
+                *item.selected = false;
+            if (otherSelected != impl_->items.value().end())
+            {
+                auto start = std::min(self, otherSelected);
+                auto end = std::max(self, otherSelected);
+                auto offset = (end != impl_->items.value().end()) ? 1 : 0;
+                for (auto it = start; it != end + offset; ++it)
+                    *it->selected = true;
+            }
+            else
+            {
+                selectAll();
+            }
+        }
+        else
+        {
+            deselectAll();
+            *item.selected = true;
+        }
+    }
+
     Nui::ElementRenderer Side::tableFlavor()
     {
         using namespace Nui;
@@ -260,22 +435,121 @@ namespace NuiFileExplorer
             }();
         };
 
+        auto makeSortIndicator = []() -> Nui::ElementRenderer
+        {
+            return span{class_ = "nui-file-grid-sort-indicator"}(
+                span{
+                    class_ = "nui-file-grid-arrow nfg-up",
+                }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x25B2)),
+                span{
+                    class_ = "nui-file-grid-arrow nfg-down",
+                }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x25BC))
+            );
+        };
+
+        auto makeHeaderCellSpan = [](std::string const& text) -> Nui::ElementRenderer
+        {
+            return span{style = "flex-grow: 1;"}(text);
+        };
+
+        auto makeOnClick = [this](SortCriterion sortCriterion)
+        {
+            return [this, sortCriterion](Nui::val event)
+            {
+                event.call<void>("stopPropagation");
+
+                const auto [previousCriterion, previousAscending] = impl_->sorting.value();
+                if (previousCriterion != sortCriterion)
+                    impl_->sorting = {sortCriterion, true};
+                else
+                    impl_->sorting = {sortCriterion, !previousAscending};
+                impl_->sortItems();
+                impl_->items.modifyNow();
+            };
+        };
+
+        auto makeHeaderCellClass = [this](SortCriterion sortCriterion)
+        {
+            return observe(impl_->sorting)
+                .generate(
+                    [this, sortCriterion]()
+                    {
+                        if (impl_->sorting.value().first == sortCriterion)
+                        {
+                            if (impl_->sorting.value().second)
+                                return "nui-file-grid-table-header-cell sorted-asc";
+                            else
+                                return "nui-file-grid-table-header-cell sorted-desc";
+                        }
+                        return "nui-file-grid-table-header-cell";
+                    }
+                );
+        };
+
+        auto contextMenu = [this](auto const& item)
+        {
+            return "contextmenu"_event = [this, item = item.item](Nui::val event)
+            {
+                onContextMenu(item, event);
+            };
+        };
+
         // clang-format off
         return Nui::Elements::div{class_ = "nui-file-grid-table"}(
             div{
                 class_ = "nui-file-grid-table-header"
             }(
-                div{}(span{}("Name"), makeTableResizer()),
-                div{}(span{}("Type"), makeTableResizer()),
-                div{}(span{}("Size"), makeTableResizer()),
-                div{}(span{}("Modified"))
+                div{
+                    class_ = makeHeaderCellClass(SortCriterion::Name),
+                    onClick = makeOnClick(SortCriterion::Name)
+                }(
+                    makeHeaderCellSpan("Name"),
+                    makeSortIndicator(),
+                    makeTableResizer()
+                ),
+                div{
+                    class_ = makeHeaderCellClass(SortCriterion::Type),
+                    onClick = makeOnClick(SortCriterion::Type)
+                }(
+                    makeHeaderCellSpan("Type"),
+                    makeSortIndicator(),
+                    makeTableResizer()
+                ),
+                div{
+                    class_ = makeHeaderCellClass(SortCriterion::Size),
+                    onClick = makeOnClick(SortCriterion::Size)
+                }(
+                    makeHeaderCellSpan("Size"),
+                    makeSortIndicator(),
+                    makeTableResizer()
+                ),
+                div{
+                    class_ = makeHeaderCellClass(SortCriterion::Atime),
+                    onClick = makeOnClick(SortCriterion::Atime)
+                }(
+                    makeHeaderCellSpan("Modification Date"),
+                    makeSortIndicator()
+                )
             ),
             div{
                 class_ = "nui-file-grid-table-rows"
             }(
-                impl_->items.map([](auto, auto const& item){
+                impl_->items.map([this, contextMenu](auto, auto const& item){
                     return div{
-                        class_ = "nui-file-grid-table-row"
+                        class_ = observe(item.selected).generate([&item](){
+                            if (item.selected->value())
+                                return "nui-file-grid-table-row selected";
+                            return "nui-file-grid-table-row";
+                        }),
+                        onDblClick = [this, &item](Nui::val event){
+                            event.call<void>("stopPropagation");
+                            closeMenus();
+                            impl_->model->onActivateItem(item.item);
+                        },
+                        contextMenu(item),
+                        onClick = [this, &item](Nui::val event){
+                            onItemClicked(item, event);
+                        }
                     }(
                         div{
                             class_ = "nui-file-grid-table-cell"
@@ -286,23 +560,33 @@ namespace NuiFileExplorer
                                 width = "16",
                                 height = "16",
                                 style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
+                                contextMenu(item),
                             }(),
-                            span{}(item.item.path.filename().string())
+                            span{
+                                contextMenu(item),
+                            }(item.item.path.filename().string())
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell"
                         }(
-                            span{}(Utility::enumToString(item.item.type))
+                            span{
+                                contextMenu(item),
+                            }(Utility::enumToString(item.item.type))
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell"
                         }(
-                            span{}(Utility::formatBytes(item.item.size))
+                            span{
+                                contextMenu(item),
+                            }(Utility::formatBytes(item.item.size))
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell"
                         }(
-                            span{}(std::to_string(item.item.atime))
+                            // TODO: Works but is ugly:
+                            span{
+                                contextMenu(item),
+                            }(secondsSinceEpochToReadable(item.item.atime))
                         )
                     );
                 })
@@ -560,93 +844,7 @@ namespace NuiFileExplorer
                         onContextMenu(item, event);
                     },
                     onClick = [this, &item](Nui::val event){
-                        event.call<void>("stopPropagation");
-                        closeMenus();
-
-                        if (event["ctrlKey"].as<bool>())
-                        {
-                            *item.selected = !item.selected->value();
-                        }
-                        else if (event["shiftKey"].as<bool>())
-                        {
-                            // find self:
-                            auto self = std::find_if(impl_->items.value().begin(), impl_->items.value().end(), [&item](auto const& i){
-                                return i.item.path == item.item.path;
-                            });
-
-                            // go backwards and forwards until we find another selected item:
-                            auto forwardSeeker = self + 1;
-                            auto backwardSeeker = self - 1;
-                            decltype(self) otherSelected = impl_->items.value().end();
-
-                            if (self == impl_->items.value().end())
-                                return;
-                            if (self == impl_->items.value().begin())
-                                backwardSeeker = impl_->items.value().begin();
-                            else if (self == impl_->items.value().end() - 1)
-                                forwardSeeker = impl_->items.value().end() - 1;
-
-                            while (forwardSeeker != impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-                            {
-                                if (forwardSeeker->selected->value())
-                                {
-                                    otherSelected = forwardSeeker;
-                                    break;
-                                }
-                                if (backwardSeeker->selected->value())
-                                {
-                                    otherSelected = backwardSeeker;
-                                    break;
-                                }
-                                ++forwardSeeker;
-                                --backwardSeeker;
-                            }
-
-                            if (otherSelected == impl_->items.value().end() && forwardSeeker != impl_->items.value().end())
-                            {
-                                for (;forwardSeeker != impl_->items.value().end(); ++forwardSeeker)
-                                {
-                                    if (forwardSeeker->selected->value())
-                                    {
-                                        otherSelected = forwardSeeker;
-                                        break;
-                                    }
-                                }
-                            }
-                            else if (otherSelected == impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-                            {
-                                for (;backwardSeeker != impl_->items.value().begin(); --backwardSeeker)
-                                {
-                                    if (backwardSeeker->selected->value())
-                                    {
-                                        otherSelected = backwardSeeker;
-                                        break;
-                                    }
-                                }
-                                if (backwardSeeker == impl_->items.value().begin() && otherSelected == impl_->items.value().end() && backwardSeeker->selected->value())
-                                    otherSelected = impl_->items.value().begin();
-                            }
-
-                            for (auto& item : impl_->items.value())
-                                *item.selected = false;
-                            if (otherSelected != impl_->items.value().end())
-                            {
-                                auto start = std::min(self, otherSelected);
-                                auto end = std::max(self, otherSelected);
-                                auto offset = (end != impl_->items.value().end()) ? 1 : 0;
-                                for (auto it = start; it != end + offset; ++it)
-                                    *it->selected = true;
-                            }
-                            else
-                            {
-                                selectAll();
-                            }
-                        }
-                        else
-                        {
-                            deselectAll();
-                            *item.selected = true;
-                        }
+                        onItemClicked(item, event);
                     }
                 }(
                     img{

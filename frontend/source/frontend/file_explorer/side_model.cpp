@@ -38,16 +38,25 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
         return;
     }
 
-    std::erase_if(*directoryEntries, [](auto const& entry) {
-        return entry.path.filename() == ".";
-    });
+    std::erase_if(
+        *directoryEntries,
+        [](auto const& entry)
+        {
+            return entry.path.filename() == ".";
+        }
+    );
 
     std::vector<NuiFileExplorer::Item> items{};
     std::transform(
-        begin(*directoryEntries), end(*directoryEntries), std::back_inserter(items), [this](auto const& entry) {
+        begin(*directoryEntries),
+        end(*directoryEntries),
+        std::back_inserter(items),
+        [this](auto const& entry)
+        {
             return NuiFileExplorer::Item{
                 .path = entry.path,
-                .icon = [&entry, this]() -> std::string {
+                .icon = [&entry, this]() -> std::string
+                {
                     const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
                     if (type == NuiFileExplorer::Item::Type::Directory)
                         return "nui://app.example/icons/folder_main.png";
@@ -69,7 +78,8 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
                 .atime = entry.atime,
                 .size = entry.size,
             };
-        });
+        }
+    );
 
     items_ = std::move(items);
     if (refreshCallback_)
