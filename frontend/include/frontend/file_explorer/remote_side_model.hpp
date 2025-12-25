@@ -24,6 +24,10 @@ class RemoteSideModel : public SideModel
     void onProperties(NuiFileExplorer::Item const& item) override;
     void onError(std::string const& error) override;
 
+    bool isLeft() const override
+    {
+        return false;
+    }
     void navigateTo(std::filesystem::path const& path) override;
     void setLocalModel(SideModel* model);
     bool isComplete() const override;

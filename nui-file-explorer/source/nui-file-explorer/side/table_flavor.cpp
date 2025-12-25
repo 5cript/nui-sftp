@@ -7,29 +7,28 @@ namespace NuiFileExplorer
         using namespace Nui;
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
+        using namespace std::string_literals;
         using Nui::Elements::div;
         using Nui::Elements::span;
 
-        auto makeTableResizer = []() -> Nui::ElementRenderer
+        auto shallHide = [this](int columnIndex)
         {
-            return div{
-                class_ = "nui-file-grid-resizer",
-                "mousedown"_event = [](Nui::val event)
-                {
-                    event.call<void>("stopPropagation");
-
-                    const auto startX = event["clientX"].as<int>();
-                    // FIXME: not here!
-                    std::vector<int> startWidths = {120, 100, 100, 280};
-
-                    // TODO: ...
-                }
-            }();
+            return style = observe(impl_->tableGridTemplateColumns)
+                               .generate(
+                                   [this, columnIndex]() -> std::optional<std::string>
+                                   {
+                                       if (impl_->tableGridTemplateColumns.value()[columnIndex] ==
+                                           impl_->tableGridTemplateColumnsHiddenValue)
+                                           return "display: none";
+                                       else
+                                           return std::nullopt;
+                                   }
+                               );
         };
 
-        auto makeSortIndicator = []() -> Nui::ElementRenderer
+        auto makeSortIndicator = [&shallHide](int columnIndex) -> Nui::ElementRenderer
         {
-            return span{class_ = "nui-file-grid-sort-indicator"}(
+            return span{class_ = "nui-file-grid-sort-indicator", shallHide(columnIndex)}(
                 span{
                     class_ = "nui-file-grid-arrow nfg-up",
                 }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x25B2)),
@@ -39,9 +38,9 @@ namespace NuiFileExplorer
             );
         };
 
-        auto makeHeaderCellSpan = [](std::string const& text) -> Nui::ElementRenderer
+        auto makeHeaderCellSpan = [&shallHide](std::string const& text, int columnIndex) -> Nui::ElementRenderer
         {
-            return span{style = "flex-grow: 1;"}(text);
+            return span{class_ = "nui-file-grid-header-cell-text", shallHide(columnIndex)}(text);
         };
 
         auto makeOnClick = [this](SortCriterion sortCriterion)
@@ -86,42 +85,53 @@ namespace NuiFileExplorer
             };
         };
 
+        auto eyeCollapser = [this](int columnIndex) -> Nui::ElementRenderer
+        {
+            return span{
+                class_ = "nui-file-grid-eye-collapser",
+                onClick = [this, columnIndex](Nui::val event)
+                {
+                    event.call<void>("stopPropagation");
+                    event["target"]["classList"].call<void>("toggle", "hidden"s);
+
+                    const std::string hiddenValue{impl_->tableGridTemplateColumnsHiddenValue};
+                    impl_->tableGridTemplateColumns[columnIndex] =
+                        impl_->tableGridTemplateColumns.value()[columnIndex] == hiddenValue
+                        ? std::string{impl_->tableGridTemplateColumnsDefaults[columnIndex]}
+                        : hiddenValue;
+                },
+            }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x1F441));
+        };
+
+        auto makeHeaderCell =
+            [&](SortCriterion sortCriterion, std::string const& name, int columnIndex) -> Nui::ElementRenderer
+        {
+            return div{
+                class_ = makeHeaderCellClass(sortCriterion), onClick = makeOnClick(sortCriterion)
+            }(eyeCollapser(columnIndex), makeHeaderCellSpan(name, columnIndex), makeSortIndicator(columnIndex));
+        };
+
         // clang-format off
-        return Nui::Elements::div{class_ = "nui-file-grid-table"}(
+        return Nui::Elements::div{
+            class_ = "nui-file-grid-table",
+            style = observe(impl_->tableGridTemplateColumns).generate([this]() {
+                std::string gridTemplateColumns = "";
+                for (const auto& colWidth : impl_->tableGridTemplateColumns.value())
+                {
+                    if (!gridTemplateColumns.empty())
+                        gridTemplateColumns += " ";
+                    gridTemplateColumns += colWidth;
+                }
+                return "grid-template-columns: " + gridTemplateColumns + ";";
+            })
+        }(
             div{
                 class_ = "nui-file-grid-table-header"
             }(
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Name),
-                    onClick = makeOnClick(SortCriterion::Name)
-                }(
-                    makeHeaderCellSpan("Name"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Type),
-                    onClick = makeOnClick(SortCriterion::Type)
-                }(
-                    makeHeaderCellSpan("Type"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Size),
-                    onClick = makeOnClick(SortCriterion::Size)
-                }(
-                    makeHeaderCellSpan("Size"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Atime),
-                    onClick = makeOnClick(SortCriterion::Atime)
-                }(
-                    makeHeaderCellSpan("Modification Date"),
-                    makeSortIndicator()
-                )
+                makeHeaderCell(SortCriterion::Name, "Name", 0),
+                makeHeaderCell(SortCriterion::Size, "Size", 1),
+                makeHeaderCell(SortCriterion::Info, "Info", 2),
+                makeHeaderCell(SortCriterion::Atime, "Last Modified", 3)
             ),
             div{
                 class_ = "nui-file-grid-table-rows"
@@ -161,14 +171,14 @@ namespace NuiFileExplorer
                             contextMenu(item),
                         }(
                             span{
-                            }(Utility::enumToString(item.item.type))
+                            }(Utility::formatBytes(item.item.size))
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
                         }(
                             span{
-                            }(Utility::formatBytes(item.item.size))
+                            }(item.item.lsStyleTypePermsUserGroup())
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell",
@@ -176,7 +186,7 @@ namespace NuiFileExplorer
                         }(
                             // TODO: Works but is ugly:
                             span{
-                            }(secondsSinceEpochToReadable(item.item.atime))
+                            }(item.item.readableATime())
                         )
                     );
                 })

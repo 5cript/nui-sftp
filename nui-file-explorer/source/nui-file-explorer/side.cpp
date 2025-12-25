@@ -28,7 +28,12 @@ namespace NuiFileExplorer
 
         // clang-format off
         return div {
-            class_ = "nui-file-grid-side"
+            class_ = "nui-file-grid-side",
+            style = [this]() -> std::optional<std::string> {
+                if (model().isLeft())
+                    return "border-right: 1px solid var(--nui-file-grid-border-color);";
+                return std::nullopt;
+            }()
         }(
             [this]() -> Nui::ElementRenderer {
                 if (impl_->settings.pathBarOnTop)
@@ -38,6 +43,11 @@ namespace NuiFileExplorer
             headMenu(),
             div{
                 class_ = "nui-file-grid-side-content",
+                style = [this]() -> std::string {
+                    if (model().isLeft())
+                        return "padding-right: 1px;";
+                    return "padding-left: 1px;";
+                }()
             }(
                 contextMenu(),
                 div{

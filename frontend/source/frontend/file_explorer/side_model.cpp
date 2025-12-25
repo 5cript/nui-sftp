@@ -75,6 +75,8 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
                 .permissions = entry.permissions,
                 .ownerId = entry.uid,
                 .groupId = entry.gid,
+                .owner = entry.owner,
+                .group = entry.group,
                 .atime = entry.atime,
                 .size = entry.size,
             };

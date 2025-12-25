@@ -16,20 +16,17 @@ namespace NuiFileExplorer
     enum class SortCriterion
     {
         Name,
-        Type,
         Size,
+        Info,
         Atime
     };
 
-    inline std::string secondsSinceEpochToReadable(std::uint64_t epochSeconds)
-    {
-        return Nui::val::global("Date")
-            .new_(static_cast<double>(epochSeconds) * 1000)
-            .call<std::string>("toLocaleString");
-    }
-
     struct Side::Implementation
     {
+        constexpr static std::array<std::string_view, 4> tableGridTemplateColumnsDefaults =
+            {"1fr", "max-content", "max-content", "max-content"};
+        constexpr static std::string_view tableGridTemplateColumnsHiddenValue = "25px";
+
         Settings settings;
         std::unique_ptr<ISideModel> model;
 
@@ -38,6 +35,9 @@ namespace NuiFileExplorer
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
         Nui::Observed<unsigned int> iconSpacing{32u};
         Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
+        Nui::Observed<std::vector<std::string>> tableGridTemplateColumns{
+            std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
+        };
 
         DropdownMenu newItemMenu{
             {
@@ -120,11 +120,11 @@ namespace NuiFileExplorer
                 case SortCriterion::Name:
                     sortByName(ascending);
                     break;
-                case SortCriterion::Type:
-                    sortByType(ascending);
-                    break;
                 case SortCriterion::Size:
                     sortBySize(ascending);
+                    break;
+                case SortCriterion::Info:
+                    sortByInfo(ascending);
                     break;
                 case SortCriterion::Atime:
                     sortByAtime(ascending);
@@ -164,14 +164,14 @@ namespace NuiFileExplorer
                 }
             );
         }
-        void sortByType(bool ascending)
+        void sortByInfo(bool ascending)
         {
             sortByPredicate(
                 [ascending](auto const& lhs, auto const& rhs)
                 {
                     if (ascending)
-                        return static_cast<int>(lhs.item.type) < static_cast<int>(rhs.item.type);
-                    return static_cast<int>(lhs.item.type) > static_cast<int>(rhs.item.type);
+                        return lhs.item.lsStyleTypePermsUserGroup() < rhs.item.lsStyleTypePermsUserGroup();
+                    return lhs.item.lsStyleTypePermsUserGroup() > rhs.item.lsStyleTypePermsUserGroup();
                 }
             );
         }

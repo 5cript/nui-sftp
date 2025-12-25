@@ -31,6 +31,13 @@ namespace NuiFileExplorer
         virtual void setItemUpdateFunction(std::function<void(bool)> doUpdate) = 0;
 
         /**
+         * @brief Returns true if this side model represents the left side.
+         *
+         * @return bool
+         */
+        virtual bool isLeft() const = 0;
+
+        /**
          * @brief Navigate to the given (full) path.
          *
          * @param path
