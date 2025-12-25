@@ -1,5 +1,5 @@
 #include <nui-file-explorer/side.hpp>
-#include <nui-file-explorer/dropdown_menu.hpp>
+#include "side/side_impl.hpp"
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -13,200 +13,6 @@ using namespace std::string_literals;
 
 namespace NuiFileExplorer
 {
-    namespace
-    {
-        std::string secondsSinceEpochToReadable(std::uint64_t epochSeconds)
-        {
-            return Nui::val::global("Date")
-                .new_(static_cast<double>(epochSeconds) * 1000)
-                .call<std::string>("toLocaleString");
-        }
-
-        enum class SortCriterion
-        {
-            Name,
-            Type,
-            Size,
-            Atime
-        };
-    }
-
-    struct Side::Implementation
-    {
-        Settings settings;
-        std::unique_ptr<ISideModel> model;
-
-        Nui::Observed<std::vector<ItemWithInternals>> items{};
-        Nui::Observed<Flavor> flavor{Flavor::Icons};
-        Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
-        Nui::Observed<unsigned int> iconSpacing{32u};
-        Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
-
-        DropdownMenu newItemMenu{
-            {
-                "File",
-                "Folder",
-                // Soft Link ?
-                // Hard Link ?
-            },
-            [this](std::string const& item)
-            {
-                Nui::Console::log("New clicked: ", item);
-                if (item == "File")
-                {
-                    model->onNewItem(Item::Type::Regular);
-                }
-                else if (item == "Folder")
-                {
-                    model->onNewItem(Item::Type::Directory);
-                }
-            },
-            [this]()
-            {
-                sortMenu.close();
-                viewMenu.close();
-            },
-            "New",
-        };
-        DropdownMenu sortMenu{
-            {
-                "Name",
-                // More...
-            },
-            [this](std::string const& item)
-            {
-                if (item == "Name")
-                {
-                    sortItems();
-                    this->items.modifyNow();
-                }
-            },
-            [this]()
-            {
-                newItemMenu.close();
-                viewMenu.close();
-            },
-            "Sort",
-        };
-        DropdownMenu viewMenu{
-            {
-                "Icons",
-                "Table",
-                "Tiles",
-            },
-            [this](std::string const& item)
-            {
-                if (item == "Icons")
-                    flavor = Flavor::Icons;
-                if (item == "Table")
-                    flavor = Flavor::Table;
-                if (item == "Tiles")
-                    flavor = Flavor::Tiles;
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            },
-            [this]()
-            {
-                newItemMenu.close();
-                sortMenu.close();
-            },
-            "View",
-        };
-
-        std::weak_ptr<Nui::Dom::BasicElement> contextMenuView{};
-        std::vector<Item> contextMenuClickItems{};
-
-        void sortItems()
-        {
-            const auto [criterion, ascending] = sorting.value();
-            switch (criterion)
-            {
-                case SortCriterion::Name:
-                    sortByName(ascending);
-                    break;
-                case SortCriterion::Type:
-                    sortByType(ascending);
-                    break;
-                case SortCriterion::Size:
-                    sortBySize(ascending);
-                    break;
-                case SortCriterion::Atime:
-                    sortByAtime(ascending);
-                    break;
-            }
-        }
-
-        auto partitionItems()
-        {
-            auto& items = this->items.value();
-            return std::stable_partition(
-                items.begin(),
-                items.end(),
-                [](auto const& lhs)
-                {
-                    return lhs.item.type == Item::Type::Directory;
-                }
-            );
-        }
-
-        void sortByPredicate(auto const& predicate)
-        {
-            auto& items = this->items.value();
-            auto partitionBorder = partitionItems();
-            std::sort(items.begin(), partitionBorder, predicate);
-            std::sort(partitionBorder, items.end(), predicate);
-        }
-
-        void sortByName(bool ascending)
-        {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
-                        return lhs.item.path.filename().string() < rhs.item.path.filename().string();
-                    return lhs.item.path.filename().string() > rhs.item.path.filename().string();
-                }
-            );
-        }
-        void sortByType(bool ascending)
-        {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
-                        return static_cast<int>(lhs.item.type) < static_cast<int>(rhs.item.type);
-                    return static_cast<int>(lhs.item.type) > static_cast<int>(rhs.item.type);
-                }
-            );
-        }
-        void sortBySize(bool ascending)
-        {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
-                        return lhs.item.size < rhs.item.size;
-                    return lhs.item.size > rhs.item.size;
-                }
-            );
-        }
-        void sortByAtime(bool ascending)
-        {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
-                        return lhs.item.atime < rhs.item.atime;
-                    return lhs.item.atime > rhs.item.atime;
-                }
-            );
-        }
-
-        Implementation(Settings settings, std::unique_ptr<ISideModel> model)
-            : settings{std::move(settings)}
-            , model{std::move(model)}
-        {}
-    };
-
     Side::Side(Settings settings, std::unique_ptr<ISideModel> model)
         : impl_(std::make_unique<Implementation>(std::move(settings), std::move(model)))
     {}
@@ -312,6 +118,21 @@ namespace NuiFileExplorer
     {
         return impl_->iconSpacing.value();
     }
+    void Side::select(Item const& item)
+    {
+        for (auto& it : impl_->items.value())
+        {
+            if (it.item.path == item.path)
+            {
+                *it.selected = true;
+                break;
+            }
+        }
+    }
+    void Side::select(ItemWithInternals const& item)
+    {
+        select(item.item);
+    }
 
     void Side::onItemClicked(ItemWithInternals const& item, Nui::val event)
     {
@@ -410,191 +231,6 @@ namespace NuiFileExplorer
         }
     }
 
-    Nui::ElementRenderer Side::tableFlavor()
-    {
-        using namespace Nui;
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-
-        auto makeTableResizer = []() -> Nui::ElementRenderer
-        {
-            return div{
-                class_ = "nui-file-grid-resizer",
-                "mousedown"_event = [](Nui::val event)
-                {
-                    event.call<void>("stopPropagation");
-
-                    const auto startX = event["clientX"].as<int>();
-                    // FIXME: not here!
-                    std::vector<int> startWidths = {120, 100, 100, 280};
-
-                    // TODO: ...
-                }
-            }();
-        };
-
-        auto makeSortIndicator = []() -> Nui::ElementRenderer
-        {
-            return span{class_ = "nui-file-grid-sort-indicator"}(
-                span{
-                    class_ = "nui-file-grid-arrow nfg-up",
-                }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x25B2)),
-                span{
-                    class_ = "nui-file-grid-arrow nfg-down",
-                }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x25BC))
-            );
-        };
-
-        auto makeHeaderCellSpan = [](std::string const& text) -> Nui::ElementRenderer
-        {
-            return span{style = "flex-grow: 1;"}(text);
-        };
-
-        auto makeOnClick = [this](SortCriterion sortCriterion)
-        {
-            return [this, sortCriterion](Nui::val event)
-            {
-                event.call<void>("stopPropagation");
-
-                const auto [previousCriterion, previousAscending] = impl_->sorting.value();
-                if (previousCriterion != sortCriterion)
-                    impl_->sorting = {sortCriterion, true};
-                else
-                    impl_->sorting = {sortCriterion, !previousAscending};
-                impl_->sortItems();
-                impl_->items.modifyNow();
-            };
-        };
-
-        auto makeHeaderCellClass = [this](SortCriterion sortCriterion)
-        {
-            return observe(impl_->sorting)
-                .generate(
-                    [this, sortCriterion]()
-                    {
-                        if (impl_->sorting.value().first == sortCriterion)
-                        {
-                            if (impl_->sorting.value().second)
-                                return "nui-file-grid-table-header-cell sorted-asc";
-                            else
-                                return "nui-file-grid-table-header-cell sorted-desc";
-                        }
-                        return "nui-file-grid-table-header-cell";
-                    }
-                );
-        };
-
-        auto contextMenu = [this](auto const& item)
-        {
-            return "contextmenu"_event = [this, item = item.item](Nui::val event)
-            {
-                onContextMenu(item, event);
-            };
-        };
-
-        // clang-format off
-        return Nui::Elements::div{class_ = "nui-file-grid-table"}(
-            div{
-                class_ = "nui-file-grid-table-header"
-            }(
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Name),
-                    onClick = makeOnClick(SortCriterion::Name)
-                }(
-                    makeHeaderCellSpan("Name"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Type),
-                    onClick = makeOnClick(SortCriterion::Type)
-                }(
-                    makeHeaderCellSpan("Type"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Size),
-                    onClick = makeOnClick(SortCriterion::Size)
-                }(
-                    makeHeaderCellSpan("Size"),
-                    makeSortIndicator(),
-                    makeTableResizer()
-                ),
-                div{
-                    class_ = makeHeaderCellClass(SortCriterion::Atime),
-                    onClick = makeOnClick(SortCriterion::Atime)
-                }(
-                    makeHeaderCellSpan("Modification Date"),
-                    makeSortIndicator()
-                )
-            ),
-            div{
-                class_ = "nui-file-grid-table-rows"
-            }(
-                impl_->items.map([this, contextMenu](auto, auto const& item){
-                    return div{
-                        class_ = observe(item.selected).generate([&item](){
-                            if (item.selected->value())
-                                return "nui-file-grid-table-row selected";
-                            return "nui-file-grid-table-row";
-                        }),
-                        onDblClick = [this, &item](Nui::val event){
-                            event.call<void>("stopPropagation");
-                            closeMenus();
-                            impl_->model->onActivateItem(item.item);
-                        },
-                        contextMenu(item),
-                        onClick = [this, &item](Nui::val event){
-                            onItemClicked(item, event);
-                        }
-                    }(
-                        div{
-                            class_ = "nui-file-grid-table-cell"
-                        }(
-                            img{
-                                src = item.item.icon,
-                                alt = "???",
-                                width = "16",
-                                height = "16",
-                                style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
-                                contextMenu(item),
-                            }(),
-                            span{
-                                contextMenu(item),
-                            }(item.item.path.filename().string())
-                        ),
-                        div{
-                            class_ = "nui-file-grid-table-cell"
-                        }(
-                            span{
-                                contextMenu(item),
-                            }(Utility::enumToString(item.item.type))
-                        ),
-                        div{
-                            class_ = "nui-file-grid-table-cell"
-                        }(
-                            span{
-                                contextMenu(item),
-                            }(Utility::formatBytes(item.item.size))
-                        ),
-                        div{
-                            class_ = "nui-file-grid-table-cell"
-                        }(
-                            // TODO: Works but is ugly:
-                            span{
-                                contextMenu(item),
-                            }(secondsSinceEpochToReadable(item.item.atime))
-                        )
-                    );
-                })
-            )
-        );
-        // clang-format on
-    }
-
     void Side::deselectAll(bool rerender)
     {
         for (auto& item : impl_->items.value())
@@ -646,8 +282,22 @@ namespace NuiFileExplorer
         event.call<void>("preventDefault");
         if (const auto menu = impl_->contextMenuView.lock(); menu)
         {
-            const int targetOffsetTop = event["target"]["offsetTop"].as<int>();
-            const int targetOffsetLeft = event["target"]["offsetLeft"].as<int>();
+            const auto offsetParent = event["target"]["offsetParent"];
+
+            int targetOffsetTop = event["target"]["offsetTop"].as<int>();
+            int targetOffsetLeft = event["target"]["offsetLeft"].as<int>();
+            if (!offsetParent.isUndefined() && !offsetParent.isNull())
+            {
+                for (auto const& cls : offsetParent["classList"])
+                {
+                    if (cls.as<std::string>() == "nui-file-grid-table-cell")
+                    {
+                        targetOffsetTop = offsetParent["offsetTop"].as<int>();
+                        targetOffsetLeft = offsetParent["offsetLeft"].as<int>();
+                        break;
+                    }
+                }
+            }
             const int offsetY = event["offsetY"].as<int>();
             const int offsetX = event["offsetX"].as<int>();
 
@@ -658,6 +308,8 @@ namespace NuiFileExplorer
             {
                 Nui::Console::log("Context menu item: ", item->path.string());
                 auto selected = selectedItems();
+
+                // "if it does not appear in the selected list..."
                 if (std::find_if(
                         selected.begin(),
                         selected.end(),
@@ -668,10 +320,11 @@ namespace NuiFileExplorer
                     ) == selected.end())
                 {
                     deselectAll();
-                    impl_->contextMenuClickItems = {item.value()};
+                    select(*item);
+                    impl_->contextMenuClickItems = {*item};
                 }
-
-                impl_->contextMenuClickItems = selected;
+                else
+                    impl_->contextMenuClickItems = selected;
             }
             else
             {
@@ -801,67 +454,6 @@ namespace NuiFileExplorer
             }(
                 "Properties"
             )
-        );
-        // clang-format on
-    }
-
-    Nui::ElementRenderer Side::iconFlavor()
-    {
-        using namespace Nui;
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-
-        // clang-format off
-        return div {
-            class_ = "nui-file-grid-icons",
-            style = Style{
-                "grid-template-columns"_style = observe(impl_->iconSize, impl_->iconSpacing).generate([this]() {
-                    return "repeat(auto-fill, minmax(" + std::to_string(impl_->iconSize.value() + impl_->iconSpacing.value()) +
-                        "px, 1fr))";
-                })
-            },
-            onClick = [this](Nui::val) {
-                onUneventfulClick();
-            },
-            "contextmenu"_event = [this](Nui::val event) {
-                onContextMenu(std::nullopt, event);
-            }
-        }(
-            impl_->items.map([this](auto, auto const& item){
-                return div{
-                    class_ = observe(item.selected).generate([&item](){
-                        if (item.selected->value())
-                            return "nui-file-grid-item-icons selected";
-                        return "nui-file-grid-item-icons";
-                    }),
-                    onDblClick = [this, &item](Nui::val event){
-                        event.call<void>("stopPropagation");
-                        closeMenus();
-                        impl_->model->onActivateItem(item.item);
-                    },
-                    "contextmenu"_event = [this, item = item.item](Nui::val event){
-                        onContextMenu(item, event);
-                    },
-                    onClick = [this, &item](Nui::val event){
-                        onItemClicked(item, event);
-                    }
-                }(
-                    img{
-                        src = item.item.icon,
-                        alt = "???",
-                        width = observe(impl_->iconSize).generate([this](){
-                            return std::to_string(impl_->iconSize.value());
-                        }),
-                        height = observe(impl_->iconSize).generate([this](){
-                            return std::to_string(impl_->iconSize.value());
-                        }),
-                        style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
-                    }(),
-                    div{
-                    }(item.item.path.filename().string())
-                );
-            })
         );
         // clang-format on
     }

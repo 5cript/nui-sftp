@@ -7,6 +7,8 @@ add_library(
         "${CMAKE_CURRENT_LIST_DIR}/dropdown_menu.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/flavor.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/side/icon_flavor.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/side/table_flavor.cpp"
 )
 
 set_source_files_properties(

@@ -139,8 +139,9 @@ namespace NuiFileExplorer
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
         void onContextMenu(std::optional<Item> const& item, Nui::val event);
-
         void onItemClicked(ItemWithInternals const& item, Nui::val event);
+        void select(Item const& item);
+        void select(ItemWithInternals const& item);
 
       private:
         struct Implementation;

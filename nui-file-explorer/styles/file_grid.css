@@ -227,6 +227,7 @@
     position: relative;
     display: flex;
     align-items: center;
+    word-wrap: break-word;
 }
 
 .nui-file-grid-table-cell>img {
@@ -239,6 +240,10 @@
 
 .nui-file-grid-table-row:nth-of-type(2n) {
     background-color: hsl(0 100% 100% / 0.05)
+}
+
+.nui-file-grid-table-row:hover:nth-of-type(2n) {
+    background-color: var(--nui-file-grid-item-highlight);
 }
 
 .nui-file-grid-table-row:is(.selected):nth-of-type(2n) {
