@@ -75,16 +75,6 @@ namespace NuiFileExplorer
         unsigned int iconSpacing() const;
 
         /**
-         * @brief Deselects all items.
-         */
-        void deselectAll(bool rerender = false);
-
-        /**
-         * @brief Selects all items.
-         */
-        void selectAll(bool rerender = false);
-
-        /**
          * @brief Returns all selected items.
          */
         std::vector<Item> selectedItems() const;
@@ -123,10 +113,8 @@ namespace NuiFileExplorer
         Nui::ElementRenderer pathBar();
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
-        void onContextMenu(std::optional<Item> const& item, Nui::val event);
+        void onContextMenu(std::optional<ItemWithInternals> const& item, Nui::val event);
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
-        void select(Item const& item);
-        void select(ItemWithInternals& item);
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
 
       private:

@@ -15,6 +15,11 @@ namespace NuiFileExplorer
         : FlavorImplementation{side}
     {}
 
+    bool IconFlavor::processKeyboardEvent(Nui::WebApi::KeyboardEvent)
+    {
+        return false;
+    }
+
     void IconFlavor::onBoxDragMouseMove(Nui::WebApi::MouseEvent event)
     {
         auto grid = gridRef_.lock();
@@ -85,8 +90,8 @@ namespace NuiFileExplorer
         // Get box rect before display none
         const auto boxRect = Nui::WebApi::DomRect{boxLocked->val().call<Nui::val>("getBoundingClientRect")};
 
-        if (!event.ctrlKey())
-            side_->deselectAll();
+        if (!event.ctrlKey() || event.shiftKey())
+            impl().selectionManager.deselectAll();
         for (auto& item : impl().items.value())
         {
             auto itemElement = item.element.lock();
@@ -99,8 +104,8 @@ namespace NuiFileExplorer
                 !(itemRect.right() < boxRect.left() || itemRect.left() > boxRect.right() ||
                     itemRect.bottom() < boxRect.top() || itemRect.top() > boxRect.bottom());
 
-            if (intersects)
-                item.select();
+            if (intersects && item.item.path.filename() != "..")
+                impl().selectionManager.select(item);
         }
     }
 
@@ -125,9 +130,6 @@ namespace NuiFileExplorer
         const auto rect = Nui::WebApi::DomRect{grid->val().call<Nui::val>("getBoundingClientRect")};
         startX_ = event.clientX() - rect.left();
         startY_ = event.clientY() - rect.top();
-
-        startScrollTop_ = scrollContainer->val()["scrollTop"].as<double>();
-        startScrollLeft_ = scrollContainer->val()["scrollLeft"].as<double>();
 
         selectionBox_ = box->val();
         selectionBox_["style"].set("left", fmt::format("{}px", startX_));
@@ -213,10 +215,10 @@ namespace NuiFileExplorer
                     gridRef_ = ref;
                 }
             }(
-                impl().items.map([this](auto, auto& item){
+                impl().items.map([this](auto index, auto& item){
                     return div{
-                        class_ = observe(item.selected).generate([&item](){
-                            if (item.selected->value())
+                        class_ = item.observeSelected([&item](){
+                            if (item.isSelected())
                                 return "nui-file-grid-item-icons selected";
                             return "nui-file-grid-item-icons";
                         }),
@@ -225,7 +227,7 @@ namespace NuiFileExplorer
                             side_->closeMenus();
                             impl().model->onActivateItem(item.item);
                         },
-                        "contextmenu"_event = [this, item = item.item](Nui::val event){
+                        "contextmenu"_event = [this, item = item](Nui::val event){
                             side_->onContextMenu(item, event);
                         },
                         onClick = [this, &item](Nui::WebApi::MouseEvent event){
@@ -233,7 +235,8 @@ namespace NuiFileExplorer
                         },
                         reference = [&item](std::weak_ptr<Nui::Dom::BasicElement> ref) {
                             item.element = ref;
-                        }
+                        },
+                        "data-index"_attr = std::to_string(index)
                     }(
                         img{
                             src = item.item.icon,

@@ -4,6 +4,7 @@
 
 #include <nui/frontend/api/abort_controller.hpp>
 #include <nui/frontend/api/mouse_event.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
@@ -20,6 +21,9 @@ namespace NuiFileExplorer
         IconFlavor(Side& impl);
         Nui::ElementRenderer operator()() override;
 
+        /// Returns true if the event was consumed
+        bool processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
+
       private:
         void onBoxDragMouseMove(Nui::WebApi::MouseEvent event);
         void onBoxDragMouseUp(Nui::WebApi::MouseEvent event);
@@ -32,9 +36,6 @@ namespace NuiFileExplorer
         // Used for select rectangle:
         double startX_{0.};
         double startY_{0.};
-
-        double startScrollTop_{0.};
-        double startScrollLeft_{0.};
 
         Nui::val selectionBox_{};
         Nui::WebApi::AbortController mouseMoveAbort_{};

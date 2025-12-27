@@ -2,6 +2,9 @@
 
 #include <nui-file-explorer/side/flavor_implementation.hpp>
 
+#include <nui/frontend/element_renderer.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
+
 namespace NuiFileExplorer
 {
     class TableFlavor : public FlavorImplementation
@@ -9,5 +12,8 @@ namespace NuiFileExplorer
       public:
         TableFlavor(Side& impl);
         Nui::ElementRenderer operator()() override;
+
+        /// Returns true if the event was consumed
+        bool processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
     };
 }

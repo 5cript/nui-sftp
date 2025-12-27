@@ -10,6 +10,7 @@ add_library(
         "${CMAKE_CURRENT_LIST_DIR}/side/flavor_implementation.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side/icon_flavor.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side/table_flavor.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/side/selection_manager.cpp"
 )
 
 set_source_files_properties(

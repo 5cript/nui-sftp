@@ -5,6 +5,7 @@
 #include <nui-file-explorer/dropdown_menu.hpp>
 #include <nui-file-explorer/icon_size.hpp>
 #include <nui-file-explorer/side/side_settings.hpp>
+#include <nui-file-explorer/side/selection_manager.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -36,6 +37,7 @@ namespace NuiFileExplorer
         std::unique_ptr<ISideModel> model;
 
         Nui::Observed<std::vector<ItemWithInternals>> items{};
+        SelectionManager selectionManager{items};
         Nui::Observed<Flavor> flavor{Flavor::Icons};
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
         Nui::Observed<unsigned int> iconSpacing{48u};

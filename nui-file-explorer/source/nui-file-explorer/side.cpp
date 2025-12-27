@@ -24,7 +24,41 @@ namespace NuiFileExplorer
 
     void Side::processKeyboardEvent(Nui::WebApi::KeyboardEvent event)
     {
-        Nui::WebApi::Console::log("Processing KB event: ", event.val());
+        auto actionWasTaken = Nui::ScopeExit(
+            [&event]() noexcept
+            {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+        );
+
+        if (event.key() == "a" && event.ctrlKey())
+        {
+            impl_->selectionManager.selectAll();
+            return;
+        }
+        if (event.key() == "Escape")
+        {
+            impl_->selectionManager.deselectAll();
+            return;
+        }
+
+        // everything else delegate to flavor impl:
+        if (impl_->flavor.value() == Flavor::Icons)
+        {
+            if (!iconFlavor_.processKeyboardEvent(event))
+                actionWasTaken.disarm();
+            iconFlavor_.processKeyboardEvent(event);
+            return;
+        }
+        if (impl_->flavor.value() == Flavor::Table)
+        {
+            if (!tableFlavor_.processKeyboardEvent(event))
+                actionWasTaken.disarm();
+            return;
+        }
+
+        actionWasTaken.disarm();
     }
 
     Nui::ElementRenderer Side::operator()()
@@ -41,7 +75,7 @@ namespace NuiFileExplorer
                     return "border-right: 1px solid var(--nui-file-grid-border-color);";
                 return std::nullopt;
             }(),
-            "keyup"_event = [this](Nui::WebApi::KeyboardEvent event) {
+            "keydown"_event = [this](Nui::WebApi::KeyboardEvent event) {
                 processKeyboardEvent(event);
             },
             tabIndex = 0,
@@ -98,6 +132,8 @@ namespace NuiFileExplorer
     {
         const auto& items = impl_->model->items();
 
+        impl_->selectionManager.loseTrackToAllSelections();
+
         impl_->items.value().clear();
         std::transform(
             items.begin(),
@@ -142,139 +178,19 @@ namespace NuiFileExplorer
     {
         return impl_->iconSpacing.value();
     }
-    void Side::select(Item const& item)
-    {
-        for (auto& it : impl_->items.value())
-        {
-            if (it.item.path == item.path)
-            {
-                *it.selected = true;
-                break;
-            }
-        }
-    }
-    void Side::select(ItemWithInternals& item)
-    {
-        item.select();
-    }
 
     void Side::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event)
     {
         event.stopPropagation();
         closeMenus();
 
-        if (event.ctrlKey())
-        {
-            *item.selected = !item.selected->value();
-        }
-        else if (event.shiftKey())
-        {
-            // find self:
-            auto self = std::find_if(
-                impl_->items.value().begin(),
-                impl_->items.value().end(),
-                [&item](auto const& i)
-                {
-                    return i.item.path == item.item.path;
-                }
-            );
-
-            // go backwards and forwards until we find another selected item:
-            auto forwardSeeker = self + 1;
-            auto backwardSeeker = self - 1;
-            decltype(self) otherSelected = impl_->items.value().end();
-
-            if (self == impl_->items.value().end())
-                return;
-            if (self == impl_->items.value().begin())
-                backwardSeeker = impl_->items.value().begin();
-            else if (self == impl_->items.value().end() - 1)
-                forwardSeeker = impl_->items.value().end() - 1;
-
-            while (forwardSeeker != impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-            {
-                if (forwardSeeker->selected->value())
-                {
-                    otherSelected = forwardSeeker;
-                    break;
-                }
-                if (backwardSeeker->selected->value())
-                {
-                    otherSelected = backwardSeeker;
-                    break;
-                }
-                ++forwardSeeker;
-                --backwardSeeker;
-            }
-
-            if (otherSelected == impl_->items.value().end() && forwardSeeker != impl_->items.value().end())
-            {
-                for (; forwardSeeker != impl_->items.value().end(); ++forwardSeeker)
-                {
-                    if (forwardSeeker->selected->value())
-                    {
-                        otherSelected = forwardSeeker;
-                        break;
-                    }
-                }
-            }
-            else if (otherSelected == impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-            {
-                for (; backwardSeeker != impl_->items.value().begin(); --backwardSeeker)
-                {
-                    if (backwardSeeker->selected->value())
-                    {
-                        otherSelected = backwardSeeker;
-                        break;
-                    }
-                }
-                if (backwardSeeker == impl_->items.value().begin() && otherSelected == impl_->items.value().end() &&
-                    backwardSeeker->selected->value())
-                    otherSelected = impl_->items.value().begin();
-            }
-
-            for (auto& item : impl_->items.value())
-                *item.selected = false;
-            if (otherSelected != impl_->items.value().end())
-            {
-                auto start = std::min(self, otherSelected);
-                auto end = std::max(self, otherSelected);
-                auto offset = (end != impl_->items.value().end()) ? 1 : 0;
-                for (auto it = start; it != end + offset; ++it)
-                    *it->selected = true;
-            }
-            else
-            {
-                selectAll();
-            }
-        }
-        else
-        {
-            deselectAll();
-            *item.selected = true;
-        }
-    }
-
-    void Side::deselectAll(bool rerender)
-    {
-        for (auto& item : impl_->items.value())
-            *item.selected = false;
-        if (rerender)
-            Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
-    void Side::selectAll(bool rerender)
-    {
-        for (auto& item : impl_->items.value())
-            *item.selected = true;
-        if (rerender)
-            Nui::globalEventContext.executeActiveEventsImmediately();
+        impl_->selectionManager.onItemClicked(item, event);
     }
 
     void Side::onUneventfulClick()
     {
         closeMenus();
-        deselectAll();
+        impl_->selectionManager.deselectAll();
     }
 
     std::vector<Item> Side::selectedItems() const
@@ -282,7 +198,7 @@ namespace NuiFileExplorer
         std::vector<Item> result{};
         for (auto const& item : impl_->items.value())
         {
-            if (item.selected->value())
+            if (item.isSelected())
                 result.push_back(item.item);
         }
         return result;
@@ -298,7 +214,7 @@ namespace NuiFileExplorer
             menu->val()["style"].set("display", "none");
     }
 
-    void Side::onContextMenu(std::optional<Item> const& item, Nui::val event)
+    void Side::onContextMenu(std::optional<ItemWithInternals> const& item, Nui::val event)
     {
         using namespace std::string_literals;
 
@@ -330,7 +246,7 @@ namespace NuiFileExplorer
 
             if (item)
             {
-                Nui::WebApi::Console::log("Context menu item: ", item->path.string());
+                Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
                 auto selected = selectedItems();
 
                 // "if it does not appear in the selected list..."
@@ -339,13 +255,13 @@ namespace NuiFileExplorer
                         selected.end(),
                         [&item](auto const& i)
                         {
-                            return i.path == item->path;
+                            return i.path == item->item.path;
                         }
                     ) == selected.end())
                 {
-                    deselectAll();
-                    select(*item);
-                    impl_->contextMenuClickItems = {*item};
+                    impl_->selectionManager.deselectAll();
+                    impl_->selectionManager.select(*item);
+                    impl_->contextMenuClickItems = {item->item};
                 }
                 else
                     impl_->contextMenuClickItems = selected;
