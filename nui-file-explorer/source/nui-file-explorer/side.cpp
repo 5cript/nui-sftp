@@ -1,10 +1,10 @@
 #include <nui-file-explorer/side.hpp>
-#include "side/side_impl.hpp"
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/api/console.hpp>
 #include <nui/event_system/listen.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
@@ -13,12 +13,19 @@ using namespace std::string_literals;
 
 namespace NuiFileExplorer
 {
-    Side::Side(Settings settings, std::unique_ptr<ISideModel> model)
-        : impl_(std::make_unique<Implementation>(std::move(settings), std::move(model)))
+    Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
+        : impl_(std::make_unique<SideImplementation>(std::move(settings), std::move(model)))
+        , iconFlavor_{*this}
+        , tableFlavor_{*this}
     {}
     Side::~Side() = default;
     Side::Side(Side&&) = default;
     Side& Side::operator=(Side&&) = default;
+
+    void Side::processKeyboardEvent(Nui::WebApi::KeyboardEvent event)
+    {
+        Nui::WebApi::Console::log("Processing KB event: ", event.val());
+    }
 
     Nui::ElementRenderer Side::operator()()
     {
@@ -33,7 +40,11 @@ namespace NuiFileExplorer
                 if (model().isLeft())
                     return "border-right: 1px solid var(--nui-file-grid-border-color);";
                 return std::nullopt;
-            }()
+            }(),
+            "keyup"_event = [this](Nui::WebApi::KeyboardEvent event) {
+                processKeyboardEvent(event);
+            },
+            tabIndex = 0,
         }(
             [this]() -> Nui::ElementRenderer {
                 if (impl_->settings.pathBarOnTop)
@@ -47,7 +58,10 @@ namespace NuiFileExplorer
                     if (model().isLeft())
                         return "padding-right: 1px;";
                     return "padding-left: 1px;";
-                }()
+                }(),
+                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
+                    impl_->scrollContainer_ = ref;
+                }
             }(
                 contextMenu(),
                 div{
@@ -59,9 +73,9 @@ namespace NuiFileExplorer
                     observe(impl_->flavor),
                     [this]() -> Nui::ElementRenderer {
                         if (impl_->flavor.value() == Flavor::Icons)
-                            return iconFlavor();
+                            return iconFlavor_();
                         if (impl_->flavor.value() == Flavor::Table)
-                            return tableFlavor();
+                            return tableFlavor_();
                         return div{}();
                     }
                 )
@@ -139,21 +153,21 @@ namespace NuiFileExplorer
             }
         }
     }
-    void Side::select(ItemWithInternals const& item)
+    void Side::select(ItemWithInternals& item)
     {
-        select(item.item);
+        item.select();
     }
 
-    void Side::onItemClicked(ItemWithInternals const& item, Nui::val event)
+    void Side::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event)
     {
-        event.call<void>("stopPropagation");
+        event.stopPropagation();
         closeMenus();
 
-        if (event["ctrlKey"].as<bool>())
+        if (event.ctrlKey())
         {
             *item.selected = !item.selected->value();
         }
-        else if (event["shiftKey"].as<bool>())
+        else if (event.shiftKey())
         {
             // find self:
             auto self = std::find_if(
@@ -259,8 +273,8 @@ namespace NuiFileExplorer
 
     void Side::onUneventfulClick()
     {
-        deselectAll();
         closeMenus();
+        deselectAll();
     }
 
     std::vector<Item> Side::selectedItems() const
@@ -316,7 +330,7 @@ namespace NuiFileExplorer
 
             if (item)
             {
-                Nui::Console::log("Context menu item: ", item->path.string());
+                Nui::WebApi::Console::log("Context menu item: ", item->path.string());
                 auto selected = selectedItems();
 
                 // "if it does not appear in the selected list..."
@@ -338,7 +352,7 @@ namespace NuiFileExplorer
             }
             else
             {
-                Nui::Console::log("Context menu item: none");
+                Nui::WebApi::Console::log("Context menu item: none");
                 impl_->contextMenuClickItems = selectedItems();
             }
             // filter ".." from context menu click items:
@@ -517,6 +531,7 @@ namespace NuiFileExplorer
                 "keyup"_event = [this](Nui::val event){
                     if (event["key"].as<std::string>() == "Enter")
                         impl_->model->onPathChange(std::filesystem::path{event["target"]["value"].as<std::string>()});
+                    event.call<void>("stopPropagation");
                 }
             }()
         );
@@ -541,7 +556,10 @@ namespace NuiFileExplorer
             }(),
             input{
                 type = "text",
-                placeHolder = "Filter"
+                placeHolder = "Filter",
+                "keyup"_event = [](Nui::val event){
+                    event.call<void>("stopPropagation");
+                }
             }()
         );
         // clang-format on

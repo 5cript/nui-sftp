@@ -55,189 +55,222 @@ void SftpFileEngine::lazyOpen(std::function<void(std::optional<Ids::ChannelId> c
     }
 
     Log::info("Creating sftp channel");
-    impl_->engine->createSftpChannel([this, onOpen](auto const& id) {
-        impl_->sftpChannelId = id;
-        onOpen(id);
-    });
+    impl_->engine->createSftpChannel(
+        [this, onOpen](auto const& id)
+        {
+            impl_->sftpChannelId = id;
+            onOpen(id);
+        }
+    );
 }
 
 void SftpFileEngine::listDirectory(
     std::filesystem::path const& path,
-    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete)
+    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete
+)
 {
-    lazyOpen([this, path, onComplete = std::move(onComplete)](auto const& channelId) {
-        if (!channelId)
+    lazyOpen(
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
         {
-            Log::error("Cannot list directory, no sftp channel");
-            return;
-        }
+            if (!channelId)
+            {
+                Log::error("Cannot list directory, no sftp channel");
+                return;
+            }
 
-        Log::info("Listing directory: {}", path.generic_string());
-        Nui::RpcClient::callWithBackChannel(
-            fmt::format("Session::{}::sftp::listDirectory", impl_->engine->sshSessionId().value()),
-            [onComplete = std::move(onComplete)](Nui::val val) {
-                Log::info("Received response for listing directory.");
-                Nui::Console::log(val);
-
-                if (val.hasOwnProperty("error") || !val.hasOwnProperty("entries"))
+            Log::info("Listing directory: {}", path.generic_string());
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::listDirectory", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
                 {
-                    if (val.hasOwnProperty("error"))
-                    {
-                        Log::error("(Frontend) Failed to list directory: {}", val["error"].as<std::string>());
-                    }
-                    else
-                    {
-                        Log::error("(Frontend) Failed to list directory: no entries");
-                    }
-                    onComplete(std::nullopt);
-                    return;
-                }
+                    Log::info("Received response for listing directory.");
+                    Nui::WebApi::Console::log(val);
 
-                onComplete(nlohmann::json::parse(Nui::JSON::stringify(val))["entries"]);
-            },
-            channelId.value().value(),
-            path.generic_string());
-    });
+                    if (val.hasOwnProperty("error") || !val.hasOwnProperty("entries"))
+                    {
+                        if (val.hasOwnProperty("error"))
+                        {
+                            Log::error("(Frontend) Failed to list directory: {}", val["error"].as<std::string>());
+                        }
+                        else
+                        {
+                            Log::error("(Frontend) Failed to list directory: no entries");
+                        }
+                        onComplete(std::nullopt);
+                        return;
+                    }
+
+                    onComplete(nlohmann::json::parse(Nui::JSON::stringify(val))["entries"]);
+                },
+                channelId.value().value(),
+                path.generic_string()
+            );
+        }
+    );
 }
 
 void SftpFileEngine::createDirectory(std::filesystem::path const& path, std::function<void(bool)> onComplete)
 {
-    lazyOpen([this, path, onComplete = std::move(onComplete)](auto const& channelId) {
-        if (!channelId)
+    lazyOpen(
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
         {
-            Log::error("Cannot create directory, no channel");
-            return;
-        }
+            if (!channelId)
+            {
+                Log::error("Cannot create directory, no channel");
+                return;
+            }
 
-        Log::info("Creating directory: {}", path.generic_string());
-        Nui::RpcClient::callWithBackChannel(
-            fmt::format("Session::{}::sftp::createDirectory", impl_->engine->sshSessionId().value()),
-            [onComplete = std::move(onComplete)](Nui::val val) {
-                Nui::Console::log(val);
-
-                if (val.hasOwnProperty("error"))
+            Log::info("Creating directory: {}", path.generic_string());
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::createDirectory", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
                 {
-                    Log::error("(Frontend) Failed to create directory: {}", val["error"].as<std::string>());
-                    onComplete(false);
-                    return;
-                }
+                    Nui::WebApi::Console::log(val);
 
-                onComplete(true);
-            },
-            channelId.value().value(),
-            path.generic_string());
-    });
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to create directory: {}", val["error"].as<std::string>());
+                        onComplete(false);
+                        return;
+                    }
+
+                    onComplete(true);
+                },
+                channelId.value().value(),
+                path.generic_string()
+            );
+        }
+    );
 }
 
 void SftpFileEngine::createFile(std::filesystem::path const& path, std::function<void(bool)> onComplete)
 {
-    lazyOpen([this, path, onComplete = std::move(onComplete)](auto const& channelId) {
-        if (!channelId)
+    lazyOpen(
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
         {
-            Log::error("Cannot create file, no channel");
-            return;
-        }
+            if (!channelId)
+            {
+                Log::error("Cannot create file, no channel");
+                return;
+            }
 
-        Log::info("Creating file: {}", path.generic_string());
-        Nui::RpcClient::callWithBackChannel(
-            fmt::format("Session::{}::sftp::createFile", impl_->engine->sshSessionId().value()),
-            [onComplete = std::move(onComplete)](Nui::val val) {
-                Nui::Console::log(val);
-
-                if (val.hasOwnProperty("error"))
+            Log::info("Creating file: {}", path.generic_string());
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::createFile", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
                 {
-                    Log::error("(Frontend) Failed to create file: {}", val["error"].as<std::string>());
-                    onComplete(false);
-                    return;
-                }
+                    Nui::WebApi::Console::log(val);
 
-                onComplete(true);
-            },
-            channelId.value().value(),
-            path.generic_string());
-    });
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to create file: {}", val["error"].as<std::string>());
+                        onComplete(false);
+                        return;
+                    }
+
+                    onComplete(true);
+                },
+                channelId.value().value(),
+                path.generic_string()
+            );
+        }
+    );
 }
 
 void SftpFileEngine::addDownload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated)
+    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+)
 {
     Log::info("Requesting to add download: {} -> {}", remotePath.generic_string(), localPath.generic_string());
-    lazyOpen([this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId) {
-        if (!channelId)
+    lazyOpen(
+        [this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId)
         {
-            Log::error("Cannot add download, no channel");
-            onOperationCreated(std::nullopt);
-            return;
-        }
+            if (!channelId)
+            {
+                Log::error("Cannot add download, no channel");
+                onOperationCreated(std::nullopt);
+                return;
+            }
 
-        const auto operationId = Ids::generateOperationId();
+            const auto operationId = Ids::generateOperationId();
 
-        Log::info(
-            "Adding download (with ID '{}'): {} -> {}",
-            operationId.value(),
-            remotePath.generic_string(),
-            localPath.generic_string());
+            Log::info(
+                "Adding download (with ID '{}'): {} -> {}",
+                operationId.value(),
+                remotePath.generic_string(),
+                localPath.generic_string()
+            );
 
-        Nui::RpcClient::callWithBackChannel(
-            fmt::format("Session::{}::sftp::addDownload", impl_->engine->sshSessionId().value()),
-            [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val) {
-                Nui::Console::log(val);
-
-                if (val.hasOwnProperty("error"))
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addDownload", impl_->engine->sshSessionId().value()),
+                [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
-                    Log::error("(Frontend) Failed to add download: {}", val["error"].as<std::string>());
-                    onOperationCreated(std::nullopt);
-                    return;
-                }
-                onOperationCreated(operationId);
-            },
-            channelId.value().value(),
-            operationId.value(),
-            remotePath.generic_string(),
-            localPath.generic_string());
-    });
+                    Nui::WebApi::Console::log(val);
+
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to add download: {}", val["error"].as<std::string>());
+                        onOperationCreated(std::nullopt);
+                        return;
+                    }
+                    onOperationCreated(operationId);
+                },
+                channelId.value().value(),
+                operationId.value(),
+                remotePath.generic_string(),
+                localPath.generic_string()
+            );
+        }
+    );
 }
 
 void SftpFileEngine::addUpload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated)
+    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+)
 {
     Log::info("Requesting to add upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
-    lazyOpen([this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId) {
-        if (!channelId)
+    lazyOpen(
+        [this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId)
         {
-            Log::error("Cannot add upload, no channel");
-            onOperationCreated(std::nullopt);
-            return;
-        }
+            if (!channelId)
+            {
+                Log::error("Cannot add upload, no channel");
+                onOperationCreated(std::nullopt);
+                return;
+            }
 
-        const auto operationId = Ids::generateOperationId();
+            const auto operationId = Ids::generateOperationId();
 
-        Log::info(
-            "Adding upload (with ID '{}'): {} -> {}",
-            operationId.value(),
-            localPath.generic_string(),
-            remotePath.generic_string());
+            Log::info(
+                "Adding upload (with ID '{}'): {} -> {}",
+                operationId.value(),
+                localPath.generic_string(),
+                remotePath.generic_string()
+            );
 
-        Nui::RpcClient::callWithBackChannel(
-            fmt::format("Session::{}::sftp::addUpload", impl_->engine->sshSessionId().value()),
-            [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val) {
-                Nui::Console::log(val);
-
-                if (val.hasOwnProperty("error"))
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addUpload", impl_->engine->sshSessionId().value()),
+                [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
-                    Log::error("(Frontend) Failed to add upload: {}", val["error"].as<std::string>());
-                    onOperationCreated(std::nullopt);
-                    return;
-                }
-                onOperationCreated(operationId);
-            },
-            channelId.value().value(),
-            operationId.value(),
-            localPath.generic_string(),
-            remotePath.generic_string());
-    });
+                    Nui::WebApi::Console::log(val);
+
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to add upload: {}", val["error"].as<std::string>());
+                        onOperationCreated(std::nullopt);
+                        return;
+                    }
+                    onOperationCreated(operationId);
+                },
+                channelId.value().value(),
+                operationId.value(),
+                localPath.generic_string(),
+                remotePath.generic_string()
+            );
+        }
+    );
 }

@@ -34,7 +34,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
         if (counter > 20)
         {
             Log::error("Failed to load terminalUtility");
-            Nui::Console::log(Nui::val::global("terminalUtility"));
+            Nui::WebApi::Console::log(Nui::val::global("terminalUtility"));
         }
         else
             Log::info("terminalUtility available.");
@@ -57,24 +57,29 @@ extern "C" void frontendMain()
 
     Log::setupFrontendLogger(
         [](std::chrono::system_clock::time_point const&, Log::Level, std::string const&) {},
-        [once = false, setupWait](Log::Level) mutable {
+        [once = false, setupWait](Log::Level) mutable
+        {
             if (!once)
             {
-                Nui::Console::info("Log available");
+                Nui::WebApi::Console::info("Log available");
                 once = true;
                 if (!tryLoad(setupWait))
                 {
                     Nui::setInterval(
                         100,
-                        [setupWait]() {
+                        [setupWait]()
+                        {
                             tryLoad(setupWait);
                         },
-                        [setupWait](Nui::TimerHandle&& t) {
+                        [setupWait](Nui::TimerHandle&& t)
+                        {
                             *setupWait = std::move(t);
-                        });
+                        }
+                    );
                 }
             }
-        });
+        }
+    );
 }
 
 EMSCRIPTEN_BINDINGS(nui_example_frontend)

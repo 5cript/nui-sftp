@@ -1,5 +1,10 @@
-#include <nui-file-explorer/side.hpp>
+#pragma once
+
+#include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/item_with_internals.hpp>
 #include <nui-file-explorer/dropdown_menu.hpp>
+#include <nui-file-explorer/icon_size.hpp>
+#include <nui-file-explorer/side/side_settings.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -21,13 +26,13 @@ namespace NuiFileExplorer
         Atime
     };
 
-    struct Side::Implementation
+    struct SideImplementation
     {
         constexpr static std::array<std::string_view, 4> tableGridTemplateColumnsDefaults =
             {"1fr", "max-content", "max-content", "max-content"};
         constexpr static std::string_view tableGridTemplateColumnsHiddenValue = "25px";
 
-        Settings settings;
+        SideSettings settings;
         std::unique_ptr<ISideModel> model;
 
         Nui::Observed<std::vector<ItemWithInternals>> items{};
@@ -39,6 +44,8 @@ namespace NuiFileExplorer
             std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
         };
 
+        std::weak_ptr<Nui::Dom::BasicElement> scrollContainer_{};
+
         DropdownMenu newItemMenu{
             {
                 "File",
@@ -48,7 +55,7 @@ namespace NuiFileExplorer
             },
             [this](std::string const& item)
             {
-                Nui::Console::log("New clicked: ", item);
+                Nui::WebApi::Console::log("New clicked: ", item);
                 if (item == "File")
                 {
                     model->onNewItem(Item::Type::Regular);
@@ -198,7 +205,7 @@ namespace NuiFileExplorer
             );
         }
 
-        Implementation(Settings settings, std::unique_ptr<ISideModel> model)
+        SideImplementation(SideSettings settings, std::unique_ptr<ISideModel> model)
             : settings{std::move(settings)}
             , model{std::move(model)}
         {}

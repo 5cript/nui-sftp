@@ -56,9 +56,10 @@ Still under construction :construction:
 
 ## File View UI
 - [x] Grid view.
-- [ ] Table view.
+- [x] Table view.
 - [x] Split UI into local and remote views.
-- [ ] Improve selection of multiple items.
+- [x] Box drag select.
+- [ ] Resize left vs right.
 - [ ] Upload drag and drop (within view and perhaps into the app).
 - [ ] Download drag and drop (within view and perhaps outside the app).
 - [ ] Filtering files.

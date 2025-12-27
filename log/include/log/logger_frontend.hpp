@@ -44,21 +44,26 @@ namespace Log
         Logger(
             std::function<void(std::chrono::system_clock::time_point const&, Log::Level, std::string const&)> onLog,
             std::function<void(Log::Level)> onLogLevel,
-            bool logOnConsole = true)
+            bool logOnConsole = true
+        )
             : onLog_{std::move(onLog)}
             , logOnConsole_{logOnConsole}
             , autoUnregisterOnLog_{Nui::RpcClient::autoRegisterFunction(
                   "log",
-                  [this](int integralLevel, std::string const& message) {
+                  [this](int integralLevel, std::string const& message)
+                  {
                       using namespace std::string_literals;
                       log(static_cast<Log::Level>(integralLevel), "[MAIN] "s + message);
-                  })}
+                  }
+              )}
             , autoUnregisterSetLevel_{Nui::RpcClient::autoRegisterFunction(
                   "setLogLevel",
-                  [this, onLogLevel = std::move(onLogLevel)](int integralLevel) {
+                  [this, onLogLevel = std::move(onLogLevel)](int integralLevel)
+                  {
                       logLevel_ = static_cast<Log::Level>(integralLevel);
                       onLogLevel(logLevel_);
-                  })}
+                  }
+              )}
             , logLevel_{Log::Level::Info}
         {}
 
@@ -90,22 +95,22 @@ namespace Log
                 switch (level)
                 {
                     case Log::Level::Trace:
-                        Nui::Console::trace(message);
+                        Nui::WebApi::Console::trace(message);
                         break;
                     case Log::Level::Debug:
-                        Nui::Console::debug(message);
+                        Nui::WebApi::Console::debug(message);
                         break;
                     case Log::Level::Info:
-                        Nui::Console::info(message);
+                        Nui::WebApi::Console::info(message);
                         break;
                     case Log::Level::Warning:
-                        Nui::Console::warn(message);
+                        Nui::WebApi::Console::warn(message);
                         break;
                     case Log::Level::Error:
-                        Nui::Console::error(message);
+                        Nui::WebApi::Console::error(message);
                         break;
                     case Log::Level::Critical:
-                        Nui::Console::error(message);
+                        Nui::WebApi::Console::error(message);
                         break;
                     case Log::Level::Off:
                         break;
@@ -127,22 +132,22 @@ namespace Log
                 {
                     case Log::Level::Trace:
                         // Leverage better printing of Nui::val
-                        Nui::Console::trace(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::trace(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Debug:
-                        Nui::Console::debug(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::debug(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Info:
-                        Nui::Console::info(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::info(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Warning:
-                        Nui::Console::warn(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::warn(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Error:
-                        Nui::Console::error(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::error(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Critical:
-                        Nui::Console::error(fmt, std::forward<Args>(args)...);
+                        Nui::WebApi::Console::error(fmt, std::forward<Args>(args)...);
                         break;
                     case Log::Level::Off:
                         break;

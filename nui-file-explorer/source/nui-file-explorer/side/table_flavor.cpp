@@ -1,8 +1,13 @@
-#include "side_impl.hpp"
+#include <nui-file-explorer/side/table_flavor.hpp>
+#include <nui-file-explorer/side.hpp>
 
 namespace NuiFileExplorer
 {
-    Nui::ElementRenderer Side::tableFlavor()
+    TableFlavor::TableFlavor(Side& impl)
+        : FlavorImplementation{impl}
+    {}
+
+    Nui::ElementRenderer TableFlavor::operator()()
     {
         using namespace Nui;
         using namespace Nui::Elements;
@@ -13,12 +18,12 @@ namespace NuiFileExplorer
 
         auto shallHide = [this](int columnIndex)
         {
-            return style = observe(impl_->tableGridTemplateColumns)
+            return style = observe(impl().tableGridTemplateColumns)
                                .generate(
                                    [this, columnIndex]() -> std::optional<std::string>
                                    {
-                                       if (impl_->tableGridTemplateColumns.value()[columnIndex] ==
-                                           impl_->tableGridTemplateColumnsHiddenValue)
+                                       if (impl().tableGridTemplateColumns.value()[columnIndex] ==
+                                           impl().tableGridTemplateColumnsHiddenValue)
                                            return "display: none";
                                        else
                                            return std::nullopt;
@@ -49,25 +54,25 @@ namespace NuiFileExplorer
             {
                 event.call<void>("stopPropagation");
 
-                const auto [previousCriterion, previousAscending] = impl_->sorting.value();
+                const auto [previousCriterion, previousAscending] = impl().sorting.value();
                 if (previousCriterion != sortCriterion)
-                    impl_->sorting = {sortCriterion, true};
+                    impl().sorting = {sortCriterion, true};
                 else
-                    impl_->sorting = {sortCriterion, !previousAscending};
-                impl_->sortItems();
-                impl_->items.modifyNow();
+                    impl().sorting = {sortCriterion, !previousAscending};
+                impl().sortItems();
+                impl().items.modifyNow();
             };
         };
 
         auto makeHeaderCellClass = [this](SortCriterion sortCriterion)
         {
-            return observe(impl_->sorting)
+            return observe(impl().sorting)
                 .generate(
                     [this, sortCriterion]()
                     {
-                        if (impl_->sorting.value().first == sortCriterion)
+                        if (impl().sorting.value().first == sortCriterion)
                         {
-                            if (impl_->sorting.value().second)
+                            if (impl().sorting.value().second)
                                 return "nui-file-grid-table-header-cell sorted-asc";
                             else
                                 return "nui-file-grid-table-header-cell sorted-desc";
@@ -81,7 +86,7 @@ namespace NuiFileExplorer
         {
             return "contextmenu"_event = [this, item = item.item](Nui::val event)
             {
-                onContextMenu(item, event);
+                side_->onContextMenu(item, event);
             };
         };
 
@@ -94,10 +99,10 @@ namespace NuiFileExplorer
                     event.call<void>("stopPropagation");
                     event["target"]["classList"].call<void>("toggle", "hidden"s);
 
-                    const std::string hiddenValue{impl_->tableGridTemplateColumnsHiddenValue};
-                    impl_->tableGridTemplateColumns[columnIndex] =
-                        impl_->tableGridTemplateColumns.value()[columnIndex] == hiddenValue
-                        ? std::string{impl_->tableGridTemplateColumnsDefaults[columnIndex]}
+                    const std::string hiddenValue{impl().tableGridTemplateColumnsHiddenValue};
+                    impl().tableGridTemplateColumns[columnIndex] =
+                        impl().tableGridTemplateColumns.value()[columnIndex] == hiddenValue
+                        ? std::string{impl().tableGridTemplateColumnsDefaults[columnIndex]}
                         : hiddenValue;
                 },
             }(Nui::val::global("String").call<std::string>("fromCodePoint", 0x1F441));
@@ -114,9 +119,9 @@ namespace NuiFileExplorer
         // clang-format off
         return Nui::Elements::div{
             class_ = "nui-file-grid-table",
-            style = observe(impl_->tableGridTemplateColumns).generate([this]() {
+            style = observe(impl().tableGridTemplateColumns).generate([this]() {
                 std::string gridTemplateColumns = "";
-                for (const auto& colWidth : impl_->tableGridTemplateColumns.value())
+                for (const auto& colWidth : impl().tableGridTemplateColumns.value())
                 {
                     if (!gridTemplateColumns.empty())
                         gridTemplateColumns += " ";
@@ -136,7 +141,7 @@ namespace NuiFileExplorer
             div{
                 class_ = "nui-file-grid-table-rows"
             }(
-                impl_->items.map([this, contextMenu](auto, auto const& item){
+                impl().items.map([this, contextMenu](auto, auto const& item){
                     return div{
                         class_ = observe(item.selected).generate([&item](){
                             if (item.selected->value())
@@ -145,11 +150,11 @@ namespace NuiFileExplorer
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
-                            closeMenus();
-                            impl_->model->onActivateItem(item.item);
+                            side_->closeMenus();
+                            impl().model->onActivateItem(item.item);
                         },
-                        onClick = [this, &item](Nui::val event){
-                            onItemClicked(item, event);
+                        onClick = [this, &item](Nui::WebApi::MouseEvent event){
+                            side_->onItemClicked(item, std::move(event));
                         }
                     }(
                         div{
@@ -158,6 +163,7 @@ namespace NuiFileExplorer
                         }(
                             img{
                                 src = item.item.icon,
+                                draggable = "false",
                                 alt = "???",
                                 width = "16",
                                 height = "16",
@@ -184,9 +190,7 @@ namespace NuiFileExplorer
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
                         }(
-                            // TODO: Works but is ugly:
-                            span{
-                            }(item.item.readableATime())
+                            span{}(item.item.readableATime())
                         )
                     );
                 })

@@ -22,18 +22,20 @@ namespace NuiFileExplorer
         std::function<void(std::string const&)> onError{};
 
         Implementation(
-            Side::Settings const& settings,
+            SideSettings const& settings,
             std::unique_ptr<ISideModel> leftModel,
-            std::unique_ptr<ISideModel> rightModel)
+            std::unique_ptr<ISideModel> rightModel
+        )
             : leftSide{settings, std::move(leftModel)}
             , rightSide{settings, std::move(rightModel)}
         {}
     };
 
     FileGrid::FileGrid(
-        Side::Settings const& settings,
+        SideSettings const& settings,
         std::unique_ptr<ISideModel> leftModel,
-        std::unique_ptr<ISideModel> rightModel)
+        std::unique_ptr<ISideModel> rightModel
+    )
         : impl_(std::make_unique<Implementation>(settings, std::move(leftModel), std::move(rightModel)))
     {}
     FileGrid::~FileGrid() = default;
@@ -80,9 +82,13 @@ namespace NuiFileExplorer
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
-        attributes.emplace_back(onClick = [this](Nui::val) {
-            onUneventfulClick();
-        });
+        attributes.emplace_back(
+            onClick =
+                [this](Nui::val)
+            {
+                onUneventfulClick();
+            }
+        );
         attributes.emplace_back(class_ = "nui-file-grid");
 
         // clang-format off
