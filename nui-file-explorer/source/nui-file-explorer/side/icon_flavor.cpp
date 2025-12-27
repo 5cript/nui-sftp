@@ -206,8 +206,7 @@ namespace NuiFileExplorer
                 class_ = "nui-file-grid-icons-grid",
                 style = Style{
                     "grid-template-columns"_style = observe(impl().iconSize, impl().iconSpacing).generate([this]() {
-                        return "repeat(auto-fit, minmax(" + std::to_string(impl().iconSize.value() + impl().iconSpacing.value()) +
-                            "px, 1fr))";
+                        return fmt::format("repeat(auto-fit, {}px)", impl().iconSize.value() + impl().iconSpacing.value());
                     })
                 },
                 reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {

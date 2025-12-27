@@ -38,7 +38,7 @@ namespace NuiFileExplorer
         Nui::Observed<std::vector<ItemWithInternals>> items{};
         Nui::Observed<Flavor> flavor{Flavor::Icons};
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
-        Nui::Observed<unsigned int> iconSpacing{32u};
+        Nui::Observed<unsigned int> iconSpacing{48u};
         Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
         Nui::Observed<std::vector<std::string>> tableGridTemplateColumns{
             std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
