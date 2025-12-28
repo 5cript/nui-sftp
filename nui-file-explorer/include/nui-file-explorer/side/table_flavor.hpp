@@ -12,8 +12,5 @@ namespace NuiFileExplorer
       public:
         TableFlavor(Side& impl);
         Nui::ElementRenderer operator()() override;
-
-        /// Returns true if the event was consumed
-        bool processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
     };
 }

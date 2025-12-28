@@ -37,8 +37,8 @@ namespace NuiFileExplorer
         std::unique_ptr<ISideModel> model;
 
         Nui::Observed<std::vector<ItemWithInternals>> items{};
-        SelectionManager selectionManager{items};
         Nui::Observed<Flavor> flavor{Flavor::Icons};
+        SelectionManager selectionManager{items, flavor.value()};
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
         Nui::Observed<unsigned int> iconSpacing{48u};
         Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
@@ -95,19 +95,14 @@ namespace NuiFileExplorer
             "Sort",
         };
         DropdownMenu viewMenu{
-            {
-                "Icons",
-                "Table",
-                "Tiles",
-            },
+            {"Icons", "Table"},
             [this](std::string const& item)
             {
                 if (item == "Icons")
                     flavor = Flavor::Icons;
                 if (item == "Table")
                     flavor = Flavor::Table;
-                if (item == "Tiles")
-                    flavor = Flavor::Tiles;
+                selectionManager.setFlavor(flavor.value());
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
             [this]()

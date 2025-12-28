@@ -59,12 +59,13 @@ Still under construction :construction:
 - [x] Table view.
 - [x] Split UI into local and remote views.
 - [x] Box drag select.
+- [ ] Improve arrow navigation with shift and control.
 - [ ] Resize left vs right.
 - [ ] Upload drag and drop (within view and perhaps into the app).
 - [ ] Download drag and drop (within view and perhaps outside the app).
 - [ ] Filtering files.
 - [x] Sorting files.
-- [ ] Keyboard input.
+- [x] Keyboard input.
 - [ ] Persist mode as part of layout.
 - [ ] Sorting modes in icon view / sort menu.
 - [x] Context menu for file operations.

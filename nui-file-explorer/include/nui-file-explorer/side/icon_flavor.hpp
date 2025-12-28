@@ -5,6 +5,7 @@
 #include <nui/frontend/api/abort_controller.hpp>
 #include <nui/frontend/api/mouse_event.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
+#include <nui/frontend/api/resize_observer.hpp>
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
@@ -20,9 +21,6 @@ namespace NuiFileExplorer
 
         IconFlavor(Side& impl);
         Nui::ElementRenderer operator()() override;
-
-        /// Returns true if the event was consumed
-        bool processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
 
       private:
         void onBoxDragMouseMove(Nui::WebApi::MouseEvent event);
@@ -45,5 +43,7 @@ namespace NuiFileExplorer
 
         // Used to prevent click events after drag box.
         bool shallClick_{true};
+
+        std::unique_ptr<Nui::WebApi::ResizeObserver> gridLayoutObserver_{};
     };
 }

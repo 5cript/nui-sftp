@@ -15,11 +15,6 @@ namespace NuiFileExplorer
         : FlavorImplementation{side}
     {}
 
-    bool IconFlavor::processKeyboardEvent(Nui::WebApi::KeyboardEvent)
-    {
-        return false;
-    }
-
     void IconFlavor::onBoxDragMouseMove(Nui::WebApi::MouseEvent event)
     {
         auto grid = gridRef_.lock();
@@ -180,6 +175,12 @@ namespace NuiFileExplorer
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
+        if (gridLayoutObserver_)
+        {
+            gridLayoutObserver_->disconnect();
+            gridLayoutObserver_ = {};
+        }
+
         // clang-format off
         return div {
             class_ = "nui-file-grid-icons",
@@ -211,9 +212,35 @@ namespace NuiFileExplorer
                         return fmt::format("repeat(auto-fit, {}px)", impl().iconSize.value() + impl().iconSpacing.value());
                     })
                 },
-                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
+                !(reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
                     gridRef_ = ref;
-                }
+
+                    Nui::WebApi::Console::log("Setting up resize observer for icon grid.");
+                    gridLayoutObserver_ = std::make_unique<Nui::WebApi::ResizeObserver>(
+                        [this](std::vector<Nui::WebApi::ResizeObserverEntry> const&, Nui::WebApi::ResizeObserver const& self) {
+                            auto grid = gridRef_.lock();
+                            if (!grid)
+                            {
+                                Nui::WebApi::Console::log("Grid gone, disconnecting resize observer.");
+                                self.disconnect();
+                                return;
+                            }
+
+                            const auto styles = Nui::val::global().call<Nui::val>("getComputedStyle", grid->val());
+                            const auto columns = styles["gridTemplateColumns"].as<std::string>();
+                            const auto rows = styles["gridTemplateRows"].as<std::string>();
+
+                            const auto columnCount = std::count(columns.begin(), columns.end(), ' ') + 1;
+                            const auto rowCount = std::count(rows.begin(), rows.end(), ' ') + 1;
+
+                            Nui::WebApi::Console::log("Icon grid resized: ", static_cast<std::uint32_t>(columnCount), " columns, ", static_cast<std::uint32_t>(rowCount), " rows.");
+
+                            impl().selectionManager.setGrid(columnCount, rowCount);
+                        }
+                    );
+
+                    gridLayoutObserver_->observe(gridRef_.lock()->val());
+                })
             }(
                 impl().items.map([this](auto index, auto& item){
                     return div{

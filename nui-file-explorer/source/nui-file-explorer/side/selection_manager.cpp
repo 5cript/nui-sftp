@@ -1,18 +1,18 @@
 #include <nui-file-explorer/side/selection_manager.hpp>
 
 #include <nui/event_system/listen.hpp>
+#include <nui/frontend/api/console.hpp>
 
 namespace NuiFileExplorer
 {
-    SelectionManager::SelectionManager(Nui::Observed<std::vector<ItemWithInternals>>& items)
+    SelectionManager::SelectionManager(Nui::Observed<std::vector<ItemWithInternals>>& items, Flavor flavor)
         : items_{&items}
+        , currentFlavor_{flavor}
     {}
 
     void SelectionManager::loseTrackToAllSelections()
     {
         selectedIndices_.clear();
-        gridWidth_ = 1;
-        gridHeight_ = 1;
         currentSelectionStart_ = std::nullopt;
     }
     void SelectionManager::deselectAll()
@@ -31,16 +31,17 @@ namespace NuiFileExplorer
         for (std::size_t i = 0; i < items_->value().size(); ++i)
             select(i);
     }
-    void SelectionManager::select(std::size_t index)
+    bool SelectionManager::select(std::size_t index)
     {
         if (index >= items_->value().size())
-            return;
+            return false;
         if (!items_->value()[index].isSelectable())
-            return;
+            return false;
         if (selectedIndices_.empty())
             currentSelectionStart_ = index;
         selectedIndices_.insert(index);
         *items_->value()[index].selected = true;
+        return true;
     }
     void SelectionManager::toggle(std::size_t index)
     {
@@ -53,7 +54,10 @@ namespace NuiFileExplorer
     {
         const auto index = item.indexDataAttribute();
         if (!index)
+        {
+            Nui::WebApi::Console::log("no data index on element");
             return;
+        }
         select(static_cast<std::size_t>(*index));
     }
     void SelectionManager::deselect(std::size_t index)
@@ -94,8 +98,12 @@ namespace NuiFileExplorer
     }
     void SelectionManager::setGrid(std::size_t width, std::size_t height)
     {
-        gridWidth_ = width;
-        gridHeight_ = height;
+        gridColumns_ = width;
+        gridRows_ = height;
+    }
+    void SelectionManager::setFlavor(Flavor flavor)
+    {
+        currentFlavor_ = flavor;
     }
     void SelectionManager::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event)
     {
@@ -181,5 +189,301 @@ namespace NuiFileExplorer
 
         deselectAll();
         select(item);
+    }
+
+    bool SelectionManager::onKeyboardEvent(Nui::WebApi::KeyboardEvent const& event)
+    {
+        if (event.key() == "a" && event.ctrlKey())
+        {
+            selectAll();
+            return true;
+        }
+        if (event.key() == "Escape")
+        {
+            deselectAll();
+            return true;
+        }
+        if (event.key() == "End")
+        {
+            auto lastSelectable = findLastSelectable();
+            if (!lastSelectable)
+            {
+                return true; // event consumed, but nothing todo.
+            }
+
+            if (event.shiftKey())
+            {
+                selectRange(currentSelectionStart_.value_or(*lastSelectable), *lastSelectable);
+                return true;
+            }
+            if (event.ctrlKey())
+            {
+                select(*lastSelectable);
+                return true;
+            }
+            deselectAll();
+            select(*lastSelectable);
+            return true;
+        }
+        if (event.key() == "Home")
+        {
+            auto firstSelectable = findFirstSelectable();
+            if (!firstSelectable)
+            {
+                return true; // event consumed, but nothing todo.
+            }
+
+            if (event.shiftKey())
+            {
+                selectRange(currentSelectionStart_.value_or(*firstSelectable), *firstSelectable);
+                return true;
+            }
+            if (event.ctrlKey())
+            {
+                select(*firstSelectable);
+                return true;
+            }
+            deselectAll();
+            select(*firstSelectable);
+            return true;
+        }
+        if (event.key() == "ArrowLeft" || event.key() == "ArrowUp")
+        {
+            if (items_->value().empty())
+                return true;
+
+            auto currentIndex = currentSelectionStart_;
+            if (!currentIndex)
+            {
+                currentIndex = findLastSelectable();
+                if (currentIndex)
+                {
+                    select(*currentIndex);
+                    return true;
+                }
+            }
+            if (!currentIndex)
+                return true;
+
+            if ((currentFlavor_ == Flavor::Icons && event.key() == "ArrowLeft") || currentFlavor_ == Flavor::Table)
+            {
+                if (event.shiftKey() || event.ctrlKey())
+                {
+                    auto result = findPreviousSelectable(*currentIndex);
+                    if (result)
+                        select(*result);
+                    return true;
+                }
+                deselectAll();
+                auto result = findPreviousSelectable(*currentIndex);
+                if (result)
+                    select(*result);
+                return true;
+            }
+
+            // or else its icons and arrow up:
+            auto position = GridPosition{*this, *currentIndex};
+            position.up();
+            if (event.shiftKey())
+            {
+                // TODO:
+                return true;
+            }
+            if (!position.isSelectable())
+                position.up();
+            if (event.ctrlKey())
+            {
+                select(position.normalized().toIndex());
+                return true;
+            }
+            deselectAll();
+            select(position.normalized().toIndex());
+            return true;
+        }
+        if (event.key() == "ArrowRight" || event.key() == "ArrowDown")
+        {
+            if (items_->value().empty())
+                return true;
+
+            auto currentIndex = currentSelectionStart_;
+            if (!currentIndex)
+            {
+                currentIndex = findFirstSelectable();
+                if (currentIndex)
+                {
+                    select(*currentIndex);
+                    return true;
+                }
+            }
+            if (!currentIndex)
+                return true;
+
+            if ((currentFlavor_ == Flavor::Icons && event.key() == "ArrowRight") || currentFlavor_ == Flavor::Table)
+            {
+                if (event.shiftKey() || event.ctrlKey())
+                {
+                    auto result = findNextSelectable(*currentIndex);
+                    if (result)
+                        select(*result);
+                    return true;
+                }
+                deselectAll();
+                auto result = findNextSelectable(*currentIndex);
+                if (result)
+                    select(*result);
+                return true;
+            }
+
+            // or else its icons and arrow down:
+            // TODO:
+            auto position = GridPosition{*this, *currentIndex};
+            position.down();
+            if (event.shiftKey())
+            {
+                // TODO:
+                return true;
+            }
+            if (!position.isSelectable())
+                position.down();
+            if (event.ctrlKey())
+            {
+                select(position.normalized().toIndex());
+                return true;
+            }
+            deselectAll();
+            select(position.normalized().toIndex());
+            return true;
+        }
+
+        // ....
+        return false;
+    }
+    SelectionManager::GridPosition SelectionManager::calculateGridPositionFromIndex(std::size_t index) const
+    {
+        return GridPosition{*this, index};
+    }
+    std::size_t SelectionManager::itemsInLastRow() const
+    {
+        if (gridColumns_ == 0)
+            return 0;
+        const auto totalItems = items_->value().size();
+        const auto fullRows = totalItems / gridColumns_;
+        const auto itemsInFullRows = fullRows * gridColumns_;
+        return totalItems - itemsInFullRows;
+    }
+    bool SelectionManager::isIndexUnselectedSelectable(std::make_signed_t<std::size_t> index) const
+    {
+        if (index < 0)
+            return false;
+        if (index >= static_cast<std::make_signed_t<std::size_t>>(items_->value().size()))
+            return false;
+        return !isSelected(static_cast<std::size_t>(index)) &&
+            items_->value()[static_cast<std::size_t>(index)].isSelectable();
+    }
+    bool SelectionManager::isIndexUnselectedSelectable(std::size_t index) const
+    {
+        if (index >= items_->value().size())
+            return false;
+        return !isSelected(index) && items_->value()[index].isSelectable();
+    }
+    std::optional<std::size_t> SelectionManager::findNextSelectable(std::size_t index) const
+    {
+        auto newIndex = index + 1;
+
+        for (; newIndex < items_->value().size() && !isIndexUnselectedSelectable(newIndex); ++newIndex)
+        {}
+
+        if (newIndex < items_->value().size())
+            return newIndex;
+        else
+        {
+            // look from beginning:
+            auto firstSelectable = findFirstSelectable();
+            if (!firstSelectable)
+                return std::nullopt;
+
+            newIndex = *firstSelectable;
+            for (; newIndex < index && !isIndexUnselectedSelectable(newIndex); ++newIndex)
+            {}
+
+            if (newIndex < index)
+                return newIndex;
+        }
+        return std::nullopt;
+    }
+    std::optional<std::size_t> SelectionManager::findPreviousSelectable(std::size_t index) const
+    {
+        auto newIndex = static_cast<std::make_signed_t<std::size_t>>(index) - 1;
+        auto signedIndex = static_cast<std::make_signed_t<std::size_t>>(index);
+
+        for (; newIndex >= 0 && !isIndexUnselectedSelectable(newIndex); --newIndex)
+        {}
+
+        if (newIndex >= 0)
+            return static_cast<std::size_t>(newIndex);
+        else
+        {
+            // look from end:
+            auto lastSelectable = findLastSelectable();
+            if (!lastSelectable)
+                return std::nullopt;
+
+            newIndex = static_cast<std::make_signed_t<std::size_t>>(*lastSelectable);
+            for (; newIndex > signedIndex && !isIndexUnselectedSelectable(newIndex); --newIndex)
+            {}
+
+            if (newIndex > signedIndex)
+                return static_cast<std::size_t>(newIndex);
+        }
+        return std::nullopt;
+    }
+
+    void SelectionManager::selectRange(std::size_t begin, std::size_t endInclusive)
+    {
+        if (items_->value().empty())
+            return;
+        if (begin == endInclusive)
+        {
+            select(begin);
+            return;
+        }
+        if (endInclusive >= items_->value().size())
+            endInclusive = items_->value().size() - 1;
+        if (begin >= items_->value().size())
+            begin = items_->value().size() - 1;
+        if (begin > endInclusive)
+        {
+            selectRange(0, endInclusive);
+            selectRange(begin, items_->value().size() - 1);
+            return;
+        }
+        for (std::size_t i = begin; i <= endInclusive; ++i)
+            select(i);
+    }
+
+    std::optional<std::size_t> SelectionManager::findFirstSelectable() const
+    {
+        if (items_->value().empty())
+            return std::nullopt;
+
+        for (std::size_t i = 0; i != std::min(maxSelectableSearchAttempts, items_->value().size()); ++i)
+        {
+            if (items_->value()[i].isSelectable())
+                return i;
+        }
+        return std::nullopt;
+    }
+    std::optional<std::size_t> SelectionManager::findLastSelectable() const
+    {
+        if (items_->value().empty())
+            return std::nullopt;
+
+        for (std::size_t i = 0; i != std::min(maxSelectableSearchAttempts, items_->value().size()); ++i)
+        {
+            if (items_->value()[items_->value().size() - i - 1].isSelectable())
+                return items_->value().size() - i - 1;
+        }
+
+        return std::nullopt;
     }
 }

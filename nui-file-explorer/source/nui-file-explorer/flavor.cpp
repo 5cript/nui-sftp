@@ -11,8 +11,6 @@ namespace NuiFileExplorer
                 return "icons";
             case Table:
                 return "table";
-            case Tiles:
-                return "tiles";
         }
     }
     Flavor fileGridFlavorFromString(std::string const& value)
@@ -22,8 +20,6 @@ namespace NuiFileExplorer
             return Icons;
         if (value == "table")
             return Table;
-        if (value == "tiles")
-            return Tiles;
         return Icons;
     }
 }

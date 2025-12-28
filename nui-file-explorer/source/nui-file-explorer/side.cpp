@@ -32,33 +32,8 @@ namespace NuiFileExplorer
             }
         );
 
-        if (event.key() == "a" && event.ctrlKey())
-        {
-            impl_->selectionManager.selectAll();
-            return;
-        }
-        if (event.key() == "Escape")
-        {
-            impl_->selectionManager.deselectAll();
-            return;
-        }
-
-        // everything else delegate to flavor impl:
-        if (impl_->flavor.value() == Flavor::Icons)
-        {
-            if (!iconFlavor_.processKeyboardEvent(event))
-                actionWasTaken.disarm();
-            iconFlavor_.processKeyboardEvent(event);
-            return;
-        }
-        if (impl_->flavor.value() == Flavor::Table)
-        {
-            if (!tableFlavor_.processKeyboardEvent(event))
-                actionWasTaken.disarm();
-            return;
-        }
-
-        actionWasTaken.disarm();
+        if (!impl_->selectionManager.onKeyboardEvent(event))
+            actionWasTaken.disarm();
     }
 
     Nui::ElementRenderer Side::operator()()
@@ -153,6 +128,7 @@ namespace NuiFileExplorer
     void Side::flavor(Flavor value)
     {
         impl_->flavor = value;
+        impl_->selectionManager.setFlavor(value);
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
     Flavor Side::flavor() const

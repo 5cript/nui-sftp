@@ -7,116 +7,6 @@ namespace NuiFileExplorer
         : FlavorImplementation{impl}
     {}
 
-    bool TableFlavor::processKeyboardEvent(Nui::WebApi::KeyboardEvent event)
-    {
-        // enum class SelectionChange
-        // {
-        //     None,
-        //     Up,
-        //     Down
-        // };
-        // auto selectionChange = SelectionChange::None;
-
-        // // Arrow Up or Left:
-        // if (event.key() == "ArrowUp" || event.key() == "ArrowLeft")
-        // {
-        //     selectionChange = SelectionChange::Up;
-        // }
-        // if (event.key() == "ArrowDown" || event.key() == "ArrowRight")
-        // {
-        //     selectionChange = SelectionChange::Down;
-        // }
-
-        // if (selectionChange == SelectionChange::Up)
-        // {
-        //     // find first selected item:
-        //     auto firstSelected = std::find_if(
-        //         impl().items.value().begin(),
-        //         impl().items.value().end(),
-        //         [](auto const& i)
-        //         {
-        //             return i.selected->value();
-        //         }
-        //     );
-
-        //     if (firstSelected == impl().items.value().end())
-        //     {
-        //         if (impl().items.value().size() > 1)
-        //         {
-        //             firstSelected = impl().items.value().end() - 1;
-        //         }
-        //         else
-        //             return false;
-        //     }
-
-        //     if (event.shiftKey() || event.ctrlKey())
-        //     {
-        //         if (firstSelected != impl().items.value().begin())
-        //         {
-        //             auto toSelect = firstSelected - 1;
-        //             *toSelect->selected = true;
-        //         }
-        //     }
-        //     else
-        //     {
-        //         if (firstSelected != impl().items.value().begin())
-        //         {
-        //             auto toSelect = firstSelected - 1;
-        //             for (auto& item : impl().items.value())
-        //                 *item.selected = false;
-        //             *toSelect->selected = true;
-        //         }
-        //     }
-        //     return true;
-        // }
-        // else if (selectionChange == SelectionChange::Down)
-        // {
-        //     // find last selected item:
-        //     auto lastSelected = std::find_if(
-        //         impl().items.value().rbegin(),
-        //         impl().items.value().rend(),
-        //         [](auto const& i)
-        //         {
-        //             return i.selected->value();
-        //         }
-        //     );
-
-        //     // convert to regular iterator:
-        //     auto lastSelectedRegular =
-        //         (lastSelected == impl().items.value().rend()) ? impl().items.value().end() : (lastSelected.base() -
-        //         1);
-
-        //     if (lastSelectedRegular == impl().items.value().end())
-        //     {
-        //         if (impl().items.value().size() > 1)
-        //         {
-        //             lastSelectedRegular = impl().items.value().begin();
-        //         }
-        //         else
-        //             return false;
-        //     }
-
-        //     if (event.shiftKey() || event.ctrlKey())
-        //     {
-        //         auto toSelect = lastSelectedRegular + 1;
-        //         if (toSelect == impl().items.value().end())
-        //             toSelect = impl().items.value().begin();
-        //         *toSelect->selected = true;
-        //     }
-        //     else
-        //     {
-        //         auto toSelect = lastSelectedRegular + 1;
-        //         if (toSelect == impl().items.value().end())
-        //             toSelect = impl().items.value().begin();
-        //         side_->deselectAll();
-        //         *toSelect->selected = true;
-        //     }
-        //     return true;
-        // }
-
-        return false;
-    }
-
     Nui::ElementRenderer TableFlavor::operator()()
     {
         using namespace Nui;
@@ -251,7 +141,7 @@ namespace NuiFileExplorer
             div{
                 class_ = "nui-file-grid-table-rows"
             }(
-                impl().items.map([this, contextMenu](auto, auto const& item){
+                impl().items.map([this, contextMenu](auto index, auto& item){
                     return div{
                         class_ = item.observeSelected([&item](){
                             if (item.isSelected())
@@ -264,8 +154,13 @@ namespace NuiFileExplorer
                             impl().model->onActivateItem(item.item);
                         },
                         onClick = [this, &item](Nui::WebApi::MouseEvent event){
+                            Nui::WebApi::Console::log("table item click");
                             side_->onItemClicked(item, std::move(event));
-                        }
+                        },
+                        reference = [&item](std::weak_ptr<Nui::Dom::BasicElement> ref) {
+                            item.element = ref;
+                        },
+                        "data-index"_attr = std::to_string(index)
                     }(
                         div{
                             class_ = "nui-file-grid-table-cell",
