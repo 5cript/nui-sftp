@@ -41,7 +41,7 @@
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-columns: min-content 1fr;
+    grid-template-columns: 1fr 1fr;
     grid-template-rows: minmax(0, 1fr);
 
     background:
@@ -358,4 +358,25 @@
 
 .sorted-desc .nui-file-grid-arrow.nfg-down {
     color: var(--nui-file-grid-table-sort-highlight);
+}
+
+/* Visible separator */
+.nui-file-grid-divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(50% - 1px);
+    width: 2px;
+    background: #bbb;
+    pointer-events: none;
+}
+
+/* Invisible grab area */
+.nui-file-grid-grabber {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(50% - 6px);
+    width: 12px;
+    cursor: col-resize;
 }
