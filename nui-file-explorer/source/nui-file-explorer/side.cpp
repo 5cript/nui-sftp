@@ -236,10 +236,11 @@ namespace NuiFileExplorer
             {
                 for (auto const& cls : offsetParent["classList"])
                 {
-                    if (cls.as<std::string>() == "nui-file-grid-table-cell")
+                    if (cls.as<std::string>() == "nui-file-grid-table-cell" ||
+                        cls.as<std::string>() == "nui-file-grid-item-icons")
                     {
-                        targetOffsetTop = offsetParent["offsetTop"].as<int>();
-                        targetOffsetLeft = offsetParent["offsetLeft"].as<int>();
+                        targetOffsetTop = offsetParent["offsetTop"].as<int>() + targetOffsetTop;
+                        targetOffsetLeft = offsetParent["offsetLeft"].as<int>() + targetOffsetLeft;
                         break;
                     }
                 }
