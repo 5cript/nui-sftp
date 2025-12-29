@@ -8,11 +8,41 @@
 
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
+#include <utility/algorithm/case_convert.hpp>
+
+#include <rapidfuzz/fuzz.hpp>
 
 using namespace std::string_literals;
 
 namespace NuiFileExplorer
 {
+    namespace
+    {
+        std::vector<std::string> tokenize(std::string const& input)
+        {
+            std::vector<std::string> result;
+            std::string currentToken;
+            for (char c : input)
+            {
+                if (std::isalnum(c))
+                {
+                    currentToken.push_back(std::tolower(c));
+                }
+                else if (std::isspace(c) || std::ispunct(c))
+                {
+                    if (!currentToken.empty())
+                    {
+                        result.push_back(currentToken);
+                        currentToken.clear();
+                    }
+                }
+            }
+            if (!currentToken.empty())
+                result.push_back(currentToken);
+            return result;
+        }
+    }
+
     Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
         : impl_(std::make_unique<SideImplementation>(std::move(settings), std::move(model)))
         , iconFlavor_{*this}
@@ -76,7 +106,7 @@ namespace NuiFileExplorer
                 div{
                     style = "width: 100%; height: 100%",
                     "contextmenu"_event = [this](Nui::val event) {
-                        onContextMenu(std::nullopt, event);
+                        onContextMenu(nullptr, event);
                     }
                 }(
                     observe(impl_->flavor),
@@ -190,7 +220,7 @@ namespace NuiFileExplorer
             menu->val()["style"].set("display", "none");
     }
 
-    void Side::onContextMenu(std::optional<ItemWithInternals> const& item, Nui::val event)
+    void Side::onContextMenu(ItemWithInternals* item, Nui::val event)
     {
         using namespace std::string_literals;
 
@@ -220,7 +250,7 @@ namespace NuiFileExplorer
             const auto left = targetOffsetLeft + offsetX;
             const auto top = targetOffsetTop + offsetY;
 
-            if (item)
+            if (item != nullptr)
             {
                 Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
                 auto selected = selectedItems();
@@ -448,12 +478,66 @@ namespace NuiFileExplorer
             }(),
             input{
                 type = "text",
-                placeHolder = "Filter",
-                "keyup"_event = [](Nui::val event){
+                placeHolder = "Search",
+                "keyup"_event = [this](Nui::val event){
+                    event.call<void>("stopPropagation");
+                    search(event["target"]["value"].as<std::string>());
+                },
+                "keydown"_event = [](Nui::val event){
                     event.call<void>("stopPropagation");
                 }
             }()
         );
         // clang-format on
+    }
+
+    void Side::search(std::string query)
+    {
+        if (query.empty())
+        {
+            // Clear all highlights
+            for (auto& item : impl_->items.value())
+                item.searchHighlighted = ItemWithInternals::SearchHighlight::Off;
+            return;
+        }
+
+        constexpr static double hitScore = 90.;
+        constexpr static double minimumScore = 60.;
+
+        Utility::Algorithm::toLowerCaseInplace(query);
+        const auto queryTokens = tokenize(query);
+
+        auto const score = [&queryTokens](auto const& tokens)
+        {
+            double max = 0.;
+            std::vector<std::string>::const_iterator maxToken;
+            for (auto const& query : queryTokens)
+            {
+                for (auto i = std::cbegin(tokens), end = std::cend(tokens); i != end; ++i)
+                {
+                    auto const fuzzScore = rapidfuzz::fuzz::ratio(query, *i);
+                    if (fuzzScore >= hitScore)
+                        return std::make_pair(fuzzScore, i);
+                    auto previousMax = max;
+                    max = std::max(max, fuzzScore);
+                    if (max > previousMax)
+                        maxToken = i;
+                }
+            }
+            return std::make_pair(max, maxToken);
+        };
+
+        for (auto& item : impl_->items.value())
+        {
+            const auto generic = item.item.path.generic_string();
+            if (generic.find(query) != std::string::npos)
+            {
+                item.searchHighlighted = ItemWithInternals::SearchHighlight::Highlight;
+                continue;
+            }
+            const auto reachedScore = score(tokenize(generic));
+            item.searchHighlighted = reachedScore.first >= minimumScore ? ItemWithInternals::SearchHighlight::Highlight
+                                                                        : ItemWithInternals::SearchHighlight::Muted;
+        }
     }
 }

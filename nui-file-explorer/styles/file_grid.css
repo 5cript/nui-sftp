@@ -19,6 +19,8 @@
     display: block;
     height: 100%;
     padding: 5px;
+    overflow-y: auto;
+    position: relative;
 }
 
 .nui-file-grid-icons-grid {
@@ -43,12 +45,21 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: minmax(0, 1fr);
+}
 
-    background:
-        radial-gradient(800px 400px at 20% 10%, #ff9a9e 0%, transparent 60%),
-        radial-gradient(700px 500px at 80% 20%, #a18cd1 0%, transparent 60%),
-        radial-gradient(600px 600px at 30% 80%, #84fab0 0%, transparent 60%),
-        linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+.nui-file-grid-gradient {
+    background-image:
+        radial-gradient(at 56% 8%, hsla(323, 64%, 77%, 1) 0px, transparent 50%),
+        radial-gradient(at 88% 7%, hsla(186, 94%, 76%, 1) 0px, transparent 50%),
+        radial-gradient(at 67% 1%, hsla(321, 80%, 79%, 1) 0px, transparent 50%),
+        radial-gradient(at 60% 69%, hsla(39, 75%, 79%, 1) 0px, transparent 50%),
+        radial-gradient(at 22% 33%, hsla(314, 83%, 65%, 1) 0px, transparent 50%),
+        radial-gradient(at 7% 91%, hsla(200, 78%, 70%, 1) 0px, transparent 50%),
+        radial-gradient(at 19% 86%, hsla(137, 62%, 74%, 1) 0px, transparent 50%);
+
+    /* Darken overlay to improve contrast (doesn't affect child elements) */
+    background-color: rgba(0, 0, 0, 0.55);
+    background-blend-mode: multiply;
 }
 
 .nui-file-grid-content:first-child {
@@ -115,6 +126,8 @@
         0 10px 25px rgba(0, 0, 0, 0.35);
 
     transition: transform 120ms ease, box-shadow 120ms ease;
+    /* Important for the sheen effect */
+    overflow: hidden;
 
     & img {
         position: relative;
@@ -129,6 +142,68 @@
         cursor: default;
     }
 }
+
+.nui-file-grid-item-icons.is-muted {
+    opacity: 0.55;
+
+    background:
+        linear-gradient(145deg,
+            rgba(255, 255, 255, 0.15),
+            rgba(255, 255, 255, 0.02));
+
+    border-color: rgba(255, 255, 255, 0.18);
+
+    box-shadow:
+        inset 1px 1px 0 rgba(255, 255, 255, 0.25),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.25),
+        0 6px 14px rgba(0, 0, 0, 0.45);
+
+    filter: saturate(70%) brightness(85%);
+}
+
+.nui-file-grid-item-icons.is-highlighted {
+    position: relative;
+    z-index: 1;
+}
+
+.nui-file-grid-item-icons.is-highlighted::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+
+    border: 2px solid transparent;
+
+    background:
+        conic-gradient(from 0deg,
+            #ff4fd8,
+            #5cf3ff,
+            #ffe56b,
+            #ff4fd8) border-box;
+
+    animation: nui-prismatic-spin 6s linear infinite;
+
+    /* keep it strictly on the border */
+    -webkit-mask:
+        linear-gradient(#000 0 0) padding-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+
+    pointer-events: none;
+    z-index: 0;
+}
+
+.nui-file-grid-item-icons>* {
+    position: relative;
+    z-index: 1;
+}
+
+/* @keyframes nui-prismatic-spin {
+    to {
+        transform: rotate(360deg);
+    }
+} */
 
 .nui-file-grid-item-icons:hover {
     transform: translateY(-2px);
@@ -182,7 +257,6 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         box-shadow: none;
         transition: box-shadow 0.3s ease-in-out;
-        border-style: none;
 
         &:focus {
             outline: none;
@@ -235,6 +309,8 @@
     /* grid-template-columns is set from within the code */
     overflow: hidden;
     display: grid;
+    grid-template-rows: 40px repeat(auto-fit, 20px);
+    height: 100%;
 }
 
 .nui-file-grid-table-header {
@@ -269,6 +345,72 @@
     &:is(.selected):nth-of-type(2n) {
         background-color: var(--nui-file-grid-item-highlight);
     }
+}
+
+.nui-file-grid-table-row.is-muted {
+    color: rgba(239, 239, 239, 0.6);
+
+    background-color:
+        color-mix(in srgb,
+            var(--nui-file-grid-table-cell-background, #303030) 80%,
+            #000 20%);
+
+    filter: saturate(75%) brightness(90%);
+}
+
+.nui-file-grid-table-row.is-muted:hover {
+    background-color:
+        color-mix(in srgb,
+            var(--nui-file-grid-table-cell-background, #303030) 70%,
+            #000 30%);
+}
+
+.nui-file-grid-table-row.is-highlighted {
+    position: relative;
+    background-color:
+        color-mix(in srgb,
+            var(--nui-file-grid-item-highlight) 85%,
+            #000 15%);
+}
+
+.nui-file-grid-table-row.is-highlighted:hover {
+    background-color:
+        color-mix(in srgb,
+            var(--nui-file-grid-item-highlight) 92%,
+            #fff 8%);
+}
+
+.nui-file-grid-table-row.is-highlighted.selected {
+    background-color:
+        color-mix(in srgb,
+            var(--nui-file-grid-item-highlight) 99%,
+            #fff 12%);
+}
+
+.nui-file-grid-table-row.is-highlighted::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+
+    pointer-events: none;
+
+    background:
+        linear-gradient(90deg,
+            #ff4fd8,
+            #5cf3ff,
+            #ffe56b,
+            #ff4fd8);
+
+    opacity: 0.8;
+
+    /* only draw 1px top & bottom */
+    mask:
+        linear-gradient(#000 0 0) top / 100% 1px no-repeat,
+        linear-gradient(#000 0 0) bottom / 100% 1px no-repeat;
+}
+
+.nui-file-grid-table-row.is-highlighted:hover::before {
+    opacity: 1;
 }
 
 .nui-file-grid-table-header,

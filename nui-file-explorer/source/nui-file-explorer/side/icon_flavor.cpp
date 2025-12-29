@@ -183,7 +183,7 @@ namespace NuiFileExplorer
 
         // clang-format off
         return div {
-            class_ = "nui-file-grid-icons",
+            class_ = "nui-file-grid-icons nui-file-grid-gradient",
             onClick = [this](Nui::WebApi::MouseEvent event) {
                 if (shallClick_)
                     side_->onUneventfulClick();
@@ -191,7 +191,7 @@ namespace NuiFileExplorer
                 event.stopPropagation();
             },
             "contextmenu"_event = [this](Nui::val event) {
-                side_->onContextMenu(std::nullopt, event);
+                side_->onContextMenu(nullptr, event);
             },
             "mousedown"_event = [this](WebApi::MouseEvent event) {
                 onBoxDragStart(std::move(event));
@@ -245,17 +245,18 @@ namespace NuiFileExplorer
                 impl().items.map([this](auto index, auto& item){
                     return div{
                         class_ = item.observeSelected([&item](){
-                            if (item.isSelected())
-                                return "nui-file-grid-item-icons selected";
-                            return "nui-file-grid-item-icons";
+                            return fmt::format("nui-file-grid-item-icons {} {}", item.isSelected() ? "selected" : "",
+                                item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
+                                : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
+                                : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
                             side_->closeMenus();
                             impl().model->onActivateItem(item.item);
                         },
-                        "contextmenu"_event = [this, item = item](Nui::val event){
-                            side_->onContextMenu(item, event);
+                        "contextmenu"_event = [this, &item](Nui::val event){
+                            side_->onContextMenu(&item, event);
                         },
                         onClick = [this, &item](Nui::WebApi::MouseEvent event){
                             side_->onItemClicked(item, event);

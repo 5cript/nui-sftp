@@ -82,11 +82,11 @@ namespace NuiFileExplorer
                 );
         };
 
-        auto contextMenu = [this](auto const& item)
+        auto contextMenu = [this](auto& item)
         {
-            return "contextmenu"_event = [this, item = item](Nui::val event)
+            return "contextmenu"_event = [this, &item](Nui::val event)
             {
-                side_->onContextMenu(item, event);
+                side_->onContextMenu(&item, event);
             };
         };
 
@@ -144,9 +144,10 @@ namespace NuiFileExplorer
                 impl().items.map([this, contextMenu](auto index, auto& item){
                     return div{
                         class_ = item.observeSelected([&item](){
-                            if (item.isSelected())
-                                return "nui-file-grid-table-row selected";
-                            return "nui-file-grid-table-row";
+                            return fmt::format("nui-file-grid-table-row {} {}", item.isSelected() ? "selected" : "",
+                                item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
+                                : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
+                                : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");

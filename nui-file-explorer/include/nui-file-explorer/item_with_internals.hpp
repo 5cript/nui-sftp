@@ -48,12 +48,20 @@ namespace NuiFileExplorer
 
         auto observeSelected(auto&& fn) const
         {
-            return Nui::observe(selected).generate(std::forward<decltype(fn)>(fn));
+            return Nui::observe(selected, searchHighlighted).generate(std::forward<decltype(fn)>(fn));
         }
 
       public:
         Item item;
         std::weak_ptr<Nui::Dom::BasicElement> element;
+
+        enum class SearchHighlight
+        {
+            Off,
+            Highlight,
+            Muted
+        };
+        Nui::Observed<SearchHighlight> searchHighlighted{SearchHighlight::Off};
 
       private:
         // Private so no one can bypass the selection manager:

@@ -76,16 +76,36 @@ namespace NuiFileExplorer
         };
         DropdownMenu sortMenu{
             {
-                "Name",
-                // More...
+                "Name Ascending",
+                "Name Descending",
+                "Size Ascending",
+                "Size Descending",
+                "Info Ascending",
+                "Info Descending",
+                "Modification Time Ascending",
+                "Modification Time Descending",
             },
             [this](std::string const& item)
             {
-                if (item == "Name")
-                {
-                    sortItems();
-                    this->items.modifyNow();
-                }
+                if (item == "Name Ascending")
+                    sorting = {SortCriterion::Name, true};
+                else if (item == "Name Descending")
+                    sorting = {SortCriterion::Name, false};
+                else if (item == "Size Ascending")
+                    sorting = {SortCriterion::Size, true};
+                else if (item == "Size Descending")
+                    sorting = {SortCriterion::Size, false};
+                else if (item == "Info Ascending")
+                    sorting = {SortCriterion::Info, true};
+                else if (item == "Info Descending")
+                    sorting = {SortCriterion::Info, false};
+                else if (item == "Modification Time Ascending")
+                    sorting = {SortCriterion::Atime, true};
+                else if (item == "Modification Time Descending")
+                    sorting = {SortCriterion::Atime, false};
+
+                sortItems();
+                items.modifyNow();
             },
             [this]()
             {

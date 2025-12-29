@@ -24,6 +24,7 @@ target_link_libraries(
     PRIVATE
         nui-frontend
         utility
+        rapidfuzz::rapidfuzz
 )
 
 target_include_directories(

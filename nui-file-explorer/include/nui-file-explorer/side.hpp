@@ -113,9 +113,10 @@ namespace NuiFileExplorer
         Nui::ElementRenderer pathBar();
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
-        void onContextMenu(std::optional<ItemWithInternals> const& item, Nui::val event);
+        void onContextMenu(ItemWithInternals* item, Nui::val event);
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
+        void search(std::string query);
 
       private:
         std::unique_ptr<SideImplementation> impl_;
