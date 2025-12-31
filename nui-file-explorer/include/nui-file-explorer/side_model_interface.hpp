@@ -101,9 +101,11 @@ namespace NuiFileExplorer
         virtual void onProperties(Item const& item) = 0;
 
         /**
-         * @brief Triggered when items are requested to be downloaded.
+         * @brief Triggered when items are requested to be downloaded / uploaded.
+         *
+         * @param subDir Optional sub-directory within the current path to transfer into.
          */
-        virtual void onTransfer(std::vector<Item> const& items) = 0;
+        virtual void onTransfer(std::vector<Item> const& items, std::optional<std::string> const& subDir) = 0;
 
         /**
          * @brief Triggered when an error occurs.

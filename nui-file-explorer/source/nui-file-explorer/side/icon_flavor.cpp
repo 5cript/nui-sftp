@@ -1,18 +1,21 @@
 #include <nui-file-explorer/side/icon_flavor.hpp>
 #include <nui-file-explorer/side.hpp>
 
+#include <nui/frontend/api/json.hpp>
+
 #include <nui/frontend/api/dom_rect.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/api/abort_signal.hpp>
+#include <nui/frontend/api/drag_event.hpp>
 
 using namespace std::string_literals;
 using namespace std::chrono_literals;
 
 namespace NuiFileExplorer
 {
-    IconFlavor::IconFlavor(Side& side)
-        : FlavorImplementation{side}
+    IconFlavor::IconFlavor(Side& side, Side& otherSide)
+        : FlavorImplementation{side, otherSide}
     {}
 
     void IconFlavor::onBoxDragMouseMove(Nui::WebApi::MouseEvent event)
@@ -32,7 +35,7 @@ namespace NuiFileExplorer
         auto box = boxLocked->val();
         if (std::chrono::steady_clock::now() - mouseDownTime_ > boxDragMinimumTimeToDifferentiateClick)
         {
-            if (box["style"]["display"].as<std::string>() != "block")
+            if (box["style"]["display"].as<std::string>() != "block" && boxDragActive_)
                 box["style"].set("display", "block"s);
         }
 
@@ -55,6 +58,7 @@ namespace NuiFileExplorer
     {
         auto onExit = Nui::ScopeExit{[this]() noexcept
             {
+                boxDragActive_ = false;
                 mouseMoveAbort_.abort();
                 mouseUpAbort_.abort();
                 Nui::globalEventContext.executeActiveEventsImmediately();
@@ -107,6 +111,7 @@ namespace NuiFileExplorer
     void IconFlavor::onBoxDragStart(Nui::WebApi::MouseEvent event)
     {
         event.stopPropagation();
+        boxDragActive_ = true;
 
         mouseDownTime_ = std::chrono::steady_clock::now();
 
@@ -197,6 +202,10 @@ namespace NuiFileExplorer
                 onBoxDragStart(std::move(event));
                 shallClick_ = true;
             },
+            "drop"_event = [this](Nui::WebApi::DragEvent dropEvent) {
+                onDrop(std::move(dropEvent), std::nullopt);
+            },
+            allowDrop
         }(
             div{
                 class_ = "nui-file-grid-selection-box",
@@ -212,6 +221,10 @@ namespace NuiFileExplorer
                         return fmt::format("repeat(auto-fit, {}px)", impl().iconSize.value() + impl().iconSpacing.value());
                     })
                 },
+                "drop"_event = [this](Nui::WebApi::DragEvent dropEvent) {
+                    onDrop(std::move(dropEvent), std::nullopt);
+                },
+                allowDrop,
                 !(reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
                     gridRef_ = ref;
 
@@ -244,11 +257,11 @@ namespace NuiFileExplorer
             }(
                 impl().items.map([this](auto index, auto& item){
                     return div{
-                        class_ = item.observeSelected([&item](){
-                            return fmt::format("nui-file-grid-item-icons {} {}", item.isSelected() ? "selected" : "",
+                        class_ = item.observeClassRelevant([&item](){
+                            return fmt::format("nui-file-grid-item-icons {} {} {}", item.isSelected() ? "selected" : "",
                                 item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
                                 : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
-                                : "");
+                                : "", item.isDropHovered.value() ? "drop-hovered" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -263,6 +276,39 @@ namespace NuiFileExplorer
                         },
                         reference = [&item](std::weak_ptr<Nui::Dom::BasicElement> ref) {
                             item.element = ref;
+                        },
+                        draggable = item.observeSelected([&item]() {
+                            return item.isSelected() ? "true" : "false";
+                        }),
+                        "mousedown"_event = [&item](Nui::WebApi::MouseEvent event){
+                            if (item.isSelected())
+                                event.stopPropagation();
+                        },
+                        "dragstart"_event = [this](Nui::WebApi::DragEvent event){
+                            Nui::WebApi::Console::log(event.val());
+                            event.stopPropagation();
+
+                            auto dataTransferOpt = event.dataTransfer();
+                            if (!dataTransferOpt.has_value())
+                            {
+                                Nui::WebApi::Console::log("Cannot set data transfer opt, because its nullish.");
+                                return;
+                            }
+
+                            Nui::val info = Nui::val::object();
+                            info.set("isLeft", side_->model().isLeft());
+                            dataTransferOpt->setData("application/json", Nui::JSON::stringify(info));
+                        },
+                        "drop"_event = [this, &item](Nui::WebApi::DragEvent event){
+                            item.isDropHovered = false;
+                            onDrop(std::move(event), item.item);
+                        },
+                        "dragenter"_event = [&item](Nui::WebApi::DragEvent){
+                            if (item.item.type == Item::Type::Directory)
+                                item.isDropHovered = true;
+                        },
+                        "dragleave"_event = [&item](Nui::WebApi::DragEvent){
+                            item.isDropHovered = false;
                         },
                         "data-index"_attr = std::to_string(index)
                     }(

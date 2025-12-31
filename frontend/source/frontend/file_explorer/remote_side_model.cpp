@@ -5,7 +5,8 @@
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
     ConfirmDialog* confirmDialog,
-    InputDialog* inputDialog)
+    InputDialog* inputDialog
+)
     : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
 {}
 
@@ -58,18 +59,21 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
             .prompt = "Enter the name of the new directory",
             .headerText = "Create a new directory",
             .isPassword = false,
-            .onConfirm =
-                [this](std::optional<std::string> const& name) {
-                    if (!name)
-                        return;
+            .onConfirm = [this](std::optional<std::string> const& name)
+            {
+                if (!name)
+                    return;
 
-                    Log::info("Creating new directory: {}", *name);
-                    if (name->find('/') != std::string::npos)
+                Log::info("Creating new directory: {}", *name);
+                if (name->find('/') != std::string::npos)
+                {
+                    Log::error("Invalid directory name (cannot contain slashes): {}", *name);
+                    return;
+                }
+                fileEngine_->createDirectory(
+                    currentPath_.value() / *name,
+                    [this](bool success)
                     {
-                        Log::error("Invalid directory name (cannot contain slashes): {}", *name);
-                        return;
-                    }
-                    fileEngine_->createDirectory(currentPath_.value() / *name, [this](bool success) {
                         if (!success)
                         {
                             Log::error("Failed to create directory");
@@ -77,8 +81,9 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         }
                         // Refresh list from server:
                         navigateTo(currentPath_.value());
-                    });
-                },
+                    }
+                );
+            },
         });
     }
     else if (type == NuiFileExplorer::Item::Type::Regular)
@@ -88,18 +93,21 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
             .prompt = "Enter the name of the new file",
             .headerText = "Create a new file",
             .isPassword = false,
-            .onConfirm =
-                [this](std::optional<std::string> const& name) {
-                    if (!name)
-                        return;
+            .onConfirm = [this](std::optional<std::string> const& name)
+            {
+                if (!name)
+                    return;
 
-                    Log::info("Creating new file: {}", *name);
-                    if (name->find('/') != std::string::npos)
+                Log::info("Creating new file: {}", *name);
+                if (name->find('/') != std::string::npos)
+                {
+                    Log::error("Invalid file name (cannot contain slashes): {}", *name);
+                    return;
+                }
+                fileEngine_->createFile(
+                    currentPath_.value() / *name,
+                    [this](bool success)
                     {
-                        Log::error("Invalid file name (cannot contain slashes): {}", *name);
-                        return;
-                    }
-                    fileEngine_->createFile(currentPath_.value() / *name, [this](bool success) {
                         if (!success)
                         {
                             Log::error("Failed to create file");
@@ -107,8 +115,9 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         }
                         // Refresh list from server:
                         navigateTo(currentPath_.value());
-                    });
-                },
+                    }
+                );
+            },
         });
     }
     else
@@ -151,7 +160,8 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         "Are you sure you want to delete {} {} {}?:",
         itemSize > 1 ? "the following" : items.front().path.generic_string(),
         itemSize == 1 ? ""s : std::to_string(itemSize),
-        itemSize == 1 ? "" : "items");
+        itemSize == 1 ? "" : "items"
+    );
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
@@ -161,23 +171,51 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 
     confirmDialog_->open(
         {.state = ConfirmDialog::State::Information,
-         .headerText = "Delete Items?",
-         .text = confirmText,
-         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-         .listItems = listItems,
-         .onClose = [items](ConfirmDialog::Button button) {
-             if (button != ConfirmDialog::Button::Yes)
-             {
-                 Log::info("Delete items cancelled");
-                 return;
-             }
+            .headerText = "Delete Items?",
+            .text = confirmText,
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .listItems = listItems,
+            .onClose = [this, items](ConfirmDialog::Button button)
+            {
+                if (button != ConfirmDialog::Button::Yes)
+                {
+                    Log::info("Delete items cancelled");
+                    return;
+                }
 
-             Log::info("Deleting items");
-             // TODO: ...
-         }});
+                std::vector<std::filesystem::path> fullPaths;
+                std::transform(
+                    items.begin(),
+                    items.end(),
+                    std::back_inserter(fullPaths),
+                    [this](auto const& item)
+                    {
+                        return (currentPath_.value() / item.path).generic_string();
+                    }
+                );
+
+                Log::info("Deleting items");
+                fileEngine_->remove(
+                    fullPaths,
+                    [this](bool success)
+                    {
+                        if (!success)
+                        {
+                            Log::error("Failed to delete files");
+                            return;
+                        }
+                        // Refresh list from server:
+                        onRefresh();
+                    }
+                );
+            }}
+    );
 }
 
-void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items)
+void RemoteSideModel::onTransfer(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir
+)
 {
     CHECK_COMPLETE();
 
@@ -195,13 +233,17 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
 
     const auto itemsSize = items.size();
 
-    const auto destinationDir = localModel_->currentPath().value();
+    auto destinationDir = localModel_->currentPath().value();
+    if (subDir)
+        destinationDir /= *subDir;
+
     std::string confirmText = fmt::format(
         "Are you sure you want to download {} {} {} to {}?:",
         itemsSize > 1 ? "the following" : items.front().path.generic_string(),
         itemsSize == 1 ? "" : std::to_string(itemsSize),
         itemsSize == 1 ? "" : "items",
-        destinationDir.generic_string());
+        destinationDir.generic_string()
+    );
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
@@ -211,48 +253,56 @@ void RemoteSideModel::onTransfer(std::vector<NuiFileExplorer::Item> const& items
 
     confirmDialog_->open(
         {.state = ConfirmDialog::State::Information,
-         .headerText = "Download Items?",
-         .text = confirmText,
-         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-         .listItems = listItems,
-         .onClose = [this, items, destinationDir](ConfirmDialog::Button button) {
-             if (button != ConfirmDialog::Button::Yes)
-             {
-                 Log::info("Download items cancelled");
-                 return;
-             }
+            .headerText = "Download Items?",
+            .text = confirmText,
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .listItems = listItems,
+            .onClose = [this, items, destinationDir](ConfirmDialog::Button button)
+            {
+                if (button != ConfirmDialog::Button::Yes)
+                {
+                    Log::info("Download items cancelled");
+                    return;
+                }
 
-             std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems;
-             std::transform(
-                 items.begin(),
-                 items.end(),
-                 std::back_inserter(downloadItems),
-                 [this, destinationDir](auto const& item) {
-                     // TODO: Proper target path handling:
-                     return std::make_pair(currentPath_.value() / item.path, destinationDir / item.path.filename());
-                 });
+                std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems;
+                std::transform(
+                    items.begin(),
+                    items.end(),
+                    std::back_inserter(downloadItems),
+                    [this, destinationDir](auto const& item)
+                    {
+                        // TODO: Proper target path handling:
+                        return std::make_pair(currentPath_.value() / item.path, destinationDir / item.path.filename());
+                    }
+                );
 
-             Log::info("Downloading items");
-             for (const auto& item : downloadItems)
-             {
-                 Log::info("Downloading '{}' to '{}'", item.first.generic_string(), item.second.generic_string());
-                 operationQueue_->enqueueDownload(
-                     item.first, item.second, [this](std::optional<Ids::OperationId> const& opId) {
-                         if (!opId)
-                         {
-                             Log::error("Failed to create download operation");
-                             confirmDialog_->open({
-                                 .state = ConfirmDialog::State::Negative,
-                                 .headerText = "Download Failed",
-                                 .text = "Failed to create download operation",
-                                 .buttons = ConfirmDialog::Button::Ok,
-                             });
-                             return;
-                         }
-                         Log::info("Download operation created with id: {}", opId->value());
-                     });
-             }
-         }});
+                Log::info("Downloading items");
+                for (const auto& item : downloadItems)
+                {
+                    Log::info("Downloading '{}' to '{}'", item.first.generic_string(), item.second.generic_string());
+                    operationQueue_->enqueueDownload(
+                        item.first,
+                        item.second,
+                        [this](std::optional<Ids::OperationId> const& opId)
+                        {
+                            if (!opId)
+                            {
+                                Log::error("Failed to create download operation");
+                                confirmDialog_->open({
+                                    .state = ConfirmDialog::State::Negative,
+                                    .headerText = "Download Failed",
+                                    .text = "Failed to create download operation",
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                                return;
+                            }
+                            Log::info("Download operation created with id: {}", opId->value());
+                        }
+                    );
+                }
+            }}
+    );
 }
 
 void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
@@ -266,14 +316,33 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
         .prompt = "Enter the new name for " + item.path.filename().string(),
         .headerText = "Rename " + item.path.filename().string(),
         .isPassword = false,
-        .onConfirm =
-            [item](std::optional<std::string> const& name) {
-                if (!name)
-                    return;
+        .onConfirm = [this, item](std::optional<std::string> const& name)
+        {
+            if (!name)
+                return;
 
-                Log::info("Renaming item to: {}", *name);
-                // TODO: ...
-            },
+            Log::info("Renaming item to: {}", *name);
+
+            std::filesystem::path fullFrom = currentPath_.value() / item.path;
+            std::filesystem::path fullTo = currentPath_.value() / *name;
+
+            fileEngine_->rename(
+                fullFrom,
+                fullTo,
+                [this, fullFrom, fullTo](bool success)
+                {
+                    if (!success)
+                    {
+                        Log::error(
+                            "Failed to rename item '{}' to '{}'", fullFrom.generic_string(), fullTo.generic_string()
+                        );
+                        return;
+                    }
+                    Log::info("Renamed item '{}' to '{}'", fullFrom.generic_string(), fullTo.generic_string());
+                    onRefresh();
+                }
+            );
+        },
     });
 }
 
@@ -295,5 +364,6 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     preNavigatePath_ = currentPath_.value();
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
-        currentPath_.value(), std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1));
+        currentPath_.value(), std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1)
+    );
 }

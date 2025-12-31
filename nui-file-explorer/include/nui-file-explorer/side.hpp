@@ -37,6 +37,8 @@ namespace NuiFileExplorer
         Side(Side&&);
         Side& operator=(Side&&);
 
+        void initialize(Side& otherSide);
+
         ISideModel& model();
 
         /**
@@ -120,7 +122,7 @@ namespace NuiFileExplorer
 
       private:
         std::unique_ptr<SideImplementation> impl_;
-        IconFlavor iconFlavor_;
-        TableFlavor tableFlavor_;
+        std::unique_ptr<IconFlavor> iconFlavor_;
+        std::unique_ptr<TableFlavor> tableFlavor_;
     };
 }

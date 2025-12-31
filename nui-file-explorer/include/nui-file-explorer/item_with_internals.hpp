@@ -46,9 +46,14 @@ namespace NuiFileExplorer
             return item.path.filename() != "..";
         }
 
+        auto observeClassRelevant(auto&& fn) const
+        {
+            return Nui::observe(selected, searchHighlighted, isDropHovered).generate(std::forward<decltype(fn)>(fn));
+        }
+
         auto observeSelected(auto&& fn) const
         {
-            return Nui::observe(selected, searchHighlighted).generate(std::forward<decltype(fn)>(fn));
+            return Nui::observe(selected).generate(std::forward<decltype(fn)>(fn));
         }
 
       public:
@@ -62,6 +67,7 @@ namespace NuiFileExplorer
             Muted
         };
         Nui::Observed<SearchHighlight> searchHighlighted{SearchHighlight::Off};
+        Nui::Observed<bool> isDropHovered{false};
 
       private:
         // Private so no one can bypass the selection manager:

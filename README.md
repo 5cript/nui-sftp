@@ -59,14 +59,20 @@ Still under construction :construction:
 - [x] Table view.
 - [x] Split UI into local and remote views.
 - [x] Box drag select.
+- [ ] Better indication that on drag drop, all selected items are being dragged.
+- [ ] Auto refresh after operation idle.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Resize left vs right.
 - [ ] Upload drag and drop (within view and perhaps into the app).
 - [ ] Download drag and drop (within view and perhaps outside the app).
+- [ ] Same side drag and drop for moving files locally or remotely.
 - [x] Searching files.
 - [x] Sorting files.
 - [x] Keyboard input.
 - [ ] Persist mode as part of layout.
 - [x] Sorting modes in icon view / sort menu.
 - [x] Context menu for file operations.
+- [x] Delete remote files (empty dirs and files).
+- [ ] Delete remote files deep (non empty dirs) -> operation queue.
+- [x] Rename remote file.
 - [ ] ...Miscellaneous menu items.

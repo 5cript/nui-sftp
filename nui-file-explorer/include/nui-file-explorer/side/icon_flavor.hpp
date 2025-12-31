@@ -6,6 +6,7 @@
 #include <nui/frontend/api/mouse_event.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/frontend/api/resize_observer.hpp>
+#include <nui/frontend/api/drag_event.hpp>
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
@@ -19,7 +20,7 @@ namespace NuiFileExplorer
       public:
         static constexpr std::chrono::milliseconds boxDragMinimumTimeToDifferentiateClick{150};
 
-        IconFlavor(Side& impl);
+        IconFlavor(Side& impl, Side& otherSide);
         Nui::ElementRenderer operator()() override;
 
       private:
@@ -43,6 +44,7 @@ namespace NuiFileExplorer
 
         // Used to prevent click events after drag box.
         bool shallClick_{true};
+        bool boxDragActive_{false};
 
         std::unique_ptr<Nui::WebApi::ResizeObserver> gridLayoutObserver_{};
     };

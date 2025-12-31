@@ -58,7 +58,10 @@ namespace NuiFileExplorer
         std::unique_ptr<ISideModel> rightModel
     )
         : impl_(std::make_unique<Implementation>(settings, std::move(leftModel), std::move(rightModel)))
-    {}
+    {
+        impl_->leftSide.initialize(impl_->rightSide);
+        impl_->rightSide.initialize(impl_->leftSide);
+    }
     FileGrid::~FileGrid() = default;
     FileGrid::FileGrid(FileGrid&&) = default;
     FileGrid& FileGrid::operator=(FileGrid&&) = default;

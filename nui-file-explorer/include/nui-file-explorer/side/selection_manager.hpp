@@ -43,6 +43,8 @@ namespace NuiFileExplorer
 
         void selectRange(std::size_t begin, std::size_t endInclusive);
 
+        std::vector<Item> selectedItems() const;
+
       private:
         class GridPosition
         {

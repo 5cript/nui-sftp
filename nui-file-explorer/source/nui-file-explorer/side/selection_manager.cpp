@@ -105,6 +105,13 @@ namespace NuiFileExplorer
     {
         currentFlavor_ = flavor;
     }
+    std::vector<Item> SelectionManager::selectedItems() const
+    {
+        std::vector<Item> result{};
+        for (auto index : selectedIndices_)
+            result.push_back(items_->value()[index].item);
+        return result;
+    }
     void SelectionManager::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event)
     {
         if (event.ctrlKey())

@@ -274,3 +274,91 @@ void SftpFileEngine::addUpload(
         }
     );
 }
+
+void SftpFileEngine::remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete)
+{
+    Log::info("Requesting to remove {} items", paths.size());
+
+    std::vector<std::string> transformedPaths;
+    transformedPaths.resize(paths.size());
+    std::transform(
+        paths.begin(),
+        paths.end(),
+        transformedPaths.begin(),
+        [](std::filesystem::path const& p)
+        {
+            return p.generic_string();
+        }
+    );
+
+    lazyOpen(
+        [this,
+            onComplete = std::move(onComplete),
+            transformedPaths = std::move(transformedPaths)](auto const& channelId)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add upload, no channel");
+                onComplete(false);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::deleteFiles", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to delete files: {}", val["error"].as<std::string>());
+                        onComplete(false);
+                        return;
+                    }
+                    onComplete(true);
+                },
+                channelId.value().value(),
+                transformedPaths
+            );
+        }
+    );
+}
+void SftpFileEngine::rename(
+    std::filesystem::path const& oldPath,
+    std::filesystem::path const& newPath,
+    std::function<void(bool)> onComplete
+)
+{
+    Log::info("Requesting to rename file: {} -> {}", oldPath.generic_string(), newPath.generic_string());
+
+    lazyOpen(
+        [this, oldPath, newPath, onComplete = std::move(onComplete)](auto const& channelId)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot rename file, no channel");
+                onComplete(false);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::rename", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to rename file: {}", val["error"].as<std::string>());
+                        onComplete(false);
+                        return;
+                    }
+                    onComplete(true);
+                },
+                channelId.value().value(),
+                oldPath.generic_string(),
+                newPath.generic_string()
+            );
+        }
+    );
+}

@@ -10,7 +10,7 @@ namespace NuiFileExplorer
     class TableFlavor : public FlavorImplementation
     {
       public:
-        TableFlavor(Side& impl);
+        TableFlavor(Side& impl, Side& otherSide);
         Nui::ElementRenderer operator()() override;
     };
 }

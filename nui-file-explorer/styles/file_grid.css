@@ -132,6 +132,7 @@
     & img {
         position: relative;
         cursor: pointer;
+        pointer-events: none;
     }
 
     & div {
@@ -140,6 +141,7 @@
         font-size: small;
         word-break: break-word;
         cursor: default;
+        pointer-events: none;
     }
 }
 
@@ -219,6 +221,13 @@
             rgba(255, 255, 255, 0.8),
             rgba(255, 255, 255, 0.35));
     border: 1px solid var(--nui-file-grid-border-color);
+}
+
+.nui-file-grid-item-icons.drop-hovered {
+    background:
+        linear-gradient(145deg,
+            hsla(241, 82%, 49%, 0.55),
+            rgba(255, 255, 255, 0.05));
 }
 
 .nui-file-grid-head {
@@ -356,6 +365,10 @@
             #000 20%);
 
     filter: saturate(75%) brightness(90%);
+}
+
+.nui-file-grid-table-row.drop-hovered {
+    background-color: var(--nui-file-grid-table-cell-background, #3d2cd6);
 }
 
 .nui-file-grid-table-row.is-muted:hover {

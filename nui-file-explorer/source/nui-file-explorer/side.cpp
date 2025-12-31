@@ -5,6 +5,8 @@
 #include <nui/frontend/api/console.hpp>
 #include <nui/event_system/listen.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
+#include <nui/frontend/api/mouse_event.hpp>
+#include <nui/frontend/api/drag_event.hpp>
 
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
@@ -45,9 +47,14 @@ namespace NuiFileExplorer
 
     Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
         : impl_(std::make_unique<SideImplementation>(std::move(settings), std::move(model)))
-        , iconFlavor_{*this}
-        , tableFlavor_{*this}
+        , iconFlavor_{}
+        , tableFlavor_{}
     {}
+    void Side::initialize(Side& otherSide)
+    {
+        iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
+        tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
+    }
     Side::~Side() = default;
     Side::Side(Side&&) = default;
     Side& Side::operator=(Side&&) = default;
@@ -112,9 +119,9 @@ namespace NuiFileExplorer
                     observe(impl_->flavor),
                     [this]() -> Nui::ElementRenderer {
                         if (impl_->flavor.value() == Flavor::Icons)
-                            return iconFlavor_();
+                            return (*iconFlavor_)();
                         if (impl_->flavor.value() == Flavor::Table)
-                            return tableFlavor_();
+                            return (*tableFlavor_)();
                         return div{}();
                     }
                 )
@@ -346,7 +353,7 @@ namespace NuiFileExplorer
                     closeMenus();
                     if (impl_->contextMenuClickItems.empty())
                         impl_->model->onError("No items selected"s);
-                    impl_->model->onTransfer(impl_->contextMenuClickItems);
+                    impl_->model->onTransfer(impl_->contextMenuClickItems, std::nullopt);
                     impl_->contextMenuClickItems = {};
                 }
             }(

@@ -3,8 +3,8 @@
 
 namespace NuiFileExplorer
 {
-    TableFlavor::TableFlavor(Side& impl)
-        : FlavorImplementation{impl}
+    TableFlavor::TableFlavor(Side& impl, Side& otherSide)
+        : FlavorImplementation{impl, otherSide}
     {}
 
     Nui::ElementRenderer TableFlavor::operator()()
@@ -143,7 +143,7 @@ namespace NuiFileExplorer
             }(
                 impl().items.map([this, contextMenu](auto index, auto& item){
                     return div{
-                        class_ = item.observeSelected([&item](){
+                        class_ = item.observeClassRelevant([&item](){
                             return fmt::format("nui-file-grid-table-row {} {}", item.isSelected() ? "selected" : "",
                                 item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
                                 : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
@@ -161,6 +161,9 @@ namespace NuiFileExplorer
                         reference = [&item](std::weak_ptr<Nui::Dom::BasicElement> ref) {
                             item.element = ref;
                         },
+                        draggable = item.observeSelected([&item]() {
+                            return item.isSelected() ? "true" : "false";
+                        }),
                         "data-index"_attr = std::to_string(index)
                     }(
                         div{
