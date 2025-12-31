@@ -368,7 +368,7 @@
 }
 
 .nui-file-grid-table-row.drop-hovered {
-    background-color: var(--nui-file-grid-table-cell-background, #3d2cd6);
+    background-color: #3d2cd6;
 }
 
 .nui-file-grid-table-row.is-muted:hover {
@@ -468,7 +468,6 @@
     }
 
     &>span {
-        user-select: text;
         overflow: hidden;
     }
 }

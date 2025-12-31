@@ -1,6 +1,8 @@
 #include <nui-file-explorer/side/table_flavor.hpp>
 #include <nui-file-explorer/side.hpp>
 
+#include <nui/frontend/api/json.hpp>
+
 namespace NuiFileExplorer
 {
     TableFlavor::TableFlavor(Side& impl, Side& otherSide)
@@ -128,7 +130,11 @@ namespace NuiFileExplorer
                     gridTemplateColumns += colWidth;
                 }
                 return "grid-template-columns: " + gridTemplateColumns + ";";
-            })
+            }),
+            "drop"_event = [this](Nui::WebApi::DragEvent dropEvent) {
+                onDrop(std::move(dropEvent), std::nullopt);
+            },
+            allowDrop,
         }(
             div{
                 class_ = "nui-file-grid-table-header"
@@ -144,10 +150,10 @@ namespace NuiFileExplorer
                 impl().items.map([this, contextMenu](auto index, auto& item){
                     return div{
                         class_ = item.observeClassRelevant([&item](){
-                            return fmt::format("nui-file-grid-table-row {} {}", item.isSelected() ? "selected" : "",
+                            return fmt::format("nui-file-grid-table-row {} {} {}", item.isSelected() ? "selected" : "",
                                 item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
                                 : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
-                                : "");
+                                : "", item.isDropHovered.value() ? "drop-hovered" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -164,7 +170,33 @@ namespace NuiFileExplorer
                         draggable = item.observeSelected([&item]() {
                             return item.isSelected() ? "true" : "false";
                         }),
-                        "data-index"_attr = std::to_string(index)
+                        "data-index"_attr = std::to_string(index),
+                        "dragstart"_event = [this](Nui::WebApi::DragEvent event){
+                            Nui::WebApi::Console::log(event.val());
+                            event.stopPropagation();
+
+                            auto dataTransferOpt = event.dataTransfer();
+                            if (!dataTransferOpt.has_value())
+                            {
+                                Nui::WebApi::Console::log("Cannot set data transfer opt, because its nullish.");
+                                return;
+                            }
+
+                            Nui::val info = Nui::val::object();
+                            info.set("isLeft", side_->model().isLeft());
+                            dataTransferOpt->setData("application/json", Nui::JSON::stringify(info));
+                        },
+                        "drop"_event = [this, &item](Nui::WebApi::DragEvent event){
+                            item.isDropHovered = false;
+                            onDrop(std::move(event), item.item);
+                        },
+                        "dragenter"_event = [&item](Nui::WebApi::DragEvent){
+                            if (item.item.type == Item::Type::Directory)
+                                item.isDropHovered = true;
+                        },
+                        "dragleave"_event = [&item](Nui::WebApi::DragEvent){
+                            item.isDropHovered = false;
+                        },
                     }(
                         div{
                             class_ = "nui-file-grid-table-cell",
