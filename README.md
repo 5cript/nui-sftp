@@ -44,9 +44,9 @@ Still under construction :construction:
 - [x] Single file uploads.
 - [ ] Bulk uploads.
 - [x] Delete file.
-- [ ] Rename file.
-- [ ] Create file.
-- [ ] Create directory.
+- [x] Rename file.
+- [x] Create file.
+- [x] Create directory.
 - [ ] Show file properties.
 - [ ] Optimize download speed.
 - [ ] Optimize upload speed.
@@ -63,8 +63,8 @@ Still under construction :construction:
 - [ ] Auto refresh after operation idle.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Resize left vs right.
-- [ ] Upload drag and drop (within view and perhaps into the app).
-- [ ] Download drag and drop (within view and perhaps outside the app).
+- [x] Upload drag and drop (within view and perhaps into the app).
+- [x] Download drag and drop (within view and perhaps outside the app).
 - [ ] Same side drag and drop for moving files locally or remotely.
 - [x] Searching files.
 - [x] Sorting files.
@@ -75,4 +75,11 @@ Still under construction :construction:
 - [x] Delete remote files (empty dirs and files).
 - [ ] Delete remote files deep (non empty dirs) -> operation queue.
 - [x] Rename remote file.
+- [ ] Fix scroll context menu offset.
+- [ ] Make Context menu pretty
 - [ ] ...Miscellaneous menu items.
+- [ ] Open files with associated application.
+- [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
+- [ ] File previews:
+  - [ ] Image preview (image as icon?)
+  - [ ] Text preview
