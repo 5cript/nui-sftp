@@ -60,7 +60,7 @@ Still under construction :construction:
 - [x] Split UI into local and remote views.
 - [x] Box drag select.
 - [ ] Better indication that on drag drop, all selected items are being dragged.
-- [ ] Auto refresh after operation idle.
+- [x] Auto refresh after operation complete.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Resize left vs right.
 - [x] Upload drag and drop (within view and perhaps into the app).

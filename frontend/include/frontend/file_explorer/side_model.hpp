@@ -60,6 +60,12 @@ class SideModel : public NuiFileExplorer::ISideModel
     {
         return currentPath_;
     }
+    void goBack() override
+    {
+        if (preNavigatePath_.empty())
+            return;
+        navigateTo(preNavigatePath_);
+    }
 
   protected:
     // Design smell:

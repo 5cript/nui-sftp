@@ -138,6 +138,9 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
 }
 void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 {
+    if (items.empty())
+        return;
+
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
     {
@@ -211,6 +214,9 @@ void LocalSideModel::onTransfer(
 )
 {
     CHECK_COMPLETE();
+
+    if (items.empty())
+        return;
 
     Log::info("Upload items requested: {}", items.size());
     for (const auto& item : items)
@@ -291,6 +297,7 @@ void LocalSideModel::onTransfer(
             }}
     );
 }
+
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     Log::info("Rename item requested: {}", item.path.generic_string());
@@ -333,7 +340,7 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 
                 Log::info("Item renamed successfully");
                 // Refresh list:
-                navigateTo(currentPath_.value());
+                onRefresh();
             },
             args
         );

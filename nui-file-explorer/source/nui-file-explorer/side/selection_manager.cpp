@@ -35,8 +35,6 @@ namespace NuiFileExplorer
     {
         if (index >= items_->value().size())
             return false;
-        if (!items_->value()[index].isSelectable())
-            return false;
         if (selectedIndices_.empty())
             currentSelectionStart_ = index;
         selectedIndices_.insert(index);
@@ -109,7 +107,10 @@ namespace NuiFileExplorer
     {
         std::vector<Item> result{};
         for (auto index : selectedIndices_)
-            result.push_back(items_->value()[index].item);
+        {
+            if (items_->value()[index].isSelectable())
+                result.push_back(items_->value()[index].item);
+        }
         return result;
     }
     void SelectionManager::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event)
@@ -296,8 +297,6 @@ namespace NuiFileExplorer
                 // TODO:
                 return true;
             }
-            if (!position.isSelectable())
-                position.up();
             if (event.ctrlKey())
             {
                 select(position.normalized().toIndex());
@@ -350,8 +349,6 @@ namespace NuiFileExplorer
                 // TODO:
                 return true;
             }
-            if (!position.isSelectable())
-                position.down();
             if (event.ctrlKey())
             {
                 select(position.normalized().toIndex());
@@ -378,26 +375,25 @@ namespace NuiFileExplorer
         const auto itemsInFullRows = fullRows * gridColumns_;
         return totalItems - itemsInFullRows;
     }
-    bool SelectionManager::isIndexUnselectedSelectable(std::make_signed_t<std::size_t> index) const
+    bool SelectionManager::isIndexUnselected(std::make_signed_t<std::size_t> index) const
     {
         if (index < 0)
             return false;
         if (index >= static_cast<std::make_signed_t<std::size_t>>(items_->value().size()))
             return false;
-        return !isSelected(static_cast<std::size_t>(index)) &&
-            items_->value()[static_cast<std::size_t>(index)].isSelectable();
+        return !isSelected(static_cast<std::size_t>(index));
     }
-    bool SelectionManager::isIndexUnselectedSelectable(std::size_t index) const
+    bool SelectionManager::isIndexUnselected(std::size_t index) const
     {
         if (index >= items_->value().size())
             return false;
-        return !isSelected(index) && items_->value()[index].isSelectable();
+        return !isSelected(index);
     }
     std::optional<std::size_t> SelectionManager::findNextSelectable(std::size_t index) const
     {
         auto newIndex = index + 1;
 
-        for (; newIndex < items_->value().size() && !isIndexUnselectedSelectable(newIndex); ++newIndex)
+        for (; newIndex < items_->value().size() && !isIndexUnselected(newIndex); ++newIndex)
         {}
 
         if (newIndex < items_->value().size())
@@ -410,7 +406,7 @@ namespace NuiFileExplorer
                 return std::nullopt;
 
             newIndex = *firstSelectable;
-            for (; newIndex < index && !isIndexUnselectedSelectable(newIndex); ++newIndex)
+            for (; newIndex < index && !isIndexUnselected(newIndex); ++newIndex)
             {}
 
             if (newIndex < index)
@@ -423,7 +419,7 @@ namespace NuiFileExplorer
         auto newIndex = static_cast<std::make_signed_t<std::size_t>>(index) - 1;
         auto signedIndex = static_cast<std::make_signed_t<std::size_t>>(index);
 
-        for (; newIndex >= 0 && !isIndexUnselectedSelectable(newIndex); --newIndex)
+        for (; newIndex >= 0 && !isIndexUnselected(newIndex); --newIndex)
         {}
 
         if (newIndex >= 0)
@@ -436,7 +432,7 @@ namespace NuiFileExplorer
                 return std::nullopt;
 
             newIndex = static_cast<std::make_signed_t<std::size_t>>(*lastSelectable);
-            for (; newIndex > signedIndex && !isIndexUnselectedSelectable(newIndex); --newIndex)
+            for (; newIndex > signedIndex && !isIndexUnselected(newIndex); --newIndex)
             {}
 
             if (newIndex > signedIndex)
@@ -472,25 +468,12 @@ namespace NuiFileExplorer
     {
         if (items_->value().empty())
             return std::nullopt;
-
-        for (std::size_t i = 0; i != std::min(maxSelectableSearchAttempts, items_->value().size()); ++i)
-        {
-            if (items_->value()[i].isSelectable())
-                return i;
-        }
-        return std::nullopt;
+        return 0;
     }
     std::optional<std::size_t> SelectionManager::findLastSelectable() const
     {
         if (items_->value().empty())
             return std::nullopt;
-
-        for (std::size_t i = 0; i != std::min(maxSelectableSearchAttempts, items_->value().size()); ++i)
-        {
-            if (items_->value()[items_->value().size() - i - 1].isSelectable())
-                return items_->value().size() - i - 1;
-        }
-
-        return std::nullopt;
+        return items_->value().size() - 1;
     }
 }

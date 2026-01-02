@@ -277,10 +277,10 @@ void RemoteSideModel::onTransfer(
                     }
                 );
 
-                Log::info("Downloading items");
+                Log::info("Downloading items.");
                 for (const auto& item : downloadItems)
                 {
-                    Log::info("Downloading '{}' to '{}'", item.first.generic_string(), item.second.generic_string());
+                    Log::info("Downloading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
                     operationQueue_->enqueueDownload(
                         item.first,
                         item.second,

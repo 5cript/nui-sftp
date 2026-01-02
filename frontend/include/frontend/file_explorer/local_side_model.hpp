@@ -30,5 +30,8 @@ class LocalSideModel : public SideModel
     void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries) override;
 
   private:
+    void enqueueRefresh(bool otherModel);
+
+  private:
     SideModel* remoteModel_{nullptr};
 };

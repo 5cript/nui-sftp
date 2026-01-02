@@ -139,17 +139,11 @@ namespace NuiFileExplorer
                     normalCol() >= static_cast<CoordinateType>(manager_->itemsInLastRow()))
                     ++row_;
             }
-            bool isUnselectedSelectable() const
+            bool isUnselected() const
             {
                 if (!isValid())
                     return false;
-                return manager_->isIndexUnselectedSelectable(toIndex());
-            }
-            bool isSelectable() const
-            {
-                if (!isValid())
-                    return false;
-                return !manager_->isSelected(toIndex());
+                return manager_->isIndexUnselected(toIndex());
             }
             bool isSelected() const
             {
@@ -172,8 +166,8 @@ namespace NuiFileExplorer
         std::optional<std::size_t> findLastSelectable() const;
         std::optional<std::size_t> findNextSelectable(std::size_t index) const;
         std::optional<std::size_t> findPreviousSelectable(std::size_t index) const;
-        bool isIndexUnselectedSelectable(std::make_signed_t<std::size_t> index) const;
-        bool isIndexUnselectedSelectable(std::size_t index) const;
+        bool isIndexUnselected(std::make_signed_t<std::size_t> index) const;
+        bool isIndexUnselected(std::size_t index) const;
         GridPosition calculateGridPositionFromIndex(std::size_t index) const;
         std::size_t itemsInLastRow() const;
 

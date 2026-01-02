@@ -33,6 +33,9 @@ class RemoteSideModel : public SideModel
     bool isComplete() const override;
 
   private:
+    void enqueueRefresh(bool otherModel);
+
+  private:
     std::unique_ptr<FileEngine> fileEngine_{nullptr};
     SideModel* localModel_{nullptr};
 };

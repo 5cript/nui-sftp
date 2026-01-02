@@ -108,7 +108,7 @@ struct Session::Implementation
             std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog),
         }
         , fileExplorer{}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog}
+        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(&fileGrid.rightModel())}
         , operationQueueElement{}
         , layoutHost{}
         , layoutName{std::move(layoutName)}

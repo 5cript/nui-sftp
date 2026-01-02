@@ -17,10 +17,21 @@
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 
+#include <frontend/components/progress_bar.hpp>
+#include <frontend/components/svg/play.hpp>
+#include <frontend/components/svg/pause.hpp>
+#include <frontend/components/svg/download.hpp>
+#include <frontend/components/svg/upload.hpp>
+#include <frontend/components/svg/scan.hpp>
+#include <frontend/components/svg/scan_animated.hpp>
+
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <chrono>
+
+class LocalSideModel;
+class RemoteSideModel;
 
 class OperationQueue
 {
@@ -31,7 +42,10 @@ class OperationQueue
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         std::string persistenceSessionName,
-        ConfirmDialog* confirmDialog);
+        ConfirmDialog* confirmDialog,
+        LocalSideModel* localModel,
+        RemoteSideModel* remoteModel
+    );
 
     ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
 
@@ -40,18 +54,22 @@ class OperationQueue
     void enqueueDownload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    );
     void enqueueUpload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    );
     void enqueueRename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    );
     void enqueueDelete(
         std::filesystem::path const& path,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete);
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    );
 
     Nui::ElementRenderer operator()();
 
@@ -65,6 +83,8 @@ class OperationQueue
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
+
+    void addCustomActionOperation(std::function<void()>);
 
   private:
     struct Implementation;

@@ -111,5 +111,10 @@ namespace NuiFileExplorer
          * @brief Triggered when an error occurs.
          */
         virtual void onError(std::string const& error) = 0;
+
+        /**
+         * @brief Goes back to the previous path, if any.
+         */
+        virtual void goBack() = 0;
     };
 }

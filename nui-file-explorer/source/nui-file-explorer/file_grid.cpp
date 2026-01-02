@@ -98,6 +98,15 @@ namespace NuiFileExplorer
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
+    ISideModel& FileGrid::leftModel()
+    {
+        return impl_->leftSide.model();
+    }
+    ISideModel& FileGrid::rightModel()
+    {
+        return impl_->rightSide.model();
+    }
+
     Nui::ElementRenderer FileGrid::operator()(std::vector<Nui::Attribute>&& attributes)
     {
         using namespace std::string_literals;

@@ -69,6 +69,39 @@ namespace NuiFileExplorer
             }
         );
 
+        if (event.key() == "F5")
+        {
+            closeMenus();
+            impl_->model->onRefresh();
+            return;
+        }
+        if (event.key() == "F2")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (selectedItems.size() == 1)
+                impl_->model->onRename(selectedItems.front());
+            return;
+        }
+        if (event.key() == "Delete")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (!selectedItems.empty())
+                impl_->model->onDelete(selectedItems);
+            return;
+        }
+        if (event.key() == "Enter")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (selectedItems.size() == 1)
+                impl_->model->onActivateItem(selectedItems.front());
+            return;
+        }
+        if (event.key() == "Backspace")
+        {
+            impl_->model->goBack();
+            return;
+        }
+
         if (!impl_->selectionManager.onKeyboardEvent(event))
             actionWasTaken.disarm();
     }
@@ -211,7 +244,7 @@ namespace NuiFileExplorer
         std::vector<Item> result{};
         for (auto const& item : impl_->items.value())
         {
-            if (item.isSelected())
+            if (item.isSelected() && item.isSelectable())
                 result.push_back(item.item);
         }
         return result;
@@ -297,8 +330,6 @@ namespace NuiFileExplorer
                 ),
                 impl_->contextMenuClickItems.end()
             );
-
-            // contextMenuClickItems
 
             menu->val()["style"].set("display", "block");
             menu->val()["style"].set("top", std::to_string(top) + "px");

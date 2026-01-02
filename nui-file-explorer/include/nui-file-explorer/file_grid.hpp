@@ -46,6 +46,9 @@ namespace NuiFileExplorer
         Side& leftSide();
         Side& rightSide();
 
+        ISideModel& leftModel();
+        ISideModel& rightModel();
+
         /**
          * @brief Only visually, does not change what the methods leftSide and rightSide return.
          */
