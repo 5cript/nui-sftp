@@ -113,7 +113,7 @@ namespace NuiFileExplorer
                 onUneventfulClick();
             }
         );
-        attributes.emplace_back(class_ = "nui-file-grid");
+        attributes.emplace_back(class_ = "nui-file-grid nui-file-grid-background");
 
         impl_->checkReferencesForGrab();
 

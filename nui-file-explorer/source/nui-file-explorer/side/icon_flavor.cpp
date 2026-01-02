@@ -188,7 +188,7 @@ namespace NuiFileExplorer
 
         // clang-format off
         return div {
-            class_ = "nui-file-grid-icons nui-file-grid-gradient",
+            class_ = "nui-file-grid-icons",
             onClick = [this](Nui::WebApi::MouseEvent event) {
                 if (shallClick_)
                     side_->onUneventfulClick();
