@@ -267,8 +267,8 @@ namespace NuiFileExplorer
 
     void Side::onUneventfulClick()
     {
-        closeMenus();
-        impl_->selectionManager.deselectAll();
+        if (!closeMenus())
+            impl_->selectionManager.deselectAll();
     }
 
     std::vector<Item> Side::selectedItems() const
@@ -282,14 +282,19 @@ namespace NuiFileExplorer
         return result;
     }
 
-    void Side::closeMenus()
+    bool Side::closeMenus()
     {
         impl_->newItemMenu.close();
         impl_->sortMenu.close();
         impl_->viewMenu.close();
 
         if (const auto menu = impl_->contextMenuView.lock(); menu)
+        {
+            bool wasOpen = menu->val()["style"]["display"].as<std::string>() != "none";
             menu->val()["style"].set("display", "none");
+            return wasOpen;
+        }
+        return false;
     }
 
     std::pair<int /*x*/, int /*y*/> Side::calculateContextMenuPosition(Nui::val const& event)

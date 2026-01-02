@@ -105,8 +105,10 @@ namespace NuiFileExplorer
 
         /**
          * @brief Closes all menus without deselecting items.
+         *
+         * @return Returns whether or not the context menu was closed.
          */
-        void closeMenus();
+        bool closeMenus();
 
         Nui::ElementRenderer operator()();
 
