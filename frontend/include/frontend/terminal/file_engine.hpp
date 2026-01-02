@@ -28,12 +28,16 @@ class FileEngine
     virtual void addDownload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        bool allowOverwrite,
+        bool insertRefresh
     ) = 0;
     virtual void addUpload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        bool allowOverwrite,
+        bool insertRefresh
     ) = 0;
 
     virtual void remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete) = 0;
@@ -41,6 +45,11 @@ class FileEngine
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
         std::function<void(bool)> onComplete
+    ) = 0;
+
+    virtual void stat(
+        std::filesystem::path const& path,
+        std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
     ) = 0;
 
     virtual void dispose() = 0;

@@ -10,16 +10,6 @@ RemoteSideModel::RemoteSideModel(
     : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
 {}
 
-void RemoteSideModel::engine(std::unique_ptr<FileEngine> fileEngine)
-{
-    fileEngine_ = std::move(fileEngine);
-}
-
-FileEngine* RemoteSideModel::engine()
-{
-    return fileEngine_.get();
-}
-
 void RemoteSideModel::setLocalModel(SideModel* model)
 {
     localModel_ = model;
@@ -27,7 +17,7 @@ void RemoteSideModel::setLocalModel(SideModel* model)
 
 bool RemoteSideModel::isComplete() const
 {
-    return fileEngine_ != nullptr && localModel_ != nullptr && SideModel::isComplete();
+    return localModel_ != nullptr && SideModel::isComplete();
 }
 
 void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
@@ -212,6 +202,165 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     );
 }
 
+void RemoteSideModel::enqueueSingleDownload(
+    std::filesystem::path const& remotePath,
+    std::filesystem::path const& localPath,
+    bool allowOverwrite,
+    bool insertRefresh
+)
+{
+    operationQueue_->enqueueDownload(
+        remotePath,
+        localPath,
+        [this](std::optional<Ids::OperationId> const& opId)
+        {
+            if (!opId)
+            {
+                Log::error("Failed to create download operation");
+                confirmDialog_->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Download Failed",
+                    .text = "Failed to create download operation",
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+            Log::info("Download operation created with id: {}", opId->value());
+        },
+        allowOverwrite,
+        insertRefresh
+    );
+}
+
+void RemoteSideModel::downloadItemsConfirmed(
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems,
+    std::size_t index,
+    bool overwriteNever,
+    bool overwriteAlways
+)
+{
+    if (index == downloadItems.size())
+        return;
+
+    if (overwriteAlways)
+    {
+        for (; index < downloadItems.size(); ++index)
+            enqueueSingleDownload(
+                downloadItems[index].first,
+                downloadItems[index].second,
+                overwriteAlways,
+                index + 1 == downloadItems.size()
+            );
+        return;
+    }
+
+    const auto fileToCheckFor = downloadItems[index].second.generic_string();
+    auto onExistsResponse = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
+                                Nui::val response
+                            ) mutable
+    {
+        Nui::WebApi::Console::log("RpcFilesystem::exists val: ", response);
+
+        auto const& item = downloadItems[index];
+
+        if (!response.hasOwnProperty("success"))
+        {
+            Log::error("Invalid response from RpcFilesystem::exists");
+            confirmDialog_->open({
+                .state = ConfirmDialog::State::Negative,
+                .headerText = "Check File Existence Failed",
+                .text = "Invalid response from backend",
+                .buttons = ConfirmDialog::Button::Ok,
+            });
+            return;
+        }
+
+        const auto success = response["success"].as<bool>();
+        if (!success || !response.hasOwnProperty("exists") || response["exists"].isNull() ||
+            response["exists"].isUndefined())
+        {
+            const auto error = response["error"].as<std::string>();
+            Log::error("Failed to check file existence: {}", error);
+            confirmDialog_->open({
+                .state = ConfirmDialog::State::Negative,
+                .headerText = "Check File Existence Failed",
+                .text = error,
+                .buttons = ConfirmDialog::Button::Ok,
+            });
+            return;
+        }
+
+        const auto exists = response["exists"].as<bool>();
+
+        Log::info("Downloading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
+        if (exists && !overwriteNever)
+        {
+            Log::info("File already exists: {}", item.second.generic_string());
+            confirmDialog_->open(
+                {.state = ConfirmDialog::State::Information,
+                    .headerText = "File already exists, overwrite?",
+                    .text = "Allow overwriting this file?  Do note that bulk downloads in subdirectories might cause "
+                            "multiple files to be overwritten.",
+                    .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
+                        ConfirmDialog::Button::None,
+                    .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
+                    .onClose = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
+                                   ConfirmDialog::Button button
+                               ) mutable
+                    {
+                        if (button == ConfirmDialog::Button::Yes)
+                        {
+                            enqueueSingleDownload(
+                                downloadItems[index].first,
+                                downloadItems[index].second,
+                                true,
+                                index + 1 == downloadItems.size()
+                            );
+                            downloadItemsConfirmed(
+                                std::move(downloadItems), index + 1, overwriteNever, overwriteAlways
+                            );
+                        }
+                        else if (button == ConfirmDialog::Button::No)
+                        {
+                            Log::info(
+                                "Skipping download of existing file: {}", downloadItems[index].second.generic_string()
+                            );
+                            downloadItemsConfirmed(
+                                std::move(downloadItems), index + 1, overwriteNever, overwriteAlways
+                            );
+                        }
+                        else if (button == ConfirmDialog::Button::All)
+                        {
+                            Log::info("Overwriting all existing files from now on.");
+                            enqueueSingleDownload(
+                                downloadItems[index].first,
+                                downloadItems[index].second,
+                                true,
+                                index + 1 == downloadItems.size()
+                            );
+                            downloadItemsConfirmed(std::move(downloadItems), index + 1, overwriteNever, true);
+                        }
+                        else if (button == ConfirmDialog::Button::None)
+                        {
+                            Log::info("Skipping all existing files from now on.");
+                            downloadItemsConfirmed(std::move(downloadItems), index + 1, true, overwriteAlways);
+                        }
+                    }}
+            );
+            return;
+        }
+
+        if (!exists)
+            enqueueSingleDownload(item.first, item.second, false, index + 1 == downloadItems.size());
+        downloadItemsConfirmed(std::move(downloadItems), index + 1, overwriteNever, overwriteAlways);
+    };
+
+    Nui::val args = Nui::val::object();
+    args.set("path", fileToCheckFor);
+
+    Nui::RpcClient::callWithBackChannel("RpcFilesystem::exists", onExistsResponse, args);
+}
+
 void RemoteSideModel::onTransfer(
     std::vector<NuiFileExplorer::Item> const& items,
     std::optional<std::string> const& subDir
@@ -272,35 +421,12 @@ void RemoteSideModel::onTransfer(
                     std::back_inserter(downloadItems),
                     [this, destinationDir](auto const& item)
                     {
-                        // TODO: Proper target path handling:
                         return std::make_pair(currentPath_.value() / item.path, destinationDir / item.path.filename());
                     }
                 );
 
                 Log::info("Downloading items.");
-                for (const auto& item : downloadItems)
-                {
-                    Log::info("Downloading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
-                    operationQueue_->enqueueDownload(
-                        item.first,
-                        item.second,
-                        [this](std::optional<Ids::OperationId> const& opId)
-                        {
-                            if (!opId)
-                            {
-                                Log::error("Failed to create download operation");
-                                confirmDialog_->open({
-                                    .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Download Failed",
-                                    .text = "Failed to create download operation",
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
-                            Log::info("Download operation created with id: {}", opId->value());
-                        }
-                    );
-                }
+                downloadItemsConfirmed(downloadItems);
             }}
     );
 }

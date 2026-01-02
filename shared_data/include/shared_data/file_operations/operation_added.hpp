@@ -13,9 +13,10 @@ namespace SharedData
     {
         Ids::OperationId operationId;
         OperationType type;
+        bool insertRefresh{false};
         std::optional<std::uint64_t> totalBytes{std::nullopt};
         std::optional<std::filesystem::path> localPath{};
         std::optional<std::filesystem::path> remotePath{};
     };
-    BOOST_DESCRIBE_STRUCT(OperationAdded, (), (operationId, type, totalBytes, localPath, remotePath))
+    BOOST_DESCRIBE_STRUCT(OperationAdded, (), (operationId, type, totalBytes, localPath, remotePath, insertRefresh))
 }

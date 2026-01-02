@@ -347,6 +347,7 @@ void Session::openSftp()
             Log::info("Opening SFTP by default");
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
             remoteSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
+            localSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().operationQueue(&impl_->operationQueue);

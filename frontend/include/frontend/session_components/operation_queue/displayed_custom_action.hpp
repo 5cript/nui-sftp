@@ -15,7 +15,7 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),
-              true
+              false
           }
         , action_{[alreadyPerformed = false,
                       action = std::move(action)](std::optional<Ids::OperationId> const& id) mutable
@@ -35,12 +35,12 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
 
     std::string statusText() const override
     {
-        return "";
+        return "Refresh File Explorer";
     }
 
     std::string title() const override
     {
-        return "";
+        return "Refresh File Explorer";
     }
 
     void state(SharedData::OperationState state) override
@@ -63,7 +63,9 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
         }(
             div {
                 style = "margin-top: 8px; font-size: 13px; color: var(--muted);"
-            }()
+            }(
+                "Refreshing the file explorer to show the latest changes."
+            )
         );
         // clang-format on
     }

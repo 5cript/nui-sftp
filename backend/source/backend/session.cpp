@@ -50,6 +50,7 @@ void Session::start()
             self->registerOperationQueuePauseUnpause();
             self->registerRpcSftpDeleteFiles();
             self->registerRpcSftpRename();
+            self->registerRpcSftpStat();
             self->operationQueue_->registerRpc();
 
             Log::info("Session '{}' connected", self->id_.value());
@@ -514,7 +515,9 @@ void Session::registerRpcSftpAddDownloadOperation()
                 std::string const& channelIdString,
                 std::string const& newOperationIdString,
                 std::string const& remotePath,
-                std::string const& localPath
+                std::string const& localPath,
+                bool allowOverwrite,
+                bool insertRefresh
             )
             {
                 auto self = weak.lock();
@@ -523,16 +526,24 @@ void Session::registerRpcSftpAddDownloadOperation()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), newOperationIdString, localPath, remotePath](
-                        RpcHelper::RpcOnce&& reply, auto&& channel
-                    )
+                    [weak = self->weak_from_this(),
+                        newOperationIdString,
+                        localPath,
+                        remotePath,
+                        allowOverwrite,
+                        insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
                             return reply({{"error", "Session no longer exists"}});
 
                         const auto result = self->operationQueue_->addDownloadOperation(
-                            *channel, Ids::makeOperationId(newOperationIdString), localPath, remotePath
+                            *channel,
+                            Ids::makeOperationId(newOperationIdString),
+                            localPath,
+                            remotePath,
+                            allowOverwrite,
+                            insertRefresh
                         );
 
                         if (!result.has_value())
@@ -571,7 +582,9 @@ void Session::registerRpcSftpAddUploadOperation()
                 std::string const& channelIdString,
                 std::string const& newOperationIdString,
                 std::string const& localPath,
-                std::string const& remotePath
+                std::string const& remotePath,
+                bool allowOverwrite,
+                bool insertRefresh
             )
             {
                 auto self = weak.lock();
@@ -580,16 +593,24 @@ void Session::registerRpcSftpAddUploadOperation()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), newOperationIdString, localPath, remotePath](
-                        RpcHelper::RpcOnce&& reply, auto&& channel
-                    )
+                    [weak = self->weak_from_this(),
+                        newOperationIdString,
+                        localPath,
+                        remotePath,
+                        allowOverwrite,
+                        insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
                             return reply({{"error", "Session no longer exists"}});
 
                         const auto result = self->operationQueue_->addUploadOperation(
-                            *channel, Ids::makeOperationId(newOperationIdString), localPath, remotePath
+                            *channel,
+                            Ids::makeOperationId(newOperationIdString),
+                            localPath,
+                            remotePath,
+                            allowOverwrite,
+                            insertRefresh
                         );
 
                         if (!result.has_value())
@@ -693,7 +714,6 @@ void Session::registerRpcSftpDeleteFiles()
 }
 void Session::registerRpcSftpRename()
 {
-
     on(fmt::format("Session::{}::sftp::rename", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -723,6 +743,48 @@ void Session::registerRpcSftpRename()
                         if (!result.has_value())
                             return reply.error("Failed to rename file: " + result.error().toString());
                         reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpStat()
+{
+    on(fmt::format("Session::{}::sftp::stat", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::string const& path
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(), path](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply.error("Session no longer exists");
+
+                        auto fut = channel->stat(std::filesystem::path{path});
+                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            return reply.error("Failed to stat file: timeout");
+
+                        const auto result = fut.get();
+                        if (!result.has_value())
+                        {
+                            if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+                            {
+                                // File does not exist, return nullopt
+                                return reply({{"success", true}, {"stat", nullptr}});
+                            }
+                            return reply.error("Failed to stat file: " + result.error().toString());
+                        }
+                        reply({{"success", true}, {"stat", *result}});
                     },
                     std::move(reply)
                 );

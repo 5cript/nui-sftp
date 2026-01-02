@@ -1,3 +1,5 @@
+#pragma once
+
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/svg.hpp>

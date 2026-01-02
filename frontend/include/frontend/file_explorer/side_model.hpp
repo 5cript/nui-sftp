@@ -43,6 +43,9 @@ class SideModel : public NuiFileExplorer::ISideModel
     SideModel(SideModel&&) = default;
     SideModel& operator=(SideModel&&) = default;
 
+    void engine(std::unique_ptr<FileEngine> fileEngine);
+    FileEngine* engine();
+
     void operationQueue(OperationQueue* operationQueue);
     OperationQueue* operationQueue();
 
@@ -74,6 +77,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     virtual void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
 
   protected:
+    std::unique_ptr<FileEngine> fileEngine_{nullptr};
     Persistence::UiOptions uiOptions_;
     ConfirmDialog* confirmDialog_;
     InputDialog* inputDialog_;

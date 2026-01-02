@@ -31,7 +31,8 @@ class OperationQueue
         Nui::RpcHub& hub,
         Persistence::SftpOptions sftpOpts,
         Ids::SessionId sessionId,
-        int parallelism = 1);
+        int parallelism = 1
+    );
 
     void cancelAll();
     void cancel(Ids::OperationId id);
@@ -48,13 +49,19 @@ class OperationQueue
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
         std::filesystem::path const& localPath,
-        std::filesystem::path const& remotePath);
+        std::filesystem::path const& remotePath,
+        bool allowOverwrite,
+        bool insertRefresh = true
+    );
 
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
         std::filesystem::path const& localPath,
-        std::filesystem::path const& remotePath);
+        std::filesystem::path const& remotePath,
+        bool allowOverwrite,
+        bool insertRefresh = true
+    );
 
     void registerRpc();
 

@@ -187,6 +187,34 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     }
                     return Nui::nil();
                 }
+            ),
+            fragment(
+                observe(impl_->buttons),
+                [this]() -> Nui::ElementRenderer {
+                    if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::All))
+                    {
+                        return ui5::button{
+                            "click"_event = [this](Nui::val) {
+                                close(Button::All);
+                            }
+                        }("All");
+                    }
+                    return Nui::nil();
+                }
+            ),
+            fragment(
+                observe(impl_->buttons),
+                [this]() -> Nui::ElementRenderer {
+                    if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::None))
+                    {
+                        return ui5::button{
+                            "click"_event = [this](Nui::val) {
+                                close(Button::None);
+                            }
+                        }("None");
+                    }
+                    return Nui::nil();
+                }
             )
         )
     );

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <frontend/session_components/operation_queue.hpp>
+
 #include <frontend/session_components/operation_queue/operation_card_interface.hpp>
 
 #include <ids/ids.hpp>
@@ -11,6 +13,13 @@
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/svg.hpp>
 #include <frontend/components/svg/scan.hpp>
+#include <frontend/components/svg/download.hpp>
+#include <frontend/components/svg/pause.hpp>
+#include <frontend/components/svg/play.hpp>
+#include <frontend/components/svg/refresh.hpp>
+#include <frontend/components/svg/scan_animated.hpp>
+#include <frontend/components/svg/scan.hpp>
+#include <frontend/components/svg/upload.hpp>
 
 #include <utility/convert_naming_convention.hpp>
 #include <utility/visit_overloaded.hpp>
@@ -66,6 +75,11 @@ class OperationCard : public OperationCardInterface
         return fmt::format("status: {}", formattedState());
     }
 
+    SharedData::OperationType type() const override
+    {
+        return type_;
+    }
+
     Nui::ElementRenderer operator()() const override
     {
         using namespace Nui::Elements;
@@ -110,6 +124,10 @@ class OperationCard : public OperationCardInterface
                                 return Svgs::scan();
                             else
                                 return Svgs::scanAnimated();
+                        }
+                        else if (type_ == SharedData::OperationType::CustomAction)
+                        {
+                            return Svgs::refresh();
                         }
                         else
                             return div{}("UnknownType");

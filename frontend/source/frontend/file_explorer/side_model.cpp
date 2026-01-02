@@ -10,9 +10,19 @@ OperationQueue* SideModel::operationQueue()
     return operationQueue_;
 }
 
+void SideModel::engine(std::unique_ptr<FileEngine> fileEngine)
+{
+    fileEngine_ = std::move(fileEngine);
+}
+
+FileEngine* SideModel::engine()
+{
+    return fileEngine_.get();
+}
+
 bool SideModel::isComplete() const
 {
-    return operationQueue_ != nullptr;
+    return operationQueue_ != nullptr && fileEngine_ != nullptr;
 }
 
 void SideModel::setItemUpdateFunction(std::function<void(bool)> doUpdate)

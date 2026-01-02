@@ -180,12 +180,19 @@ void SftpFileEngine::createFile(std::filesystem::path const& path, std::function
 void SftpFileEngine::addDownload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+    bool allowOverwrite,
+    bool insertRefresh
 )
 {
     Log::info("Requesting to add download: {} -> {}", remotePath.generic_string(), localPath.generic_string());
     lazyOpen(
-        [this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId)
+        [this,
+            remotePath,
+            localPath,
+            onOperationCreated = std::move(onOperationCreated),
+            allowOverwrite,
+            insertRefresh](auto const& channelId)
         {
             if (!channelId)
             {
@@ -220,7 +227,9 @@ void SftpFileEngine::addDownload(
                 channelId.value().value(),
                 operationId.value(),
                 remotePath.generic_string(),
-                localPath.generic_string()
+                localPath.generic_string(),
+                allowOverwrite,
+                insertRefresh
             );
         }
     );
@@ -229,12 +238,19 @@ void SftpFileEngine::addDownload(
 void SftpFileEngine::addUpload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated
+    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+    bool allowOverwrite,
+    bool insertRefresh
 )
 {
     Log::info("Requesting to add upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
     lazyOpen(
-        [this, remotePath, localPath, onOperationCreated = std::move(onOperationCreated)](auto const& channelId)
+        [this,
+            remotePath,
+            localPath,
+            onOperationCreated = std::move(onOperationCreated),
+            allowOverwrite,
+            insertRefresh](auto const& channelId)
         {
             if (!channelId)
             {
@@ -269,7 +285,9 @@ void SftpFileEngine::addUpload(
                 channelId.value().value(),
                 operationId.value(),
                 localPath.generic_string(),
-                remotePath.generic_string()
+                remotePath.generic_string(),
+                allowOverwrite,
+                insertRefresh
             );
         }
     );
@@ -345,8 +363,6 @@ void SftpFileEngine::rename(
                 fmt::format("Session::{}::sftp::rename", impl_->engine->sshSessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
-                    Nui::WebApi::Console::log(val);
-
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to rename file: {}", val["error"].as<std::string>());
@@ -358,6 +374,52 @@ void SftpFileEngine::rename(
                 channelId.value().value(),
                 oldPath.generic_string(),
                 newPath.generic_string()
+            );
+        }
+    );
+}
+
+void SftpFileEngine::stat(
+    std::filesystem::path const& path,
+    std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
+)
+{
+    Log::info("Requesting info of file: {}", path.generic_string());
+
+    lazyOpen(
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot stat file, no channel");
+                onComplete(std::nullopt);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::stat", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log("stat val", val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to rename file: {}", val["error"].as<std::string>());
+                        onComplete(std::nullopt);
+                        return;
+                    }
+                    if (!val.hasOwnProperty("stat") || val["stat"].isNull() || val["stat"].isUndefined())
+                    {
+                        onComplete(std::pair<bool /*exists*/, SharedData::DirectoryEntry>{false, {}});
+                        return;
+                    }
+                    onComplete(
+                        std::pair<bool /*exists*/, SharedData::DirectoryEntry>{
+                            true, nlohmann::json::parse(Nui::JSON::stringify(val))["stat"]
+                        }
+                    );
+                },
+                channelId.value().value(),
+                path.generic_string()
             );
         }
     );

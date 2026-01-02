@@ -190,6 +190,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
             doCancel();
         }
     }
+    cleanupCustomActionsAfterId(operation.operationId());
 }
 
 void OperationQueue::activate(FileEngine* fileEngine, Ids::SessionId sessionId)
@@ -353,23 +354,26 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     try
     {
         impl_->operations.insert(added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)});
-        if (added.type == SharedData::OperationType::Download)
+        if (added.insertRefresh)
         {
-            addCustomActionOperation(
-                [this]()
-                {
-                    impl_->localModel->onRefresh();
-                }
-            );
-        }
-        else if (added.type == SharedData::OperationType::Upload)
-        {
-            addCustomActionOperation(
-                [this]()
-                {
-                    impl_->remoteModel->onRefresh();
-                }
-            );
+            if (added.type == SharedData::OperationType::Download)
+            {
+                addCustomActionOperation(
+                    [this]()
+                    {
+                        impl_->localModel->onRefresh();
+                    }
+                );
+            }
+            else if (added.type == SharedData::OperationType::Upload)
+            {
+                addCustomActionOperation(
+                    [this]()
+                    {
+                        impl_->remoteModel->onRefresh();
+                    }
+                );
+            }
         }
     }
     catch (std::exception const& e)
@@ -546,7 +550,13 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                 static_cast<int>(completed.reason)
             );
     }
-    auto iter = impl_->operations.find(completed.operationId);
+    cleanupCustomActionsAfterId(completed.operationId);
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::cleanupCustomActionsAfterId(Ids::OperationId const& id)
+{
+    auto iter = impl_->operations.find(id);
     if (iter != impl_->operations.end())
     {
         ++iter;
@@ -559,7 +569,6 @@ void OperationQueue::onOperationCompleted(Nui::val val)
             iter->get()->state(SharedData::OperationState::Completed);
         }
     }
-    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
@@ -591,7 +600,7 @@ Nui::ElementRenderer OperationQueue::operator()()
 
     auto makeSummaryText = [this]() -> std::string
     {
-        return fmt::format("{} total operations", impl_->operations.observedValues().value().size());
+        return fmt::format("{} total operations", static_cast<int>(impl_->operations.observedValues().value().size()));
     };
 
     // clang-format off
@@ -683,7 +692,9 @@ Nui::ElementRenderer OperationQueue::operator()()
 void OperationQueue::enqueueDownload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+    bool allowOverwrite,
+    bool insertRefresh
 )
 {
     if (!impl_->fileEngine)
@@ -694,12 +705,14 @@ void OperationQueue::enqueueDownload(
     }
 
     Log::info("Frontend Operation Queue download: {} -> {}", remotePath.generic_string(), localPath.generic_string());
-    impl_->fileEngine->addDownload(remotePath, localPath, std::move(onComplete));
+    impl_->fileEngine->addDownload(remotePath, localPath, std::move(onComplete), allowOverwrite, insertRefresh);
 }
 void OperationQueue::enqueueUpload(
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+    bool allowOverwrite,
+    bool insertRefresh
 )
 {
     if (!impl_->fileEngine)
@@ -710,7 +723,7 @@ void OperationQueue::enqueueUpload(
     }
 
     Log::info("Frontend Operation Queue upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
-    impl_->fileEngine->addUpload(remotePath, localPath, std::move(onComplete));
+    impl_->fileEngine->addUpload(remotePath, localPath, std::move(onComplete), allowOverwrite, insertRefresh);
 }
 void OperationQueue::enqueueRename(
     std::filesystem::path const&,

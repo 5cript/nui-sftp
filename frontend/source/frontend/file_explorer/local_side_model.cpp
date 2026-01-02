@@ -271,29 +271,7 @@ void LocalSideModel::onTransfer(
                 );
 
                 Log::info("Uploading items");
-                for (const auto& item : uploadItems)
-                {
-                    Log::info("Uploading '{}' to '{}'", item.second.generic_string(), item.first.generic_string());
-                    operationQueue_->enqueueUpload(
-                        item.first /* remote */,
-                        item.second /* local */,
-                        [this](std::optional<Ids::OperationId> const& opId)
-                        {
-                            if (!opId)
-                            {
-                                Log::error("Failed to create upload operation");
-                                confirmDialog_->open({
-                                    .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Upload Failed",
-                                    .text = "Failed to create upload operation",
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
-                            Log::info("Upload operation created with id: {}", opId->value());
-                        }
-                    );
-                }
+                uploadItemsConfirmed(uploadItems);
             }}
     );
 }
@@ -502,6 +480,147 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
             onDirectoryListing(directoryEntries);
         },
         args
+    );
+}
+
+void LocalSideModel::uploadItemsConfirmed(
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems,
+    std::size_t index,
+    bool overwriteNever,
+    bool overwriteAlways
+)
+{
+    if (index == uploadItems.size())
+        return;
+
+    if (overwriteAlways)
+    {
+        for (; index < uploadItems.size(); ++index)
+            enqueueSingleUpload(
+                uploadItems[index].first, uploadItems[index].second, overwriteAlways, index + 1 == uploadItems.size()
+            );
+        return;
+    }
+
+    fileEngine_->stat(
+        uploadItems[index].first,
+        [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
+            std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& entry
+        ) mutable
+        {
+            if (!entry)
+            {
+                Log::error("Failed to stat file: {}", uploadItems[index].first.generic_string());
+                confirmDialog_->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Upload Failed",
+                    .text = "Failed to get file information: " + uploadItems[index].first.generic_string(),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            auto const& item = uploadItems[index];
+
+            Log::debug(
+                "File '{}' {} exist on remote side. OverwriteNever: {}, OverwriteAlways: {}",
+                item.second.generic_string(),
+                entry->first ? "does" : "does not",
+                overwriteNever,
+                overwriteAlways
+            );
+
+            if (entry->first && !overwriteNever)
+            {
+                Log::info("Uploading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
+                confirmDialog_->open(
+                    {.state = ConfirmDialog::State::Information,
+                        .headerText = "File already exists, overwrite?",
+                        .text = "Allow overwriting this file? Do note that bulk uploads in subdirectories might cause "
+                                "multiple files to be overwritten.",
+                        .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
+                            ConfirmDialog::Button::None,
+                        .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
+                        .onClose = [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
+                                       ConfirmDialog::Button button
+                                   ) mutable
+                        {
+                            if (button == ConfirmDialog::Button::Yes)
+                            {
+                                enqueueSingleUpload(
+                                    uploadItems[index].first,
+                                    uploadItems[index].second,
+                                    true,
+                                    index + 1 == uploadItems.size()
+                                );
+                                uploadItemsConfirmed(
+                                    std::move(uploadItems), index + 1, overwriteNever, overwriteAlways
+                                );
+                            }
+                            else if (button == ConfirmDialog::Button::No)
+                            {
+                                Log::info(
+                                    "Skipping upload of existing file: {}", uploadItems[index].second.generic_string()
+                                );
+                                uploadItemsConfirmed(
+                                    std::move(uploadItems), index + 1, overwriteNever, overwriteAlways
+                                );
+                            }
+                            else if (button == ConfirmDialog::Button::All)
+                            {
+                                Log::info("Overwriting all existing files from now on.");
+                                enqueueSingleUpload(
+                                    uploadItems[index].first,
+                                    uploadItems[index].second,
+                                    true,
+                                    index + 1 == uploadItems.size()
+                                );
+                                uploadItemsConfirmed(std::move(uploadItems), index + 1, overwriteNever, true);
+                            }
+                            else if (button == ConfirmDialog::Button::None)
+                            {
+                                Log::info("Skipping all existing files from now on.");
+                                uploadItemsConfirmed(std::move(uploadItems), index + 1, true, overwriteAlways);
+                            }
+                        }}
+                );
+                return;
+            }
+
+            if (!entry->first)
+                enqueueSingleUpload(item.first, item.second, false, index + 1 == uploadItems.size());
+            uploadItemsConfirmed(std::move(uploadItems), index + 1, overwriteNever, overwriteAlways);
+        }
+    );
+}
+
+void LocalSideModel::enqueueSingleUpload(
+    std::filesystem::path const& remotePath,
+    std::filesystem::path const& localPath,
+    bool allowOverwrite,
+    bool insertRefresh
+)
+{
+    operationQueue_->enqueueUpload(
+        remotePath,
+        localPath,
+        [this](std::optional<Ids::OperationId> const& opId)
+        {
+            if (!opId)
+            {
+                Log::error("Failed to create upload operation");
+                confirmDialog_->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Upload Failed",
+                    .text = "Failed to create upload operation",
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+            Log::info("Upload operation created with id: {}", opId->value());
+        },
+        allowOverwrite,
+        insertRefresh
     );
 }
 

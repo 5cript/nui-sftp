@@ -54,12 +54,16 @@ class OperationQueue
     void enqueueDownload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+        bool allowOverwrite,
+        bool insertRefresh
     );
     void enqueueUpload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+        std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+        bool allowOverwrite,
+        bool insertRefresh
     );
     void enqueueRename(
         std::filesystem::path const& oldPath,
@@ -83,6 +87,7 @@ class OperationQueue
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
+    void cleanupCustomActionsAfterId(Ids::OperationId const& id);
 
     void addCustomActionOperation(std::function<void()>);
 

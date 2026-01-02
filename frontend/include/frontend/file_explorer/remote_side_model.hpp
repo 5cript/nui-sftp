@@ -13,9 +13,6 @@ class RemoteSideModel : public SideModel
   public:
     RemoteSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog);
 
-    void engine(std::unique_ptr<FileEngine> fileEngine);
-    FileEngine* engine();
-
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
@@ -35,7 +32,20 @@ class RemoteSideModel : public SideModel
   private:
     void enqueueRefresh(bool otherModel);
 
+    void downloadItemsConfirmed(
+        std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems,
+        std::size_t index = 0,
+        bool overwriteNever = false,
+        bool overwriteAlways = false
+    );
+
+    void enqueueSingleDownload(
+        std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath,
+        bool allowOverwrite,
+        bool insertRefresh
+    );
+
   private:
-    std::unique_ptr<FileEngine> fileEngine_{nullptr};
     SideModel* localModel_{nullptr};
 };

@@ -141,6 +141,15 @@ class Session
      */
     void registerRpcSftpRename();
 
+    /**
+     * Handles calls from the frontend to stat a file over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     path: string
+     * }
+     */
+    void registerRpcSftpStat();
+
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
     void registerOperationQueuePauseUnpause();
