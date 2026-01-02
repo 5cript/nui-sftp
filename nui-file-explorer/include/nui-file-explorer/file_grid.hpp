@@ -16,9 +16,10 @@ namespace NuiFileExplorer
     {
       public:
         FileGrid(
-            Side::Settings const& settings,
+            SideSettings const& settings,
             std::unique_ptr<ISideModel> leftModel,
-            std::unique_ptr<ISideModel> rightModel);
+            std::unique_ptr<ISideModel> rightModel
+        );
         ~FileGrid();
         FileGrid(const FileGrid&) = delete;
         FileGrid& operator=(const FileGrid&) = delete;
@@ -44,6 +45,9 @@ namespace NuiFileExplorer
 
         Side& leftSide();
         Side& rightSide();
+
+        ISideModel& leftModel();
+        ISideModel& rightModel();
 
         /**
          * @brief Only visually, does not change what the methods leftSide and rightSide return.

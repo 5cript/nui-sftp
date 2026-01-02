@@ -1,9 +1,18 @@
 #include <nui-file-explorer/side.hpp>
-#include <nui-file-explorer/dropdown_menu.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/api/console.hpp>
+#include <nui/event_system/listen.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
+#include <nui/frontend/api/mouse_event.hpp>
+#include <nui/frontend/api/drag_event.hpp>
+
+#include <utility/enum_string_convert.hpp>
+#include <utility/format_bytes.hpp>
+#include <utility/algorithm/case_convert.hpp>
+
+#include <rapidfuzz/fuzz.hpp>
 
 using namespace std::string_literals;
 
@@ -11,116 +20,91 @@ namespace NuiFileExplorer
 {
     namespace
     {
-        struct ItemWithInternals
+        std::vector<std::string> tokenize(std::string const& input)
         {
-            Item item;
-            std::shared_ptr<Nui::Observed<bool>> selected;
-
-            explicit ItemWithInternals(Item const& item)
-                : item{item}
-                , selected{std::make_shared<Nui::Observed<bool>>(false)}
-            {}
-        };
+            std::vector<std::string> result;
+            std::string currentToken;
+            for (char c : input)
+            {
+                if (std::isalnum(c))
+                {
+                    currentToken.push_back(std::tolower(c));
+                }
+                else if (std::isspace(c) || std::ispunct(c))
+                {
+                    if (!currentToken.empty())
+                    {
+                        result.push_back(currentToken);
+                        currentToken.clear();
+                    }
+                }
+            }
+            if (!currentToken.empty())
+                result.push_back(currentToken);
+            return result;
+        }
     }
 
-    struct Side::Implementation
-    {
-        Settings settings;
-        std::unique_ptr<ISideModel> model;
-
-        Nui::Observed<std::vector<ItemWithInternals>> items{};
-        Nui::Observed<Flavor> flavor{Flavor::Icons};
-        Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
-        Nui::Observed<unsigned int> iconSpacing{32u};
-        DropdownMenu newItemMenu{
-            {
-                "File",
-                "Folder",
-                // Soft Link ?
-                // Hard Link ?
-            },
-            [this](std::string const& item) {
-                Nui::Console::log("New clicked: ", item);
-                if (item == "File")
-                {
-                    model->onNewItem(Item::Type::Regular);
-                }
-                else if (item == "Folder")
-                {
-                    model->onNewItem(Item::Type::Directory);
-                }
-            },
-            [this]() {
-                sortMenu.close();
-                viewMenu.close();
-            },
-            "New",
-        };
-        DropdownMenu sortMenu{
-            {
-                "Name",
-                // More...
-            },
-            [this](std::string const& item) {
-                if (item == "Name")
-                {
-                    sortItems();
-                    this->items.modifyNow();
-                }
-            },
-            [this]() {
-                newItemMenu.close();
-                viewMenu.close();
-            },
-            "Sort",
-        };
-        DropdownMenu viewMenu{
-            {
-                "Icons",
-                "Table",
-                "Tiles",
-            },
-            [this](std::string const& item) {
-                if (item == "Icons")
-                    flavor = Flavor::Icons;
-                if (item == "Table")
-                    flavor = Flavor::Table;
-                if (item == "Tiles")
-                    flavor = Flavor::Tiles;
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            },
-            [this]() {
-                newItemMenu.close();
-                sortMenu.close();
-            },
-            "View",
-        };
-
-        std::weak_ptr<Nui::Dom::BasicElement> contextMenuView{};
-        std::vector<Item> contextMenuClickItems{};
-
-        void sortItems()
-        {
-            auto& items = this->items.value();
-            std::sort(items.begin(), items.end(), [](auto const& lhs, auto const& rhs) {
-                if (lhs.item.type != rhs.item.type)
-                    return lhs.item.type > rhs.item.type;
-                return lhs.item.path.filename().string() < rhs.item.path.filename().string();
-            });
-        }
-
-        Implementation(Settings settings, std::unique_ptr<ISideModel> model)
-            : settings{std::move(settings)}
-            , model{std::move(model)}
-        {}
-    };
-
-    Side::Side(Settings settings, std::unique_ptr<ISideModel> model)
-        : impl_(std::make_unique<Implementation>(std::move(settings), std::move(model)))
+    Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
+        : impl_(std::make_unique<SideImplementation>(std::move(settings), std::move(model)))
+        , iconFlavor_{}
+        , tableFlavor_{}
     {}
+    void Side::initialize(Side& otherSide)
+    {
+        iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
+        tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
+    }
     Side::~Side() = default;
     Side::Side(Side&&) = default;
     Side& Side::operator=(Side&&) = default;
+
+    void Side::processKeyboardEvent(Nui::WebApi::KeyboardEvent event)
+    {
+        auto actionWasTaken = Nui::ScopeExit(
+            [&event]() noexcept
+            {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+        );
+
+        if (event.key() == "F5")
+        {
+            closeMenus();
+            impl_->model->onRefresh();
+            return;
+        }
+        if (event.key() == "F2")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (selectedItems.size() == 1)
+                impl_->model->onRename(selectedItems.front());
+            return;
+        }
+        if (event.key() == "Delete")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (!selectedItems.empty())
+                impl_->model->onDelete(selectedItems);
+            return;
+        }
+        if (event.key() == "Enter")
+        {
+            const auto selectedItems = this->selectedItems();
+            if (selectedItems.size() == 1)
+                impl_->model->onActivateItem(selectedItems.front());
+            return;
+        }
+        if (event.key() == "Backspace")
+        {
+            impl_->model->goBack();
+            return;
+        }
+
+        if (!impl_->selectionManager.onKeyboardEvent(event))
+            actionWasTaken.disarm();
+    }
 
     Nui::ElementRenderer Side::operator()()
     {
@@ -130,7 +114,16 @@ namespace NuiFileExplorer
 
         // clang-format off
         return div {
-            class_ = "nui-file-grid-side"
+            class_ = "nui-file-grid-side",
+            style = [this]() -> std::optional<std::string> {
+                if (model().isLeft())
+                    return "border-right: 1px solid var(--nui-file-grid-border-color);";
+                return std::nullopt;
+            }(),
+            "keydown"_event = [this](Nui::WebApi::KeyboardEvent event) {
+                processKeyboardEvent(event);
+            },
+            tabIndex = 0,
         }(
             [this]() -> Nui::ElementRenderer {
                 if (impl_->settings.pathBarOnTop)
@@ -140,20 +133,28 @@ namespace NuiFileExplorer
             headMenu(),
             div{
                 class_ = "nui-file-grid-side-content",
+                style = [this]() -> std::string {
+                    if (model().isLeft())
+                        return "padding-right: 1px;";
+                    return "padding-left: 1px;";
+                }(),
+                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
+                    impl_->scrollContainer_ = ref;
+                }
             }(
                 contextMenu(),
                 div{
                     style = "width: 100%; height: 100%",
                     "contextmenu"_event = [this](Nui::val event) {
-                        onContextMenu(std::nullopt, event);
+                        onContextMenu(nullptr, event);
                     }
                 }(
                     observe(impl_->flavor),
                     [this]() -> Nui::ElementRenderer {
                         if (impl_->flavor.value() == Flavor::Icons)
-                            return iconFlavor();
+                            return (*iconFlavor_)();
                         if (impl_->flavor.value() == Flavor::Table)
-                            return tableFlavor();
+                            return (*tableFlavor_)();
                         return div{}();
                     }
                 )
@@ -172,23 +173,62 @@ namespace NuiFileExplorer
         return *impl_->model;
     }
 
-    void Side::updateItems(bool sorted)
+    void Side::updateItems(bool sorted, bool reapplySelection)
     {
         const auto& items = impl_->model->items();
 
+        auto selectedPaths = impl_->selectionManager.selectedPaths();
+        impl_->selectionManager.loseTrackToAllSelections();
+
+        std::set<std::filesystem::path> pathSet;
+
         impl_->items.value().clear();
-        std::transform(items.begin(), items.end(), std::back_inserter(impl_->items.value()), [](auto const& item) {
-            return ItemWithInternals{item};
-        });
+        std::transform(
+            items.begin(),
+            items.end(),
+            std::back_inserter(impl_->items.value()),
+            [&pathSet](auto const& item)
+            {
+                pathSet.insert(item.path);
+                return ItemWithInternals{item};
+            }
+        );
         if (sorted)
             impl_->sortItems();
 
         impl_->items.modifyNow();
+
+        // TODO: expensive, also do I want this?
+        // reapply selection:
+        if (reapplySelection && !selectedPaths.empty())
+        {
+            std::set<std::filesystem::path> diff;
+            std::set_intersection(
+                pathSet.begin(),
+                pathSet.end(),
+                selectedPaths.begin(),
+                selectedPaths.end(),
+                std::inserter(diff, diff.begin())
+            );
+            for (auto const& path : diff)
+                impl_->selectionManager.select(path);
+        }
+
+        // reapply search
+        if (auto searchTextBox = impl_->searchTextBox_.lock(); searchTextBox)
+        {
+            const auto query = searchTextBox->val()["value"].as<std::string>();
+            if (!query.empty())
+                search(query);
+        }
+
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     void Side::flavor(Flavor value)
     {
         impl_->flavor = value;
+        impl_->selectionManager.setFlavor(value);
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
     Flavor Side::flavor() const
@@ -215,36 +255,18 @@ namespace NuiFileExplorer
         return impl_->iconSpacing.value();
     }
 
-    Nui::ElementRenderer Side::tableFlavor()
+    void Side::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event)
     {
-        using namespace Nui;
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
+        event.stopPropagation();
+        closeMenus();
 
-        return Nui::Elements::div{}();
-    }
-
-    void Side::deselectAll(bool rerender)
-    {
-        for (auto& item : impl_->items.value())
-            *item.selected = false;
-        if (rerender)
-            Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
-    void Side::selectAll(bool rerender)
-    {
-        for (auto& item : impl_->items.value())
-            *item.selected = true;
-        if (rerender)
-            Nui::globalEventContext.executeActiveEventsImmediately();
+        impl_->selectionManager.onItemClicked(item, event);
     }
 
     void Side::onUneventfulClick()
     {
-        deselectAll();
         closeMenus();
+        impl_->selectionManager.deselectAll();
     }
 
     std::vector<Item> Side::selectedItems() const
@@ -252,7 +274,7 @@ namespace NuiFileExplorer
         std::vector<Item> result{};
         for (auto const& item : impl_->items.value())
         {
-            if (item.selected->value())
+            if (item.isSelected() && item.isSelectable())
                 result.push_back(item.item);
         }
         return result;
@@ -268,7 +290,7 @@ namespace NuiFileExplorer
             menu->val()["style"].set("display", "none");
     }
 
-    void Side::onContextMenu(std::optional<Item> const& item, Nui::val event)
+    void Side::onContextMenu(ItemWithInternals* item, Nui::val event)
     {
         using namespace std::string_literals;
 
@@ -276,31 +298,54 @@ namespace NuiFileExplorer
         event.call<void>("preventDefault");
         if (const auto menu = impl_->contextMenuView.lock(); menu)
         {
-            const int targetOffsetTop = event["target"]["offsetTop"].as<int>();
-            const int targetOffsetLeft = event["target"]["offsetLeft"].as<int>();
+            const auto offsetParent = event["target"]["offsetParent"];
+
+            int targetOffsetTop = event["target"]["offsetTop"].as<int>();
+            int targetOffsetLeft = event["target"]["offsetLeft"].as<int>();
+            if (!offsetParent.isUndefined() && !offsetParent.isNull())
+            {
+                for (auto const& cls : offsetParent["classList"])
+                {
+                    if (cls.as<std::string>() == "nui-file-grid-table-cell" ||
+                        cls.as<std::string>() == "nui-file-grid-item-icons")
+                    {
+                        targetOffsetTop = offsetParent["offsetTop"].as<int>() + targetOffsetTop;
+                        targetOffsetLeft = offsetParent["offsetLeft"].as<int>() + targetOffsetLeft;
+                        break;
+                    }
+                }
+            }
             const int offsetY = event["offsetY"].as<int>();
             const int offsetX = event["offsetX"].as<int>();
 
             const auto left = targetOffsetLeft + offsetX;
             const auto top = targetOffsetTop + offsetY;
 
-            if (item)
+            if (item != nullptr)
             {
-                Nui::Console::log("Context menu item: ", item->path.string());
+                Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
                 auto selected = selectedItems();
-                if (std::find_if(selected.begin(), selected.end(), [&item](auto const& i) {
-                        return i.path == item->path;
-                    }) == selected.end())
-                {
-                    deselectAll();
-                    impl_->contextMenuClickItems = {item.value()};
-                }
 
-                impl_->contextMenuClickItems = selected;
+                // "if it does not appear in the selected list..."
+                if (std::find_if(
+                        selected.begin(),
+                        selected.end(),
+                        [&item](auto const& i)
+                        {
+                            return i.path == item->item.path;
+                        }
+                    ) == selected.end())
+                {
+                    impl_->selectionManager.deselectAll();
+                    impl_->selectionManager.select(*item);
+                    impl_->contextMenuClickItems = {item->item};
+                }
+                else
+                    impl_->contextMenuClickItems = selected;
             }
             else
             {
-                Nui::Console::log("Context menu item: none");
+                Nui::WebApi::Console::log("Context menu item: none");
                 impl_->contextMenuClickItems = selectedItems();
             }
             // filter ".." from context menu click items:
@@ -308,12 +353,13 @@ namespace NuiFileExplorer
                 std::remove_if(
                     impl_->contextMenuClickItems.begin(),
                     impl_->contextMenuClickItems.end(),
-                    [](auto const& item) {
+                    [](auto const& item)
+                    {
                         return item.path.filename() == "..";
-                    }),
-                impl_->contextMenuClickItems.end());
-
-            // contextMenuClickItems
+                    }
+                ),
+                impl_->contextMenuClickItems.end()
+            );
 
             menu->val()["style"].set("display", "block");
             menu->val()["style"].set("top", std::to_string(top) + "px");
@@ -337,9 +383,15 @@ namespace NuiFileExplorer
     {
         std::vector<Item> selectedItems = this->selectedItems();
         std::vector<std::filesystem::path> result(selectedItems.size());
-        std::transform(selectedItems.begin(), selectedItems.end(), result.begin(), [](auto const& item) {
-            return item.path;
-        });
+        std::transform(
+            selectedItems.begin(),
+            selectedItems.end(),
+            result.begin(),
+            [](auto const& item)
+            {
+                return item.path;
+            }
+        );
         return result;
     }
 
@@ -362,7 +414,7 @@ namespace NuiFileExplorer
                     closeMenus();
                     if (impl_->contextMenuClickItems.empty())
                         impl_->model->onError("No items selected"s);
-                    impl_->model->onTransfer(impl_->contextMenuClickItems);
+                    impl_->model->onTransfer(impl_->contextMenuClickItems, std::nullopt);
                     impl_->contextMenuClickItems = {};
                 }
             }(
@@ -421,153 +473,6 @@ namespace NuiFileExplorer
         // clang-format on
     }
 
-    Nui::ElementRenderer Side::iconFlavor()
-    {
-        using namespace Nui;
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-
-        // clang-format off
-        return div {
-            class_ = "nui-file-grid-icons",
-            style = Style{
-                "grid-template-columns"_style = observe(impl_->iconSize, impl_->iconSpacing).generate([this]() {
-                    return "repeat(auto-fill, minmax(" + std::to_string(impl_->iconSize.value() + impl_->iconSpacing.value()) +
-                        "px, 1fr))";
-                })
-            },
-            onClick = [this](Nui::val) {
-                onUneventfulClick();
-            },
-            "contextmenu"_event = [this](Nui::val event) {
-                onContextMenu(std::nullopt, event);
-            }
-        }(
-            impl_->items.map([this](auto, auto const& item){
-                return div{
-                    class_ = observe(item.selected).generate([&item](){
-                        if (item.selected->value())
-                            return "nui-file-grid-item-icons selected";
-                        return "nui-file-grid-item-icons";
-                    }),
-                    onDblClick = [this, &item](Nui::val event){
-                        event.call<void>("stopPropagation");
-                        closeMenus();
-                        impl_->model->onActivateItem(item.item);
-                    },
-                    "contextmenu"_event = [this, item = item.item](Nui::val event){
-                        onContextMenu(item, event);
-                    },
-                    onClick = [this, &item](Nui::val event){
-                        event.call<void>("stopPropagation");
-                        closeMenus();
-
-                        if (event["ctrlKey"].as<bool>())
-                        {
-                            *item.selected = !item.selected->value();
-                        }
-                        else if (event["shiftKey"].as<bool>())
-                        {
-                            // find self:
-                            auto self = std::find_if(impl_->items.value().begin(), impl_->items.value().end(), [&item](auto const& i){
-                                return i.item.path == item.item.path;
-                            });
-
-                            // go backwards and forwards until we find another selected item:
-                            auto forwardSeeker = self + 1;
-                            auto backwardSeeker = self - 1;
-                            decltype(self) otherSelected = impl_->items.value().end();
-
-                            if (self == impl_->items.value().end())
-                                return;
-                            if (self == impl_->items.value().begin())
-                                backwardSeeker = impl_->items.value().begin();
-                            else if (self == impl_->items.value().end() - 1)
-                                forwardSeeker = impl_->items.value().end() - 1;
-
-                            while (forwardSeeker != impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-                            {
-                                if (forwardSeeker->selected->value())
-                                {
-                                    otherSelected = forwardSeeker;
-                                    break;
-                                }
-                                if (backwardSeeker->selected->value())
-                                {
-                                    otherSelected = backwardSeeker;
-                                    break;
-                                }
-                                ++forwardSeeker;
-                                --backwardSeeker;
-                            }
-
-                            if (otherSelected == impl_->items.value().end() && forwardSeeker != impl_->items.value().end())
-                            {
-                                for (;forwardSeeker != impl_->items.value().end(); ++forwardSeeker)
-                                {
-                                    if (forwardSeeker->selected->value())
-                                    {
-                                        otherSelected = forwardSeeker;
-                                        break;
-                                    }
-                                }
-                            }
-                            else if (otherSelected == impl_->items.value().end() && backwardSeeker != impl_->items.value().begin())
-                            {
-                                for (;backwardSeeker != impl_->items.value().begin(); --backwardSeeker)
-                                {
-                                    if (backwardSeeker->selected->value())
-                                    {
-                                        otherSelected = backwardSeeker;
-                                        break;
-                                    }
-                                }
-                                if (backwardSeeker == impl_->items.value().begin() && otherSelected == impl_->items.value().end() && backwardSeeker->selected->value())
-                                    otherSelected = impl_->items.value().begin();
-                            }
-
-                            for (auto& item : impl_->items.value())
-                                *item.selected = false;
-                            if (otherSelected != impl_->items.value().end())
-                            {
-                                auto start = std::min(self, otherSelected);
-                                auto end = std::max(self, otherSelected);
-                                auto offset = (end != impl_->items.value().end()) ? 1 : 0;
-                                for (auto it = start; it != end + offset; ++it)
-                                    *it->selected = true;
-                            }
-                            else
-                            {
-                                selectAll();
-                            }
-                        }
-                        else
-                        {
-                            deselectAll();
-                            *item.selected = true;
-                        }
-                    }
-                }(
-                    img{
-                        src = item.item.icon,
-                        alt = "???",
-                        width = observe(impl_->iconSize).generate([this](){
-                            return std::to_string(impl_->iconSize.value());
-                        }),
-                        height = observe(impl_->iconSize).generate([this](){
-                            return std::to_string(impl_->iconSize.value());
-                        }),
-                        style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
-                    }(),
-                    div{
-                    }(item.item.path.filename().string())
-                );
-            })
-        );
-        // clang-format on
-    }
-
     Nui::ElementRenderer Side::headMenu()
     {
         using namespace Nui;
@@ -617,6 +522,7 @@ namespace NuiFileExplorer
                 "keyup"_event = [this](Nui::val event){
                     if (event["key"].as<std::string>() == "Enter")
                         impl_->model->onPathChange(std::filesystem::path{event["target"]["value"].as<std::string>()});
+                    event.call<void>("stopPropagation");
                 }
             }()
         );
@@ -641,9 +547,69 @@ namespace NuiFileExplorer
             }(),
             input{
                 type = "text",
-                placeHolder = "Filter"
+                placeHolder = "Search",
+                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
+                    impl_->searchTextBox_ = ref;
+                },
+                "keyup"_event = [this](Nui::val event){
+                    event.call<void>("stopPropagation");
+                    search(event["target"]["value"].as<std::string>());
+                },
+                "keydown"_event = [](Nui::val event){
+                    event.call<void>("stopPropagation");
+                }
             }()
         );
         // clang-format on
+    }
+
+    void Side::search(std::string query)
+    {
+        if (query.empty())
+        {
+            // Clear all highlights
+            for (auto& item : impl_->items.value())
+                item.searchHighlighted = ItemWithInternals::SearchHighlight::Off;
+            return;
+        }
+
+        constexpr static double hitScore = 90.;
+        constexpr static double minimumScore = 60.;
+
+        Utility::Algorithm::toLowerCaseInplace(query);
+        const auto queryTokens = tokenize(query);
+
+        auto const score = [&queryTokens](auto const& tokens)
+        {
+            double max = 0.;
+            std::vector<std::string>::const_iterator maxToken;
+            for (auto const& query : queryTokens)
+            {
+                for (auto i = std::cbegin(tokens), end = std::cend(tokens); i != end; ++i)
+                {
+                    auto const fuzzScore = rapidfuzz::fuzz::ratio(query, *i);
+                    if (fuzzScore >= hitScore)
+                        return std::make_pair(fuzzScore, i);
+                    auto previousMax = max;
+                    max = std::max(max, fuzzScore);
+                    if (max > previousMax)
+                        maxToken = i;
+                }
+            }
+            return std::make_pair(max, maxToken);
+        };
+
+        for (auto& item : impl_->items.value())
+        {
+            const auto generic = item.item.path.generic_string();
+            if (generic.find(query) != std::string::npos)
+            {
+                item.searchHighlighted = ItemWithInternals::SearchHighlight::Highlight;
+                continue;
+            }
+            const auto reachedScore = score(tokenize(generic));
+            item.searchHighlighted = reachedScore.first >= minimumScore ? ItemWithInternals::SearchHighlight::Highlight
+                                                                        : ItemWithInternals::SearchHighlight::Muted;
+        }
     }
 }

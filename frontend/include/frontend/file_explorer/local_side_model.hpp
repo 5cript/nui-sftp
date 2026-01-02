@@ -15,15 +15,36 @@ class LocalSideModel : public SideModel
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
-    void onTransfer(std::vector<NuiFileExplorer::Item> const& items) override;
+    void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
     void onError(std::string const& error) override;
 
+    bool isLeft() const override
+    {
+        return true;
+    }
     void setRemoteModel(SideModel* model);
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
     void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries) override;
+
+  private:
+    void enqueueRefresh(bool otherModel);
+
+    void uploadItemsConfirmed(
+        std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems,
+        std::size_t index = 0,
+        bool overwriteNever = false,
+        bool overwriteAlways = false
+    );
+
+    void enqueueSingleUpload(
+        std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath,
+        bool allowOverwrite,
+        bool insertRefresh
+    );
 
   private:
     SideModel* remoteModel_{nullptr};

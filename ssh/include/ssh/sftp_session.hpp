@@ -77,7 +77,8 @@ namespace SecureShell
          */
         std::future<std::expected<void, Error>> createDirectory(
             std::filesystem::path const& path,
-            std::filesystem::perms permissions = std::filesystem::perms::owner_all);
+            std::filesystem::perms permissions = std::filesystem::perms::owner_all
+        );
 
         /**
          * @brief Opens a file, creating it if it does not exist, then closes it.
@@ -89,7 +90,8 @@ namespace SecureShell
         std::future<std::expected<void, Error>> createFile(
             std::filesystem::path const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_read |
-                std::filesystem::perms::owner_write);
+                std::filesystem::perms::owner_write
+        );
 
         /**
          * @brief Removes a file.
@@ -106,6 +108,14 @@ namespace SecureShell
          * @return std::future<std::expected<void, Error>>
          */
         std::future<std::expected<void, Error>> removeDirectory(std::filesystem::path const& path);
+
+        /**
+         * @brief Removes everything in the provided paths.
+         *
+         * @param path
+         * @return std::future<std::expected<void, Error>>
+         */
+        std::future<std::expected<void, Error>> removeAll(std::vector<std::filesystem::path> paths);
 
         /**
          * @brief Gets the attributes of a file or directory.

@@ -6,5 +6,15 @@
 
 namespace SharedData
 {
-    BOOST_DEFINE_ENUM_CLASS(OperationType, Scan, Download, BulkDownload, Upload, BulkUpload, Rename, Delete)
+    BOOST_DEFINE_ENUM_CLASS(
+        OperationType,
+        Scan,
+        Download,
+        BulkDownload,
+        Upload,
+        BulkUpload,
+        Rename,
+        Delete,
+        CustomAction
+    )
 }

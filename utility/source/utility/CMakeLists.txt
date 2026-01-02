@@ -33,4 +33,6 @@ target_compile_definitions(utility PRIVATE -DCMD_EXECUTABLE="${CMD}" -DMSYS2_BAS
 target_link_libraries(utility PUBLIC
     core-target
     nlohmann_json::nlohmann_json
+    gimo::gimo
+    fmt
 )

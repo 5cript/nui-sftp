@@ -44,9 +44,9 @@ Still under construction :construction:
 - [x] Single file uploads.
 - [ ] Bulk uploads.
 - [x] Delete file.
-- [ ] Rename file.
-- [ ] Create file.
-- [ ] Create directory.
+- [x] Rename file.
+- [x] Create file.
+- [x] Create directory.
 - [ ] Show file properties.
 - [ ] Optimize download speed.
 - [ ] Optimize upload speed.
@@ -56,9 +56,29 @@ Still under construction :construction:
 
 ## File View UI
 - [x] Grid view.
-- [ ] Table view.
+- [x] Table view.
 - [x] Split UI into local and remote views.
-- [ ] Improve selection of multiple items.
-- [ ] Upload drag and drop.
-- [ ] Download drag and drop?
-- [ ] ...Miscellaneous menu items.
+- [x] Box drag select for icon view.
+- [x] Box drag select for table view.
+- [ ] Better indication that on drag drop, all selected items are being dragged.
+- [x] Auto refresh after operation complete.
+- [ ] Improve arrow navigation with shift and control.
+- [x] Resize left vs right.
+- [x] Upload drag and drop (within view and perhaps into the app).
+- [x] Download drag and drop (within view and perhaps outside the app).
+- [ ] Same side drag and drop for moving files locally or remotely.
+- [x] Searching files.
+- [x] Sorting files.
+- [x] Keyboard input.
+- [ ] Persist mode as part of layout.
+- [x] Sorting modes in icon view / sort menu.
+- [x] Context menu for file operations.
+- [x] Delete remote files (empty dirs and files).
+- [ ] Delete remote files deep (non empty dirs) -> operation queue.
+- [x] Rename remote file.
+- [x] Ask user to overwrite files on upload/download.
+- [ ] Open files with associated application.
+- [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
+- [ ] File previews:
+  - [ ] Image preview (image as icon?)
+  - [ ] Text preview

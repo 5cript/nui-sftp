@@ -10,12 +10,22 @@ OperationQueue* SideModel::operationQueue()
     return operationQueue_;
 }
 
-bool SideModel::isComplete() const
+void SideModel::engine(std::unique_ptr<FileEngine> fileEngine)
 {
-    return operationQueue_ != nullptr;
+    fileEngine_ = std::move(fileEngine);
 }
 
-void SideModel::setItemUpdateFunction(std::function<void(bool)> doUpdate)
+FileEngine* SideModel::engine()
+{
+    return fileEngine_.get();
+}
+
+bool SideModel::isComplete() const
+{
+    return operationQueue_ != nullptr && fileEngine_ != nullptr;
+}
+
+void SideModel::setItemUpdateFunction(std::function<void(bool, bool)> doUpdate)
 {
     refreshCallback_ = std::move(doUpdate);
 }
@@ -38,16 +48,25 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
         return;
     }
 
-    std::erase_if(*directoryEntries, [](auto const& entry) {
-        return entry.path.filename() == ".";
-    });
+    std::erase_if(
+        *directoryEntries,
+        [](auto const& entry)
+        {
+            return entry.path.filename() == ".";
+        }
+    );
 
     std::vector<NuiFileExplorer::Item> items{};
     std::transform(
-        begin(*directoryEntries), end(*directoryEntries), std::back_inserter(items), [this](auto const& entry) {
+        begin(*directoryEntries),
+        end(*directoryEntries),
+        std::back_inserter(items),
+        [this](auto const& entry)
+        {
             return NuiFileExplorer::Item{
                 .path = entry.path,
-                .icon = [&entry, this]() -> std::string {
+                .icon = [&entry, this]() -> std::string
+                {
                     const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
                     if (type == NuiFileExplorer::Item::Type::Directory)
                         return "nui://app.example/icons/folder_main.png";
@@ -66,12 +85,18 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
                 .permissions = entry.permissions,
                 .ownerId = entry.uid,
                 .groupId = entry.gid,
+                .owner = entry.owner,
+                .group = entry.group,
                 .atime = entry.atime,
                 .size = entry.size,
             };
-        });
+        }
+    );
 
     items_ = std::move(items);
     if (refreshCallback_)
-        refreshCallback_(true);
+    {
+        refreshCallback_(true, reapplySelectionOnce_);
+        reapplySelectionOnce_ = false;
+    }
 }

@@ -11,7 +11,8 @@ class SftpFileEngine : public FileEngine
 
     void listDirectory(
         std::filesystem::path const& path,
-        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete) override;
+        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete
+    ) override;
     void dispose() override;
     void createDirectory(std::filesystem::path const& path, std::function<void(bool)> onComplete) override;
     void createFile(std::filesystem::path const& path, std::function<void(bool)> onComplete) override;
@@ -21,11 +22,29 @@ class SftpFileEngine : public FileEngine
     void addDownload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated) override;
+        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        bool allowOverwrite,
+        bool insertRefresh
+    ) override;
     void addUpload(
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated) override;
+        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        bool allowOverwrite,
+        bool insertRefresh
+    ) override;
+
+    void remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete) override;
+    void rename(
+        std::filesystem::path const& oldPath,
+        std::filesystem::path const& newPath,
+        std::function<void(bool)> onComplete
+    ) override;
+
+    void stat(
+        std::filesystem::path const& path,
+        std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
+    ) override;
 
   private:
     void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&)> const& onOpen);

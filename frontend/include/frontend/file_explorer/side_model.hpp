@@ -22,7 +22,8 @@
                 "SideModel is used before the setup is complete. ({}:{} {})", \
                 loc.file_name(), \
                 loc.line(), \
-                loc.function_name()); \
+                loc.function_name() \
+            ); \
             return; \
         } \
     } while (false)
@@ -42,10 +43,13 @@ class SideModel : public NuiFileExplorer::ISideModel
     SideModel(SideModel&&) = default;
     SideModel& operator=(SideModel&&) = default;
 
+    void engine(std::unique_ptr<FileEngine> fileEngine);
+    FileEngine* engine();
+
     void operationQueue(OperationQueue* operationQueue);
     OperationQueue* operationQueue();
 
-    void setItemUpdateFunction(std::function<void(bool)> doUpdate) override;
+    void setItemUpdateFunction(std::function<void(bool, bool)> doUpdate) override;
     const std::vector<NuiFileExplorer::Item>& items() const override;
     void onPathChange(std::filesystem::path const& path) override
     {
@@ -53,11 +57,18 @@ class SideModel : public NuiFileExplorer::ISideModel
     }
     void onRefresh() override
     {
+        reapplySelectionOnce_ = true;
         navigateTo(currentPath_.value());
     }
     Nui::Observed<std::filesystem::path> const& currentPath() const override
     {
         return currentPath_;
+    }
+    void goBack() override
+    {
+        if (preNavigatePath_.empty())
+            return;
+        navigateTo(preNavigatePath_);
     }
 
   protected:
@@ -67,6 +78,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     virtual void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
 
   protected:
+    std::unique_ptr<FileEngine> fileEngine_{nullptr};
     Persistence::UiOptions uiOptions_;
     ConfirmDialog* confirmDialog_;
     InputDialog* inputDialog_;
@@ -74,5 +86,6 @@ class SideModel : public NuiFileExplorer::ISideModel
     OperationQueue* operationQueue_{nullptr};
     Nui::Observed<std::filesystem::path> currentPath_{};
     std::filesystem::path preNavigatePath_{};
-    std::function<void(bool)> refreshCallback_{nullptr};
+    std::function<void(bool, bool)> refreshCallback_{nullptr};
+    bool reapplySelectionOnce_{false};
 };

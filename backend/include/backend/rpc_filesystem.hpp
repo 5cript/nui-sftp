@@ -10,7 +10,8 @@ class RpcFilesystem : public RpcHelper::StrandRpc
         boost::asio::any_io_executor executor,
         Nui::Window& wnd,
         Nui::RpcHub& hub,
-        Persistence::LocalFilesystemOptions options);
+        Persistence::LocalFilesystemOptions options
+    );
 
   private:
     void registerRemove();
@@ -21,6 +22,7 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     void registerCreateDirectory();
     void registerProperties();
     void registerGetHome();
+    void registerDoesExist();
 
   private:
     Persistence::LocalFilesystemOptions options_;

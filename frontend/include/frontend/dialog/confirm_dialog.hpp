@@ -18,6 +18,8 @@ class ConfirmDialog
         Ok = 0b0000'0010,
         Yes = 0b0000'0100,
         No = 0b0000'1000,
+        All = 0b0001'0000,
+        None = 0b0010'0000,
     };
 
     friend auto operator|(Button lhs, Button rhs)

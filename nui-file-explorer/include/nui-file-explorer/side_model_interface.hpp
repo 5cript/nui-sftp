@@ -28,7 +28,14 @@ namespace NuiFileExplorer
          */
         virtual Nui::Observed<std::filesystem::path> const& currentPath() const = 0;
 
-        virtual void setItemUpdateFunction(std::function<void(bool)> doUpdate) = 0;
+        virtual void setItemUpdateFunction(std::function<void(bool, bool)> doUpdate) = 0;
+
+        /**
+         * @brief Returns true if this side model represents the left side.
+         *
+         * @return bool
+         */
+        virtual bool isLeft() const = 0;
 
         /**
          * @brief Navigate to the given (full) path.
@@ -94,13 +101,20 @@ namespace NuiFileExplorer
         virtual void onProperties(Item const& item) = 0;
 
         /**
-         * @brief Triggered when items are requested to be downloaded.
+         * @brief Triggered when items are requested to be downloaded / uploaded.
+         *
+         * @param subDir Optional sub-directory within the current path to transfer into.
          */
-        virtual void onTransfer(std::vector<Item> const& items) = 0;
+        virtual void onTransfer(std::vector<Item> const& items, std::optional<std::string> const& subDir) = 0;
 
         /**
          * @brief Triggered when an error occurs.
          */
         virtual void onError(std::string const& error) = 0;
+
+        /**
+         * @brief Goes back to the previous path, if any.
+         */
+        virtual void goBack() = 0;
     };
 }

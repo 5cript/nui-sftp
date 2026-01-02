@@ -3,6 +3,7 @@
 
 #include <nui/event_system/event_context.hpp>
 #include <nui/event_system/observed_value.hpp>
+#include <nui/frontend/api/dom_rect.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -18,24 +19,49 @@ namespace NuiFileExplorer
         Side rightSide;
 
         Nui::Observed<bool> swapSides{false};
-
         std::function<void(std::string const&)> onError{};
+        std::weak_ptr<Nui::Dom::BasicElement> grabber{};
+        std::weak_ptr<Nui::Dom::BasicElement> grid{};
+        std::weak_ptr<Nui::Dom::BasicElement> divider{};
+        bool dragging{false};
+        Nui::WebApi::AbortController mouseMoveAbort{};
+        Nui::WebApi::AbortController mouseUpAbort{};
+
+        bool checkReferencesForGrab()
+        {
+            auto grabElement = grabber.lock();
+            auto gridElement = grid.lock();
+            auto dividerElement = divider.lock();
+            if (!grabElement || !gridElement || !dividerElement)
+            {
+                mouseUpAbort.abort();
+                mouseMoveAbort.abort();
+                dragging = false;
+                return false;
+            }
+            return true;
+        }
 
         Implementation(
-            Side::Settings const& settings,
+            SideSettings const& settings,
             std::unique_ptr<ISideModel> leftModel,
-            std::unique_ptr<ISideModel> rightModel)
+            std::unique_ptr<ISideModel> rightModel
+        )
             : leftSide{settings, std::move(leftModel)}
             , rightSide{settings, std::move(rightModel)}
         {}
     };
 
     FileGrid::FileGrid(
-        Side::Settings const& settings,
+        SideSettings const& settings,
         std::unique_ptr<ISideModel> leftModel,
-        std::unique_ptr<ISideModel> rightModel)
+        std::unique_ptr<ISideModel> rightModel
+    )
         : impl_(std::make_unique<Implementation>(settings, std::move(leftModel), std::move(rightModel)))
-    {}
+    {
+        impl_->leftSide.initialize(impl_->rightSide);
+        impl_->rightSide.initialize(impl_->leftSide);
+    }
     FileGrid::~FileGrid() = default;
     FileGrid::FileGrid(FileGrid&&) = default;
     FileGrid& FileGrid::operator=(FileGrid&&) = default;
@@ -72,6 +98,15 @@ namespace NuiFileExplorer
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
+    ISideModel& FileGrid::leftModel()
+    {
+        return impl_->leftSide.model();
+    }
+    ISideModel& FileGrid::rightModel()
+    {
+        return impl_->rightSide.model();
+    }
+
     Nui::ElementRenderer FileGrid::operator()(std::vector<Nui::Attribute>&& attributes)
     {
         using namespace std::string_literals;
@@ -80,10 +115,16 @@ namespace NuiFileExplorer
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
-        attributes.emplace_back(onClick = [this](Nui::val) {
-            onUneventfulClick();
-        });
-        attributes.emplace_back(class_ = "nui-file-grid");
+        attributes.emplace_back(
+            onClick =
+                [this](Nui::val)
+            {
+                onUneventfulClick();
+            }
+        );
+        attributes.emplace_back(class_ = "nui-file-grid nui-file-grid-background");
+
+        impl_->checkReferencesForGrab();
 
         // clang-format off
         return div {
@@ -98,10 +139,90 @@ namespace NuiFileExplorer
                     std::swap(left, right);
 
                 return div{
-                    class_ = "nui-file-grid-content"
+                    class_ = "nui-file-grid-content",
+                    reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
+                        impl_->grid = elem;
+                    }
                 }(
                     (*left)(),
-                    (*right)()
+                    (*right)(),
+                    div{
+                        class_ = "nui-file-grid-divider",
+                        reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
+                            impl_->divider = elem;
+                        }
+                    }(),
+                    div{
+                        class_ = "nui-file-grid-grabber",
+                        reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
+                            impl_->grabber = elem;
+
+                            auto options = Nui::val::object();
+                            impl_->mouseMoveAbort = {};
+                            options.set("signal", impl_->mouseMoveAbort.signal().val());
+
+                            Nui::val::global("window").call<void>(
+                                "addEventListener",
+                                "mousemove"s,
+                                Nui::bind(
+                                    [this](Nui::val rawEvent)
+                                    {
+                                        Nui::WebApi::MouseEvent event{std::move(rawEvent)};
+                                        if (!impl_->checkReferencesForGrab())
+                                            return;
+
+                                        if (!impl_->dragging)
+                                            return;
+
+                                        auto grid = impl_->grid.lock();
+                                        auto grabber = impl_->grabber.lock();
+                                        auto divider = impl_->divider.lock();
+
+                                        const auto rect = Nui::WebApi::DomRect{grid->val().call<Nui::val>("getBoundingClientRect")};
+                                        const auto x = event.clientX() - rect.left();
+                                        const auto pct = std::max(10., std::min(90., (x / rect.width()) * 100.));
+
+                                        grid->val()["style"].set(
+                                            "gridTemplateColumns",
+                                            fmt::format("{}% {}% ", pct, 100. - pct)
+                                        );
+                                        grabber->val()["style"].set(
+                                            "left",
+                                            fmt::format("calc({}% - {}px)", pct, grabber->val()["offsetWidth"].as<int>() / 2)
+                                        );
+                                        divider->val()["style"].set(
+                                            "left",
+                                            fmt::format("calc({}% - {}px)", pct, 1)
+                                        );
+                                    },
+                                    std::placeholders::_1
+                                ),
+                                options
+                            );
+
+                            auto options2 = Nui::val::object();
+                            impl_->mouseUpAbort = {};
+                            options2.set("signal", impl_->mouseUpAbort.signal().val());
+
+                            Nui::val::global("window").call<void>(
+                                "addEventListener",
+                                "mouseup"s,
+                                Nui::bind(
+                                    [this](Nui::val)
+                                    {
+                                        if (!impl_->checkReferencesForGrab())
+                                            return;
+                                        impl_->dragging = false;
+                                    },
+                                    std::placeholders::_1
+                                ),
+                                options2
+                            );
+                        },
+                        !("mousedown"_event = [this](Nui::WebApi::MouseEvent) {
+                            impl_->dragging = true;
+                        })
+                    }()
                 );
             }
         );

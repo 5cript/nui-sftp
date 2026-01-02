@@ -5,7 +5,8 @@
 
 DownloadOperation::DownloadOperation(
     std::weak_ptr<SecureShell::IFileStream> fileStream,
-    DownloadOperationOptions options)
+    DownloadOperationOptions options
+)
     : Operation{}
     , fileStream_{std::move(fileStream)}
     , remotePath_{std::move(options.remotePath)}
@@ -261,7 +262,8 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         if (!mayOverwrite_)
         {
             Log::error(
-                "DownloadOperation: File '{}' already exists and may not be overwritten.", localPath_.generic_string());
+                "DownloadOperation: File '{}' already exists and may not be overwritten.", localPath_.generic_string()
+            );
             return enterErrorState({.type = ErrorType::FileExists});
         }
     }
@@ -307,7 +309,8 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     Log::info(
         "DownloadOperation: Prepared download of '{}' to '{}'.",
         remotePath_.generic_string(),
-        localPath_.generic_string());
+        localPath_.generic_string()
+    );
 
     return {};
 }
@@ -319,7 +322,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::cancel(bool ado
         Log::info(
             "DownloadOperation: Download of '{}' to '{}' canceled.",
             remotePath_.generic_string(),
-            localPath_.generic_string());
+            localPath_.generic_string()
+        );
         state_ = OperationState::Canceled;
     }
 
@@ -351,7 +355,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
     if (std::filesystem::exists(localPath_) && !mayOverwrite_)
     {
         Log::error(
-            "DownloadOperation: File '{}' already exists and may not be overwritten.", localPath_.generic_string());
+            "DownloadOperation: File '{}' already exists and may not be overwritten.", localPath_.generic_string()
+        );
         return std::unexpected(Error{.type = ErrorType::FileExists});
     }
 
@@ -403,6 +408,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
     Log::info(
         "DownloadOperation: Finalized download of '{}' to '{}'.",
         remotePath_.generic_string(),
-        localPath_.generic_string());
+        localPath_.generic_string()
+    );
     return {};
 }

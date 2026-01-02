@@ -34,7 +34,8 @@ class Session
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
         Nui::Window& wnd,
         Nui::RpcHub& hub,
-        Persistence::SftpOptions const& sftpOptions);
+        Persistence::SftpOptions const& sftpOptions
+    );
 
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -120,6 +121,35 @@ class Session
      * }
      */
     void registerRpcSftpCreateFile();
+
+    /**
+     * Handles calls from the frontend to delete files over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     paths: vector<string>
+     * }
+     */
+    void registerRpcSftpDeleteFiles();
+
+    /**
+     * Handles calls from the frontend to rename a file over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     oldName: string,
+     *     newName: string
+     * }
+     */
+    void registerRpcSftpRename();
+
+    /**
+     * Handles calls from the frontend to stat a file over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     path: string
+     * }
+     */
+    void registerRpcSftpStat();
+
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
     void registerOperationQueuePauseUnpause();
@@ -131,57 +161,63 @@ class Session
     template <typename FunctionT, typename ReplyCallable>
     void withChannelDo(Ids::ChannelId channelId, FunctionT&& func, ReplyCallable&& reply)
     {
-        within_strand_do([this,
-                          channelId = std::move(channelId),
-                          func = std::forward<FunctionT>(func),
-                          reply = std::forward<ReplyCallable>(reply)]() mutable {
-            if (auto iter = channels_.find(channelId); iter != channels_.end())
+        within_strand_do(
+            [this,
+                channelId = std::move(channelId),
+                func = std::forward<FunctionT>(func),
+                reply = std::forward<ReplyCallable>(reply)]() mutable
             {
-                if (auto channel = iter->second.lock(); channel)
+                if (auto iter = channels_.find(channelId); iter != channels_.end())
                 {
-                    func(std::move(reply), std::move(channel));
+                    if (auto channel = iter->second.lock(); channel)
+                    {
+                        func(std::move(reply), std::move(channel));
+                    }
+                    else
+                    {
+                        Log::error("Failed to lock channel with id: {}", channelId.value());
+                        removeChannel(channelId);
+                        return reply({{"error", "Failed to lock channel"}});
+                    }
                 }
                 else
                 {
-                    Log::error("Failed to lock channel with id: {}", channelId.value());
-                    removeChannel(channelId);
-                    return reply({{"error", "Failed to lock channel"}});
+                    Log::error("No channel found with id: {}", channelId.value());
+                    return reply({{"error", "No channel found with id"}});
                 }
             }
-            else
-            {
-                Log::error("No channel found with id: {}", channelId.value());
-                return reply({{"error", "No channel found with id"}});
-            }
-        });
+        );
     }
 
     template <typename FunctionT, typename ReplyCallable>
     void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, ReplyCallable&& reply)
     {
-        within_strand_do([this,
-                          channelId = std::move(channelId),
-                          func = std::forward<FunctionT>(func),
-                          reply = std::forward<ReplyCallable>(reply)]() mutable {
-            if (auto iter = sftpChannels_.find(channelId); iter != sftpChannels_.end())
+        within_strand_do(
+            [this,
+                channelId = std::move(channelId),
+                func = std::forward<FunctionT>(func),
+                reply = std::forward<ReplyCallable>(reply)]() mutable
             {
-                if (auto channel = iter->second.lock(); channel)
+                if (auto iter = sftpChannels_.find(channelId); iter != sftpChannels_.end())
                 {
-                    func(std::move(reply), std::move(channel));
+                    if (auto channel = iter->second.lock(); channel)
+                    {
+                        func(std::move(reply), std::move(channel));
+                    }
+                    else
+                    {
+                        Log::error("Failed to lock channel with id: {}", channelId.value());
+                        removeSftpChannel(channelId);
+                        return reply({{"error", "Failed to lock channel"}});
+                    }
                 }
                 else
                 {
-                    Log::error("Failed to lock channel with id: {}", channelId.value());
-                    removeSftpChannel(channelId);
-                    return reply({{"error", "Failed to lock channel"}});
+                    Log::error("No channel found with id: {}", channelId.value());
+                    return reply({{"error", "No channel found with id"}});
                 }
             }
-            else
-            {
-                Log::error("No channel found with id: {}", channelId.value());
-                return reply({{"error", "No channel found with id"}});
-            }
-        });
+        );
     }
 
     void doOperationQueueWork();

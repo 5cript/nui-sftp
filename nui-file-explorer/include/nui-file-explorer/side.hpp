@@ -3,8 +3,15 @@
 #include <nui-file-explorer/item.hpp>
 #include <nui-file-explorer/flavor.hpp>
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/item_with_internals.hpp>
+#include <nui-file-explorer/side/side_settings.hpp>
+#include <nui-file-explorer/side/side_implementation.hpp>
+#include <nui-file-explorer/side/icon_flavor.hpp>
+#include <nui-file-explorer/side/table_flavor.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
+#include <nui/frontend/api/mouse_event.hpp>
 
 #include <memory>
 
@@ -13,18 +20,9 @@ namespace NuiFileExplorer
     class Side
     {
       public:
-        struct Settings
-        {
-            bool pathBarOnTop = false;
-        };
-
-        enum class IconSize : unsigned int
-        {
-            Small = 16,
-            Medium = 64,
-            Large = 80,
-            ExtraLarge = 256
-        };
+        friend class FlavorImplementation;
+        friend class IconFlavor;
+        friend class TableFlavor;
 
         /**
          * @brief Construct a new side given settings and model.
@@ -32,19 +30,21 @@ namespace NuiFileExplorer
          * @param settings
          * @param model
          */
-        Side(Settings settings, std::unique_ptr<ISideModel> model);
+        Side(SideSettings settings, std::unique_ptr<ISideModel> model);
         ~Side();
         Side(const Side&) = delete;
         Side& operator=(const Side&) = delete;
         Side(Side&&);
         Side& operator=(Side&&);
 
+        void initialize(Side& otherSide);
+
         ISideModel& model();
 
         /**
          * @brief Pulls items from model and displays them.
          */
-        void updateItems(bool sorted);
+        void updateItems(bool sorted, bool reapplySelection);
 
         /**
          * @brief Determines how the grid should be displayed.
@@ -75,16 +75,6 @@ namespace NuiFileExplorer
          * @brief Returns the spacing between icons in the grid.
          */
         unsigned int iconSpacing() const;
-
-        /**
-         * @brief Deselects all items.
-         */
-        void deselectAll(bool rerender = false);
-
-        /**
-         * @brief Selects all items.
-         */
-        void selectAll(bool rerender = false);
 
         /**
          * @brief Returns all selected items.
@@ -122,15 +112,17 @@ namespace NuiFileExplorer
 
       private:
         Nui::ElementRenderer headMenu();
-        Nui::ElementRenderer iconFlavor();
-        Nui::ElementRenderer tableFlavor();
         Nui::ElementRenderer pathBar();
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
-        void onContextMenu(std::optional<Item> const& item, Nui::val event);
+        void onContextMenu(ItemWithInternals* item, Nui::val event);
+        void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
+        void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
+        void search(std::string query);
 
       private:
-        struct Implementation;
-        std::unique_ptr<Implementation> impl_;
+        std::unique_ptr<SideImplementation> impl_;
+        std::unique_ptr<IconFlavor> iconFlavor_;
+        std::unique_ptr<TableFlavor> tableFlavor_;
     };
 }

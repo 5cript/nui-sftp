@@ -158,7 +158,7 @@ namespace
         }
         else
         {
-            Log::debug("Terminal::received", debugPrint);
+            // Log::debug("Terminal::received", debugPrint);
         }
     }
 }
@@ -184,7 +184,8 @@ struct GenericTerminalChannel
     GenericTerminalChannel(Ids::ChannelId channelId)
         : channelId{std::move(channelId)}
     {
-        doWrite = [this](std::string const& data, bool isUserInput) {
+        doWrite = [this](std::string const& data, bool isUserInput)
+        {
             writeRespectingCache(data, isUserInput);
         };
     }
@@ -225,7 +226,8 @@ void GenericTerminalChannel::writeRespectingCache(std::string const& data, bool 
     }
 
     // Switch writing mode to cacheless:
-    doWrite = [this](std::string const& cacheData, bool cacheIsUserInput) {
+    doWrite = [this](std::string const& cacheData, bool cacheIsUserInput)
+    {
         writeAfterCache(cacheData, cacheIsUserInput);
     };
 
@@ -300,7 +302,8 @@ std::string TerminalChannel::stealTerminal()
 void TerminalChannel::open(
     Nui::val host,
     Persistence::TerminalOptions const& options,
-    std::function<void(bool, std::string const&)> onOpen)
+    std::function<void(bool, std::string const&)> onOpen
+)
 {
     if (isOpen())
         return;
@@ -323,22 +326,28 @@ void TerminalChannel::open(
     term.call<void>(
         "onData",
         Nui::bind(
-            [this](Nui::val data, Nui::val) {
+            [this](Nui::val data, Nui::val)
+            {
                 write(data.as<std::string>(), true);
             },
             std::placeholders::_1,
-            std::placeholders::_2));
+            std::placeholders::_2
+        )
+    );
 
     term.call<void>(
         "onResize",
         Nui::bind(
-            [this](Nui::val obj, Nui::val) {
-                Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
+            [this](Nui::val obj, Nui::val)
+            {
+                // Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
                 if (auto* channel = impl_->channel(); channel)
                     channel->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
             },
             std::placeholders::_1,
-            std::placeholders::_2));
+            std::placeholders::_2
+        )
+    );
 
     if (!impl_->writeCache.empty())
         write("", false);
@@ -425,7 +434,8 @@ Terminal::Terminal(std::unique_ptr<TerminalEngine> engine, bool isMultiChannel)
 {}
 
 void Terminal::iterateAllChannels(
-    std::function<bool(Ids::ChannelId const& channelId, TerminalChannel& channel)> const& handler)
+    std::function<bool(Ids::ChannelId const& channelId, TerminalChannel& channel)> const& handler
+)
 {
     for (auto& [id, channel] : impl_->channels)
     {
@@ -437,7 +447,8 @@ void Terminal::iterateAllChannels(
 void Terminal::createChannel(
     Nui::val host,
     Persistence::TerminalOptions const& options,
-    std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated)
+    std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated
+)
 {
     using namespace std::string_literals;
 
@@ -452,7 +463,8 @@ void Terminal::createChannel(
 
         Log::info("Creating channel using multi-channel engine");
         multiChannelEngine->createChannel(
-            [this, channelId](std::string const& data) {
+            [this, channelId](std::string const& data)
+            {
                 // This should work, because the channel is opened after creation, and no data should be written before
                 if (channelId && *channelId)
                 {
@@ -462,7 +474,8 @@ void Terminal::createChannel(
                     }
                 }
             },
-            [this, channelId](std::string const& data) {
+            [this, channelId](std::string const& data)
+            {
                 // This should work, because the channel is opened after creation, and no data should be written before
                 if (channelId && *channelId)
                 {
@@ -472,7 +485,8 @@ void Terminal::createChannel(
                     }
                 }
             },
-            [this, channelId, onChannelCreated, host, options](std::optional<Ids::ChannelId> const& creationResult) {
+            [this, channelId, onChannelCreated, host, options](std::optional<Ids::ChannelId> const& creationResult)
+            {
                 if (!creationResult)
                 {
                     onChannelCreated(std::nullopt, "Failed to create channel");
@@ -491,7 +505,8 @@ void Terminal::createChannel(
                 }
 
                 [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
-                    **channelId, std::make_unique<TerminalChannel>(multiChannelEngine, **channelId));
+                    **channelId, std::make_unique<TerminalChannel>(multiChannelEngine, **channelId)
+                );
                 if (channelIter == impl_->channels.end())
                 {
                     Log::error("Failed to create channel");
@@ -503,7 +518,8 @@ void Terminal::createChannel(
                 channelIter->second->open(
                     host,
                     options,
-                    [onChannelCreated, channelId = **channelId, host](bool success, std::string const& info) mutable {
+                    [onChannelCreated, channelId = **channelId, host](bool success, std::string const& info) mutable
+                    {
                         if (!success)
                         {
                             onChannelCreated(std::nullopt, info);
@@ -511,8 +527,10 @@ void Terminal::createChannel(
                         }
                         host.call<void>("setAttribute", "data-channelid"s, channelId.value());
                         onChannelCreated(channelId, info);
-                    });
-            });
+                    }
+                );
+            }
+        );
     }
     else
     {
@@ -520,65 +538,81 @@ void Terminal::createChannel(
 
         auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
 
-        singleChannelEngine->open([this, onChannelCreated = std::move(onChannelCreated), host, options](
-                                      bool success, std::string const& infoOrUuid) {
-            if (!success)
+        singleChannelEngine->open(
+            [this, onChannelCreated = std::move(onChannelCreated), host, options](
+                bool success, std::string const& infoOrUuid
+            )
             {
-                Log::error("Failed to open terminal: '{}'", infoOrUuid);
-                onChannelCreated(std::nullopt, infoOrUuid);
-                return;
-            };
+                if (!success)
+                {
+                    Log::error("Failed to open terminal: '{}'", infoOrUuid);
+                    onChannelCreated(std::nullopt, infoOrUuid);
+                    return;
+                };
 
-            const auto channelId = Ids::makeChannelId(infoOrUuid);
-            auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
+                const auto channelId = Ids::makeChannelId(infoOrUuid);
+                auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
 
-            impl_->singleModeChannel = std::make_unique<SingleTerminalChannel>(singleChannelEngine, channelId);
+                impl_->singleModeChannel = std::make_unique<SingleTerminalChannel>(singleChannelEngine, channelId);
 
-            singleChannelEngine->setStderrHandler([this](std::string const& data) {
-                impl_->singleModeChannel->doWrite(data, false);
-            });
-            singleChannelEngine->setStdoutHandler([this](std::string const& data) {
-                // TODO: Add stderr styling mode
-                impl_->singleModeChannel->doWrite(data, false);
-            });
+                singleChannelEngine->setStderrHandler(
+                    [this](std::string const& data)
+                    {
+                        impl_->singleModeChannel->doWrite(data, false);
+                    }
+                );
+                singleChannelEngine->setStdoutHandler(
+                    [this](std::string const& data)
+                    {
+                        // TODO: Add stderr styling mode
+                        impl_->singleModeChannel->doWrite(data, false);
+                    }
+                );
 
-            impl_->singleModeChannel->termId =
-                terminalUtility().call<std::string>("createTerminal", host, asVal(options));
+                impl_->singleModeChannel->termId =
+                    terminalUtility().call<std::string>("createTerminal", host, asVal(options));
 
-            auto term = impl_->singleModeChannel->terminal();
-            if (term.isUndefined())
-            {
-                Log::error("Failed to get terminal with id: '{}", impl_->singleModeChannel->termId);
-                dispose();
-                onChannelCreated(std::nullopt, "Failed to get terminal");
-                return;
+                auto term = impl_->singleModeChannel->terminal();
+                if (term.isUndefined())
+                {
+                    Log::error("Failed to get terminal with id: '{}", impl_->singleModeChannel->termId);
+                    dispose();
+                    onChannelCreated(std::nullopt, "Failed to get terminal");
+                    return;
+                }
+
+                Log::info("Single channel terminal opened with id: '{}'", impl_->singleModeChannel->termId);
+
+                term.call<void>(
+                    "onData",
+                    Nui::bind(
+                        [this](Nui::val data, Nui::val)
+                        {
+                            impl_->singleModeChannel->doWrite(data.as<std::string>(), true);
+                        },
+                        std::placeholders::_1,
+                        std::placeholders::_2
+                    )
+                );
+
+                term.call<void>(
+                    "onResize",
+                    Nui::bind(
+                        [this](Nui::val obj, Nui::val)
+                        {
+                            // Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
+                            impl_->singleModeChannel->engine->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
+                        },
+                        std::placeholders::_1,
+                        std::placeholders::_2
+                    )
+                );
+
+                if (!impl_->singleModeChannel->writeCache.empty())
+                    impl_->singleModeChannel->doWrite("", false);
+                onChannelCreated(channelId, "");
             }
-
-            Log::info("Single channel terminal opened with id: '{}'", impl_->singleModeChannel->termId);
-
-            term.call<void>(
-                "onData",
-                Nui::bind(
-                    [this](Nui::val data, Nui::val) {
-                        impl_->singleModeChannel->doWrite(data.as<std::string>(), true);
-                    },
-                    std::placeholders::_1,
-                    std::placeholders::_2));
-
-            term.call<void>(
-                "onResize",
-                Nui::bind(
-                    [this](Nui::val obj, Nui::val) {
-                        Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
-                        impl_->singleModeChannel->engine->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
-                    },
-                    std::placeholders::_1,
-                    std::placeholders::_2));
-
-            if (!impl_->singleModeChannel->writeCache.empty())
-                impl_->singleModeChannel->doWrite("", false);
-            onChannelCreated(channelId, "");
-        });
+        );
     }
 }
 TerminalChannel* Terminal::channel(Ids::ChannelId const& channelId)
@@ -624,16 +658,19 @@ void Terminal::focus()
 void Terminal::open(std::function<void(bool, std::string const&)> onOpen)
 {
     Log::info("Opening session");
-    impl_->engine->open([this, onOpen = std::move(onOpen)](bool success, std::string const& info) {
-        if (!success)
+    impl_->engine->open(
+        [this, onOpen = std::move(onOpen)](bool success, std::string const& info)
         {
-            Log::error("Failed to open terminal: '{}'", info);
-            dispose();
-            onOpen(false, info);
-            return;
-        };
-        onOpen(true, info);
-    });
+            if (!success)
+            {
+                Log::error("Failed to open terminal: '{}'", info);
+                dispose();
+                onOpen(false, info);
+                return;
+            };
+            onOpen(true, info);
+        }
+    );
 }
 void Terminal::dispose()
 {

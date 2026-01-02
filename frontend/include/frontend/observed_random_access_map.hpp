@@ -75,6 +75,20 @@ class ObservedRandomAccessMap
         return observedValues_.value().at(it->second).get();
     }
 
+    auto find(KeyT const& key)
+    {
+        auto it = keyToIndexMap_.find(key);
+        if (it == keyToIndexMap_.end())
+            return observedValues_.value().end();
+
+        return observedValues_.value().begin() + it->second;
+    }
+
+    auto end()
+    {
+        return observedValues_.value().end();
+    }
+
     template <typename FunctionT>
     void modify(KeyT const& key, FunctionT const& modifier)
     {

@@ -26,6 +26,8 @@ add_library(roar-include-only INTERFACE)
 target_include_directories(roar-include-only INTERFACE "${CMAKE_CURRENT_LIST_DIR}/dependencies/roar/include")
 
 include("${CMAKE_CURRENT_LIST_DIR}/dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
+add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/gimo")
+add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/traits")
 add_subdirectory("${CMAKE_SOURCE_DIR}/constants/source/constants")
 add_subdirectory("${CMAKE_SOURCE_DIR}/ids/source/ids")
 add_subdirectory("${CMAKE_SOURCE_DIR}/shared_data/source/shared_data")

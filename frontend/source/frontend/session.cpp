@@ -108,7 +108,7 @@ struct Session::Implementation
             std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog),
         }
         , fileExplorer{}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog}
+        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(&fileGrid.rightModel())}
         , operationQueueElement{}
         , layoutHost{}
         , layoutName{std::move(layoutName)}
@@ -176,7 +176,8 @@ Session::Session(
     InputDialog* inputDialog,
     ConfirmDialog* confirmDialog,
     std::function<void(Session const*)> closeSelf,
-    bool visible)
+    bool visible
+)
     : impl_{std::make_unique<Implementation>(
           stateHolder,
           events,
@@ -187,7 +188,8 @@ Session::Session(
           inputDialog,
           confirmDialog,
           std::move(closeSelf),
-          visible)}
+          visible
+      )}
 {
     if (std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine))
     {
@@ -210,22 +212,31 @@ Session::Session(
 
 void Session::setupFileGrid()
 {
-    impl_->fileGrid.onError([this](auto const& message) {
-        Log::error("File grid error: {}", message);
-        impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Negative,
-            .headerText = "File Grid Error",
-            .text = message,
-            .buttons = ConfirmDialog::Button::Ok,
-        });
-    });
+    impl_->fileGrid.onError(
+        [this](auto const& message)
+        {
+            Log::error("File grid error: {}", message);
+            impl_->confirmDialog->open({
+                .state = ConfirmDialog::State::Negative,
+                .headerText = "File Grid Error",
+                .text = message,
+                .buttons = ConfirmDialog::Button::Ok,
+            });
+        }
+    );
 
-    remoteSideModel().setItemUpdateFunction([this](bool sorted) {
-        remoteFileGridSide().updateItems(sorted);
-    });
-    localSideModel().setItemUpdateFunction([this](bool sorted) {
-        localFileGridSide().updateItems(sorted);
-    });
+    remoteSideModel().setItemUpdateFunction(
+        [this](bool sorted, bool reapplySelection)
+        {
+            remoteFileGridSide().updateItems(sorted, reapplySelection);
+        }
+    );
+    localSideModel().setItemUpdateFunction(
+        [this](bool sorted, bool reapplySelection)
+        {
+            localFileGridSide().updateItems(sorted, reapplySelection);
+        }
+    );
     remoteSideModel().setLocalModel(&localSideModel());
     localSideModel().setRemoteModel(&remoteSideModel());
 }
@@ -240,10 +251,12 @@ void Session::createSshEngine()
             .onExit = std::bind(&Session::onTerminalConnectionClose, this),
             .onBeforeExit = std::bind(&Session::onBeforeTerminalConnectionClose, this),
         }),
-        true);
+        true
+    );
 
     impl_->terminal.value()->open(
-        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2));
+        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
+    );
 }
 
 void Session::onBeforeTerminalConnectionClose()
@@ -266,16 +279,19 @@ void Session::createExecutingEngine()
             .engineOptions = std::get<Persistence::ExecutingTerminalEngine>(impl_->engine.engine),
             .termios = impl_->engine.termios.value(),
             .onProcessChange =
-                [this](std::string const& cmdline) {
-                    Log::info("Tab title changed: {}", cmdline);
-                    *impl_->tabTitle = cmdline;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
+                [this](std::string const& cmdline)
+            {
+                Log::info("Tab title changed: {}", cmdline);
+                *impl_->tabTitle = cmdline;
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            },
         }),
-        false);
+        false
+    );
 
     impl_->terminal.value()->open(
-        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2));
+        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
+    );
 }
 
 Session::~Session() = default;
@@ -285,36 +301,40 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(Session);
 void Session::openLocalFilesystem()
 {
     // initial navigate to default path:
-    Nui::RpcClient::callWithBackChannel("RpcFilesystem::getHome", [this](Nui::val response) {
-        if (!response.hasOwnProperty("success"))
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::getHome",
+        [this](Nui::val response)
         {
-            Log::error("Invalid response from RpcFilesystem::getHome");
-            return;
-        }
+            if (!response.hasOwnProperty("success"))
+            {
+                Log::error("Invalid response from RpcFilesystem::getHome");
+                return;
+            }
 
-        const auto success = response["success"].as<bool>();
-        if (!success)
-        {
-            const auto error = response["error"].as<std::string>();
-            Log::error("Failed to get home directory: {}", error);
-            return;
-        }
+            const auto success = response["success"].as<bool>();
+            if (!success)
+            {
+                const auto error = response["error"].as<std::string>();
+                Log::error("Failed to get home directory: {}", error);
+                return;
+            }
 
-        if (!response.hasOwnProperty("path"))
-        {
-            Log::error("Invalid response from RpcFilesystem::getHome: missing 'path'");
-            impl_->confirmDialog->open({
-                .state = ConfirmDialog::State::Negative,
-                .headerText = "Get Home Directory Failed",
-                .text = "Invalid response from backend: missing 'path'",
-                .buttons = ConfirmDialog::Button::Ok,
-            });
-            return;
-        }
+            if (!response.hasOwnProperty("path"))
+            {
+                Log::error("Invalid response from RpcFilesystem::getHome: missing 'path'");
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Get Home Directory Failed",
+                    .text = "Invalid response from backend: missing 'path'",
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
 
-        const auto homePath = response["path"].as<std::string>();
-        localFileGridSide().path(homePath);
-    });
+            const auto homePath = response["path"].as<std::string>();
+            localFileGridSide().path(homePath);
+        }
+    );
 }
 
 void Session::openSftp()
@@ -327,6 +347,7 @@ void Session::openSftp()
             Log::info("Opening SFTP by default");
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
             remoteSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
+            localSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().operationQueue(&impl_->operationQueue);
@@ -537,19 +558,23 @@ void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
     using namespace std::string_literals;
 
     // Removing element from vector:
-    std::erase_if(impl_->channelElements, [channelId](auto elem) -> bool {
-        const auto val = elem->val();
-        if (val.template call<bool>("hasAttribute", "data-channelid"s))
+    std::erase_if(
+        impl_->channelElements,
+        [channelId](auto elem) -> bool
         {
-            return val.template call<std::string>("getAttribute", "data-channelid"s) == channelId.value();
+            const auto val = elem->val();
+            if (val.template call<bool>("hasAttribute", "data-channelid"s))
+            {
+                return val.template call<std::string>("getAttribute", "data-channelid"s) == channelId.value();
+            }
+            else
+            {
+                // FIXME: I can see this warning, which should not happen, but it does.
+                Log::warn("Channel element does not have a channel id attribute");
+            }
+            return false;
         }
-        else
-        {
-            // FIXME: I can see this warning, which should not happen, but it does.
-            Log::warn("Channel element does not have a channel id attribute");
-        }
-        return false;
-    });
+    );
 
     // Removing channel in frontend:
     using namespace std::string_literals;
@@ -595,15 +620,19 @@ void Session::initializeLayout()
             element,
             impl_->sessionLayoutId,
             layout.value_or(""),
-            Nui::bind([this]() -> Nui::val {
-                Nui::Console::log("Channel factory content panel manager");
-                auto elem = Nui::Dom::makeStandaloneElement(makeChannelElement());
-                impl_->channelElements.push_back(elem);
-                return elem->val();
-            }),
             Nui::bind(
-                [this](Nui::val channelIdVal) -> Nui::val {
-                    Nui::Console::log(channelIdVal);
+                [this]() -> Nui::val
+                {
+                    Nui::WebApi::Console::log("Channel factory content panel manager");
+                    auto elem = Nui::Dom::makeStandaloneElement(makeChannelElement());
+                    impl_->channelElements.push_back(elem);
+                    return elem->val();
+                }
+            ),
+            Nui::bind(
+                [this](Nui::val channelIdVal) -> Nui::val
+                {
+                    Nui::WebApi::Console::log(channelIdVal);
 
                     if (channelIdVal.isUndefined())
                     {
@@ -628,63 +657,83 @@ void Session::initializeLayout()
                     }
                     return Nui::val::undefined();
                 },
-                std::placeholders::_1),
-            Nui::bind([this]() -> Nui::val {
-                // OpenFileExplorer
-                if (impl_->fileExplorer)
+                std::placeholders::_1
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
                 {
-                    Log::warn("There is already a file explorer, cannot open another one");
+                    // OpenFileExplorer
+                    if (impl_->fileExplorer)
+                    {
+                        Log::warn("There is already a file explorer, cannot open another one");
+                        return Nui::val::undefined();
+                    }
+                    impl_->fileExplorer = Nui::Dom::makeStandaloneElement(makeFileExplorerElement());
+                    return impl_->fileExplorer->val();
+                }
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
+                {
+                    // Remove FileExplorer
+                    if (!impl_->fileExplorer)
+                    {
+                        Log::warn("There is no file explorer to remove");
+                        return Nui::val::undefined();
+                    }
+                    impl_->fileExplorer.reset();
                     return Nui::val::undefined();
                 }
-                impl_->fileExplorer = Nui::Dom::makeStandaloneElement(makeFileExplorerElement());
-                return impl_->fileExplorer->val();
-            }),
-            Nui::bind([this]() -> Nui::val {
-                // Remove FileExplorer
-                if (!impl_->fileExplorer)
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
                 {
-                    Log::warn("There is no file explorer to remove");
+                    if (impl_->operationQueueElement)
+                    {
+                        Log::warn("There is already an operation queue, cannot open another one");
+                        return Nui::val::undefined();
+                    }
+                    impl_->operationQueueElement = Nui::Dom::makeStandaloneElement(makeOperationQueueElement());
+                    return impl_->operationQueueElement->val();
+                }
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
+                {
+                    if (!impl_->operationQueueElement)
+                    {
+                        Log::warn("There is no operation queue to remove");
+                        return Nui::val::undefined();
+                    }
+                    impl_->operationQueueElement.reset();
                     return Nui::val::undefined();
                 }
-                impl_->fileExplorer.reset();
-                return Nui::val::undefined();
-            }),
-            Nui::bind([this]() -> Nui::val {
-                if (impl_->operationQueueElement)
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
                 {
-                    Log::warn("There is already an operation queue, cannot open another one");
+                    if (impl_->sessionOptionsElement)
+                    {
+                        Log::warn("There are already session options, cannot open another one");
+                        return Nui::val::undefined();
+                    }
+                    impl_->sessionOptionsElement = Nui::Dom::makeStandaloneElement(impl_->sessionOptions());
+                    return impl_->sessionOptionsElement->val();
+                }
+            ),
+            Nui::bind(
+                [this]() -> Nui::val
+                {
+                    if (!impl_->sessionOptionsElement)
+                    {
+                        Log::warn("There are no session options to remove");
+                        return Nui::val::undefined();
+                    }
+                    impl_->sessionOptionsElement.reset();
                     return Nui::val::undefined();
                 }
-                impl_->operationQueueElement = Nui::Dom::makeStandaloneElement(makeOperationQueueElement());
-                return impl_->operationQueueElement->val();
-            }),
-            Nui::bind([this]() -> Nui::val {
-                if (!impl_->operationQueueElement)
-                {
-                    Log::warn("There is no operation queue to remove");
-                    return Nui::val::undefined();
-                }
-                impl_->operationQueueElement.reset();
-                return Nui::val::undefined();
-            }),
-            Nui::bind([this]() -> Nui::val {
-                if (impl_->sessionOptionsElement)
-                {
-                    Log::warn("There are already session options, cannot open another one");
-                    return Nui::val::undefined();
-                }
-                impl_->sessionOptionsElement = Nui::Dom::makeStandaloneElement(impl_->sessionOptions());
-                return impl_->sessionOptionsElement->val();
-            }),
-            Nui::bind([this]() -> Nui::val {
-                if (!impl_->sessionOptionsElement)
-                {
-                    Log::warn("There are no session options to remove");
-                    return Nui::val::undefined();
-                }
-                impl_->sessionOptionsElement.reset();
-                return Nui::val::undefined();
-            }));
+            )
+        );
 }
 
 Nui::ElementRenderer Session::operator()(bool visible)
