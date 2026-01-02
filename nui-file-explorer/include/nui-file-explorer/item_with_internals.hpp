@@ -15,17 +15,26 @@ namespace NuiFileExplorer
     class ItemWithInternals
     {
       public:
+        enum class SearchHighlight
+        {
+            Off,
+            Highlight,
+            Muted
+        };
+
         friend SelectionManager;
 
         bool isSelected() const
         {
-            return selected->value();
+            return selected_->value();
         }
 
         explicit ItemWithInternals(Item const& item)
             : item{item}
             , element{}
-            , selected{std::make_shared<Nui::Observed<bool>>(false)}
+            , searchHighlighted_{std::make_shared<Nui::Observed<SearchHighlight>>(SearchHighlight::Off)}
+            , isDropHovered_{std::make_shared<Nui::Observed<bool>>(false)}
+            , selected_{std::make_shared<Nui::Observed<bool>>(false)}
         {}
 
         std::optional<int> indexDataAttribute() const
@@ -48,29 +57,41 @@ namespace NuiFileExplorer
 
         auto observeClassRelevant(auto&& fn) const
         {
-            return Nui::observe(selected, searchHighlighted, isDropHovered).generate(std::forward<decltype(fn)>(fn));
+            return Nui::observe(selected_, searchHighlighted_, isDropHovered_).generate(std::forward<decltype(fn)>(fn));
         }
 
         auto observeSelected(auto&& fn) const
         {
-            return Nui::observe(selected).generate(std::forward<decltype(fn)>(fn));
+            return Nui::observe(selected_).generate(std::forward<decltype(fn)>(fn));
+        }
+
+        SearchHighlight searchHighlight() const
+        {
+            return searchHighlighted_->value();
+        }
+
+        void searchHighlight(SearchHighlight value)
+        {
+            *searchHighlighted_ = value;
+        }
+
+        bool isDropHovered() const
+        {
+            return isDropHovered_->value();
+        }
+
+        void isDropHovered(bool value)
+        {
+            *isDropHovered_ = value;
         }
 
       public:
         Item item;
         std::weak_ptr<Nui::Dom::BasicElement> element;
 
-        enum class SearchHighlight
-        {
-            Off,
-            Highlight,
-            Muted
-        };
-        Nui::Observed<SearchHighlight> searchHighlighted{SearchHighlight::Off};
-        Nui::Observed<bool> isDropHovered{false};
-
       private:
-        // Private so no one can bypass the selection manager:
-        std::shared_ptr<Nui::Observed<bool>> selected;
+        std::shared_ptr<Nui::Observed<SearchHighlight>> searchHighlighted_;
+        std::shared_ptr<Nui::Observed<bool>> isDropHovered_;
+        std::shared_ptr<Nui::Observed<bool>> selected_;
     };
 }

@@ -120,6 +120,15 @@ namespace NuiFileExplorer
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
         void search(std::string query);
 
+        /**
+         * @brief calculates the top left corner disregarding the menu dimension itself and whether opening it would
+         * overflow the side.
+         *
+         * @param event
+         * @return std::pair<int x, int y>
+         */
+        std::pair<int /*x*/, int /*y*/> calculateContextMenuPosition(Nui::val const& event);
+
       private:
         std::unique_ptr<SideImplementation> impl_;
         std::unique_ptr<IconFlavor> iconFlavor_;

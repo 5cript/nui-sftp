@@ -28,7 +28,7 @@ namespace NuiFileExplorer
         if (!boxLocked)
             return;
 
-        auto scrollContainer = impl().scrollContainer_.lock();
+        auto scrollContainer = impl().scrollContainer.lock();
         if (!scrollContainer)
             return;
 
@@ -123,7 +123,7 @@ namespace NuiFileExplorer
         if (!box)
             return;
 
-        auto scrollContainer = impl().scrollContainer_.lock();
+        auto scrollContainer = impl().scrollContainer.lock();
         if (!scrollContainer)
             return;
 
@@ -258,10 +258,12 @@ namespace NuiFileExplorer
                 impl().items.map([this](auto index, auto& item){
                     return div{
                         class_ = item.observeClassRelevant([&item](){
+                            auto searchHighlight = item.searchHighlight();
+
                             return fmt::format("nui-file-grid-item-icons {} {} {}", item.isSelected() ? "selected" : "",
-                                item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
-                                : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
-                                : "", item.isDropHovered.value() ? "drop-hovered" : "");
+                                searchHighlight == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
+                                : searchHighlight == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
+                                : "", item.isDropHovered() ? "drop-hovered" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -300,15 +302,15 @@ namespace NuiFileExplorer
                             dataTransferOpt->setData("application/json", Nui::JSON::stringify(info));
                         },
                         "drop"_event = [this, &item](Nui::WebApi::DragEvent event){
-                            item.isDropHovered = false;
+                            item.isDropHovered(false);
                             onDrop(std::move(event), item.item);
                         },
                         "dragenter"_event = [&item](Nui::WebApi::DragEvent){
                             if (item.item.type == Item::Type::Directory)
-                                item.isDropHovered = true;
+                                item.isDropHovered(true);
                         },
                         "dragleave"_event = [&item](Nui::WebApi::DragEvent){
-                            item.isDropHovered = false;
+                            item.isDropHovered(false);
                         },
                         "data-index"_attr = std::to_string(index)
                     }(

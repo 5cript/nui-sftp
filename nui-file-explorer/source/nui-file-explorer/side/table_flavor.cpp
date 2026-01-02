@@ -3,6 +3,8 @@
 
 #include <nui/frontend/api/json.hpp>
 
+#include <fmt/ranges.h>
+
 namespace NuiFileExplorer
 {
     TableFlavor::TableFlavor(Side& impl, Side& otherSide)
@@ -121,15 +123,11 @@ namespace NuiFileExplorer
         // clang-format off
         return Nui::Elements::div{
             class_ = "nui-file-grid-table",
-            style = observe(impl().tableGridTemplateColumns).generate([this]() {
-                std::string gridTemplateColumns = "";
-                for (const auto& colWidth : impl().tableGridTemplateColumns.value())
-                {
-                    if (!gridTemplateColumns.empty())
-                        gridTemplateColumns += " ";
-                    gridTemplateColumns += colWidth;
-                }
-                return "grid-template-columns: " + gridTemplateColumns + ";";
+            style = observe(impl().tableGridTemplateColumns, impl().items).generate([this]() {
+                return fmt::format(
+                    "grid-template-columns: {};"
+                    "grid-template-rows: minmax(40px, min-content) repeat({}, 25px)", fmt::join(impl().tableGridTemplateColumns.value(), " "), impl().items.value().size()
+                );
             }),
             "drop"_event = [this](Nui::WebApi::DragEvent dropEvent) {
                 onDrop(std::move(dropEvent), std::nullopt);
@@ -150,10 +148,13 @@ namespace NuiFileExplorer
                 impl().items.map([this, contextMenu](auto index, auto& item){
                     return div{
                         class_ = item.observeClassRelevant([&item](){
+                            const auto searchHighlight = item.searchHighlight();
+                            const auto isDropHovered = item.isDropHovered();
+
                             return fmt::format("nui-file-grid-table-row {} {} {}", item.isSelected() ? "selected" : "",
-                                item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
-                                : item.searchHighlighted.value() == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
-                                : "", item.isDropHovered.value() ? "drop-hovered" : "");
+                                searchHighlight == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
+                                : searchHighlight == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
+                                : "", isDropHovered ? "drop-hovered" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -187,15 +188,15 @@ namespace NuiFileExplorer
                             dataTransferOpt->setData("application/json", Nui::JSON::stringify(info));
                         },
                         "drop"_event = [this, &item](Nui::WebApi::DragEvent event){
-                            item.isDropHovered = false;
+                            item.isDropHovered(false);
                             onDrop(std::move(event), item.item);
                         },
                         "dragenter"_event = [&item](Nui::WebApi::DragEvent){
                             if (item.item.type == Item::Type::Directory)
-                                item.isDropHovered = true;
+                                item.isDropHovered(true);
                         },
                         "dragleave"_event = [&item](Nui::WebApi::DragEvent){
-                            item.isDropHovered = false;
+                            item.isDropHovered(false);
                         },
                     }(
                         div{
