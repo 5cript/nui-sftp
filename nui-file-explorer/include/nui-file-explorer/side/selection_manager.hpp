@@ -28,6 +28,7 @@ namespace NuiFileExplorer
         void deselect(std::size_t index);
         void toggle(std::size_t index);
         void select(ItemWithInternals const& item);
+        void select(std::filesystem::path const& path);
         void deselect(ItemWithInternals const& item);
         void toggle(ItemWithInternals const& item);
         std::size_t selectedCount() const;
@@ -44,6 +45,7 @@ namespace NuiFileExplorer
         void selectRange(std::size_t begin, std::size_t endInclusive);
 
         std::vector<Item> selectedItems() const;
+        std::set<std::filesystem::path> selectedPaths() const;
 
       private:
         class GridPosition

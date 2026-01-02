@@ -28,7 +28,7 @@ namespace NuiFileExplorer
          */
         virtual Nui::Observed<std::filesystem::path> const& currentPath() const = 0;
 
-        virtual void setItemUpdateFunction(std::function<void(bool)> doUpdate) = 0;
+        virtual void setItemUpdateFunction(std::function<void(bool, bool)> doUpdate) = 0;
 
         /**
          * @brief Returns true if this side model represents the left side.

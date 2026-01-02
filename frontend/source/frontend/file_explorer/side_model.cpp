@@ -25,7 +25,7 @@ bool SideModel::isComplete() const
     return operationQueue_ != nullptr && fileEngine_ != nullptr;
 }
 
-void SideModel::setItemUpdateFunction(std::function<void(bool)> doUpdate)
+void SideModel::setItemUpdateFunction(std::function<void(bool, bool)> doUpdate)
 {
     refreshCallback_ = std::move(doUpdate);
 }
@@ -95,5 +95,8 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
 
     items_ = std::move(items);
     if (refreshCallback_)
-        refreshCallback_(true);
+    {
+        refreshCallback_(true, reapplySelectionOnce_);
+        reapplySelectionOnce_ = false;
+    }
 }

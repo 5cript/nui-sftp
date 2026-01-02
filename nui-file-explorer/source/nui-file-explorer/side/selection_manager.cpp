@@ -41,6 +41,22 @@ namespace NuiFileExplorer
         *items_->value()[index].selected = true;
         return true;
     }
+    void SelectionManager::select(std::filesystem::path const& path)
+    {
+        auto it = std::find_if(
+            items_->value().begin(),
+            items_->value().end(),
+            [&path](auto const& item)
+            {
+                return item.item.path == path;
+            }
+        );
+        if (it != items_->value().end())
+        {
+            const auto index = std::distance(items_->value().begin(), it);
+            select(static_cast<std::size_t>(index));
+        }
+    }
     void SelectionManager::toggle(std::size_t index)
     {
         if (selectedIndices_.contains(index))
@@ -110,6 +126,16 @@ namespace NuiFileExplorer
         {
             if (items_->value()[index].isSelectable())
                 result.push_back(items_->value()[index].item);
+        }
+        return result;
+    }
+    std::set<std::filesystem::path> SelectionManager::selectedPaths() const
+    {
+        std::set<std::filesystem::path> result{};
+        for (auto index : selectedIndices_)
+        {
+            if (items_->value()[index].isSelectable())
+                result.insert(items_->value()[index].item.path);
         }
         return result;
     }

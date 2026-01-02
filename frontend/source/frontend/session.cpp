@@ -226,15 +226,15 @@ void Session::setupFileGrid()
     );
 
     remoteSideModel().setItemUpdateFunction(
-        [this](bool sorted)
+        [this](bool sorted, bool reapplySelection)
         {
-            remoteFileGridSide().updateItems(sorted);
+            remoteFileGridSide().updateItems(sorted, reapplySelection);
         }
     );
     localSideModel().setItemUpdateFunction(
-        [this](bool sorted)
+        [this](bool sorted, bool reapplySelection)
         {
-            localFileGridSide().updateItems(sorted);
+            localFileGridSide().updateItems(sorted, reapplySelection);
         }
     );
     remoteSideModel().setLocalModel(&localSideModel());

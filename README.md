@@ -75,7 +75,7 @@ Still under construction :construction:
 - [x] Delete remote files (empty dirs and files).
 - [ ] Delete remote files deep (non empty dirs) -> operation queue.
 - [x] Rename remote file.
-- [ ] ...Miscellaneous menu items.
+- [x] Ask user to overwrite files on upload/download.
 - [ ] Open files with associated application.
 - [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
 - [ ] File previews:

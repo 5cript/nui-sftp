@@ -44,7 +44,7 @@ namespace NuiFileExplorer
         /**
          * @brief Pulls items from model and displays them.
          */
-        void updateItems(bool sorted);
+        void updateItems(bool sorted, bool reapplySelection);
 
         /**
          * @brief Determines how the grid should be displayed.

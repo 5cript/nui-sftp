@@ -173,19 +173,23 @@ namespace NuiFileExplorer
         return *impl_->model;
     }
 
-    void Side::updateItems(bool sorted)
+    void Side::updateItems(bool sorted, bool reapplySelection)
     {
         const auto& items = impl_->model->items();
 
+        auto selectedPaths = impl_->selectionManager.selectedPaths();
         impl_->selectionManager.loseTrackToAllSelections();
+
+        std::set<std::filesystem::path> pathSet;
 
         impl_->items.value().clear();
         std::transform(
             items.begin(),
             items.end(),
             std::back_inserter(impl_->items.value()),
-            [](auto const& item)
+            [&pathSet](auto const& item)
             {
+                pathSet.insert(item.path);
                 return ItemWithInternals{item};
             }
         );
@@ -193,6 +197,32 @@ namespace NuiFileExplorer
             impl_->sortItems();
 
         impl_->items.modifyNow();
+
+        // TODO: expensive, also do I want this?
+        // reapply selection:
+        if (reapplySelection && !selectedPaths.empty())
+        {
+            std::set<std::filesystem::path> diff;
+            std::set_intersection(
+                pathSet.begin(),
+                pathSet.end(),
+                selectedPaths.begin(),
+                selectedPaths.end(),
+                std::inserter(diff, diff.begin())
+            );
+            for (auto const& path : diff)
+                impl_->selectionManager.select(path);
+        }
+
+        // reapply search
+        if (auto searchTextBox = impl_->searchTextBox_.lock(); searchTextBox)
+        {
+            const auto query = searchTextBox->val()["value"].as<std::string>();
+            if (!query.empty())
+                search(query);
+        }
+
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     void Side::flavor(Flavor value)
@@ -518,6 +548,9 @@ namespace NuiFileExplorer
             input{
                 type = "text",
                 placeHolder = "Search",
+                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
+                    impl_->searchTextBox_ = ref;
+                },
                 "keyup"_event = [this](Nui::val event){
                     event.call<void>("stopPropagation");
                     search(event["target"]["value"].as<std::string>());

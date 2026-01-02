@@ -47,6 +47,7 @@ namespace NuiFileExplorer
         };
 
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer_{};
+        std::weak_ptr<Nui::Dom::BasicElement> searchTextBox_{};
 
         DropdownMenu newItemMenu{
             {

@@ -49,7 +49,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     void operationQueue(OperationQueue* operationQueue);
     OperationQueue* operationQueue();
 
-    void setItemUpdateFunction(std::function<void(bool)> doUpdate) override;
+    void setItemUpdateFunction(std::function<void(bool, bool)> doUpdate) override;
     const std::vector<NuiFileExplorer::Item>& items() const override;
     void onPathChange(std::filesystem::path const& path) override
     {
@@ -57,6 +57,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     }
     void onRefresh() override
     {
+        reapplySelectionOnce_ = true;
         navigateTo(currentPath_.value());
     }
     Nui::Observed<std::filesystem::path> const& currentPath() const override
@@ -85,5 +86,6 @@ class SideModel : public NuiFileExplorer::ISideModel
     OperationQueue* operationQueue_{nullptr};
     Nui::Observed<std::filesystem::path> currentPath_{};
     std::filesystem::path preNavigatePath_{};
-    std::function<void(bool)> refreshCallback_{nullptr};
+    std::function<void(bool, bool)> refreshCallback_{nullptr};
+    bool reapplySelectionOnce_{false};
 };
