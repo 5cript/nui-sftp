@@ -75,7 +75,6 @@ Still under construction :construction:
 - [x] Delete remote files (empty dirs and files).
 - [ ] Delete remote files deep (non empty dirs) -> operation queue.
 - [x] Rename remote file.
-- [ ] Fix scroll context menu offset.
 - [ ] Make Context menu pretty
 - [ ] ...Miscellaneous menu items.
 - [ ] Open files with associated application.
