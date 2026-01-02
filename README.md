@@ -58,7 +58,8 @@ Still under construction :construction:
 - [x] Grid view.
 - [x] Table view.
 - [x] Split UI into local and remote views.
-- [x] Box drag select.
+- [x] Box drag select for icon view.
+- [x] Box drag select for table view.
 - [ ] Better indication that on drag drop, all selected items are being dragged.
 - [x] Auto refresh after operation complete.
 - [ ] Improve arrow navigation with shift and control.
