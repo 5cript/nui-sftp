@@ -1,6 +1,6 @@
 #include <persistence/state/terminal_engine.hpp>
 #include <frontend/session.hpp>
-#include <frontend/terminal/terminal.hpp>
+#include <frontend/terminal/frontend_ssh_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/user_control_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
@@ -46,7 +46,7 @@ struct Session::Implementation
     Nui::Observed<bool> isVisible;
     Persistence::UiOptions uiOptions;
 
-    // (Ssh, ...)Session / Terminal Engine:
+    // (Ssh, ...)Session / FrontendSshManager Engine:
     Persistence::TerminalEngine engine;
     Nui::Observed<Persistence::TerminalOptions> options;
 
@@ -67,8 +67,8 @@ struct Session::Implementation
     std::optional<std::string> layoutName;
     bool waitingForLayoutHost{false};
 
-    // Channels & Terminal Connection
-    Nui::Observed<std::unique_ptr<Terminal>> terminal;
+    // Channels & FrontendSshManager Connection
+    Nui::Observed<std::unique_ptr<FrontendSshManager>> terminal;
     std::vector<std::shared_ptr<Nui::Dom::Element>> channelElements;
 
     // Session Options
@@ -76,6 +76,7 @@ struct Session::Implementation
     SessionOptions sessionOptions;
 
     // Shutdown:
+    Nui::Observed<bool> shuttingDown{false};
     std::function<void()> onShutdownComplete{};
 
     Implementation(
@@ -245,7 +246,7 @@ void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");
 
-    impl_->terminal = std::make_unique<Terminal>(
+    impl_->terminal = std::make_unique<FrontendSshManager>(
         std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
             .engineOptions = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine),
             .onExit = std::bind(&Session::onTerminalConnectionClose, this),
@@ -274,7 +275,7 @@ void Session::onBeforeTerminalConnectionClose()
 
 void Session::createExecutingEngine()
 {
-    impl_->terminal = std::make_unique<Terminal>(
+    impl_->terminal = std::make_unique<FrontendSshManager>(
         std::make_unique<ExecutingTerminalEngine>(ExecutingTerminalEngine::Settings{
             .engineOptions = std::get<Persistence::ExecutingTerminalEngine>(impl_->engine.engine),
             .termios = impl_->engine.termios.value(),
@@ -346,8 +347,9 @@ void Session::openSftp()
         {
             Log::info("Opening SFTP by default");
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
-            remoteSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
-            localSideModel().engine(std::make_unique<SftpFileEngine>(sshTerminalEngine));
+            auto fileEngine = std::make_shared<SftpFileEngine>(sshTerminalEngine);
+            remoteSideModel().engine(fileEngine);
+            localSideModel().engine(std::move(fileEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().operationQueue(&impl_->operationQueue);
@@ -365,7 +367,7 @@ void Session::fallbackToUserControlEngine()
 {
     // TODO:
 
-    // impl_->terminal = std::make_unique<Terminal>(
+    // impl_->terminal = std::make_unique<FrontendSshManager>(
     //     std::make_unique<UserControlEngine>(UserControlEngine::Settings{
     //         .onInput =
     //             [this](std::string const& input) {
@@ -440,81 +442,83 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
 
 void Session::onTerminalConnectionClose()
 {
-    // TODO: this is harsh, when the connection dropped unexpectedly, so keep the terminal open and
-    // print a disconnect warning.
-
+    // TODO:
     Log::debug("onTerminalConnectionClose");
-
-    impl_->terminal.value().reset();
-
-    if (auto* fileEngine = remoteSideModel().engine(); fileEngine)
-    {
-        fileEngine->dispose();
-    }
-    else
-    {
-        closeSelf();
-    }
 }
 
 void Session::onFileExplorerConnectionClose()
 {
-    // TODO: this is harsh, when the connection dropped unexpectedly, so keep the terminal open and
-    // print a disconnect warning.
-
+    // TODO:
     Log::debug("onFileExplorerConnectionClose");
-
-    remoteSideModel().engine({});
-
-    if (impl_->terminal.value())
-    {
-        impl_->terminal.value()->dispose();
-    }
-    else
-    {
-        closeSelf();
-    }
 }
 
-void Session::managerShutdown(std::function<void()> onShutdown)
+void Session::shutdown(std::function<void()> onShutdown)
 {
-    const bool isExecutingEngine = std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine);
-
-    if (!isExecutingEngine && (impl_->terminal.value() || remoteSideModel().engine()))
-    {
-        if (impl_->terminal.value())
-        {
-            Log::info("Waiting for terminal engine to close");
-        }
-        if (auto* fileEngine = remoteSideModel().engine(); fileEngine)
-        {
-            Log::info("Waiting for file engine to close");
-        }
-        impl_->onShutdownComplete = std::move(onShutdown);
-    }
-    else
-    {
-        Log::info("Session shutdown is already complete");
-        Nui::val::global("contentPanelManager").call<void>("removePanel", impl_->sessionLayoutId);
-        onShutdown();
-    }
+    impl_->onShutdownComplete = std::move(onShutdown);
+    closeSelf();
 }
 
 void Session::closeSelf()
 {
-    if (impl_->onShutdownComplete)
+    // Immediately make page inert to prevent user interaction from this point on.
+    impl_->shuttingDown = true;
+    Nui::globalEventContext.executeActiveEventsImmediately();
+
+    const bool isExecutingEngine = std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine);
+
+    auto closeSelfCompletion = [this]()
     {
-        Log::info("Session shutdown complete");
+        Log::info("Removing session layout from content panel manager.");
         Nui::val::global("contentPanelManager").call<void>("removePanel", impl_->sessionLayoutId);
 
-        impl_->onShutdownComplete();
-        return;
-    }
+        // outside shutdown
+        if (impl_->onShutdownComplete)
+        {
+            Log::info("Session shutdown complete.");
+            impl_->onShutdownComplete();
+            return;
+        }
 
-    if (impl_->closeSelf)
+        // "inside" shutdown (connection loss etc)
+        if (impl_->closeSelf)
+        {
+            Log::info("Calling close self callback.");
+            impl_->closeSelf(this);
+            return;
+        }
+    };
+
+    if (!isExecutingEngine && (impl_->terminal.value() || remoteSideModel().engine()))
     {
-        impl_->closeSelf(this);
-        return;
+        Log::info("Session shutdown started.");
+
+        impl_->operationQueue.deactivate();
+        auto terminalDispose = [this, closeSelfCompletion]()
+        {
+            Log::info("Disposing frontend ssh manager.");
+            if (impl_->terminal.value())
+            {
+                impl_->terminal.value()->dispose(
+                    [closeSelfCompletion]()
+                    {
+                        Log::info("Frontend ssh manager disposed.");
+                        closeSelfCompletion();
+                    }
+                );
+            }
+        };
+
+        if (auto fileEngine = remoteSideModel().engine(); fileEngine)
+        {
+            Log::info("Disposing file engine.");
+            fileEngine->dispose(terminalDispose);
+        }
+        terminalDispose();
+    }
+    else
+    {
+        Log::info("Session shutdown is already complete.");
+        closeSelfCompletion();
     }
 }
 
@@ -763,6 +767,9 @@ Nui::ElementRenderer Session::operator()(bool visible)
                 initializeLayout();
                 impl_->waitingForLayoutHost = false;
             }
+        }),
+        "inert"_attr = observe(impl_->shuttingDown).generate([this]() -> std::optional<std::string> {
+            return impl_->shuttingDown.value() ? "true"s : std::optional<std::string>{std::nullopt};
         })
     }(
     );

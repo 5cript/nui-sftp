@@ -8,7 +8,7 @@ class SessionOptions extends NuiWidget {
         super(name, factory, deleter, 'session-options');
 
         this.title.label = 'Session Options';
-        this.title.closable = false;
+        this.title.closable = true;
         this.title.caption = 'Session Options';
     }
 }

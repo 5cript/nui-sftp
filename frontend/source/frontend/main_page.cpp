@@ -18,9 +18,9 @@ struct MainPage::Implementation
     PasswordPrompter prompter;
     Sidebar sidebar;
     Toolbar toolbar;
+    SessionArea sessionArea;
     InputDialog newItemAskDialog;
     ConfirmDialog confirmDialog;
-    SessionArea sessionArea;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
 
@@ -30,13 +30,14 @@ struct MainPage::Implementation
         , prompter{}
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
         , newItemAskDialog{"AskDialog"}
         , confirmDialog{"ConfirmDialog"}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
         , darkMode{true}
         , setupWait{}
     {
         Log::info("MainPage::Implementation()");
+        toolbar.sessionArea(sessionArea);
     }
 
     ~Implementation()

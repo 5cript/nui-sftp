@@ -32,11 +32,19 @@ class Session
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
         std::function<void(Session const*)> closeSelf,
-        bool visible);
+        bool visible
+    );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Session);
 
     Nui::ElementRenderer operator()(bool visible);
-    void managerShutdown(std::function<void()> onShutdown);
+
+    /**
+     * @brief initiates shutdown of the session manager and calls onShutdown when done.
+     * Do not use "from the inside", is only used by session manager to close a session.
+     *
+     * @param onShutdown callback to call when shutdown is complete
+     */
+    void shutdown(std::function<void()> onShutdown);
 
     std::string name() const;
     std::weak_ptr<Nui::Observed<std::string>> tabTitle() const;

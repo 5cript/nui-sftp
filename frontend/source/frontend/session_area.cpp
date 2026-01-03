@@ -29,7 +29,8 @@ struct SessionArea::Implementation
         FrontendEvents* events,
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
-        Toolbar* toolbar)
+        Toolbar* toolbar
+    )
         : stateHolder{stateHolder}
         , events{events}
         , newItemAskDialog{newItemAskDialog}
@@ -40,30 +41,50 @@ struct SessionArea::Implementation
     {}
 };
 
+void SessionArea::removeActiveSession()
+{
+    if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
+    {
+        removeSession(impl_->selected);
+    }
+    else
+    {
+        Log::error("SessionArea::removeActiveSession: No active session to remove.");
+    }
+}
+
 SessionArea::SessionArea(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
     InputDialog* newItemAskDialog,
     ConfirmDialog* confirmDialog,
-    Toolbar* toolbar)
+    Toolbar* toolbar
+)
     : impl_{std::make_unique<Implementation>(stateHolder, events, newItemAskDialog, confirmDialog, toolbar)}
 {
-    listen(events->onNewSession, [this](std::string const& name) -> void {
-        addSession(name);
-    });
-
-    stateHolder->load([this](bool success, Persistence::StateHolder& holder) {
-        if (!success)
-            return;
-
-        auto const& state = holder.stateCache();
-
-        for (auto const& [name, session] : state.sessions)
+    listen(
+        events->onNewSession,
+        [this](std::string const& name) -> void
         {
-            if (session.startupSession && session.startupSession.value())
-                addSession(name);
+            addSession(name);
         }
-    });
+    );
+
+    stateHolder->load(
+        [this](bool success, Persistence::StateHolder& holder)
+        {
+            if (!success)
+                return;
+
+            auto const& state = holder.stateCache();
+
+            for (auto const& [name, session] : state.sessions)
+            {
+                if (session.startupSession && session.startupSession.value())
+                    addSession(name);
+            }
+        }
+    );
 
     registerRpc();
 }
@@ -72,28 +93,32 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(SessionArea);
 
 void SessionArea::registerRpc()
 {
-    Nui::RpcClient::registerFunction("SessionArea::processDied", [this](Nui::val val) {
-        auto const processId = val["id"].as<std::string>();
-        Log::info("Process with id '{}' terminated.", processId);
-
-        std::size_t index = 0;
-        for (auto const& session : impl_->sessions.value())
+    Nui::RpcClient::registerFunction(
+        "SessionArea::processDied",
+        [this](Nui::val val)
         {
-            if (session->getProcessIdIfExecutingEngine().value_or("") == processId)
+            auto const processId = val["id"].as<std::string>();
+            Log::info("Process with id '{}' terminated.", processId);
+
+            std::size_t index = 0;
+            for (auto const& session : impl_->sessions.value())
             {
-                Log::info("Process with id '{}' found in session '{}'.", processId, session->name());
-                break;
+                if (session->getProcessIdIfExecutingEngine().value_or("") == processId)
+                {
+                    Log::info("Process with id '{}' found in session '{}'.", processId, session->name());
+                    break;
+                }
+                ++index;
             }
-            ++index;
-        }
 
-        if (index < impl_->sessions.size())
-            removeSession(index);
-        else
-        {
-            Log::error("Process with id '{}' not found in any session.", processId);
+            if (index < impl_->sessions.size())
+                removeSession(index);
+            else
+            {
+                Log::error("Process with id '{}' not found in any session.", processId);
+            }
         }
-    });
+    );
 }
 
 void SessionArea::removeSession(std::size_t index)
@@ -109,15 +134,19 @@ void SessionArea::removeSession(std::size_t index)
     if (impl_->sessions.value()[index]->visible() && impl_->sessions.size() > 1)
         setSelected(std::max(0ull, index - 1ull));
 
-    impl_->sessions.value()[index]->managerShutdown([this, index]() {
-        impl_->sessions.erase(impl_->sessions.begin() + index);
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    });
+    impl_->sessions.value()[index]->shutdown(
+        [this, index]()
+        {
+            impl_->sessions.erase(impl_->sessions.begin() + index);
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+    );
 }
 
 void SessionArea::setSelected(int index)
 {
-    const auto wasAnythingSelected = [this, index]() {
+    const auto wasAnythingSelected = [this, index]()
+    {
         if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
         {
             impl_->sessions.value()[impl_->selected]->visible(false);
@@ -139,48 +168,59 @@ void SessionArea::addSession(std::string const& name)
 {
     using namespace std::string_literals;
 
-    impl_->stateHolder->load([this, name](bool success, Persistence::StateHolder& holder) {
-        if (!success)
-            return;
-
-        auto const& state = holder.stateCache().fullyResolve();
-
-        auto iter = state.sessions.find(name);
-        if (iter == end(state.sessions))
+    impl_->stateHolder->load(
+        [this, name](bool success, Persistence::StateHolder& holder)
         {
-            Log::error("No engine found for name: {}", name);
-            return;
+            if (!success)
+                return;
+
+            auto const& state = holder.stateCache().fullyResolve();
+
+            auto iter = state.sessions.find(name);
+            if (iter == end(state.sessions))
+            {
+                Log::error("No engine found for name: {}", name);
+                return;
+            }
+
+            auto [engineKey, engine] = *iter;
+
+            Log::info("Adding session: {} with layout {}", name, impl_->toolbar->selectedLayout());
+            impl_->sessions.emplace_back(
+                std::make_unique<Session>(
+                    impl_->stateHolder,
+                    impl_->events,
+                    engine,
+                    state.uiOptions,
+                    name,
+                    impl_->toolbar->selectedLayout(),
+                    impl_->newItemAskDialog,
+                    impl_->confirmDialog,
+                    [this](Session const* ptr)
+                    {
+                        auto const index = std::distance(
+                            begin(impl_->sessions.value()),
+                            std::find_if(
+                                begin(impl_->sessions.value()),
+                                end(impl_->sessions.value()),
+                                [ptr](auto const& session)
+                                {
+                                    return session.get() == ptr;
+                                }
+                            )
+                        );
+                        removeSession(index);
+                    },
+                    impl_->sessions.size() == 0
+                )
+            );
+
+            if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
+                impl_->sessions.value()[impl_->selected]->visible(false);
+            impl_->selected = impl_->sessions.size() - 1;
+            Nui::globalEventContext.executeActiveEventsImmediately();
         }
-
-        auto [engineKey, engine] = *iter;
-
-        Log::info("Adding session: {} with layout {}", name, impl_->toolbar->selectedLayout());
-        impl_->sessions.emplace_back(
-            std::make_unique<Session>(
-                impl_->stateHolder,
-                impl_->events,
-                engine,
-                state.uiOptions,
-                name,
-                impl_->toolbar->selectedLayout(),
-                impl_->newItemAskDialog,
-                impl_->confirmDialog,
-                [this](Session const* ptr) {
-                    auto const index = std::distance(
-                        begin(impl_->sessions.value()),
-                        std::find_if(
-                            begin(impl_->sessions.value()), end(impl_->sessions.value()), [ptr](auto const& session) {
-                                return session.get() == ptr;
-                            }));
-                    removeSession(index);
-                },
-                impl_->sessions.size() == 0));
-
-        if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
-            impl_->sessions.value()[impl_->selected]->visible(false);
-        impl_->selected = impl_->sessions.size() - 1;
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    });
+    );
 }
 
 Nui::ElementRenderer SessionArea::operator()()
@@ -219,7 +259,8 @@ Nui::ElementRenderer SessionArea::operator()()
                 // tabs dont actually reside here:
                 return ui5::tab{
                     "text"_prop = session->tabTitle(),
-                    "selected"_prop = i == impl_->selected
+                    "selected"_prop = i == impl_->selected,
+                    "moveable"_prop = true
                 }();
             }
         ),

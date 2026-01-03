@@ -52,5 +52,5 @@ class FileEngine
         std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
     ) = 0;
 
-    virtual void dispose() = 0;
+    virtual void dispose(std::function<void()> onComplete) = 0;
 };

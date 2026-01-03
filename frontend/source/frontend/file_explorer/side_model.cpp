@@ -10,14 +10,14 @@ OperationQueue* SideModel::operationQueue()
     return operationQueue_;
 }
 
-void SideModel::engine(std::unique_ptr<FileEngine> fileEngine)
+void SideModel::engine(std::shared_ptr<FileEngine> fileEngine)
 {
     fileEngine_ = std::move(fileEngine);
 }
 
-FileEngine* SideModel::engine()
+std::shared_ptr<FileEngine> SideModel::engine()
 {
-    return fileEngine_.get();
+    return fileEngine_;
 }
 
 bool SideModel::isComplete() const

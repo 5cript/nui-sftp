@@ -17,7 +17,8 @@ class SessionArea
         FrontendEvents* events,
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
-        Toolbar* toolbar);
+        Toolbar* toolbar
+    );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SessionArea);
 
     Nui::ElementRenderer operator()();
@@ -26,6 +27,7 @@ class SessionArea
     void registerRpc();
     void removeSession(std::size_t index);
     void setSelected(int index);
+    void removeActiveSession();
 
   private:
     struct Implementation;

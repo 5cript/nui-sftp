@@ -173,15 +173,11 @@ namespace NuiFileExplorer
 
         void sortByPredicate(auto const& predicate)
         {
-            Nui::WebApi::Console::log("A");
             auto partitionBorder = partitionItems();
-            Nui::WebApi::Console::log("B");
             auto& items = this->items.value();
             std::sort(items.begin(), partitionBorder, predicate);
-            Nui::WebApi::Console::log("C");
             if (partitionBorder != items.end())
                 std::sort(partitionBorder, items.end(), predicate);
-            Nui::WebApi::Console::log("D");
         }
 
         void sortByName(bool ascending)

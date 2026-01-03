@@ -1,5 +1,6 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/classes.hpp>
+#include <frontend/session_area.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
 #include <constants/layouts.hpp>
@@ -18,6 +19,7 @@ struct Toolbar::Implementation
 {
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
+    SessionArea* sessionArea;
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
     std::string selectedLayout;
@@ -37,55 +39,73 @@ struct Toolbar::Implementation
 
 void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
 {
-    stateHolder->load([this, onDone = std::move(onDone)](bool success, Persistence::StateHolder& holder) {
-        if (!success)
-            return;
-
-        auto const& state = holder.stateCache();
-
-        std::vector<std::pair<std::string, std::string /*orderby*/>> enginesUnordered;
-        for (auto const& [name, engine] : state.sessions)
-            enginesUnordered.push_back({name, engine.orderBy.value_or(name)});
-
-        std::sort(enginesUnordered.begin(), enginesUnordered.end(), [](auto const& lhs, auto const& rhs) {
-            return lhs.second < rhs.second;
-        });
-
-        std::vector<std::string> engines;
-        for (auto const& [name, _] : enginesUnordered)
-            engines.push_back(name);
-
+    stateHolder->load(
+        [this, onDone = std::move(onDone)](bool success, Persistence::StateHolder& holder)
         {
-            Log::info("Updating terminal engines list.");
-            auto proxy = terminalEngines.modify();
-            terminalEngines = std::move(engines);
+            if (!success)
+                return;
 
-            events->onNewSession.value() = terminalEngines.value().front();
+            auto const& state = holder.stateCache();
+
+            std::vector<std::pair<std::string, std::string /*orderby*/>> enginesUnordered;
+            for (auto const& [name, engine] : state.sessions)
+                enginesUnordered.push_back({name, engine.orderBy.value_or(name)});
+
+            std::sort(
+                enginesUnordered.begin(),
+                enginesUnordered.end(),
+                [](auto const& lhs, auto const& rhs)
+                {
+                    return lhs.second < rhs.second;
+                }
+            );
+
+            std::vector<std::string> engines;
+            for (auto const& [name, _] : enginesUnordered)
+                engines.push_back(name);
+
+            {
+                Log::info("Updating terminal engines list.");
+                auto proxy = terminalEngines.modify();
+                terminalEngines = std::move(engines);
+
+                events->onNewSession.value() = terminalEngines.value().front();
+            }
+            Nui::globalEventContext.executeActiveEventsImmediately();
+            onDone();
         }
-        Nui::globalEventContext.executeActiveEventsImmediately();
-        onDone();
-    });
+    );
 }
 
 Toolbar::Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events)
     : impl_(std::make_unique<Implementation>(stateHolder, events))
 {
     Log::info("Toolbar::Toolbar");
-    impl_->updateSessionsList([this]() {
-        reloadLayouts();
-    });
+    impl_->updateSessionsList(
+        [this]()
+        {
+            reloadLayouts();
+        }
+    );
 }
 
 void Toolbar::connectLayoutsChanged()
 {
-    listen(impl_->events->onLayoutsChanged, [this](bool) {
-        impl_->stateHolder->load([this](bool success, Persistence::StateHolder&) {
-            if (!success)
-                return;
+    listen(
+        impl_->events->onLayoutsChanged,
+        [this](bool)
+        {
+            impl_->stateHolder->load(
+                [this](bool success, Persistence::StateHolder&)
+                {
+                    if (!success)
+                        return;
 
-            reloadLayouts();
-        });
-    });
+                    reloadLayouts();
+                }
+            );
+        }
+    );
 }
 
 void Toolbar::reloadLayouts()
@@ -122,7 +142,7 @@ Nui::ElementRenderer Toolbar::operator()()
     return div{class_ = "toolbar"}(
         ui5::toolbar{
             "alignContent"_prop = "Start",
-            "design"_prop = "Solid",
+            "design"_prop = "Solid"
         }(
             ui5::toolbar_select{
                 "change"_event = [this](Nui::val event) {
@@ -156,6 +176,22 @@ Nui::ElementRenderer Toolbar::operator()()
                 "click"_event = [this](Nui::val) {
                     impl_->events->onNewSession.modifyNow();
                 }
+            }(),
+            ui5::toolbar_button{
+                "text"_prop = "End Session",
+                "click"_event = [this](Nui::val) {
+                    if (impl_->sessionArea) {
+                        impl_->sessionArea->removeActiveSession();
+                    } else {
+                        Log::error("Toolbar::EndSession: sessionArea is not set.");
+                    }
+                }
+            }(),
+            ui5::toolbar_button{
+                "text"_prop = "Settings",
+                "click"_event = [](Nui::val) {
+                    // TODO:
+                }
             }()
         )
     );
@@ -165,4 +201,9 @@ Nui::ElementRenderer Toolbar::operator()()
 std::string Toolbar::selectedLayout() const
 {
     return impl_->selectedLayout;
+}
+
+void Toolbar::sessionArea(SessionArea& sessionArea)
+{
+    impl_->sessionArea = &sessionArea;
 }
