@@ -19,8 +19,8 @@ namespace NuiFileExplorer
     {
         for (auto index : selectedIndices_)
         {
-            if (items_->value()[index].selected->value())
-                *items_->value()[index].selected = false;
+            if (items_->value()[index].isSelected())
+                *items_->value()[index].selected_ = false;
         }
         loseTrackToAllSelections();
     }
@@ -38,7 +38,7 @@ namespace NuiFileExplorer
         if (selectedIndices_.empty())
             currentSelectionStart_ = index;
         selectedIndices_.insert(index);
-        *items_->value()[index].selected = true;
+        *items_->value()[index].selected_ = true;
         return true;
     }
     void SelectionManager::select(std::filesystem::path const& path)
@@ -79,8 +79,8 @@ namespace NuiFileExplorer
         if (index >= items_->value().size())
             return;
         selectedIndices_.erase(index);
-        if (items_->value()[index].selected->value())
-            *items_->value()[index].selected = false;
+        if (items_->value()[index].isSelected())
+            *items_->value()[index].selected_ = false;
         if (selectedIndices_.empty())
             currentSelectionStart_ = std::nullopt;
     }
@@ -399,7 +399,10 @@ namespace NuiFileExplorer
         const auto totalItems = items_->value().size();
         const auto fullRows = totalItems / gridColumns_;
         const auto itemsInFullRows = fullRows * gridColumns_;
-        return totalItems - itemsInFullRows;
+        const auto diff = totalItems - itemsInFullRows;
+        if (diff == 0)
+            return gridColumns_;
+        return diff;
     }
     bool SelectionManager::isIndexUnselected(std::make_signed_t<std::size_t> index) const
     {

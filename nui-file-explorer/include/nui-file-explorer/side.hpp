@@ -105,8 +105,10 @@ namespace NuiFileExplorer
 
         /**
          * @brief Closes all menus without deselecting items.
+         *
+         * @return Returns whether or not the context menu was closed.
          */
-        void closeMenus();
+        bool closeMenus();
 
         Nui::ElementRenderer operator()();
 
@@ -119,6 +121,15 @@ namespace NuiFileExplorer
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
         void search(std::string query);
+
+        /**
+         * @brief calculates the top left corner disregarding the menu dimension itself and whether opening it would
+         * overflow the side.
+         *
+         * @param event
+         * @return std::pair<int x, int y>
+         */
+        std::pair<int /*x*/, int /*y*/> calculateContextMenuPosition(Nui::val const& event);
 
       private:
         std::unique_ptr<SideImplementation> impl_;

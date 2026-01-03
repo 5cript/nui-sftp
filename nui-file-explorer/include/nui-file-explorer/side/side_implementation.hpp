@@ -46,8 +46,9 @@ namespace NuiFileExplorer
             std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
         };
 
-        std::weak_ptr<Nui::Dom::BasicElement> scrollContainer_{};
-        std::weak_ptr<Nui::Dom::BasicElement> searchTextBox_{};
+        std::weak_ptr<Nui::Dom::BasicElement> sideElement{};
+        std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};
+        std::weak_ptr<Nui::Dom::BasicElement> searchTextBox{};
 
         DropdownMenu newItemMenu{
             {
@@ -172,55 +173,100 @@ namespace NuiFileExplorer
 
         void sortByPredicate(auto const& predicate)
         {
-            auto& items = this->items.value();
+            Nui::WebApi::Console::log("A");
             auto partitionBorder = partitionItems();
+            Nui::WebApi::Console::log("B");
+            auto& items = this->items.value();
             std::sort(items.begin(), partitionBorder, predicate);
-            std::sort(partitionBorder, items.end(), predicate);
+            Nui::WebApi::Console::log("C");
+            if (partitionBorder != items.end())
+                std::sort(partitionBorder, items.end(), predicate);
+            Nui::WebApi::Console::log("D");
         }
 
         void sortByName(bool ascending)
         {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
-                        return lhs.item.path.filename().string() < rhs.item.path.filename().string();
-                    return lhs.item.path.filename().string() > rhs.item.path.filename().string();
-                }
-            );
+            if (ascending)
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
+                        return lhs.item.path.filename() < rhs.item.path.filename();
+                    }
+                );
+            }
+            else
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
+                        return lhs.item.path.filename() > rhs.item.path.filename();
+                    }
+                );
+            }
         }
         void sortByInfo(bool ascending)
         {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
+            if (ascending)
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
                         return lhs.item.lsStyleTypePermsUserGroup() < rhs.item.lsStyleTypePermsUserGroup();
-                    return lhs.item.lsStyleTypePermsUserGroup() > rhs.item.lsStyleTypePermsUserGroup();
-                }
-            );
+                    }
+                );
+            }
+            else
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
+                        return lhs.item.lsStyleTypePermsUserGroup() > rhs.item.lsStyleTypePermsUserGroup();
+                    }
+                );
+            }
         }
         void sortBySize(bool ascending)
         {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
+            if (ascending)
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
                         return lhs.item.size < rhs.item.size;
-                    return lhs.item.size > rhs.item.size;
-                }
-            );
+                    }
+                );
+            }
+            else
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
+                        return lhs.item.size > rhs.item.size;
+                    }
+                );
+            }
         }
         void sortByAtime(bool ascending)
         {
-            sortByPredicate(
-                [ascending](auto const& lhs, auto const& rhs)
-                {
-                    if (ascending)
+            if (ascending)
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
                         return lhs.item.atime < rhs.item.atime;
-                    return lhs.item.atime > rhs.item.atime;
-                }
-            );
+                    }
+                );
+            }
+            else
+            {
+                sortByPredicate(
+                    [](auto const& lhs, auto const& rhs)
+                    {
+                        return lhs.item.atime > rhs.item.atime;
+                    }
+                );
+            }
         }
 
         SideImplementation(SideSettings settings, std::unique_ptr<ISideModel> model)
