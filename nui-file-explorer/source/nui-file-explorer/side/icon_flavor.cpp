@@ -257,8 +257,6 @@ namespace NuiFileExplorer
                             const auto columnCount = std::count(columns.begin(), columns.end(), ' ') + 1;
                             const auto rowCount = std::count(rows.begin(), rows.end(), ' ') + 1;
 
-                            Nui::WebApi::Console::log("Icon grid resized: ", static_cast<std::uint32_t>(columnCount), " columns, ", static_cast<std::uint32_t>(rowCount), " rows.");
-
                             impl().selectionManager.setGrid(columnCount, rowCount);
                         }
                     );
