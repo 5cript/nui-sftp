@@ -399,7 +399,10 @@ namespace NuiFileExplorer
         const auto totalItems = items_->value().size();
         const auto fullRows = totalItems / gridColumns_;
         const auto itemsInFullRows = fullRows * gridColumns_;
-        return totalItems - itemsInFullRows;
+        const auto diff = totalItems - itemsInFullRows;
+        if (diff == 0)
+            return gridColumns_;
+        return diff;
     }
     bool SelectionManager::isIndexUnselected(std::make_signed_t<std::size_t> index) const
     {
