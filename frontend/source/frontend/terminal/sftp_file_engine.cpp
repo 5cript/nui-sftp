@@ -22,7 +22,7 @@ SftpFileEngine::~SftpFileEngine()
 {
     if (!moveDetector_.wasMoved())
     {
-        dispose();
+        dispose([]() {});
     }
 }
 
@@ -31,14 +31,14 @@ std::optional<Ids::ChannelId> SftpFileEngine::release()
     return std::move(impl_->sftpChannelId);
 }
 
-void SftpFileEngine::dispose()
+void SftpFileEngine::dispose(std::function<void()> onComplete)
 {
     if (!impl_->wasDisposed)
     {
         if (impl_->sftpChannelId)
         {
             Log::info("Closing sftp channel");
-            impl_->engine->closeChannel(impl_->sftpChannelId.value(), []() {});
+            impl_->engine->closeChannel(impl_->sftpChannelId.value(), std::move(onComplete));
         }
     }
     impl_->wasDisposed = true;

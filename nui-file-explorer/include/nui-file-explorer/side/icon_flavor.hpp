@@ -8,6 +8,7 @@
 #include <nui/frontend/api/resize_observer.hpp>
 #include <nui/frontend/api/drag_event.hpp>
 #include <nui/frontend/element_renderer.hpp>
+#include <nui/utility/move_detector.hpp>
 
 #include <chrono>
 
@@ -21,6 +22,12 @@ namespace NuiFileExplorer
         static constexpr std::chrono::milliseconds boxDragMinimumTimeToDifferentiateClick{150};
 
         IconFlavor(Side& impl, Side& otherSide);
+        ~IconFlavor();
+        IconFlavor(const IconFlavor&) = delete;
+        IconFlavor& operator=(const IconFlavor&) = delete;
+        IconFlavor(IconFlavor&&) = default;
+        IconFlavor& operator=(IconFlavor&&) = default;
+
         Nui::ElementRenderer operator()() override;
 
       private:
@@ -29,6 +36,8 @@ namespace NuiFileExplorer
         void onBoxDragStart(Nui::WebApi::MouseEvent event);
 
       private:
+        Nui::MoveDetector moveDetector_{};
+
         std::weak_ptr<Nui::Dom::BasicElement> gridRef_{};
         std::weak_ptr<Nui::Dom::BasicElement> selectBox_{};
 
@@ -36,7 +45,6 @@ namespace NuiFileExplorer
         double startX_{0.};
         double startY_{0.};
 
-        Nui::val selectionBox_{};
         Nui::WebApi::AbortController mouseMoveAbort_{};
         Nui::WebApi::AbortController mouseUpAbort_{};
 

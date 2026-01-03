@@ -33,12 +33,7 @@ namespace NuiFileExplorer
             auto gridElement = grid.lock();
             auto dividerElement = divider.lock();
             if (!grabElement || !gridElement || !dividerElement)
-            {
-                mouseUpAbort.abort();
-                mouseMoveAbort.abort();
-                dragging = false;
                 return false;
-            }
             return true;
         }
 
@@ -62,7 +57,14 @@ namespace NuiFileExplorer
         impl_->leftSide.initialize(impl_->rightSide);
         impl_->rightSide.initialize(impl_->leftSide);
     }
-    FileGrid::~FileGrid() = default;
+    FileGrid::~FileGrid()
+    {
+        if (moveDetector_.wasMoved())
+            return;
+
+        impl_->mouseUpAbort.abort();
+        impl_->mouseMoveAbort.abort();
+    }
     FileGrid::FileGrid(FileGrid&&) = default;
     FileGrid& FileGrid::operator=(FileGrid&&) = default;
 
@@ -123,6 +125,10 @@ namespace NuiFileExplorer
             }
         );
         attributes.emplace_back(class_ = "nui-file-grid nui-file-grid-background");
+
+        impl_->mouseUpAbort.abort();
+        impl_->mouseMoveAbort.abort();
+        impl_->dragging = false;
 
         impl_->checkReferencesForGrab();
 

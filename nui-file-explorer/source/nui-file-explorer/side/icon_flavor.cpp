@@ -18,6 +18,17 @@ namespace NuiFileExplorer
         : FlavorImplementation{side, otherSide}
     {}
 
+    IconFlavor::~IconFlavor()
+    {
+        if (moveDetector_.wasMoved())
+            return;
+
+        mouseMoveAbort_.abort();
+        mouseUpAbort_.abort();
+        if (gridLayoutObserver_)
+            gridLayoutObserver_->disconnect();
+    }
+
     void IconFlavor::onBoxDragMouseMove(Nui::WebApi::MouseEvent event)
     {
         auto grid = gridRef_.lock();
@@ -131,11 +142,11 @@ namespace NuiFileExplorer
         startX_ = event.clientX() - rect.left();
         startY_ = event.clientY() - rect.top();
 
-        selectionBox_ = box->val();
-        selectionBox_["style"].set("left", fmt::format("{}px", startX_));
-        selectionBox_["style"].set("top", fmt::format("{}px", startY_));
-        selectionBox_["style"].set("width", "0px"s);
-        selectionBox_["style"].set("height", "0px"s);
+        auto selectionBox = box->val();
+        selectionBox["style"].set("left", fmt::format("{}px", startX_));
+        selectionBox["style"].set("top", fmt::format("{}px", startY_));
+        selectionBox["style"].set("width", "0px"s);
+        selectionBox["style"].set("height", "0px"s);
 
         auto options = Nui::val::object();
 

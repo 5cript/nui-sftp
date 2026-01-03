@@ -33,7 +33,7 @@ struct OperationQueue::Implementation
     std::string persistenceSessionName;
     Ids::SessionId sessionId;
     ConfirmDialog* confirmDialog;
-    FileEngine* fileEngine;
+    std::shared_ptr<FileEngine> fileEngine;
     LocalSideModel* localModel;
     RemoteSideModel* remoteModel;
 
@@ -193,9 +193,15 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
     cleanupCustomActionsAfterId(operation.operationId());
 }
 
-void OperationQueue::activate(FileEngine* fileEngine, Ids::SessionId sessionId)
+void OperationQueue::deactivate()
 {
-    impl_->fileEngine = fileEngine;
+    impl_->fileEngine.reset();
+    impl_->sessionId = {};
+}
+
+void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId)
+{
+    impl_->fileEngine = std::move(fileEngine);
     impl_->sessionId = std::move(sessionId);
 
     impl_->onUpdate.push_back(

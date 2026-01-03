@@ -55,7 +55,8 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
 
     Nui::RpcClient::callWithBackChannel(
         "SessionManager::connect",
-        [this, onOpen = std::move(onOpen)](Nui::val val) {
+        [this, onOpen = std::move(onOpen)](Nui::val val)
+        {
             if (!val.hasOwnProperty("id"))
             {
                 Log::error("SessionManager::connect callback did not return an id");
@@ -67,7 +68,8 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
             impl_->sshSessionId = Ids::makeSessionId(val["id"].as<std::string>());
             onOpen(true, "");
         },
-        obj);
+        obj
+    );
 }
 
 void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool fromDtor)
@@ -78,11 +80,13 @@ void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool from
         Log::info("Disconnecting session: {}", impl_->sshSessionId.value());
         Nui::RpcClient::callWithBackChannel(
             "SessionManager::disconnect",
-            [onDisconnect = std::move(onDisconnect)](Nui::val) {
+            [onDisconnect = std::move(onDisconnect)](Nui::val)
+            {
                 // TODO: handle error
                 onDisconnect();
             },
-            impl_->sshSessionId.value());
+            impl_->sshSessionId.value()
+        );
         if (!fromDtor)
         {
             if (impl_->settings.onExit)
@@ -105,7 +109,8 @@ void SshTerminalEngine::createChannelImpl(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
     std::function<void(std::optional<Ids::ChannelId> const&)> onCreated,
-    bool fileMode)
+    bool fileMode
+)
 {
     if (impl_->blockedByDestruction)
     {
@@ -121,10 +126,11 @@ void SshTerminalEngine::createChannelImpl(
     Nui::RpcClient::callWithBackChannel(
         fmt::format("Session::{}::Channel::create", impl_->sshSessionId.value()),
         [this,
-         onCreated = std::move(onCreated),
-         handler = std::move(handler),
-         errorHandler = std::move(errorHandler),
-         fileMode](Nui::val val) {
+            onCreated = std::move(onCreated),
+            handler = std::move(handler),
+            errorHandler = std::move(errorHandler),
+            fileMode](Nui::val val)
+        {
             if (val.hasOwnProperty("error"))
             {
                 Log::error("Failed to create channel: {}", val["error"].as<std::string>());
@@ -147,18 +153,21 @@ void SshTerminalEngine::createChannelImpl(
             iter->second.open(
                 handler,
                 errorHandler,
-                [this]() {
+                [this]()
+                {
                     // If one channel dies, destroy everything.
                     Log::info("Channel died, disconnecting entire session");
                     onChannelDeath();
                 },
-                fileMode);
+                fileMode
+            );
 
             if (!fileMode)
             {
                 Nui::RpcClient::callWithBackChannel(
                     fmt::format("Session::{}::Channel::startReading", impl_->sshSessionId.value()),
-                    [this, channelId, onCreated](Nui::val val) {
+                    [this, channelId, onCreated](Nui::val val)
+                    {
                         if (val.hasOwnProperty("error"))
                         {
                             Log::error("Failed to start reading: {}", val["error"].as<std::string>());
@@ -169,20 +178,23 @@ void SshTerminalEngine::createChannelImpl(
                         Log::info("Started reading: {}", channelId.value());
                         onCreated(channelId);
                     },
-                    channelId.value());
+                    channelId.value()
+                );
             }
             else
             {
                 onCreated(channelId);
             }
         },
-        obj);
+        obj
+    );
 }
 
 void SshTerminalEngine::createChannel(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
-    std::function<void(std::optional<Ids::ChannelId> const&)> onCreated)
+    std::function<void(std::optional<Ids::ChannelId> const&)> onCreated
+)
 {
     createChannelImpl(std::move(handler), std::move(errorHandler), std::move(onCreated), false);
 }
@@ -202,9 +214,13 @@ void SshTerminalEngine::dispose(std::function<void()> onDisposeComplete)
     impl_->blockedByDestruction = true;
 
     if (impl_->disposer)
+    {
+        Log::error("SshTerminalEngine, dispose already in progress");
         return;
+    }
 
-    impl_->disposer = [this, onDisposeComplete = std::move(onDisposeComplete)]() mutable {
+    impl_->disposer = [this, onDisposeComplete = std::move(onDisposeComplete)]() mutable
+    {
         if (impl_->channels.empty())
         {
             disconnect(onDisposeComplete);
@@ -213,9 +229,13 @@ void SshTerminalEngine::dispose(std::function<void()> onDisposeComplete)
         {
             auto currentChannel = impl_->channels.begin();
             const auto channelId = currentChannel->first;
-            closeChannel(channelId, [this, onDisposeComplete]() mutable {
-                impl_->disposer();
-            });
+            closeChannel(
+                channelId,
+                [this, onDisposeComplete]() mutable
+                {
+                    impl_->disposer();
+                }
+            );
         }
     };
 
@@ -226,14 +246,18 @@ void SshTerminalEngine::closeChannel(Ids::ChannelId const& channelId, std::funct
 {
     if (auto channel = impl_->channels.find(channelId); channel != impl_->channels.end())
     {
-        channel->second.dispose([this, channelId, onChannelClosed = std::move(onChannelClosed)]() {
-            impl_->channels.erase(channelId);
-            onChannelClosed();
-        });
+        channel->second.dispose(
+            [this, channelId, onChannelClosed = std::move(onChannelClosed)]()
+            {
+                impl_->channels.erase(channelId);
+                onChannelClosed();
+            }
+        );
     }
     else
     {
         Log::error("Failed to close channel (could not find it): {}", channelId.value());
+        onChannelClosed();
     }
 }
 SshChannel* SshTerminalEngine::channel(Ids::ChannelId const& channelId)

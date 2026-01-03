@@ -46,6 +46,11 @@ namespace Ids
             return id_ != "INVALID_ID";
         }
 
+        void invalidate()
+        {
+            id_ = "INVALID_ID";
+        }
+
       protected:
         Id() = delete;
         explicit Id(std::string const& id)

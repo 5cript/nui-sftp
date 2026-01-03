@@ -14,7 +14,7 @@ target_sources(
         dialog/confirm_dialog.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
-        terminal/terminal.cpp
+        terminal/frontend_ssh_manager.cpp
         terminal/executing_engine.cpp
         terminal/sftp_file_engine.cpp
         terminal/ssh_engine.cpp

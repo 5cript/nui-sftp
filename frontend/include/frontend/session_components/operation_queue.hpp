@@ -49,7 +49,8 @@ class OperationQueue
 
     ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
 
-    void activate(FileEngine* fileEngine, Ids::SessionId sessionId);
+    void activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId);
+    void deactivate();
 
     void enqueueDownload(
         std::filesystem::path const& remotePath,

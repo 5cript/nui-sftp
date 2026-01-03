@@ -2,6 +2,7 @@
 
 #include <nui-file-explorer/flavor.hpp>
 #include <nui-file-explorer/side.hpp>
+#include <nui/utility/move_detector.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 #include <nui/frontend/attributes/impl/attribute.hpp>
@@ -55,8 +56,7 @@ namespace NuiFileExplorer
         void swapSides(bool doSwap);
 
       private:
-
-      private:
+        Nui::MoveDetector moveDetector_;
         struct Implementation;
         std::unique_ptr<Implementation> impl_;
     };
