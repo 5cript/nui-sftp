@@ -189,8 +189,8 @@ Nui::ElementRenderer Toolbar::operator()()
             }(),
             ui5::toolbar_button{
                 "text"_prop = "Settings",
-                "click"_event = [](Nui::val) {
-                    // TODO:
+                "click"_event = [this](Nui::val) {
+                    impl_->events->settingsOpen = true;
                 }
             }()
         )

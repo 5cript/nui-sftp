@@ -1,0 +1,94 @@
+.settings-page-background-blocker {
+    z-index: 9;
+
+    background-color: rgba(0, 0, 0, 0.5);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+
+    position: absolute;
+    box-sizing: border-box;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.settings-page {
+    margin: 40px;
+    position: relative;
+    border-radius: 12px;
+    flex-grow: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+
+    background-color: var(--sapBackgroundColor);
+    overflow: hidden;
+}
+
+.settings-page-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    padding: 12px 16px;
+    align-items: center;
+    place-content: center;
+    font-size: 1.5rem;
+}
+
+.settings-page-header .title {
+    margin-left: 16px;
+}
+
+.settings-page-content {
+    display: grid;
+    flex-grow: 1;
+    background-color: var(--darkerBackground);
+    padding-top: 16px;
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow: hidden;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr;
+}
+
+.settings-page-content .side {
+    width: 250px;
+    border-right: 1px solid var(--sapContent_ForegroundBorderColor);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.settings-page-content .side .configuration-text {
+    display: flex;
+    gap: 4px;
+    align-items: baseline;
+    color: gray;
+    margin-bottom: 10px;
+}
+
+.settings-page-section-selector {
+    padding: 8px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 2px 8px;
+    cursor: pointer;
+    border: solid 1px transparent;
+}
+
+.settings-page-section-selector:hover {
+    background-color: #404040;
+    box-shadow: 0 0 18px #404040;
+    border-radius: 6px;
+}
+
+.settings-page-section-selector.active {
+    background-color: color-mix(in srgb, var(--sapBrandColor) 20%, black 80%);
+    border: 1px solid var(--sapBrandColor);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--sapBrandColor) 30%, transparent 70%);
+    transition: box-shadow 180ms ease;
+    border-radius: 6px;
+
+}

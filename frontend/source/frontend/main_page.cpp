@@ -3,6 +3,7 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
+#include <frontend/settings.hpp>
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <log/log.hpp>
@@ -21,6 +22,7 @@ struct MainPage::Implementation
     SessionArea sessionArea;
     InputDialog newItemAskDialog;
     ConfirmDialog confirmDialog;
+    Settings settings;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
 
@@ -33,6 +35,7 @@ struct MainPage::Implementation
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
         , newItemAskDialog{"AskDialog"}
         , confirmDialog{"ConfirmDialog"}
+        , settings{stateHolder, events, &newItemAskDialog, &confirmDialog}
         , darkMode{true}
         , setupWait{}
     {
@@ -75,6 +78,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->newItemAskDialog(),
         impl_->prompter.dialog(),
         impl_->confirmDialog(),
+        impl_->settings(),
         div{
             style = "background-color: var(--sapBackgroundColor); color: var(--sapTextColor);",
             class_ = "main-page",

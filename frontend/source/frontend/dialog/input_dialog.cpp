@@ -113,7 +113,7 @@ Nui::ElementRenderer InputDialog::operator()()
             )
         ),
         div{
-            "slot"_prop = "footer",
+            "slot"_attr = "footer",
             style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px"
         }(
             div{style = "flex: 1;"}(),

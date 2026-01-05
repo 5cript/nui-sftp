@@ -8,6 +8,7 @@ import { setTheme } from "@ui5/webcomponents-base/dist/config/Theme.js";
 import { setThemeRoot } from "@ui5/webcomponents-base/dist/config/ThemeRoot.js";
 
 import { ContentPanelManager } from "./content_panel_manager.ts";
+import "./icons.js";
 
 (() => {
     globalThis.generateId = () => {
