@@ -9,9 +9,11 @@ target_sources(
         toolbar.cpp
         session_area.cpp
         session.cpp
+        settings.cpp
         dialog/input_dialog.cpp
         dialog/password_prompter.cpp
         dialog/confirm_dialog.cpp
+        dialog/new_session_dialog.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         terminal/frontend_ssh_manager.cpp
@@ -82,13 +84,13 @@ nui_prepare_emscripten_target(
         -sMEMORY64=1
         -sWASM_BIGINT
         -fexceptions
-        # -O2
-        -g
+        #$<$<CONFIG:Debug>:-g>
+        #$<$<CONFIG:Release>:-O2>
         # or other options, see emscripten docs.
     EMSCRIPTEN_COMPILE_OPTIONS
-        # -O3
         -sMEMORY64=1
-        -g
+        #$<$<CONFIG:Debug>:-g>
+        #$<$<CONFIG:Release>:-O2>
     CXX_STANDARD
         23
     OBSERVED_BUNDLE_FILES
