@@ -15,9 +15,11 @@ namespace Persistence
         std::optional<bool> preventCreateFile{std::nullopt};
         std::optional<bool> preventCreateDirectory{std::nullopt};
         std::optional<std::string> homeOverride{std::nullopt};
-
-        void useDefaultsFrom(LocalFilesystemOptions const& other);
     };
-    void to_json(nlohmann::json& j, LocalFilesystemOptions const& options);
-    void from_json(nlohmann::json const& j, LocalFilesystemOptions& options);
+
+    BOOST_DESCRIBE_STRUCT(
+        LocalFilesystemOptions,
+        (),
+        (preventDeletion, preventRename, preventCreateFile, preventCreateDirectory, homeOverride)
+    )
 }

@@ -5,6 +5,7 @@
 #endif
 
 #include <utility/algorithm/case_convert.hpp>
+#include <utility/describe.hpp>
 
 #include <string>
 #include <string_view>
@@ -21,6 +22,8 @@ namespace Log
         Critical,
         Off
     };
+
+    BOOST_DESCRIBE_ENUM(Level, Trace, Debug, Info, Warning, Error, Critical, Off);
 
 #ifndef __EMSCRIPTEN__
     inline spdlog::level::level_enum toSpdlogLevel(Level lvl)

@@ -15,28 +15,23 @@ namespace Persistence
         std::optional<bool> tryContinue{std::nullopt};
         std::optional<bool> inheritPermissions{std::nullopt};
         std::optional<std::filesystem::perms> customPermissions{std::nullopt};
-
-        void useDefaultsFrom(CommonTransferOptions const& other);
     };
-    void to_json(nlohmann::json& j, CommonTransferOptions const& options);
-    void from_json(nlohmann::json const& j, CommonTransferOptions& options);
+    BOOST_DESCRIBE_STRUCT(
+        CommonTransferOptions,
+        (),
+        (tempFileSuffix, mayOverwrite, tryContinue, inheritPermissions, customPermissions)
+    )
 
     struct DownloadOptions : public CommonTransferOptions
     {
         std::optional<bool> reserveSpace{std::nullopt};
         std::optional<bool> doCleanup{std::nullopt};
-
-        void useDefaultsFrom(DownloadOptions const& other);
     };
-    void to_json(nlohmann::json& j, DownloadOptions const& options);
-    void from_json(nlohmann::json const& j, DownloadOptions& options);
+    BOOST_DESCRIBE_STRUCT(DownloadOptions, (CommonTransferOptions), (reserveSpace, doCleanup))
 
     struct UploadOptions : public CommonTransferOptions
-    {
-        void useDefaultsFrom(UploadOptions const& other);
-    };
-    void to_json(nlohmann::json& j, UploadOptions const& options);
-    void from_json(nlohmann::json const& j, UploadOptions& options);
+    {};
+    BOOST_DESCRIBE_STRUCT(UploadOptions, (CommonTransferOptions), ())
 
     struct SftpOptions
     {
@@ -44,9 +39,6 @@ namespace Persistence
         std::optional<UploadOptions> uploadOptions{};
         std::optional<int> concurrency{std::nullopt}; // How many parallel transfers are allowed?
         std::chrono::seconds operationTimeout{5};
-
-        void useDefaultsFrom(SftpOptions const& other);
     };
-    void to_json(nlohmann::json& j, SftpOptions const& options);
-    void from_json(nlohmann::json const& j, SftpOptions& options);
+    BOOST_DESCRIBE_STRUCT(SftpOptions, (), (downloadOptions, uploadOptions, concurrency, operationTimeout))
 }

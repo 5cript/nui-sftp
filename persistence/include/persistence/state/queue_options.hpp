@@ -10,9 +10,7 @@ namespace Persistence
     {
         std::optional<bool> autoRemoveCompletedOperations{std::nullopt};
         std::optional<bool> startInPausedState{std::nullopt};
-
-        void useDefaultsFrom(QueueOptions const& other);
     };
-    void to_json(nlohmann::json& j, QueueOptions const& options);
-    void from_json(nlohmann::json const& j, QueueOptions& options);
+
+    BOOST_DESCRIBE_STRUCT(QueueOptions, (), (autoRemoveCompletedOperations, startInPausedState))
 }

@@ -41,11 +41,19 @@ struct SessionOptions::Implementation
 void SessionOptions::loadLayoutNames()
 {
     impl_->stateHolder->load(
-        [this](bool success, Persistence::StateHolder&)
+        [this](std::optional<std::string> const& error, Persistence::StateHolder&)
         {
-            if (!success)
+            if (error)
             {
                 Log::error("Failed to load state holder");
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Error loading state",
+                    .text = fmt::format(
+                        "An error occurred while loading the application state: {}.\nCannot load layout names.", *error
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
                 return;
             }
             impl_->layoutNames.value().clear();

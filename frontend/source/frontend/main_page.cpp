@@ -16,12 +16,12 @@ struct MainPage::Implementation
 {
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
+    ConfirmDialog confirmDialog;
+    InputDialog newItemAskDialog;
     PasswordPrompter prompter;
     Sidebar sidebar;
     Toolbar toolbar;
     SessionArea sessionArea;
-    InputDialog newItemAskDialog;
-    ConfirmDialog confirmDialog;
     Settings settings;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
@@ -29,12 +29,12 @@ struct MainPage::Implementation
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events)
         : stateHolder{stateHolder}
         , events{events}
+        , confirmDialog{"ConfirmDialog"}
+        , newItemAskDialog{"AskDialog"}
         , prompter{}
         , sidebar{stateHolder, events}
-        , toolbar{stateHolder, events}
+        , toolbar{stateHolder, events, &confirmDialog}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
-        , newItemAskDialog{"AskDialog"}
-        , confirmDialog{"ConfirmDialog"}
         , settings{stateHolder, events, &newItemAskDialog, &confirmDialog}
         , darkMode{true}
         , setupWait{}

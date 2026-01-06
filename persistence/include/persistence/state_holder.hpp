@@ -17,8 +17,11 @@ namespace Persistence
         StateHolder();
         ROAR_PIMPL_SPECIAL_FUNCTIONS(StateHolder);
 
-        void load(std::function<void(bool, StateHolder&)> const& onLoad);
-        void save(std::function<void()> const& onSaveComplete = []() {});
+        void load(std::function<void(std::optional<std::string> const& /*error*/, StateHolder&)> const& onLoad);
+        void save(
+            std::function<void(std::optional<std::string> const& error)> const& onSaveComplete =
+                [](std::optional<std::string> const&) {}
+        );
 
         State& stateCache();
 

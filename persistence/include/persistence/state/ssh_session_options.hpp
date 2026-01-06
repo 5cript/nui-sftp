@@ -25,8 +25,20 @@ namespace Persistence
         std::optional<std::string> defaultDirectory{std::nullopt};
         Referenceable<SshOptions> sshOptions{};
         Referenceable<SftpOptions> sftpOptions{};
-        void useDefaultsFrom(SshSessionOptions const& other);
     };
-    void to_json(nlohmann::json& j, SshSessionOptions const& options);
-    void from_json(nlohmann::json const& j, SshSessionOptions& options);
+
+    BOOST_DESCRIBE_STRUCT(
+        SshSessionOptions,
+        (),
+        (host,
+            port,
+            user,
+            passwordUnsafe,
+            sshKey,
+            environment,
+            openSftpByDefault,
+            defaultDirectory,
+            sshOptions,
+            sftpOptions)
+    )
 }

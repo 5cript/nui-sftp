@@ -43,6 +43,8 @@ void NewSessionDialog::open(std::function<void(ConfirmResult const&)> onConfirm)
     if (auto input = impl_->input.lock())
     {
         input->val().set("value", std::string{Implementation::defaultName});
+        impl_->nameValid = true;
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     if (auto diag = impl_->dialog.lock(); diag)

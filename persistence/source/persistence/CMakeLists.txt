@@ -1,17 +1,9 @@
 add_library(
     persistence
     STATIC
-        state/ssh_options.cpp
-        state/sftp_options.cpp
-        state/ssh_session_options.cpp
         state/state.cpp
         state/terminal_engine.cpp
-        state/terminal_options.cpp
-        state/terminal_theme.cpp
         state/termios.cpp
-        state/ui_options.cpp
-        state/queue_options.cpp
-        state/local_filesystem_options.cpp
         state_holder.cpp
 )
 
@@ -37,10 +29,12 @@ target_include_directories(
 
 target_link_libraries(
     persistence
+    PRIVATE
+        core-target
     PUBLIC
         constants
         utility
+        shared-data
         log
         roar-include-only
-        core-target
 )
