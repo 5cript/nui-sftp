@@ -46,7 +46,8 @@ namespace Persistence
                     .IXANY_ = false,
                     .IXOFF_ = false,
                     .IMAXBEL_ = false,
-                    .IUTF8_ = true};
+                    .IUTF8_ = true
+                };
             }
         };
         std::optional<InputFlags> inputFlags{InputFlags{}};
@@ -86,7 +87,8 @@ namespace Persistence
                     .TABDLY_ = "TAB0",
                     .BSDLY_ = "BS0",
                     .VTDLY_ = "VT0",
-                    .FFDLY_ = "FF0"};
+                    .FFDLY_ = "FF0"
+                };
             }
         };
         std::optional<OutputFlags> outputFlags{OutputFlags{}};
@@ -124,7 +126,8 @@ namespace Persistence
                     .LOBLK_ = false,
                     .CIBAUD_ = false,
                     .CMSPAR_ = false,
-                    .CRTSCTS_ = false};
+                    .CRTSCTS_ = false
+                };
             }
         };
         std::optional<ControlFlags> controlFlags{ControlFlags{}};
@@ -166,7 +169,8 @@ namespace Persistence
                     .NOFLSH_ = false,
                     .TOSTOP_ = false,
                     .PENDIN_ = false,
-                    .IEXTEN_ = true};
+                    .IEXTEN_ = true
+                };
             }
         };
         std::optional<LocalFlags> localFlags{LocalFlags{}};
@@ -213,7 +217,6 @@ namespace Persistence
     void from_json(nlohmann::json const& j, Termios::LocalFlags& localFlags);
     void to_json(nlohmann::json& j, Termios::CC const& cc);
     void from_json(nlohmann::json const& j, Termios::CC& cc);
-
     void to_json(nlohmann::json& j, Termios const& termios);
     void from_json(nlohmann::json const& j, Termios& termios);
 }

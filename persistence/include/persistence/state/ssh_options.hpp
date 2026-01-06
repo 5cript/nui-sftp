@@ -25,9 +25,28 @@ namespace Persistence
         std::optional<std::string> identityAgent{std::nullopt};
         std::optional<int> connectTimeoutSeconds{std::nullopt};
         std::optional<int> connectTimeoutUSeconds{std::nullopt};
-
-        void useDefaultsFrom(SshOptions const& other);
     };
-    void to_json(nlohmann::json& j, SshOptions const& options);
-    void from_json(nlohmann::json const& j, SshOptions& options);
+    BOOST_DESCRIBE_STRUCT(
+        SshOptions,
+        (),
+        (sshDirectory,
+            knownHostsFile,
+            tryAgentForAuthentication,
+            usePublicKeyAutoAuth,
+            logVerbosity,
+            keyExchangeAlgorithms,
+            compressionClientToServer,
+            compressionServerToClient,
+            compressionLevel,
+            strictHostKeyCheck,
+            proxyCommand,
+            gssapiServerIdentity,
+            gssapiClientIdentity,
+            gssapiDelegateCredentials,
+            noDelay,
+            bypassConfig,
+            identityAgent,
+            connectTimeoutSeconds,
+            connectTimeoutUSeconds)
+    )
 }

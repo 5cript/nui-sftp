@@ -24,13 +24,15 @@ namespace Persistence
         }
     }
 
-    void StateHolder::load(std::function<void(bool, StateHolder&)> const& onLoad)
+    void StateHolder::load(std::function<void(std::optional<std::string> const& /*error*/, StateHolder&)> const& onLoad)
     {
         setupPersistence();
         const auto path = Roar::resolvePath(Constants::persistencePath);
 
-        auto makeBackup = [&path]() {
-            const auto backupFileName = [&path]() {
+        auto makeBackup = [&path]()
+        {
+            const auto backupFileName = [&path]()
+            {
                 const auto now = std::chrono::system_clock::now();
                 const auto time = fmt::format("{:%Y-%m-%d_%H-%M-%S}", now);
 
@@ -48,7 +50,9 @@ namespace Persistence
 
         try
         {
-            const auto before = [&path, &makeBackup]() {
+            std::optional<std::string> error{std::nullopt};
+            const auto before = [&path, &makeBackup, &error]()
+            {
                 try
                 {
                     std::ifstream reader{path, std::ios_base::binary};
@@ -59,9 +63,24 @@ namespace Persistence
                     }
                     return nlohmann::json::parse(reader, nullptr, true, true);
                 }
+                catch (nlohmann::json::parse_error const& e)
+                {
+                    Log::error("Failed to parse config file: {}", e.what());
+                    error = fmt::format("Failed to parse config file: {}", e.what());
+                    makeBackup();
+                    return nlohmann::json(nullptr);
+                }
+                catch (nlohmann::json::exception const& e)
+                {
+                    Log::error("Failed to parse config file: {}", e.what());
+                    error = fmt::format("Failed to parse config file: {}", e.what());
+                    makeBackup();
+                    return nlohmann::json(nullptr);
+                }
                 catch (std::exception const& e)
                 {
                     Log::error("Failed to parse config file: {}", e.what());
+                    error = fmt::format("Failed to parse config file: {}", e.what());
                     makeBackup();
                     return nlohmann::json(nullptr);
                 }
@@ -71,18 +90,18 @@ namespace Persistence
             {
                 // Save something valid
                 dataFixer(nlohmann::json::object());
-                onLoad(true, *this);
+                onLoad(error, *this);
                 return;
             }
 
             before.get_to(stateCache_);
             dataFixer(before);
-            onLoad(true, *this);
+            onLoad(error, *this);
         }
         catch (std::exception const& e)
         {
             Log::error("Failed to load config file: {}", e.what());
-            onLoad(false, *this);
+            onLoad(fmt::format("Failed to load config file: {}", e.what()), *this);
         }
     }
 
@@ -112,11 +131,10 @@ namespace Persistence
                 .lineHeight = std::nullopt,
                 .renderer = "canvas",
                 .letterSpacing = 0,
-                .theme =
-                    TerminalTheme{
-                        .background = "#202020",
-                        .white = "#efefef",
-                    },
+                .theme = TerminalTheme{
+                    .background = "#202020",
+                    .white = "#efefef",
+                },
             };
             mustSave = true;
         }
@@ -151,7 +169,7 @@ namespace Persistence
         }
     }
 
-    void StateHolder::save(std::function<void()> const& onSaveComplete)
+    void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
     {
         setupPersistence();
         const auto path = Roar::resolvePath(Constants::persistencePath);
@@ -160,7 +178,7 @@ namespace Persistence
         {
             std::ofstream writer{path, std::ios_base::binary};
             writer << nlohmann::json(stateCache_).dump(4);
-            onSaveComplete();
+            onSaveComplete(std::nullopt);
         }
         catch (std::exception const& e)
         {
@@ -171,43 +189,69 @@ namespace Persistence
 
     void StateHolder::registerRpc(Nui::RpcHub& hub)
     {
-        hub.registerFunction("StateHolder::load", [&hub, this](std::string responseId) {
-            Log::debug("Received state load request from frontend state holder.");
+        hub.registerFunction(
+            "StateHolder::load",
+            [&hub, this](std::string responseId)
+            {
+                Log::debug("Received state load request from frontend state holder.");
 
-            load([responseId, &hub](bool success, StateHolder& holder) {
-                if (!success)
+                load(
+                    [responseId, &hub](std::optional<std::string> const& error, StateHolder& holder)
+                    {
+                        if (error)
+                        {
+                            hub.callRemote(
+                                responseId,
+                                nlohmann::json{
+                                    {"error", *error},
+                                }
+                            );
+                            return;
+                        }
+                        Log::debug("State loaded from disk.");
+                        hub.callRemote(responseId, nlohmann::json(holder.stateCache_).dump());
+                    }
+                );
+            }
+        );
+
+        hub.registerFunction(
+            "StateHolder::save",
+            [&hub, this](std::string responseId, std::string const& state)
+            {
+                Log::debug("Received state save request from frontend state holder.");
+
+                try
+                {
+                    stateCache_ = nlohmann::json::parse(state).get<State>();
+                    save(
+                        [&hub, responseId](std::optional<std::string> const& error)
+                        {
+                            if (error)
+                            {
+                                hub.callRemote(
+                                    responseId,
+                                    nlohmann::json{
+                                        {"error", *error},
+                                    }
+                                );
+                                return;
+                            }
+                            Log::debug("State saved to disk.");
+                            hub.callRemote(responseId, nlohmann::json{{"success", true}});
+                        }
+                    );
+                }
+                catch (std::exception const& e)
                 {
                     hub.callRemote(
                         responseId,
                         nlohmann::json{
-                            {"error", "Failed to load state from disk."},
-                        });
-                    return;
+                            {"error", fmt::format("Failed to save state to disk: {}", e.what())},
+                        }
+                    );
                 }
-                Log::debug("State loaded from disk.");
-                hub.callRemote(responseId, nlohmann::json(holder.stateCache_).dump());
-            });
-        });
-
-        hub.registerFunction("StateHolder::save", [&hub, this](std::string responseId, std::string const& state) {
-            Log::debug("Received state save request from frontend state holder.");
-
-            try
-            {
-                stateCache_ = nlohmann::json::parse(state).get<State>();
-                save([&hub, responseId]() {
-                    Log::debug("State saved to disk.");
-                    hub.callRemote(responseId, nlohmann::json{{"success", true}});
-                });
             }
-            catch (std::exception const& e)
-            {
-                hub.callRemote(
-                    responseId,
-                    nlohmann::json{
-                        {"error", fmt::format("Failed to save state to disk: {}", e.what())},
-                    });
-            }
-        });
+        );
     }
 }

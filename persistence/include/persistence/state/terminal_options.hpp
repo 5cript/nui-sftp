@@ -18,9 +18,10 @@ namespace Persistence
         std::optional<std::string> renderer{std::nullopt};
         std::optional<int> letterSpacing{std::nullopt};
         std::optional<TerminalTheme> theme{};
-
-        void useDefaultsFrom(TerminalOptions const& other);
     };
-    void to_json(nlohmann::json& j, TerminalOptions const& engine);
-    void from_json(nlohmann::json const& j, TerminalOptions& engine);
+    BOOST_DESCRIBE_STRUCT(
+        TerminalOptions,
+        (),
+        (fontFamily, fontSize, lineHeight, cursorBlink, renderer, letterSpacing, theme)
+    )
 }

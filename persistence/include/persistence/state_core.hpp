@@ -1,7 +1,12 @@
 #pragma once
 
+#include <persistence/reference.hpp>
 #include <nui/core.hpp>
 #include <nlohmann/json.hpp>
+#include <utility/describe.hpp>
+#include <utility/enum_string_convert.hpp>
+#include <shared_data/shared_data.hpp>
+#include <log/log.hpp>
 
 #include <utility>
 #include <optional>
@@ -65,6 +70,101 @@ namespace Persistence
 
     template <typename T>
     constexpr bool isStateWrap = IsStateWrap<T>::value;
+
+    using SharedData::from_json;
+    using SharedData::to_json;
+
+    template <typename T>
+    void useDefaultsFrom(std::optional<T>& toFill, std::optional<T> const& defaultsFromThis);
+
+    template <typename T>
+    void useDefaultsFrom(std::optional<T>& toFill, T const& defaultsFromThis);
+
+    template <
+        typename T,
+        typename Enable = std::void_t<decltype(std::declval<T>().useDefaultsFrom(std::declval<T const&>()))>>
+    void useDefaultsFrom(T& toFill, T const& defaultsFromThis);
+
+    template <typename T>
+    void useDefaultsFrom(ReferenceAndImpl<T>& toFill, T const& defaultsFromThis);
+
+    template <
+        typename T,
+        class Bases = boost::describe::describe_bases<T, boost::describe::mod_any_access>,
+        class Members = boost::describe::describe_members<T, boost::describe::mod_any_access>,
+        class Enable = std::enable_if_t<!std::is_union_v<T>>>
+    void useDefaultsFrom(T& toFill, T const& defaultsFromThis);
+
+    template <typename T>
+    concept CanCallUseDefaultsFrom = requires(T t, T const& other) {
+        { useDefaultsFrom(t, other) } -> std::same_as<void>;
+    };
+
+    template <typename T, class Bases, class Members, class Enable>
+    void useDefaultsFrom(T& toFill, T const& defaultsFromThis)
+    {
+        boost::mp11::mp_for_each<Bases>(
+            [&](auto&& base)
+            {
+                using type = typename std::decay_t<decltype(base)>::type;
+                useDefaultsFrom(static_cast<type&>(toFill), static_cast<type const&>(defaultsFromThis));
+            }
+        );
+        boost::mp11::mp_for_each<Members>(
+            [&](auto&& memAccessor)
+            {
+                if constexpr (CanCallUseDefaultsFrom<std::decay_t<decltype(toFill.*memAccessor.pointer)>>)
+                    useDefaultsFrom(toFill.*memAccessor.pointer, defaultsFromThis.*memAccessor.pointer);
+                else
+                {
+                    Log::debug(
+                        "Skipping useDefaultsFrom for member {} of type {}.",
+                        memAccessor.name,
+                        typeid(decltype(toFill.*memAccessor.pointer)).name()
+                    );
+                }
+            }
+        );
+    }
+
+    template <typename T>
+    void useDefaultsFrom(std::optional<T>& toFill, std::optional<T> const& defaultsFromThis)
+    {
+        if (!toFill && defaultsFromThis)
+            toFill = *defaultsFromThis;
+    }
+
+    template <typename T>
+    void useDefaultsFrom(std::optional<T>& toFill, T const& defaultsFromThis)
+    {
+        if (!toFill)
+            toFill = defaultsFromThis;
+    }
+
+    template <typename T, typename Enable>
+    void useDefaultsFrom(T& toFill, T const& defaultsFromThis)
+    {
+        toFill.useDefaultsFrom(defaultsFromThis);
+    }
+
+    template <typename T>
+    void useDefaultsFrom(ReferenceAndImpl<T>& toFill, T const& defaultsFromThis)
+    {
+        useDefaultsFrom(toFill.value(), defaultsFromThis);
+    }
+
+#ifdef NUI_FRONTEND
+    template <typename EnumT, typename EnumDescription = boost::describe::describe_enumerators<EnumT>>
+    void to_val(Nui::val& v, EnumT const& e)
+    {
+        SharedData::to_val<EnumT, EnumDescription>(v, e);
+    }
+    template <typename EnumT, typename EnumDescription = boost::describe::describe_enumerators<EnumT>>
+    void from_val(Nui::val const& v, EnumT& e)
+    {
+        SharedData::from_val<EnumT, EnumDescription>(v, e);
+    }
+#endif
 }
 
 namespace Detail

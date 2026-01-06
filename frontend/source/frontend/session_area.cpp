@@ -71,10 +71,20 @@ SessionArea::SessionArea(
     );
 
     stateHolder->load(
-        [this](bool success, Persistence::StateHolder& holder)
+        [this](std::optional<std::string> const& error, Persistence::StateHolder& holder)
         {
-            if (!success)
+            if (error)
+            {
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Error loading state",
+                    .text = fmt::format(
+                        "An error occurred while loading the application state: {}\nDefault state will be used.", *error
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
                 return;
+            }
 
             auto const& state = holder.stateCache();
 
@@ -169,10 +179,20 @@ void SessionArea::addSession(std::string const& name)
     using namespace std::string_literals;
 
     impl_->stateHolder->load(
-        [this, name](bool success, Persistence::StateHolder& holder)
+        [this, name](std::optional<std::string> const& error, Persistence::StateHolder& holder)
         {
-            if (!success)
+            if (error)
+            {
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Error loading state",
+                    .text = fmt::format(
+                        "An error occurred while loading the application state: {}\nCannot add session.", *error
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
                 return;
+            }
 
             auto const& state = holder.stateCache().fullyResolve();
 

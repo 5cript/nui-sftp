@@ -70,70 +70,74 @@ namespace
             .scheme = schemeName,
             .allowedOrigins = {"*"s},
             .onRequest =
-                [programDir, schemeName](CustomSchemeRequest const& request) {
+                [programDir, schemeName](CustomSchemeRequest const& request)
+            {
+                // make path relative to / to avoid directory traversal
+                const auto url = request.parseUrl();
+                if (!url)
+                {
+                    Log::error("Failed to parse url: '{}'", request.uri);
+                    return makeResponse(400, "Bad Request", "Bad Request");
+                }
+
+                const auto pathString = url->pathAsString();
+                Log::debug("Request for {}", pathString);
+
+                if (pathString == "/index.html")
+                    return makeResponse(200, "OK", index(), "text/html");
+
+                const auto file = [&]()
+                {
+                    const auto endsWith = [&](std::string_view ending)
+                    {
+                        return pathString.size() >= ending.size() &&
+                            pathString.substr(pathString.size() - ending.size()) == ending;
+                    };
+
+                    if (endsWith("css_variables.css"))
+                    {
+                        return programDir / "themes" / std::filesystem::path{pathString}.parent_path().filename() /
+                            "css_variables.css";
+                    }
+
                     // make path relative to / to avoid directory traversal
-                    const auto url = request.parseUrl();
-                    if (!url)
-                    {
-                        Log::error("Failed to parse url: '{}'", request.uri);
-                        return makeResponse(400, "Bad Request", "Bad Request");
-                    }
+                    if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf"))
+                        return programDir / "dynamic_sources" / std::filesystem::relative(pathString, "/");
+                    else
+                        return programDir / "assets" / std::filesystem::relative(pathString, "/");
+                }();
 
-                    const auto pathString = url->pathAsString();
-                    Log::debug("Request for {}", pathString);
+                // Check if file exists and return 404 if not
+                if (!std::filesystem::exists(file))
+                {
+                    Log::error("File not found: '{}'", file.string());
+                    return CustomSchemeResponse{
+                        .statusCode = 404,
+                        .reasonPhrase = "Not Found",
+                        .headers =
+                            {
+                                {"Content-Type"s, "text/plain"s},
+                                // Do not forget to allow CORS
+                                {"Access-Control-Allow-Origin"s, "*"s},
+                            },
+                        .body = "Not Found: "s + file.string(),
+                    };
+                }
 
-                    if (pathString == "/index.html")
-                        return makeResponse(200, "OK", index(), "text/html");
+                Log::debug("Serving file: '{}'", file.string());
 
-                    const auto file = [&]() {
-                        const auto endsWith = [&](std::string_view ending) {
-                            return pathString.size() >= ending.size() &&
-                                pathString.substr(pathString.size() - ending.size()) == ending;
-                        };
+                // Read file
+                auto content = readFile(file);
 
-                        if (endsWith("css_variables.css"))
-                        {
-                            return programDir / "themes" / std::filesystem::path{pathString}.parent_path().filename() /
-                                "css_variables.css";
-                        }
-
-                        // make path relative to / to avoid directory traversal
-                        if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf"))
-                            return programDir / "dynamic_sources" / std::filesystem::relative(pathString, "/");
-                        else
-                            return programDir / "assets" / std::filesystem::relative(pathString, "/");
-                    }();
-
-                    // Check if file exists and return 404 if not
-                    if (!std::filesystem::exists(file))
-                    {
-                        Log::error("File not found: '{}'", file.string());
-                        return CustomSchemeResponse{
-                            .statusCode = 404,
-                            .reasonPhrase = "Not Found",
-                            .headers =
-                                {
-                                    {"Content-Type"s, "text/plain"s},
-                                    // Do not forget to allow CORS
-                                    {"Access-Control-Allow-Origin"s, "*"s},
-                                },
-                            .body = "Not Found: "s + file.string(),
-                        };
-                    }
-
-                    Log::debug("Serving file: '{}'", file.string());
-
-                    // Read file
-                    auto content = readFile(file);
-
-                    // Return file
-                    const auto code = content.empty() ? 204 : 200;
-                    return makeResponse(
-                        code,
-                        "OK",
-                        std::move(content),
-                        Roar::extensionToMime(file.extension().string()).value_or("application/octet-stream"));
-                },
+                // Return file
+                const auto code = content.empty() ? 204 : 200;
+                return makeResponse(
+                    code,
+                    "OK",
+                    std::move(content),
+                    Roar::extensionToMime(file.extension().string()).value_or("application/octet-stream")
+                );
+            },
 
             // Windows: Is this secure like https (not http)? A lot of things are not allowed in http.
             .treatAsSecure = true,
@@ -165,29 +169,35 @@ Main::Main(int const, char const* const* argv)
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
 
-    stateHolder_.load([this](bool success, Persistence::StateHolder& holder) {
-        if (!success)
+    stateHolder_.load(
+        [this](std::optional<std::string> const& error, Persistence::StateHolder& holder)
         {
+            if (error)
+            {
+                Log::error("Setting up rpc filesystem with full lockdown due to state load error: {}", *error);
+
+                rpcFilesystem_ = std::make_unique<RpcFilesystem>(
+                    window_.getExecutor(),
+                    window_,
+                    hub_,
+                    // prevent all:
+                    Persistence::LocalFilesystemOptions{
+                        .preventDeletion = true,
+                        .preventRename = true,
+                        .preventCreateFile = true,
+                        .preventCreateDirectory = true,
+                    }
+                );
+                return;
+            }
+
+            Log::setLevel(holder.stateCache().logLevel);
+
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
-                window_.getExecutor(),
-                window_,
-                hub_,
-                // prevent all:
-                Persistence::LocalFilesystemOptions{
-                    .preventDeletion = true,
-                    .preventRename = true,
-                    .preventCreateFile = true,
-                    .preventCreateDirectory = true,
-                });
-
-            return;
+                window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions
+            );
         }
-
-        Log::setLevel(holder.stateCache().logLevel);
-
-        rpcFilesystem_ = std::make_unique<RpcFilesystem>(
-            window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions);
-    });
+    );
 }
 Main::~Main()
 {
@@ -228,23 +238,29 @@ void Main::startChildSignalTimer()
 
 #ifdef __linux__
     childSignalTimer_.expires_after(200ms);
-    childSignalTimer_.async_wait([this](boost::system::error_code const& ec) {
-        if (ec)
-            return;
-
-        for (auto& i : sigchld)
+    childSignalTimer_.async_wait(
+        [this](boost::system::error_code const& ec)
         {
-            if (i > 0)
-            {
-                window_.runInJavascriptThread([i, this]() {
-                    processes_.notifyChildExit(hub_, i);
-                });
-                i = 0;
-            }
-        }
+            if (ec)
+                return;
 
-        startChildSignalTimer();
-    });
+            for (auto& i : sigchld)
+            {
+                if (i > 0)
+                {
+                    window_.runInJavascriptThread(
+                        [i, this]()
+                        {
+                            processes_.notifyChildExit(hub_, i);
+                        }
+                    );
+                    i = 0;
+                }
+            }
+
+            startChildSignalTimer();
+        }
+    );
 #endif
 }
 
@@ -255,20 +271,21 @@ int main(int const argc, char const* const* argv)
 #    pragma clang diagnostic ignored "-Wc99-designator"
     struct sigaction sa{
         .sa_sigaction =
-            +[](int, siginfo_t* info, void*) {
-                const pid_t pid = info->si_pid;
-                if (pid > 0)
+            +[](int, siginfo_t* info, void*)
+        {
+            const pid_t pid = info->si_pid;
+            if (pid > 0)
+            {
+                for (auto& i : sigchld)
                 {
-                    for (auto& i : sigchld)
+                    if (i == 0)
                     {
-                        if (i == 0)
-                        {
-                            i = pid;
-                            break;
-                        }
+                        i = pid;
+                        break;
                     }
                 }
-            },
+            }
+        },
         .sa_mask = {},
         .sa_flags = SA_SIGINFO,
         .sa_restorer = nullptr,

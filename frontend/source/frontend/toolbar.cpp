@@ -20,13 +20,15 @@ struct Toolbar::Implementation
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
     SessionArea* sessionArea;
+    ConfirmDialog* confirmDialog;
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
     std::string selectedLayout;
 
-    Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events)
+    Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
         : stateHolder{stateHolder}
         , events{events}
+        , confirmDialog{confirmDialog}
         , terminalEngines{}
         , layouts{}
         , selectedLayout{}
@@ -40,10 +42,21 @@ struct Toolbar::Implementation
 void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
 {
     stateHolder->load(
-        [this, onDone = std::move(onDone)](bool success, Persistence::StateHolder& holder)
+        [this, onDone = std::move(onDone)](std::optional<std::string> const& error, Persistence::StateHolder& holder)
         {
-            if (!success)
+            if (error)
+            {
+                confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Error loading state",
+                    .text = fmt::format(
+                        "An error occurred while loading the application state: {}\nCannot update sessions list.",
+                        *error
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
                 return;
+            }
 
             auto const& state = holder.stateCache();
 
@@ -77,8 +90,8 @@ void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
     );
 }
 
-Toolbar::Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events)
-    : impl_(std::make_unique<Implementation>(stateHolder, events))
+Toolbar::Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
+    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog))
 {
     Log::info("Toolbar::Toolbar");
     impl_->updateSessionsList(
@@ -96,10 +109,21 @@ void Toolbar::connectLayoutsChanged()
         [this](bool)
         {
             impl_->stateHolder->load(
-                [this](bool success, Persistence::StateHolder&)
+                [this](std::optional<std::string> const& error, Persistence::StateHolder&)
                 {
-                    if (!success)
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Negative,
+                            .headerText = "Error loading state",
+                            .text = fmt::format(
+                                "An error occurred while loading the application state: {}\nCannot update layouts.",
+                                *error
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
                         return;
+                    }
 
                     reloadLayouts();
                 }

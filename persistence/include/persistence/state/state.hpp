@@ -29,6 +29,18 @@ namespace Persistence
         State fullyResolve() const;
     };
 
-    void to_json(nlohmann::json& j, State const& state);
-    void from_json(nlohmann::json const& j, State& state);
+    BOOST_DESCRIBE_STRUCT(
+        State,
+        (),
+        (terminalOptions,
+            sessions,
+            termios,
+            sshOptions,
+            sftpOptions,
+            sshSessionOptions,
+            uiOptions,
+            logLevel,
+            queueOptions,
+            localFilesystemOptions)
+    )
 }

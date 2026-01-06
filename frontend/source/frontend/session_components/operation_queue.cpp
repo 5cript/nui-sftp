@@ -85,10 +85,23 @@ OperationQueue::OperationQueue(
       }
 {
     impl_->stateHolder->load(
-        [this, name = impl_->persistenceSessionName](bool success, Persistence::StateHolder& holder)
+        [this, name = impl_->persistenceSessionName](
+            std::optional<std::string> const& error, Persistence::StateHolder& holder
+        )
         {
-            if (!success)
+            if (error)
+            {
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = "Error loading state",
+                    .text = fmt::format(
+                        "An error occurred while loading the application state: {}\nCannot set up operation queue.",
+                        *error
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
                 return;
+            }
 
             auto const& state = holder.stateCache().fullyResolve();
 
@@ -174,16 +187,16 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
 
         if (operation.warrantsCancelConfirm())
         {
-            impl_->confirmDialog->open(
-                {.headerText = "Cancel Operation",
-                    .text = fmt::format("Are you sure you want to cancel the operation?"),
-                    .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-                    .onClose = [doCancel](ConfirmDialog::Button buttonPressed)
-                    {
-                        if (buttonPressed == ConfirmDialog::Button::Yes)
-                            doCancel();
-                    }}
-            );
+            impl_->confirmDialog->open({
+                .headerText = "Cancel Operation",
+                .text = fmt::format("Are you sure you want to cancel the operation?"),
+                .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+                .onClose = [doCancel](ConfirmDialog::Button buttonPressed)
+                {
+                    if (buttonPressed == ConfirmDialog::Button::Yes)
+                        doCancel();
+                },
+            });
         }
         else
         {
@@ -677,13 +690,35 @@ Nui::ElementRenderer OperationQueue::operator()()
                 "design"_prop = "Graphical",
                 "change"_event = [this](Nui::val event) {
                     *impl_->autoClean = event["target"]["checked"].as<bool>();
-                    impl_->stateHolder->load([this, name = impl_->persistenceSessionName](bool success, Persistence::StateHolder& holder) {
-                        if (!success)
+                    impl_->stateHolder->load([this, name = impl_->persistenceSessionName](std::optional<std::string> const& error, Persistence::StateHolder& holder) {
+                        if (error) {
+                            impl_->confirmDialog->open({
+                                .state = ConfirmDialog::State::Negative,
+                                .headerText = "Error loading state",
+                                .text = fmt::format(
+                                    "An error occurred while loading the application state: {}.",
+                                    *error
+                                ),
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
                             return;
+                        }
 
                         auto iter = holder.stateCache().sessions.find(name);
                         iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
-                        holder.save([]() {});
+                        holder.save([this](std::optional<std::string> const& error) {
+                            if (error) {
+                                impl_->confirmDialog->open({
+                                    .state = ConfirmDialog::State::Negative,
+                                    .headerText = "Error saving state",
+                                    .text = fmt::format(
+                                        "An error occurred while saving the application state: {}.",
+                                        *error
+                                    ),
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                            }
+                        });
                     });
                 }
             }(),

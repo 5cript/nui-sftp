@@ -32,9 +32,33 @@ namespace Persistence
         std::optional<std::string> selectionInactiveBackground{std::nullopt};
         std::optional<std::string> white{std::nullopt};
         std::optional<std::string> yellow{std::nullopt};
-
-        void useDefaultsFrom(TerminalTheme const& other);
     };
-    void to_json(nlohmann::json& j, TerminalTheme const& theme);
-    void from_json(nlohmann::json const& j, TerminalTheme& theme);
+    BOOST_DESCRIBE_STRUCT(
+        TerminalTheme,
+        (),
+        (background,
+            black,
+            blue,
+            brightBlack,
+            brightBlue,
+            brightCyan,
+            brightGreen,
+            brightMagenta,
+            brightRed,
+            brightWhite,
+            brightYellow,
+            cursor,
+            cursorAccent,
+            cyan,
+            extendedAnsi,
+            foreground,
+            green,
+            magenta,
+            red,
+            selectionBackground,
+            selectionForeground,
+            selectionInactiveBackground,
+            white,
+            yellow)
+    )
 }

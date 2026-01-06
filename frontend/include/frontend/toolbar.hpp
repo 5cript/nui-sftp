@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/events/frontend_events.hpp>
+#include <frontend/dialog/confirm_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -11,7 +12,7 @@ class SessionArea;
 class Toolbar
 {
   public:
-    Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events);
+    Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Toolbar);
 
     void sessionArea(SessionArea& sessionArea);

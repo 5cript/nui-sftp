@@ -1,7 +1,7 @@
 #pragma once
 
-#include <persistence/state_core.hpp>
 #include <utility/traits_and_concepts/unique_ptr.hpp>
+#include <nlohmann/json.hpp>
 
 #include <string>
 #include <optional>
@@ -20,12 +20,6 @@ namespace Persistence
     void from_json(nlohmann::json const& obj, Reference& ref);
 
     template <typename T>
-    concept ReferenceableType = requires(T t) {
-        { t.useDefaultsFrom(std::declval<T>()) } -> std::same_as<void>;
-    };
-
-    template <typename T>
-    requires ReferenceableType<T>
     class ReferenceAndImpl
     {
       public:
@@ -48,10 +42,6 @@ namespace Persistence
         bool hasReference() const
         {
             return ref_.has_value();
-        }
-        void useDefaultsFrom(T const& other)
-        {
-            value_.useDefaultsFrom(other);
         }
         T& operator*()
         {
@@ -86,9 +76,13 @@ namespace Persistence
         template <typename MapType>
         bool resolveWith(MapType const& map)
         {
-            return resolveWith(map, [](auto& value, auto const& other) {
-                value.useDefaultsFrom(other);
-            });
+            return resolveWith(
+                map,
+                [](auto& value, auto const& other)
+                {
+                    value.useDefaultsFrom(other);
+                }
+            );
         }
 
         ReferenceAndImpl() = default;
@@ -140,7 +134,6 @@ namespace Persistence
     };
 
     template <typename T>
-    requires ReferenceableType<T>
     class ReferenceAndImpl<std::unique_ptr<T>>
     {
       public:
@@ -200,9 +193,12 @@ namespace Persistence
         {}
         ReferenceAndImpl(ReferenceAndImpl const& other)
             : ref_{other.ref_}
-            , value_{[&other]() -> decltype(value_) {
-                return std::make_unique<T>(*other.value_);
-            }()}
+            , value_{
+                  [&other]() -> decltype(value_)
+                  {
+                      return std::make_unique<T>(*other.value_);
+                  }()
+              }
         {}
         ReferenceAndImpl(ReferenceAndImpl&& other)
             : ref_{std::move(other.ref_)}
