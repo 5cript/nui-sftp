@@ -86,7 +86,7 @@ namespace Persistence
     void useDefaultsFrom(T& toFill, T const& defaultsFromThis);
 
     template <typename T>
-    void useDefaultsFrom(ReferenceAndImpl<T>& toFill, T const& defaultsFromThis);
+    void useDefaultsFrom(Referenceable<T>& toFill, T const& defaultsFromThis);
 
     template <
         typename T,
@@ -114,7 +114,14 @@ namespace Persistence
             [&](auto&& memAccessor)
             {
                 if constexpr (CanCallUseDefaultsFrom<std::decay_t<decltype(toFill.*memAccessor.pointer)>>)
+                {
+                    Log::debug(
+                        "Calling useDefaultsFrom for member {} of type {}.",
+                        memAccessor.name,
+                        typeid(decltype(toFill.*memAccessor.pointer)).name()
+                    );
                     useDefaultsFrom(toFill.*memAccessor.pointer, defaultsFromThis.*memAccessor.pointer);
+                }
                 else
                 {
                     Log::debug(

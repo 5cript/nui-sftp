@@ -14,8 +14,6 @@ class MainPage
     ROAR_PIMPL_SPECIAL_FUNCTIONS(MainPage);
 
     Nui::ElementRenderer render();
-
-  private:
     void onSetupComplete();
 
   private:

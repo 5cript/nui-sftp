@@ -2,6 +2,7 @@
 #include <frontend/observed_random_access_map.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/state_holder_with_dialog.hpp>
 
 #include <frontend/session_components/operation_queue/displayed_download_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_upload_operation.hpp>
@@ -84,26 +85,13 @@ OperationQueue::OperationQueue(
           ),
       }
 {
-    impl_->stateHolder->load(
-        [this, name = impl_->persistenceSessionName](
-            std::optional<std::string> const& error, Persistence::StateHolder& holder
-        )
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const& state)
         {
-            if (error)
-            {
-                impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Error loading state",
-                    .text = fmt::format(
-                        "An error occurred while loading the application state: {}\nCannot set up operation queue.",
-                        *error
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+            if (!success)
                 return;
-            }
-
-            auto const& state = holder.stateCache().fullyResolve();
 
             auto iter = state.sessions.find(name);
             if (iter == end(state.sessions))
@@ -116,7 +104,8 @@ OperationQueue::OperationQueue(
             impl_->paused = engine.queueOptions->startInPausedState.value_or(true);
             *impl_->autoClean = engine.queueOptions->autoRemoveCompletedOperations.value_or(false);
             Nui::globalEventContext.executeActiveEventsImmediately();
-        }
+        },
+        "Cannot set up operation queue."
     );
 
     Nui::setInterval(
@@ -690,35 +679,28 @@ Nui::ElementRenderer OperationQueue::operator()()
                 "design"_prop = "Graphical",
                 "change"_event = [this](Nui::val event) {
                     *impl_->autoClean = event["target"]["checked"].as<bool>();
-                    impl_->stateHolder->load([this, name = impl_->persistenceSessionName](std::optional<std::string> const& error, Persistence::StateHolder& holder) {
-                        if (error) {
-                            impl_->confirmDialog->open({
-                                .state = ConfirmDialog::State::Negative,
-                                .headerText = "Error loading state",
-                                .text = fmt::format(
-                                    "An error occurred while loading the application state: {}.",
-                                    *error
-                                ),
-                                .buttons = ConfirmDialog::Button::Ok,
-                            });
-                            return;
-                        }
+                    loadState(
+                        *impl_->stateHolder,
+                        impl_->confirmDialog,
+                        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const&) {
+                            if (!success)
+                                return;
 
-                        auto iter = holder.stateCache().sessions.find(name);
-                        iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
-                        holder.save([this](std::optional<std::string> const& error) {
-                            if (error) {
-                                impl_->confirmDialog->open({
-                                    .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Error saving state",
-                                    .text = fmt::format(
-                                        "An error occurred while saving the application state: {}.",
-                                        *error
-                                    ),
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                            }
-                        });
+                            auto iter = impl_->stateHolder->stateCache().sessions.find(name);
+                            iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
+                            impl_->stateHolder->save([this](std::optional<std::string> const& error) {
+                                if (error) {
+                                    impl_->confirmDialog->open({
+                                        .state = ConfirmDialog::State::Negative,
+                                        .headerText = "Error saving state",
+                                        .text = fmt::format(
+                                            "An error occurred while saving the application state: {}.",
+                                            *error
+                                        ),
+                                        .buttons = ConfirmDialog::Button::Ok,
+                                    });
+                                }
+                            });
                     });
                 }
             }(),
