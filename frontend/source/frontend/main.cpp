@@ -45,6 +45,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
         dom = std::make_unique<Nui::Dom::Dom>();
 
         dom->setBody(Nui::Elements::body{}(mainPage->render()));
+        mainPage->onSetupComplete();
     }
     else
         Log::info("Waiting for terminalUtility to be available.");

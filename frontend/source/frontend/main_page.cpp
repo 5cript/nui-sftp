@@ -58,6 +58,28 @@ MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events
 void MainPage::onSetupComplete()
 {
     Log::info("Setup is complete.");
+    Nui::RpcClient::callWithBackChannel(
+        "Main::getInitialPersistenceLoadWarning",
+        [this](Nui::val response)
+        {
+            if (response.hasOwnProperty("warning"))
+            {
+                const auto warning = response["warning"].as<std::string>();
+                if (!warning.empty())
+                {
+                    impl_->confirmDialog.open({
+                        .state = ConfirmDialog::State::Critical,
+                        .headerText = "Warning loading state",
+                        .text = fmt::format(
+                            "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration.",
+                            warning
+                        ),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                }
+            }
+        }
+    );
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(MainPage);

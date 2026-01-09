@@ -24,7 +24,13 @@ namespace Persistence
         }
     }
 
-    void StateHolder::load(std::function<void(std::optional<std::string> const& /*error*/, StateHolder&)> const& onLoad)
+    void StateHolder::load(
+        std::function<void(
+            std::optional<std::string> const& error,
+            StateHolder&,
+            std::optional<std::string> const& warning
+        )> const& onLoad
+    )
     {
         setupPersistence();
         const auto path = Roar::resolvePath(Constants::persistencePath);
@@ -89,37 +95,57 @@ namespace Persistence
             if (before.is_null())
             {
                 // Save something valid
-                dataFixer(nlohmann::json::object());
-                onLoad(error, *this);
+                const auto warning = dataFixer(nlohmann::json::object());
+                onLoad(error, *this, warning);
                 return;
             }
 
             before.get_to(stateCache_);
-            dataFixer(before);
-            onLoad(error, *this);
+            const auto warning = dataFixer(before);
+            onLoad(error, *this, warning);
         }
         catch (std::exception const& e)
         {
             Log::error("Failed to load config file: {}", e.what());
-            onLoad(fmt::format("Failed to load config file: {}", e.what()), *this);
+            onLoad(fmt::format("Failed to load config file: {}", e.what()), *this, std::nullopt);
         }
     }
 
-    void StateHolder::dataFixer(nlohmann::json const& before)
+    std::optional<std::string> StateHolder::dataFixer(nlohmann::json const& before)
     {
         const auto after = nlohmann::json(stateCache_);
         bool mustSave = !nlohmann::json::diff(before, after).empty();
+        std::optional<std::string> warning{std::nullopt};
+
+        auto extendWarning = [&](std::string const& msg)
+        {
+            if (warning)
+                *warning += "\n" + msg;
+            else
+                warning = msg;
+        };
 
         if (mustSave)
         {
             Log::warn("Config diff: {}", nlohmann::json::diff(before, after).dump());
+            extendWarning(
+                fmt::format(
+                    "Loaded json contains entries that are not understood by this version and were removed.\nThese "
+                    "might have been some typos or entries from a newer version.\nPlease check the config file and "
+                    "re-apply any necessary settings.\nDiff:\n{}",
+                    nlohmann::json::diff(before, after).dump(4)
+                )
+            );
         }
 
+        bool hasMissingDefaults = false;
         if (stateCache_.termios.empty())
         {
             Log::warn("Config file misses termios, adding defaults.");
             stateCache_.termios["default"] = Termios::saneDefaults();
+            extendWarning("Added default termios settings.");
             mustSave = true;
+            hasMissingDefaults = true;
         }
 
         if (stateCache_.terminalOptions.empty())
@@ -136,7 +162,9 @@ namespace Persistence
                     .white = "#efefef",
                 },
             };
+            extendWarning("Added default terminal options.");
             mustSave = true;
+            hasMissingDefaults = true;
         }
 
         if (stateCache_.sessions.empty())
@@ -145,28 +173,36 @@ namespace Persistence
 #ifdef _WIN32
             stateCache_.sessions["msys2_default"] = TerminalEngine{
                 .type = "shell",
-                .terminalOptions = Reference{.ref = "default"},
-                .termios = Reference{.ref = "default"},
+                .terminalOptions = Reference{"default"},
+                .termios = Reference{"default"},
                 .engine = defaultMsys2TerminalEngine(),
             };
+            extendWarning("Added default msys2 terminal engine.");
 #elif __APPLE__
 // nothing
 #else
             stateCache_.sessions["bash_default"] = TerminalEngine{
                 .type = "shell",
-                .terminalOptions = Reference{.ref = "default"},
-                .termios = Reference{.ref = "default"},
+                .terminalOptions = Reference{"default"},
+                .termios = Reference{"default"},
                 .engine = defaultBashTerminalEngine(),
             };
+            extendWarning("Added default bash terminal engine.");
 #endif
             mustSave = true;
+            hasMissingDefaults = true;
         }
 
+        if (hasMissingDefaults)
+        {
+            extendWarning("Wrote missing default settings to config file.");
+        }
         if (mustSave)
         {
-            Log::warn("Config file misses some defaults, writing them back to disk.");
+            Log::warn("Config file misses some defaults or has misunderstood parameters, writing them back to disk.");
             save();
         }
+        return warning;
     }
 
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
@@ -196,20 +232,24 @@ namespace Persistence
                 Log::debug("Received state load request from frontend state holder.");
 
                 load(
-                    [responseId, &hub](std::optional<std::string> const& error, StateHolder& holder)
+                    [responseId, &hub](
+                        std::optional<std::string> const& error,
+                        StateHolder& holder,
+                        std::optional<std::string> const& warning
+                    )
                     {
+                        auto json = nlohmann::json::object();
+                        if (warning)
+                            json["warning"] = *warning;
                         if (error)
                         {
-                            hub.callRemote(
-                                responseId,
-                                nlohmann::json{
-                                    {"error", *error},
-                                }
-                            );
+                            json["error"] = *error;
+                            hub.callRemote(responseId, json);
                             return;
                         }
+                        json["state"] = nlohmann::json(holder.stateCache()).dump();
                         Log::debug("State loaded from disk.");
-                        hub.callRemote(responseId, nlohmann::json(holder.stateCache_).dump());
+                        hub.callRemote(responseId, json);
                     }
                 );
             }

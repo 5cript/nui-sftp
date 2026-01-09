@@ -170,8 +170,18 @@ Main::Main(int const, char const* const* argv)
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
 
     stateHolder_.load(
-        [this](std::optional<std::string> const& error, Persistence::StateHolder& holder)
+        [this](
+            std::optional<std::string> const& error,
+            Persistence::StateHolder& holder,
+            std::optional<std::string> const& warning
+        )
         {
+            if (warning)
+            {
+                Log::warn("Warning loading state: {}", *warning);
+                initialPersistenceLoadWarning_ = *warning;
+            }
+
             if (error)
             {
                 Log::error("Setting up rpc filesystem with full lockdown due to state load error: {}", *error);
@@ -219,6 +229,7 @@ void Main::registerRpc()
     stateHolder_.registerRpc(hub_);
     processes_.registerRpc(window_, hub_);
     sshSessionManager_->registerRpc();
+    registerInitialWarningGetter();
 }
 
 void Main::show()
@@ -229,6 +240,24 @@ void Main::show()
     window_.navigate("nui://app.example/index.html");
     window_.setConsoleOutput(false);
     window_.run();
+}
+
+void Main::registerInitialWarningGetter()
+{
+    hub_.registerFunction(
+        "Main::getInitialPersistenceLoadWarning",
+        [this](std::string responseId)
+        {
+            Log::debug("Received request for initial persistence load warning.");
+
+            hub_.callRemote(
+                responseId,
+                nlohmann::json{
+                    {"warning", initialPersistenceLoadWarning_},
+                }
+            );
+        }
+    );
 }
 
 void Main::startChildSignalTimer()

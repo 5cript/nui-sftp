@@ -1,6 +1,7 @@
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/components/ui5/suggestion-item.hpp>
 #include <frontend/events/frontend_events.hpp>
+#include <frontend/state_holder_with_dialog.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/attributes.hpp>
@@ -40,26 +41,18 @@ struct SessionOptions::Implementation
 
 void SessionOptions::loadLayoutNames()
 {
-    impl_->stateHolder->load(
-        [this](std::optional<std::string> const& error, Persistence::StateHolder&)
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this](bool success, Persistence::State const& state)
         {
-            if (error)
-            {
-                Log::error("Failed to load state holder");
-                impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Error loading state",
-                    .text = fmt::format(
-                        "An error occurred while loading the application state: {}.\nCannot load layout names.", *error
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+            if (!success)
                 return;
-            }
+
             impl_->layoutNames.value().clear();
 
-            if (const auto iter = impl_->stateHolder->stateCache().sessions.find(impl_->persistenceSessionName);
-                iter != end(impl_->stateHolder->stateCache().sessions) && iter->second.layouts)
+            if (const auto iter = state.sessions.find(impl_->persistenceSessionName);
+                iter != end(state.sessions) && iter->second.layouts)
             {
                 for (const auto& [name, session] : *iter->second.layouts)
                 {
@@ -68,7 +61,8 @@ void SessionOptions::loadLayoutNames()
             }
 
             impl_->layoutNames.modifyNow();
-        }
+        },
+        "Cannot load layout names."
     );
 }
 

@@ -1,6 +1,7 @@
 #include <frontend/session_area.hpp>
 #include <frontend/session.hpp>
 #include <frontend/classes.hpp>
+#include <frontend/state_holder_with_dialog.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
 
@@ -70,23 +71,13 @@ SessionArea::SessionArea(
         }
     );
 
-    stateHolder->load(
-        [this](std::optional<std::string> const& error, Persistence::StateHolder& holder)
+    loadState(
+        *stateHolder,
+        impl_->confirmDialog,
+        [this](bool success, Persistence::State const& state)
         {
-            if (error)
-            {
-                impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Error loading state",
-                    .text = fmt::format(
-                        "An error occurred while loading the application state: {}\nDefault state will be used.", *error
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+            if (!success)
                 return;
-            }
-
-            auto const& state = holder.stateCache();
 
             for (auto const& [name, session] : state.sessions)
             {
@@ -178,23 +169,13 @@ void SessionArea::addSession(std::string const& name)
 {
     using namespace std::string_literals;
 
-    impl_->stateHolder->load(
-        [this, name](std::optional<std::string> const& error, Persistence::StateHolder& holder)
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this, name](bool success, Persistence::State const& state)
         {
-            if (error)
-            {
-                impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Error loading state",
-                    .text = fmt::format(
-                        "An error occurred while loading the application state: {}\nCannot add session.", *error
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+            if (!success)
                 return;
-            }
-
-            auto const& state = holder.stateCache().fullyResolve();
 
             auto iter = state.sessions.find(name);
             if (iter == end(state.sessions))
@@ -239,7 +220,8 @@ void SessionArea::addSession(std::string const& name)
                 impl_->sessions.value()[impl_->selected]->visible(false);
             impl_->selected = impl_->sessions.size() - 1;
             Nui::globalEventContext.executeActiveEventsImmediately();
-        }
+        },
+        "Cannot add session."
     );
 }
 

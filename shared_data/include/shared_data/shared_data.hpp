@@ -60,10 +60,14 @@ namespace SharedData
         );
 
         template <typename ObjT>
-        void from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::chrono::seconds value);
+        void from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::chrono::seconds& value);
 
         template <typename ObjT>
-        void from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::chrono::milliseconds value);
+        void
+        from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::chrono::milliseconds& value);
+
+        template <typename ObjT>
+        void from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::filesystem::perms& value);
 
         template <typename ObjT, typename T>
         void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, T& value)
@@ -79,15 +83,21 @@ namespace SharedData
         }
 
         template <typename ObjT>
-        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::chrono::seconds value)
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::chrono::seconds& value)
         {
             value = std::chrono::seconds{j.get<long long>()};
         }
 
         template <typename ObjT>
-        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::chrono::milliseconds value)
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::chrono::milliseconds& value)
         {
             value = std::chrono::milliseconds{j.get<long long>()};
+        }
+
+        template <typename ObjT>
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::filesystem::perms& value)
+        {
+            value = static_cast<std::filesystem::perms>(j.get<int>());
         }
 
         template <typename ObjT, typename T>
@@ -141,12 +151,14 @@ namespace SharedData
         void to_json_impl(nlohmann::json& j, std::variant<std::monostate, Ts...> const& obj);
         void to_json_impl(nlohmann::json& j, std::chrono::seconds value);
         void to_json_impl(nlohmann::json& j, std::chrono::milliseconds value);
+        void to_json_impl(nlohmann::json& j, std::filesystem::perms value);
 
         template <typename T>
         requires(!std::is_enum_v<T>)
         void to_json_impl(nlohmann::json& j, T const& obj)
         {
             j = obj;
+            std::cout << "to_json_impl: " << j.dump() << " - " << typeid(T).name() << std::endl;
         }
         template <typename T>
         requires std::is_enum_v<T>
@@ -162,11 +174,15 @@ namespace SharedData
         {
             j = value.count();
         }
+        inline void to_json_impl(nlohmann::json& j, std::filesystem::perms value)
+        {
+            j = static_cast<int>(value);
+        }
         template <typename T>
         void to_json_impl(nlohmann::json& j, std::optional<T> const& obj)
         {
             if (obj)
-                j = *obj;
+                Detail::to_json_impl(j, *obj);
         }
         template <typename... Ts>
         void to_json_impl(nlohmann::json& j, std::variant<std::monostate, Ts...> const& obj)
@@ -192,7 +208,8 @@ namespace SharedData
         class Enable = std::enable_if_t<!std::is_union_v<T>>>
     void to_json(nlohmann::json& j, T const& obj)
     {
-        j = nlohmann::json::object();
+        if (j.is_null())
+            j = nlohmann::json::object();
 
         boost::mp11::mp_for_each<Bases>(
             [&](auto&& base)

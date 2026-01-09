@@ -11,6 +11,12 @@ namespace Persistence
     struct Reference
     {
         std::string ref;
+        explicit Reference(std::string ref)
+            : ref{std::move(ref)}
+        {}
+        explicit Reference(char const* ref)
+            : ref{ref}
+        {}
         operator std::string() const
         {
             return ref;
@@ -35,9 +41,9 @@ namespace Persistence
         {
             return ref_->ref;
         }
-        void ref(std::string const& ref)
+        void ref(Reference ref)
         {
-            ref_ = Reference{.ref = ref};
+            ref_ = std::move(ref);
         }
         bool hasReference() const
         {
@@ -80,7 +86,7 @@ namespace Persistence
                 map,
                 [](auto& value, auto const& other)
                 {
-                    value.useDefaultsFrom(other);
+                    useDefaultsFrom(value, other);
                 }
             );
         }
@@ -99,7 +105,7 @@ namespace Persistence
             , value_{other.value_}
         {}
         ReferenceAndImpl(ReferenceAndImpl&& other)
-            : ref_{std::move(other.ref_)}
+            : ref_{std::exchange(other.ref_, std::nullopt)}
             , value_{std::move(other.value_)}
         {}
         ReferenceAndImpl& operator=(ReferenceAndImpl const& other)
@@ -110,7 +116,7 @@ namespace Persistence
         }
         ReferenceAndImpl& operator=(ReferenceAndImpl&& other)
         {
-            ref_ = std::move(other.ref_);
+            ref_ = std::exchange(other.ref_, std::nullopt);
             value_ = std::move(other.value_);
             return *this;
         }
@@ -149,21 +155,13 @@ namespace Persistence
         {
             return ref_->ref;
         }
-        void ref(std::string const& ref)
+        void ref(Reference ref)
         {
-            ref_ = Reference{.ref = ref};
+            ref_ = std::move(ref);
         }
         bool hasReference() const
         {
             return ref_.has_value();
-        }
-        void useDefaultsFrom(T const& other)
-        {
-            value_->useDefaultsFrom(other);
-        }
-        void useDefaultsFrom(std::unique_ptr<T> const& other)
-        {
-            value_->useDefaultsFrom(*other);
         }
         T& operator*()
         {
@@ -193,16 +191,11 @@ namespace Persistence
         {}
         ReferenceAndImpl(ReferenceAndImpl const& other)
             : ref_{other.ref_}
-            , value_{
-                  [&other]() -> decltype(value_)
-                  {
-                      return std::make_unique<T>(*other.value_);
-                  }()
-              }
+            , value_{std::make_unique<T>(*other.value_)}
         {}
         ReferenceAndImpl(ReferenceAndImpl&& other)
-            : ref_{std::move(other.ref_)}
-            , value_{std::move(other.value_)}
+            : ref_{std::exchange(other.ref_, std::nullopt)}
+            , value_{std::exchange(other.value_, nullptr)}
         {}
         ReferenceAndImpl& operator=(ReferenceAndImpl const& other)
         {
@@ -212,8 +205,8 @@ namespace Persistence
         }
         ReferenceAndImpl& operator=(ReferenceAndImpl&& other)
         {
-            ref_ = std::move(other.ref_);
-            value_ = std::move(other.value_);
+            ref_ = std::exchange(other.ref_, std::nullopt);
+            value_ = std::exchange(other.value_, nullptr);
             return *this;
         }
         ReferenceAndImpl& operator=(Reference ref)
@@ -247,7 +240,8 @@ namespace Persistence
     template <typename T>
     void to_json(nlohmann::json& obj, Referenceable<T> const& ref)
     {
-        obj = nlohmann::json::object();
+        if (obj.is_null())
+            obj = nlohmann::json::object();
 
         if (ref.hasReference())
             obj["$ref"] = ref.ref();
@@ -259,7 +253,7 @@ namespace Persistence
     {
         if (obj.contains("$ref"))
         {
-            ref.ref(obj["$ref"].get<std::string>());
+            ref.ref(Reference{obj["$ref"].get<std::string>()});
         }
 
         from_json(obj, ref.value());
@@ -270,7 +264,7 @@ namespace Persistence
     {
         if (obj.contains("$ref"))
         {
-            ref.ref(obj["$ref"].get<std::string>());
+            ref.ref(Reference{obj["$ref"].get<std::string>()});
         }
 
         from_json(obj, ref.value());

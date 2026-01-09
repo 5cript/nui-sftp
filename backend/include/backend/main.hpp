@@ -33,6 +33,9 @@ class Main
     void startChildSignalTimer();
 
   private:
+    void registerInitialWarningGetter();
+
+  private:
     std::atomic_bool shuttingDown_;
     std::filesystem::path programDir_;
     Persistence::StateHolder stateHolder_;
@@ -43,4 +46,6 @@ class Main
     PasswordPrompter prompter_;
     std::shared_ptr<SessionManager> sshSessionManager_;
     boost::asio::steady_timer childSignalTimer_;
+    // for display later in UI
+    std::string initialPersistenceLoadWarning_;
 };

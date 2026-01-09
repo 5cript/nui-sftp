@@ -5,27 +5,39 @@
 
 namespace Persistence
 {
-    void StateHolder::load(std::function<void(std::optional<std::string> const& error, StateHolder&)> const& onLoad)
+    void StateHolder::load(
+        std::function<void(
+            std::optional<std::string> const& error,
+            StateHolder&,
+            std::optional<std::string> const& warning
+        )> const& onLoad
+    )
     {
         Nui::RpcClient::getRemoteCallableWithBackChannel(
-            "StateHolder::load", [this, onLoad](Nui::val const& jsonStringOrError) {
-                if (jsonStringOrError.hasOwnProperty("error"))
+            "StateHolder::load", [this, onLoad](Nui::val const& objectWithErrorWarningState) {
+                std::optional<std::string> warning{std::nullopt};
+                if (objectWithErrorWarningState.hasOwnProperty("warning"))
                 {
-                    onLoad(jsonStringOrError["error"].as<std::string>(), *this);
+                    warning = objectWithErrorWarningState["warning"].as<std::string>();
+                }
+
+                if (objectWithErrorWarningState.hasOwnProperty("error"))
+                {
+                    onLoad(objectWithErrorWarningState["error"].as<std::string>(), *this, warning);
                     return;
                 }
 
                 try
                 {
-                    nlohmann::json::parse(jsonStringOrError.as<std::string>()).get_to(stateCache_);
+                    nlohmann::json::parse(objectWithErrorWarningState["state"].as<std::string>()).get_to(stateCache_);
                 }
                 catch (std::exception const& exc)
                 {
                     Log::info("Failed to parse state from json: {}", exc.what());
-                    onLoad(fmt::format("Failed to parse state from json: {}", exc.what()), *this);
+                    onLoad(fmt::format("Failed to parse state from json: {}", exc.what()), *this, warning);
                     return;
                 }
-                onLoad(std::nullopt, *this);
+                onLoad(std::nullopt, *this, warning);
             })();
     }
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)

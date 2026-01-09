@@ -1,6 +1,7 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
+#include <frontend/state_holder_with_dialog.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
 #include <constants/layouts.hpp>
@@ -41,24 +42,13 @@ struct Toolbar::Implementation
 
 void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
 {
-    stateHolder->load(
-        [this, onDone = std::move(onDone)](std::optional<std::string> const& error, Persistence::StateHolder& holder)
+    loadState(
+        *stateHolder,
+        confirmDialog,
+        [this, onDone = std::move(onDone)](bool success, Persistence::State const& state)
         {
-            if (error)
-            {
-                confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Error loading state",
-                    .text = fmt::format(
-                        "An error occurred while loading the application state: {}\nCannot update sessions list.",
-                        *error
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+            if (!success)
                 return;
-            }
-
-            auto const& state = holder.stateCache();
 
             std::vector<std::pair<std::string, std::string /*orderby*/>> enginesUnordered;
             for (auto const& [name, engine] : state.sessions)
@@ -108,25 +98,17 @@ void Toolbar::connectLayoutsChanged()
         impl_->events->onLayoutsChanged,
         [this](bool)
         {
-            impl_->stateHolder->load(
-                [this](std::optional<std::string> const& error, Persistence::StateHolder&)
+            loadState(
+                *impl_->stateHolder,
+                impl_->confirmDialog,
+                [this](bool success, Persistence::State const&)
                 {
-                    if (error)
-                    {
-                        impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Negative,
-                            .headerText = "Error loading state",
-                            .text = fmt::format(
-                                "An error occurred while loading the application state: {}\nCannot update layouts.",
-                                *error
-                            ),
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
+                    if (!success)
                         return;
-                    }
 
                     reloadLayouts();
-                }
+                },
+                "Cannot update layouts."
             );
         }
     );

@@ -1,5 +1,6 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/components/ui5/text.hpp>
+#include <ui5/components/text_area.hpp>
 #include <frontend/components/ui5/list.hpp>
 #include <log/log.hpp>
 
@@ -38,6 +39,7 @@ struct ConfirmDialog::Implementation
     std::function<void(Button)> onClose;
     Nui::Observed<State> state;
     Nui::Observed<std::string> headerText;
+    // Nui::Observed<std::vector<std::string>> textLines;
     Nui::Observed<std::string> text;
     Nui::Observed<Button> buttons;
     Nui::Observed<std::vector<OpenOptions::ListElement>> listItems;
@@ -64,6 +66,22 @@ void ConfirmDialog::open(OpenOptions const& options)
     impl_->state = options.state;
     impl_->headerText = options.headerText;
     impl_->text = options.text;
+    // {
+    //     // split text by \n and store in textLines
+    //     std::vector<std::string> lines;
+    //     std::string::size_type start = 0;
+    //     std::string::size_type end = options.text.find('\n');
+    //     while (end != std::string::npos)
+    //     {
+    //         lines.push_back(options.text.substr(start, end - start));
+    //         start = end + 1;
+    //         if (start >= options.text.size())
+    //             break;
+    //         end = options.text.find('\n', start);
+    //     }
+    //     lines.push_back(options.text.substr(start));
+    //     impl_->textLines = lines;
+    // }
     impl_->buttons = options.buttons;
     impl_->listItems = options.listItems;
     Nui::globalEventContext.executeActiveEventsImmediately();
@@ -104,9 +122,16 @@ Nui::ElementRenderer ConfirmDialog::operator()()
         reference = impl_->dialog,
     }(
         section{}(
-            ui5::text{
-                style = "margin-bottom: 10px;"
-            }(impl_->text),
+            ui5::textarea{
+                "value"_prop = impl_->text,
+                "readonly"_prop = true,
+                "growing"_prop = true,
+                "growMaxRows"_prop = 25,
+                style = "width: 100%; height: 200px; margin-bottom: 10px;",
+                "state"_prop = observe(impl_->state).generate([this](){
+                    return stateToString(impl_->state.value());
+                }),
+            }(),
             ui5::list{
                 style = "max-height: 500px; overflow-y: auto;"
             }(
