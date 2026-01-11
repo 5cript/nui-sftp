@@ -3,6 +3,7 @@
 #include <nui/core.hpp>
 #include <nui/rpc.hpp>
 
+#include <nlohmann/json.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <persistence/state/state.hpp>
@@ -14,7 +15,7 @@ namespace Persistence
     class StateHolder
     {
       public:
-        StateHolder();
+        StateHolder(std::filesystem::path programDirectory = {});
         ROAR_PIMPL_SPECIAL_FUNCTIONS(StateHolder);
 
         void load(
@@ -28,6 +29,7 @@ namespace Persistence
             std::function<void(std::optional<std::string> const& error)> const& onSaveComplete =
                 [](std::optional<std::string> const&) {}
         );
+        void loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete);
 
         State& stateCache();
 
@@ -43,6 +45,7 @@ namespace Persistence
 #endif
 
       private:
-        State stateCache_;
+        State stateCache_{};
+        std::filesystem::path programDirectory_;
     };
 } // namespace Persistence

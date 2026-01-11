@@ -22,9 +22,22 @@ class Settings
 
     Nui::ElementRenderer operator()();
 
+    void applySettingsToUi();
+
   private:
     Nui::ElementRenderer side();
     Nui::ElementRenderer header();
+    Nui::ElementRenderer generalSettings();
+    Nui::ElementRenderer sections();
+
+    struct GroupParameters
+    {
+        Nui::Observed<bool>& isCollapsed;
+        Nui::Observed<bool>* isEnabled = nullptr;
+        Nui::ElementRenderer content;
+        std::string headerTitle;
+    };
+    Nui::ElementRenderer group(GroupParameters const& params);
 
     enum class Section
     {
@@ -42,8 +55,9 @@ class Settings
     Nui::ElementRenderer sectionSelector(SectionSelectorOptions const& options);
     bool isActive(SectionSelectorOptions const& options);
 
-  private:
     void addNewSession();
+    void onChange();
+    void applySettingsToState(Persistence::State& state);
 
   private:
     struct Implementation;

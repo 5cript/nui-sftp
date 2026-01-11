@@ -51,4 +51,31 @@ namespace Persistence
             onSaveComplete(std::nullopt);
         })(nlohmann::json(stateCache_).dump());
     }
+    void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
+    {
+        Nui::RpcClient::getRemoteCallableWithBackChannel(
+            "StateHolder::loadLanguageFile",
+            [onLoadComplete](Nui::val const& val) {
+                if (val.hasOwnProperty("error"))
+                {
+                    Log::error("Failed to load language file: {}", val["error"].as<std::string>());
+                    onLoadComplete(std::nullopt);
+                    return;
+                }
+                nlohmann::json j;
+                try
+                {
+                    Nui::WebApi::Console::log("languageFile", val);
+                    j = nlohmann::json::parse(val["jsonString"].as<std::string>());
+                }
+                catch (std::exception const& exc)
+                {
+                    Log::error("Failed to parse language file json: {}", exc.what());
+                    onLoadComplete(std::nullopt);
+                    return;
+                }
+                onLoadComplete(std::move(j));
+            }
+        )();
+    }
 }

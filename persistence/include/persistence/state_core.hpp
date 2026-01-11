@@ -1,6 +1,7 @@
 #pragma once
 
 #include <persistence/reference.hpp>
+#include <persistence/element_missing_handler.hpp>
 #include <nui/core.hpp>
 #include <nlohmann/json.hpp>
 #include <utility/describe.hpp>

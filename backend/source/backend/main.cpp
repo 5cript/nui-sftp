@@ -152,7 +152,7 @@ namespace
 Main::Main(int const, char const* const* argv)
     : shuttingDown_{false}
     , programDir_{std::filesystem::path{argv[0]}.parent_path()}
-    , stateHolder_{}
+    , stateHolder_{programDir_}
     , window_{
           Nui::WindowOptions{
               .title = "NuiScp"s,

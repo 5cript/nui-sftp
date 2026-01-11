@@ -4,6 +4,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/settings.hpp>
+#include <utility/language.hpp>
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <log/log.hpp>
@@ -69,11 +70,8 @@ void MainPage::onSetupComplete()
                 {
                     impl_->confirmDialog.open({
                         .state = ConfirmDialog::State::Critical,
-                        .headerText = "Warning loading state",
-                        .text = fmt::format(
-                            "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration.",
-                            warning
-                        ),
+                        .headerText = language->get("persistence", "warningLoadingState"),
+                        .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
                         .buttons = ConfirmDialog::Button::Ok,
                     });
                 }

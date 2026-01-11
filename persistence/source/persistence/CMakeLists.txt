@@ -19,6 +19,7 @@ else()
         PRIVATE
             state_holder_backend.cpp
     )
+    target_link_libraries(persistence PRIVATE yaml-cpp::yaml-cpp)
 endif()
 
 target_include_directories(

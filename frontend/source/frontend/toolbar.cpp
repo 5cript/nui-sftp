@@ -2,6 +2,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
+#include <utility/language.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
 #include <constants/layouts.hpp>
@@ -108,7 +109,7 @@ void Toolbar::connectLayoutsChanged()
 
                     reloadLayouts();
                 },
-                "Cannot update layouts."
+                language->get("toolbar", "cannotUpdateLayouts")
             );
         }
     );
@@ -178,13 +179,13 @@ Nui::ElementRenderer Toolbar::operator()()
                 }
             ),
             ui5::toolbar_button{
-                "text"_prop = "New Session",
+                "text"_prop = language->getObserved("toolbar", "newSession"),
                 "click"_event = [this](Nui::val) {
                     impl_->events->onNewSession.modifyNow();
                 }
             }(),
             ui5::toolbar_button{
-                "text"_prop = "End Session",
+                "text"_prop = language->getObserved("toolbar", "endSession"),
                 "click"_event = [this](Nui::val) {
                     if (impl_->sessionArea) {
                         impl_->sessionArea->removeActiveSession();
@@ -194,7 +195,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 }
             }(),
             ui5::toolbar_button{
-                "text"_prop = "Settings",
+                "text"_prop = language->getObserved("toolbar", "settings"),
                 "click"_event = [this](Nui::val) {
                     impl_->events->settingsOpen = true;
                 }

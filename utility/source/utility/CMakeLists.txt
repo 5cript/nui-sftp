@@ -35,4 +35,5 @@ target_link_libraries(utility PUBLIC
     nlohmann_json::nlohmann_json
     gimo::gimo
     fmt
+    events
 )

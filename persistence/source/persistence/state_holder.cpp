@@ -2,8 +2,8 @@
 
 namespace Persistence
 {
-    StateHolder::StateHolder()
-        : stateCache_{}
+    StateHolder::StateHolder(std::filesystem::path programDirectory)
+        : programDirectory_{std::move(programDirectory)}
     {}
     ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(StateHolder);
 

@@ -35,6 +35,9 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/ids/source/ids")
 add_subdirectory("${CMAKE_SOURCE_DIR}/shared_data/source/shared_data")
 add_subdirectory("${CMAKE_SOURCE_DIR}/utility/source/utility")
 add_subdirectory("${CMAKE_SOURCE_DIR}/log/source/log")
+if (NOT EMSCRIPTEN)
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies/yaml-cpp.cmake")
+endif()
 add_subdirectory("${CMAKE_SOURCE_DIR}/persistence/source/persistence")
 add_subdirectory("${CMAKE_SOURCE_DIR}/events/source/events")
 include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies.cmake")
@@ -67,6 +70,7 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources"
         COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources/index.html"
         COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources/index.js"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/static/assets/language.yaml" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/language.yaml"
         VERBATIM
     )
 

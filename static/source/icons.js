@@ -3,6 +3,18 @@ import "@ui5/webcomponents-icons/dist/settings.js";
 import "@ui5/webcomponents-icons/dist/wrench.js";
 import "@ui5/webcomponents-icons/dist/it-system.js";
 import "@ui5/webcomponents-icons/dist/add.js";
+import "@ui5/webcomponents-icons/dist/navigation-right-arrow.js";
+import "@ui5/webcomponents-icons/dist/navigation-down-arrow.js";
+import "@ui5/webcomponents-icons/dist/activity-items.js";
+import "@ui5/webcomponents-icons/dist/zoom-in.js";
+import "@ui5/webcomponents-icons/dist/information.js";
+import "@ui5/webcomponents-icons/dist/alert.js";
+import "@ui5/webcomponents-icons/dist/error.js";
+import "@ui5/webcomponents-icons/dist/incident.js";
+import "@ui5/webcomponents-icons/dist/hide.js";
+import "@ui5/webcomponents-icons/dist/refresh.js";
+import "@ui5/webcomponents-icons/dist/sys-help.js";
+
 
 // Added for user icons - session:
 import "@ui5/webcomponents-icons/dist/laptop.js";
