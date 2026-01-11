@@ -4,6 +4,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <utility/language.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 
@@ -35,9 +36,9 @@ class Settings
         Nui::Observed<bool>& isCollapsed;
         Nui::Observed<bool>* isEnabled = nullptr;
         Nui::ElementRenderer content;
-        std::string headerTitle;
+        LanguageObservedText headerTitle;
     };
-    Nui::ElementRenderer group(GroupParameters const& params);
+    Nui::ElementRenderer group(GroupParameters&& params);
 
     enum class Section
     {

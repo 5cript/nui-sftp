@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/settings/setting.hpp>
+#include <utility/language.hpp>
 #include <log/log.hpp>
 
 #include <ui5/components/label.hpp>
@@ -18,7 +19,7 @@ class TextSetting : public Setting<std::string>
 
     TextSetting(
         Nui::Observed<std::string>& state,
-        std::string helpText,
+        LanguageObservedText helpText,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction
     )
@@ -30,7 +31,7 @@ class TextSetting : public Setting<std::string>
           }
     {}
 
-    Nui::ElementRenderer operator()(auto& label)
+    Nui::ElementRenderer operator()(auto&& label)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
@@ -39,7 +40,7 @@ class TextSetting : public Setting<std::string>
         return div{}(
             ui5::label{
                 style = "color: var(--sapTextColor); margin-right: 10px",
-            }(label),
+            }(std::forward<decltype(label)>(label)),
             ui5::input{
                 "value"_prop = *state_,
                 "change"_event = [this](Nui::val event){

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility/language.hpp>
+
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
 #include <traits/functions.hpp>
@@ -17,7 +19,7 @@ class Setting
   public:
     Setting(
         Nui::Observed<ValueType>& state,
-        std::string helpText,
+        LanguageObservedText helpText,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction
     )
@@ -70,7 +72,7 @@ class Setting
     Nui::Observed<ValueType>* state_;
     std::function<void()> onChange_;
     std::function<void()> resetAction_;
-    std::string helpText_;
+    LanguageObservedText helpText_;
 
   private:
     Nui::Observed<bool> isHelpOpen_{false};
