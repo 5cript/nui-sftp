@@ -57,9 +57,10 @@ struct GeneralSettings
                   },
                   language->getObserved("settings", "general", "loggingAndErrorReporting", "logLevelHelpText"),
                   onChange,
-                  [this]()
+                  [this, onChange]()
                   {
                       logLevel.logLevel = Persistence::State{}.logLevel;
+                      onChange();
                   },
                   [](Log::Level const& level)
                   {
@@ -100,11 +101,12 @@ struct GeneralSettings
                       events->onLanguageChanged = localization.languageCode.value();
                       events->onLanguageChanged.modifyNow();
                   },
-                  [this, events]()
+                  [this, events, onChange]()
                   {
                       localization.languageCode = Persistence::State{}.localizationOptions.languageCode;
                       events->onLanguageChanged = localization.languageCode.value();
                       events->onLanguageChanged.modifyNow();
+                      onChange();
                   },
                   [](std::string const& code) -> std::string
                   {
@@ -119,9 +121,10 @@ struct GeneralSettings
                   localization.dateTimeFormatString,
                   language->getObserved("settings", "general", "localization", "dateTimeFormatHelpText"),
                   onChange,
-                  [this]()
+                  [this, onChange]()
                   {
                       localization.dateTimeFormatString = Persistence::State{}.localizationOptions.dateTimeFormatString;
+                      onChange();
                   },
               },
           }

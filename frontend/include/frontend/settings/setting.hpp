@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility/language.hpp>
+#include <ids/id.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
@@ -9,6 +10,7 @@
 #include <ui5/components/responsive_popover.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/reference.hpp>
+#include <nui/frontend/attributes/id.hpp>
 #include <nui/frontend/elements/div.hpp>
 
 #include <concepts>
@@ -50,20 +52,30 @@ class Setting
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
+        const auto idString = Ids::generateId().id();
+
         return div{}(
             ui5::button{
                 "design"_prop = "Transparent",
                 "icon"_prop = "sys-help",
+                id = idString,
                 "click"_event =
                     [this]()
                 {
-                    isHelpOpen_ = !*isHelpOpen_;
+                    if (auto helpPopover = helpPopoverElement_.lock(); helpPopover)
+                    {
+                        helpPopover->val().set("open", !helpPopover->val()["open"].as<bool>());
+                    }
                 },
             }(),
             ui5::responsive_popover{
-                "opener"_prop = "btn",
-                "header-text"_prop = "Help",
-                "open"_prop = isHelpOpen_,
+                reference =
+                    [this](std::weak_ptr<Nui::Dom::BasicElement> const& ptr)
+                {
+                    helpPopoverElement_ = ptr;
+                },
+                "opener"_prop = idString,
+                "header-text"_prop = "Help"
             }(helpText_)
         );
     }
@@ -75,5 +87,5 @@ class Setting
     LanguageObservedText helpText_;
 
   private:
-    Nui::Observed<bool> isHelpOpen_{false};
+    std::weak_ptr<Nui::Dom::BasicElement> helpPopoverElement_;
 };
