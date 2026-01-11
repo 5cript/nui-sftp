@@ -2,13 +2,130 @@
 
 #include <frontend/components/icon_panel.hpp>
 #include <frontend/dialog/new_session_dialog.hpp>
+#include <frontend/classes.hpp>
+#include <frontend/settings/combo_setting.hpp>
+#include <frontend/settings/text_setting.hpp>
+#include <frontend/state_holder_with_dialog.hpp>
 #include <log/log.hpp>
 
 #include <ui5/components/button.hpp>
+#include <ui5/components/switch.hpp>
+#include <ui5/components/busy_indicator.hpp>
 
+#include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
+
+struct GeneralSettings
+{
+    struct CollapsibleStates
+    {
+        Nui::Observed<bool> localization{false};
+        Nui::Observed<bool> loggingAndErrorReporting{false};
+    } collapsibleStates;
+
+    struct LogLevel
+    {
+        Nui::Observed<Log::Level> logLevel;
+        ComboSetting<Log::Level, std::string> comboSetting;
+    } logLevel;
+
+    struct Localization
+    {
+        Nui::Observed<std::string> languageCode{};
+        Nui::Observed<std::string> dateTimeFormatString{};
+
+        ComboSetting<std::string, std::string> language;
+        TextSetting dateTimeFormat;
+    } localization;
+
+    GeneralSettings(std::invocable auto const& onChange, FrontendEvents* events)
+        : logLevel{
+              .logLevel{Persistence::State{}.logLevel},
+              .comboSetting = {
+                  logLevel.logLevel,
+                  {
+                      Log::Level::Trace,
+                      Log::Level::Debug,
+                      Log::Level::Info,
+                      Log::Level::Warning,
+                      Log::Level::Error,
+                      Log::Level::Critical,
+                      Log::Level::Off,
+                  },
+                  "The log level determines the verbosity of the application's logging output.",
+                  onChange,
+                  [this]()
+                  {
+                      logLevel.logLevel = Persistence::State{}.logLevel;
+                  },
+                  [](Log::Level const& level)
+                  {
+                      return Utility::enumToString<Log::Level>(level);
+                  },
+                  [](Log::Level const& level) -> std::optional<std::string>
+                  {
+                      switch (level)
+                      {
+                          case Log::Level::Trace:
+                              return "activity-items";
+                          case Log::Level::Debug:
+                              return "zoom-in";
+                          case Log::Level::Info:
+                              return "information";
+                          case Log::Level::Warning:
+                              return "alert";
+                          case Log::Level::Error:
+                              return "error";
+                          case Log::Level::Critical:
+                              return "incident";
+                          case Log::Level::Off:
+                              return "hide";
+                          default:
+                              return std::nullopt;
+                      }
+                  }
+              }
+          }
+        , localization{
+              .language = {
+                  localization.languageCode,
+                  {"en_US", "de_DE"},
+                  "The language used in the application's user interface.",
+                  [onChange, events, this]()
+                  {
+                      onChange();
+                      events->onLanguageChanged = localization.languageCode.value();
+                      events->onLanguageChanged.modifyNow();
+                  },
+                  [this]()
+                  {
+                      localization.languageCode = Persistence::State{}.localizationOptions.languageCode;
+                  },
+                  [](std::string const& code) -> std::string
+                  {
+                      if (code == "en_US")
+                          return "English (US)";
+                      else if (code == "de_DE")
+                          return "Deutsch";
+                      return code;
+                  },
+              },
+              .dateTimeFormat = TextSetting{
+                  localization.dateTimeFormatString,
+                  "The date and time format string used throughout the application, predominantly in the file explorer "
+                  "table view. Uses the fmt::format formatting syntax. "
+                  "https://fmt.dev/12.0/syntax/#chrono-format-specifications",
+                  onChange,
+                  [this]()
+                  {
+                      localization.dateTimeFormatString = Persistence::State{}.localizationOptions.dateTimeFormatString;
+                  },
+              },
+          }
+    {}
+};
 
 struct Settings::Implementation
 {
@@ -17,8 +134,10 @@ struct Settings::Implementation
     InputDialog* inputDialog;
     ConfirmDialog* confirmDialog;
     NewSessionDialog newSessionDialog{"settings"};
+    Nui::ThrottledFunction throttledSave{};
     Nui::Observed<Settings::Section> activeSection{Settings::Section::GeneralSettings};
     Nui::Observed<std::optional<std::string>> activeSession{};
+    Nui::Observed<bool> saveInProgress{false};
 
     Nui::Observed<std::vector<Settings::SectionSelectorOptions>> sessionSelectors{{
         {.sessionId = "Session 1", .icon = "it-system"},
@@ -26,16 +145,20 @@ struct Settings::Implementation
         {.sessionId = "Session 3", .icon = "it-system"},
     }};
 
+    GeneralSettings generalSettings;
+
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         InputDialog* inputDialog,
-        ConfirmDialog* confirmDialog
+        ConfirmDialog* confirmDialog,
+        std::invocable auto const& onChange
     )
         : stateHolder{stateHolder}
         , events{events}
         , inputDialog{inputDialog}
         , confirmDialog{confirmDialog}
+        , generalSettings{onChange, events}
     {}
 };
 
@@ -45,17 +168,111 @@ Settings::Settings(
     InputDialog* inputDialog,
     ConfirmDialog* confirmDialog
 )
-    : impl_{std::make_unique<Implementation>(stateHolder, events, inputDialog, confirmDialog)}
-{}
+    : impl_{std::make_unique<Implementation>(
+          stateHolder,
+          events,
+          inputDialog,
+          confirmDialog,
+          [this]()
+          {
+              if (impl_->throttledSave.valid())
+                  impl_->throttledSave();
+          }
+      )}
+{
+    Nui::throttle(
+        500,
+        [this]()
+        {
+            onChange();
+        },
+        [this](Nui::ThrottledFunction&& func)
+        {
+            impl_->throttledSave = std::move(func);
+        },
+        true
+    );
+
+    listen(
+        impl_->events->settingsOpen,
+        [this](bool open)
+        {
+            if (open)
+                applySettingsToUi();
+        }
+    );
+}
+
+void Settings::applySettingsToState(Persistence::State& state)
+{
+    state.logLevel = *impl_->generalSettings.logLevel.logLevel;
+    state.localizationOptions.languageCode = *impl_->generalSettings.localization.languageCode;
+    state.localizationOptions.dateTimeFormatString = *impl_->generalSettings.localization.dateTimeFormatString;
+}
+
+void Settings::applySettingsToUi()
+{
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this](bool success, Persistence::State const&)
+        {
+            if (!success)
+                return;
+
+            impl_->generalSettings.logLevel.logLevel = impl_->stateHolder->stateCache().logLevel;
+            impl_->generalSettings.localization.languageCode =
+                impl_->stateHolder->stateCache().localizationOptions.languageCode;
+            impl_->generalSettings.localization.dateTimeFormatString =
+                impl_->stateHolder->stateCache().localizationOptions.dateTimeFormatString;
+
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+    );
+}
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Settings);
+
+void Settings::onChange()
+{
+    impl_->saveInProgress = true;
+    Nui::globalEventContext.executeActiveEventsImmediately();
+
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this](bool, Persistence::State const&)
+        {
+            applySettingsToState(impl_->stateHolder->stateCache());
+
+            impl_->stateHolder->save(
+                [this](std::optional<std::string> const& error)
+                {
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Negative,
+                            .headerText = "Error saving state",
+                            .text = fmt::format("An error occurred while saving the application state: {}", *error),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
+
+                    impl_->saveInProgress = false;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
+        },
+        "Error occured while saving in the settings menu."
+    );
+}
 
 Nui::ElementRenderer Settings::operator()()
 {
     using namespace Nui;
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
-    using Nui::Elements::div; // because of the global div.
+    using Nui::Elements::div;
 
     return div{
         class_ = "settings-page-background-blocker",
@@ -74,8 +291,37 @@ Nui::ElementRenderer Settings::operator()()
                 class_ = "settings-page-content",
             }(side(),
                 div{
-                    class_ = "settings-page-content-main",
-                }("Main Content"))));
+                    class_ = "settings-page-content main",
+                }(sections()))));
+}
+
+Nui::ElementRenderer Settings::sections()
+{
+    using namespace Nui;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+
+    // clang-format off
+    return div{
+        class_ = "settings-page-sections",
+    }(
+        observe(impl_->activeSection).generate(
+            [this](Section activeSection) -> Nui::ElementRenderer {
+                switch (activeSection) {
+                    case Section::GeneralSettings:
+                        return generalSettings();
+                    case Section::GlobalInheritables:
+                        return Nui::nil(); // TODO
+                    case Section::Session:
+                        return Nui::nil(); // TODO
+                    default:
+                        return Nui::nil(); // TODO
+                }
+                return Nui::nil();
+            }
+        )
+    );
 }
 
 Nui::ElementRenderer Settings::header()
@@ -83,7 +329,8 @@ Nui::ElementRenderer Settings::header()
     using namespace Nui;
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
-    using Nui::Elements::div; // because of the global div.
+    using Nui::Elements::div;
+    using Nui::Elements::span;
 
     // clang-format off
     return div{
@@ -95,6 +342,17 @@ Nui::ElementRenderer Settings::header()
             .withBorder = true
         }),
         div{class_ = "title"}("Settings"),
+        div{
+            class_ = "save-indicator",
+            style = observe(impl_->saveInProgress).generate([](bool inProgress) {
+                return inProgress ? "visibility: visible;" : "visibility: hidden;";
+            })
+        }(
+            ui5::busy_indicator{
+                "size"_prop = "M",
+            }(),
+            span{}("Saving...")
+        ),
         ui5::button{
             "design"_prop = "Transparent",
             "icon"_prop = "decline",
@@ -131,7 +389,7 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
     using namespace Nui;
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
-    using Nui::Elements::div; // because of the global div.
+    using Nui::Elements::div;
     using Nui::Elements::span;
 
     // clang-format off
@@ -197,7 +455,7 @@ Nui::ElementRenderer Settings::side()
     using namespace Nui;
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
-    using Nui::Elements::div; // because of the global div.
+    using Nui::Elements::div;
     using Nui::Elements::span;
 
     // clang-format off
@@ -237,6 +495,94 @@ Nui::ElementRenderer Settings::side()
                     .icon = item.icon,
                 });
             })
+        )
+    );
+    // clang-format on
+}
+
+Nui::ElementRenderer Settings::generalSettings()
+{
+    using namespace Nui;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // clang-format off
+    auto loggingAndErrorReporting = fragment(
+        impl_->generalSettings.logLevel.comboSetting("Log Level")
+    );
+
+    auto localization = fragment(
+        impl_->generalSettings.localization.language("Language"),
+        impl_->generalSettings.localization.dateTimeFormat("Date-Time Format String")
+    );
+    // clang-format on
+
+    // clang-format off
+    return fragment(
+        group({
+            .isCollapsed = impl_->generalSettings.collapsibleStates.localization,
+            .content = std::move(localization),
+            .headerTitle = "Localization"
+        }),
+        group({
+            .isCollapsed = impl_->generalSettings.collapsibleStates.loggingAndErrorReporting,
+            .content = std::move(loggingAndErrorReporting),
+            .headerTitle = "Logging and Error Reporting"
+        })
+    );
+    // clang-format on
+}
+
+Nui::ElementRenderer Settings::group(GroupParameters const& params)
+{
+    using namespace Nui;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // clang-format off
+    return div{
+        class_ = "settings-group",
+    }(
+        div{
+            class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
+                return classes("settings-group-header", isCollapsed ? "collapsed" : "uncollapsed");
+            }),
+            onClick = [&isCollapsed = params.isCollapsed](){
+                isCollapsed = !*isCollapsed;
+            }
+        }(
+            // collapse indicator:
+            span{class_ = "settings-group-header-collapse-indicator"}(
+                ui5::icon{
+                    "name"_prop = observe(params.isCollapsed).generate([](bool isCollapsed) {
+                        return isCollapsed ? "navigation-right-arrow" : "navigation-down-arrow";
+                    }),
+                    "design"_prop = "Neutral",
+                    style = "color: var(--sapTextColor)"
+                }()
+            ),
+            span{class_ = "settings-group-header-title"}(params.headerTitle),
+            [&params]() -> Nui::ElementRenderer {
+                if (params.isEnabled) {
+                    return ui5::switch_{
+                        "design"_prop = "Emphasized",
+                        "state"_prop = *params.isEnabled,
+                        "change"_event = [&params](Nui::val event) {
+                            *params.isEnabled = event["state"].as<bool>();
+                        },
+                    }();
+                }
+                return Nui::nil();
+            }()
+        ),
+        div{class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
+            return classes("settings-group-content", isCollapsed ? "collapsed" : "uncollapsed");
+        })}(
+            std::move(params.content)
         )
     );
     // clang-format on

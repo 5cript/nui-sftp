@@ -10,10 +10,11 @@
 #include <persistence/state/ui_options.hpp>
 #include <persistence/state/queue_options.hpp>
 #include <persistence/state/local_filesystem_options.hpp>
+#include <persistence/state/localization_options.hpp>
 
 namespace Persistence
 {
-    struct State
+    struct State : public DefaultMissingMember
     {
         std::unordered_map<std::string, TerminalOptions> terminalOptions{};
         std::unordered_map<std::string, Termios> termios{};
@@ -25,6 +26,7 @@ namespace Persistence
         LocalFilesystemOptions localFilesystemOptions{};
         UiOptions uiOptions{};
         Log::Level logLevel{Log::Level::Info};
+        LocalizationOptions localizationOptions{};
 
         State fullyResolve() const;
     };
@@ -40,6 +42,7 @@ namespace Persistence
             sshSessionOptions,
             uiOptions,
             logLevel,
+            localizationOptions,
             queueOptions,
             localFilesystemOptions)
     )

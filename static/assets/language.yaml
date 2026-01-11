@@ -1,0 +1,22 @@
+en_US:
+  settings:
+    title: "Settings"
+  persistence:
+    warningLoadingState: "Warning loading state"
+    loadedWithWarnings: "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration."
+  toolbar:
+    cannotUpdateLayouts: "Cannot update layouts."
+    newSession: "New Session"
+    endSession: "End Session"
+    settings: "Settings"
+de_DE:
+  settings:
+    title: "Einstellungen"
+  persistence:
+    warningLoadingState: "Warnung beim Laden des Zustands"
+    loadedWithWarnings: "Der Anwendungszustand wurde mit Warnungen geladen:\n\n{}\n\nBitte überprüfen Sie Ihre Konfiguration."
+  toolbar:
+    cannotUpdateLayouts: "Layouts können nicht aktualisiert werden."
+    newSession: "Neue Sitzung"
+    endSession: "Sitzung Beenden"
+    settings: "Einstellungen"

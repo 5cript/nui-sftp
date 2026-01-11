@@ -1,4 +1,5 @@
 #include <frontend/main_page.hpp>
+#include <utility/language.hpp>
 #include <persistence/state_holder.hpp>
 #include <log/log.hpp>
 
@@ -15,6 +16,8 @@
 #include <nui/frontend/attributes.hpp>
 
 #include <memory>
+
+std::unique_ptr<LanguageProvider> language{nullptr};
 
 static std::unique_ptr<Persistence::StateHolder> persistence{};
 static std::unique_ptr<FrontendEvents> frontendEvents{};
@@ -40,22 +43,43 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
             Log::info("terminalUtility available.");
 
         persistence = std::make_unique<Persistence::StateHolder>();
-        frontendEvents = std::make_unique<FrontendEvents>();
-        mainPage = std::make_unique<MainPage>(persistence.get(), frontendEvents.get());
-        dom = std::make_unique<Nui::Dom::Dom>();
+        persistence->load(
+            [](std::optional<std::string> const&, Persistence::StateHolder&, std::optional<std::string> const&)
+            {
+                frontendEvents = std::make_unique<FrontendEvents>();
+                frontendEvents->onLanguageChanged = persistence->stateCache().localizationOptions.languageCode;
 
-        dom->setBody(Nui::Elements::body{}(mainPage->render()));
-        mainPage->onSetupComplete();
+                persistence->loadLanguageFile(
+                    [](std::optional<nlohmann::json> lang)
+                    {
+                        language = std::make_unique<LanguageProvider>(
+                            frontendEvents.get(),
+                            lang.value_or(
+                                []()
+                                {
+                                    auto res = nlohmann::json::object();
+                                    res["en_US"] = nlohmann::json::object();
+                                    return res;
+                                }()
+                            )
+                        );
+                        mainPage = std::make_unique<MainPage>(persistence.get(), frontendEvents.get());
+                        dom = std::make_unique<Nui::Dom::Dom>();
+
+                        dom->setBody(Nui::Elements::body{}(mainPage->render()));
+                        mainPage->onSetupComplete();
+                    }
+                );
+            }
+        );
     }
     else
         Log::info("Waiting for terminalUtility to be available.");
     return terminalUtilityAvailable;
 }
 
-extern "C" void frontendMain()
+void setupLogger(std::shared_ptr<Nui::TimerHandle> setupWait)
 {
-    std::shared_ptr<Nui::TimerHandle> setupWait = std::make_shared<Nui::TimerHandle>();
-
     Log::setupFrontendLogger(
         [](std::chrono::system_clock::time_point const&, Log::Level, std::string const&) {},
         [once = false, setupWait](Log::Level) mutable
@@ -81,6 +105,12 @@ extern "C" void frontendMain()
             }
         }
     );
+}
+
+extern "C" void frontendMain()
+{
+    std::shared_ptr<Nui::TimerHandle> setupWait = std::make_shared<Nui::TimerHandle>();
+    setupLogger(setupWait);
 }
 
 EMSCRIPTEN_BINDINGS(nui_example_frontend)

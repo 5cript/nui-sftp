@@ -158,7 +158,6 @@ namespace SharedData
         void to_json_impl(nlohmann::json& j, T const& obj)
         {
             j = obj;
-            std::cout << "to_json_impl: " << j.dump() << " - " << typeid(T).name() << std::endl;
         }
         template <typename T>
         requires std::is_enum_v<T>
@@ -201,6 +200,27 @@ namespace SharedData
         }
     }
 
+    template <typename T, typename ElementT>
+    void invokeElementOptionalHandler(T&, nlohmann::json&, ElementT const&, char const*)
+    {
+        // default is do nothing: dont serialize
+    }
+
+    template <
+        typename T,
+        typename ElementT,
+        typename Enable = std::void_t<decltype(std::declval<T>().handleOptionalMember(
+            std::declval<T&>(),
+            std::declval<nlohmann::json&>(),
+            std::declval<ElementT const&>(),
+            std::declval<char const*>()
+        ))>>
+    void
+    invokeElementOptionalHandler(T& obj, nlohmann::json& objectJson, ElementT const& pointerToMember, char const* name)
+    {
+        obj.handleOptionalMember(obj, objectJson, pointerToMember, name);
+    }
+
     template <
         typename T,
         class Bases = boost::describe::describe_bases<T, boost::describe::mod_any_access>,
@@ -226,13 +246,29 @@ namespace SharedData
                 {
                     if (obj.*memAccessor.pointer)
                         Detail::to_json_impl(j[memAccessor.name], obj.*memAccessor.pointer);
+                    else
+                        invokeElementOptionalHandler(obj, j, obj.*memAccessor.pointer, memAccessor.name);
                 }
                 else
-                {
                     Detail::to_json_impl(j[memAccessor.name], obj.*memAccessor.pointer);
-                }
             }
         );
+    }
+
+    template <typename T, typename ElementT>
+    void invokeElementMissingHandler(T&, ElementT&, char const* memberName)
+    {
+        throw std::runtime_error(std::string("Missing required field '") + memberName + "' in JSON object");
+    }
+
+    template <
+        typename T,
+        typename ElementT,
+        typename Enable = std::void_t<
+            decltype(std::declval<T>().handleMissingElement(std::declval<ElementT&>(), std::declval<char const*>()))>>
+    void invokeElementMissingHandler(T& obj, ElementT& member, char const* memberName)
+    {
+        obj.handleMissingElement(member, memberName);
     }
 
     template <
@@ -261,13 +297,9 @@ namespace SharedData
                 else
                 {
                     if (j.contains(memAccessor.name))
-                    {
                         Detail::from_json_impl(obj, j, j.at(memAccessor.name), obj.*memAccessor.pointer);
-                    }
                     else
-                        throw std::runtime_error(
-                            std::string("Missing required field '") + memAccessor.name + "' in JSON object"
-                        );
+                        invokeElementMissingHandler(obj, obj.*memAccessor.pointer, memAccessor.name);
                 }
             }
         );

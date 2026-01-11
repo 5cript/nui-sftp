@@ -2,6 +2,7 @@
 #include <persistence/state/state.hpp>
 #include <constants/persistence.hpp>
 #include <log/log.hpp>
+#include <yaml-cpp/yaml.h>
 
 #include <fmt/chrono.h>
 #include <roar/filesystem/special_paths.hpp>
@@ -101,7 +102,23 @@ namespace Persistence
             }
 
             before.get_to(stateCache_);
-            const auto warning = dataFixer(before);
+            auto warning = dataFixer(before);
+            auto missing = stateCache_.collectMissingMembers(stateCache_);
+            if (!missing.empty())
+            {
+                if (warning)
+                {
+                    *warning += "\n";
+                }
+                else
+                {
+                    warning = "The following required fields were missing in the config and were set to defaults:\n";
+                }
+                for (auto const& member : missing)
+                {
+                    *warning += fmt::format("- {}\n", member);
+                }
+            }
             onLoad(error, *this, warning);
         }
         catch (std::exception const& e)
@@ -293,5 +310,73 @@ namespace Persistence
                 }
             }
         );
+
+        hub.registerFunction(
+            "StateHolder::loadLanguageFile",
+            [this, &hub](std::string responseId)
+            {
+                Log::debug("Received language file load request from frontend state holder.");
+
+                loadLanguageFile(
+                    [responseId, &hub](std::optional<nlohmann::json> const& jsonOpt)
+                    {
+                        if (jsonOpt)
+                        {
+                            auto response = nlohmann::json::object();
+                            response["jsonString"] = jsonOpt->dump();
+                            hub.callRemote(responseId, response);
+                        }
+                        else
+                        {
+                            hub.callRemote(
+                                responseId,
+                                nlohmann::json{
+                                    {"error", "Failed to load language file."},
+                                }
+                            );
+                        }
+                    }
+                );
+            }
+        );
+    }
+
+    void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
+    {
+        const auto path = programDirectory_ / "assets" / "language.yaml";
+
+        // Convert to json:
+
+        nlohmann::json json;
+
+        try
+        {
+            YAML::Node config = YAML::LoadFile(path.generic_string());
+            auto translateNode = [&](this const auto& translateNode, YAML::Node const& node) -> nlohmann::json
+            {
+                if (node.IsScalar())
+                {
+                    return node.as<std::string>();
+                }
+                else if (node.IsMap())
+                {
+                    nlohmann::json obj = nlohmann::json::object();
+                    for (auto const& item : node)
+                    {
+                        obj[item.first.as<std::string>()] = translateNode(item.second);
+                    }
+                    return obj;
+                }
+                return nullptr;
+            };
+            json = translateNode(config);
+        }
+        catch (std::exception const& e)
+        {
+            Log::error("Failed to parse language file: {}", e.what());
+            onLoadComplete(std::nullopt);
+            return;
+        }
+        onLoadComplete(std::move(json));
     }
 }
