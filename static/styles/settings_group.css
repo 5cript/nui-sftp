@@ -27,6 +27,7 @@
     &.collapsed {
         border: unset;
         border-radius: unset;
+        padding: 0;
     }
 }
 

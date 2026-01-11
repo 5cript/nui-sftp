@@ -1,6 +1,26 @@
 en_US:
+  language: "Language"
   settings:
     title: "Settings"
+    dateTimeFormatString: "Date-Time Format String"
+    generalSettings: "General Settings"
+    loggingAndErrorReportingGroupHeader: "Logging and Error Reporting"
+    globalInheritables: "Inheritable Settings"
+    errorLoadingSettings: "Error occured while loading in the settings menu."
+    errorSavingSettingsHeader: "Could not save settings"
+    errorSavingSettings: "Error occured while saving in the settings menu."
+    unknownSession: "Unknown Session"
+    saving: "Saving..."
+    addNew: "Add New!"
+    configuration: "Configuration"
+    sessionsServers: "Sessions / Servers"
+    logLevel: "Log Level"
+    general:
+      localization:
+        dateTimeFormatHelpText: "The date and time format string used throughout the application, predominantly in the file explorer table view. Uses the fmt::format formatting syntax. https://fmt.dev/12.0/syntax/#chrono-format-specifications"
+        languageHelpText: "The language used in the application's user interface."
+      loggingAndErrorReporting:
+        logLevelHelpText: "The log level determines the verbosity of the application's logging output."
   persistence:
     warningLoadingState: "Warning loading state"
     loadedWithWarnings: "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration."
@@ -10,8 +30,28 @@ en_US:
     endSession: "End Session"
     settings: "Settings"
 de_DE:
+  language: "Sprache"
   settings:
     title: "Einstellungen"
+    dateTimeFormatString: "Datums- und Zeitformat-String"
+    generalSettings: "Allgemeine Einstellungen"
+    loggingAndErrorReportingGroupHeader: "Protokollierung und Fehlerberichterstattung"
+    globalInheritables: "Vererbbare Einstellungen"
+    errorSavingSettings: "Fehler beim Speichern im Einstellungsmenü aufgetreten."
+    errorLoadingSettings: "Fehler beim Laden im Einstellungsmenü aufgetreten."
+    errorSavingSettingsHeader: "Einstellungen konnten nicht gespeichert werden"
+    unknownSession: "Unbekannte Sitzung"
+    saving: "Speichern..."
+    addNew: "Neu hinzufügen!"
+    configuration: "Konfiguration"
+    sessionsServers: "Sitzungen / Server"
+    logLevel: "Protokollierungsstufe"
+    general:
+      localization:
+        dateTimeFormatHelpText: "Der Datums- und Zeitformat-String, der in der gesamten Anwendung verwendet wird, hauptsächlich in der Tabellenansicht des Dateiexplorers. Verwendet die fmt::format Formatierungssyntax. https://fmt.dev/12.0/syntax/#chrono-format-specifications"
+        languageHelpText: "Die Sprache, die in der Benutzeroberfläche der Anwendung verwendet wird."
+      loggingAndErrorReporting:
+        logLevelHelpText: "Das Protokollierungsniveau bestimmt die Detailgenauigkeit der Protokollausgabe der Anwendung."
   persistence:
     warningLoadingState: "Warnung beim Laden des Zustands"
     loadedWithWarnings: "Der Anwendungszustand wurde mit Warnungen geladen:\n\n{}\n\nBitte überprüfen Sie Ihre Konfiguration."

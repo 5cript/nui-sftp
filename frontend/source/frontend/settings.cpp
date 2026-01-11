@@ -6,6 +6,7 @@
 #include <frontend/settings/combo_setting.hpp>
 #include <frontend/settings/text_setting.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
+#include <utility/language.hpp>
 #include <log/log.hpp>
 
 #include <ui5/components/button.hpp>
@@ -54,7 +55,7 @@ struct GeneralSettings
                       Log::Level::Critical,
                       Log::Level::Off,
                   },
-                  "The log level determines the verbosity of the application's logging output.",
+                  language->getObserved("settings", "general", "loggingAndErrorReporting", "logLevelHelpText"),
                   onChange,
                   [this]()
                   {
@@ -92,16 +93,18 @@ struct GeneralSettings
               .language = {
                   localization.languageCode,
                   {"en_US", "de_DE"},
-                  "The language used in the application's user interface.",
-                  [onChange, events, this]()
+                  language->getObserved("settings", "general", "localization", "languageHelpText"),
+                  [onChange, this, events]()
                   {
                       onChange();
                       events->onLanguageChanged = localization.languageCode.value();
                       events->onLanguageChanged.modifyNow();
                   },
-                  [this]()
+                  [this, events]()
                   {
                       localization.languageCode = Persistence::State{}.localizationOptions.languageCode;
+                      events->onLanguageChanged = localization.languageCode.value();
+                      events->onLanguageChanged.modifyNow();
                   },
                   [](std::string const& code) -> std::string
                   {
@@ -114,9 +117,7 @@ struct GeneralSettings
               },
               .dateTimeFormat = TextSetting{
                   localization.dateTimeFormatString,
-                  "The date and time format string used throughout the application, predominantly in the file explorer "
-                  "table view. Uses the fmt::format formatting syntax. "
-                  "https://fmt.dev/12.0/syntax/#chrono-format-specifications",
+                  language->getObserved("settings", "general", "localization", "dateTimeFormatHelpText"),
                   onChange,
                   [this]()
                   {
@@ -252,8 +253,10 @@ void Settings::onChange()
                     {
                         impl_->confirmDialog->open({
                             .state = ConfirmDialog::State::Negative,
-                            .headerText = "Error saving state",
-                            .text = fmt::format("An error occurred while saving the application state: {}", *error),
+                            .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                            ),
                             .buttons = ConfirmDialog::Button::Ok,
                         });
                     }
@@ -263,7 +266,7 @@ void Settings::onChange()
                 }
             );
         },
-        "Error occured while saving in the settings menu."
+        language->get("settings", "errorLoadingSettings")
     );
 }
 
@@ -341,7 +344,7 @@ Nui::ElementRenderer Settings::header()
             .color = "var(--sapBrandColor)",
             .withBorder = true
         }),
-        div{class_ = "title"}("Settings"),
+        div{class_ = "title"}(language->getObserved("settings", "title")),
         div{
             class_ = "save-indicator",
             style = observe(impl_->saveInProgress).generate([](bool inProgress) {
@@ -351,7 +354,7 @@ Nui::ElementRenderer Settings::header()
             ui5::busy_indicator{
                 "size"_prop = "M",
             }(),
-            span{}("Saving...")
+            span{}(language->getObserved("settings", "saving"))
         ),
         ui5::button{
             "design"_prop = "Transparent",
@@ -429,21 +432,24 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                         .withBorder = true
                     });
                 }(),
-                span{}([&options]() -> std::string {
-                    if (options.sessionId.has_value())
-                        return options.sessionId.value();
+                span{}(
+                    observe(impl_->events->onLanguageChanged).generate(
+                        [&options]() -> std::string {
+                        if (options.sessionId.has_value())
+                            return options.sessionId.value();
 
-                    switch (options.thisSection) {
-                        case Settings::Section::GeneralSettings:
-                            return "General Settings";
-                        case Settings::Section::GlobalInheritables:
-                            return "Global Inheritables";
-                        case Settings::Section::Session:
-                            return "Unknown Session";
-                        case Settings::Section::Add:
-                            return "Add New!";
-                    }
-                }())
+                        switch (options.thisSection) {
+                            case Settings::Section::GeneralSettings:
+                                return language->get("settings", "generalSettings");
+                            case Settings::Section::GlobalInheritables:
+                                return language->get("settings", "globalInheritables");
+                            case Settings::Section::Session:
+                                return language->get("settings", "unknownSession");
+                            case Settings::Section::Add:
+                                return language->get("settings", "addNew");
+                        }
+                    })
+                )
             );
         }
     );
@@ -465,7 +471,7 @@ Nui::ElementRenderer Settings::side()
                 "name"_prop = "settings",
                 "design"_prop = "Neutral"
             }(),
-            span{}("Configuration")
+            span{}(language->getObserved("settings", "configuration"))
         ),
         sectionSelector({
             .thisSection = Settings::Section::GeneralSettings,
@@ -481,7 +487,7 @@ Nui::ElementRenderer Settings::side()
                 "name"_prop = "it-system",
                 "design"_prop = "Neutral"
             }(),
-            span{}("Base Sessions / Servers")
+            span{}(language->getObserved("settings", "sessionsServers"))
         ),
         sectionSelector({
             .thisSection = Settings::Section::Add,
@@ -510,12 +516,12 @@ Nui::ElementRenderer Settings::generalSettings()
 
     // clang-format off
     auto loggingAndErrorReporting = fragment(
-        impl_->generalSettings.logLevel.comboSetting("Log Level")
+        impl_->generalSettings.logLevel.comboSetting(language->getObserved("settings", "logLevel"))
     );
 
     auto localization = fragment(
-        impl_->generalSettings.localization.language("Language"),
-        impl_->generalSettings.localization.dateTimeFormat("Date-Time Format String")
+        impl_->generalSettings.localization.language(language->getObserved("language")),
+        impl_->generalSettings.localization.dateTimeFormat(language->getObserved("settings", "dateTimeFormatString"))
     );
     // clang-format on
 
@@ -524,18 +530,18 @@ Nui::ElementRenderer Settings::generalSettings()
         group({
             .isCollapsed = impl_->generalSettings.collapsibleStates.localization,
             .content = std::move(localization),
-            .headerTitle = "Localization"
+            .headerTitle = language->getObserved("settings", "generalSettings")
         }),
         group({
             .isCollapsed = impl_->generalSettings.collapsibleStates.loggingAndErrorReporting,
             .content = std::move(loggingAndErrorReporting),
-            .headerTitle = "Logging and Error Reporting"
+            .headerTitle = language->getObserved("settings", "loggingAndErrorReportingGroupHeader")
         })
     );
     // clang-format on
 }
 
-Nui::ElementRenderer Settings::group(GroupParameters const& params)
+Nui::ElementRenderer Settings::group(GroupParameters&& params)
 {
     using namespace Nui;
     using namespace Nui::Elements;
@@ -565,7 +571,7 @@ Nui::ElementRenderer Settings::group(GroupParameters const& params)
                     style = "color: var(--sapTextColor)"
                 }()
             ),
-            span{class_ = "settings-group-header-title"}(params.headerTitle),
+            span{class_ = "settings-group-header-title"}(std::move(params.headerTitle)),
             [&params]() -> Nui::ElementRenderer {
                 if (params.isEnabled) {
                     return ui5::switch_{

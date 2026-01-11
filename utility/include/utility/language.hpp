@@ -27,7 +27,9 @@ class LanguageProvider
     }
 
     template <typename... Args>
-    auto getObserved(Args&&... args)
+    Nui::
+        ObservedValueCombinatorWithGenerator<std::function<std::string(std::string const&)>, Nui::Observed<std::string>>
+        getObserved(Args&&... args)
     {
         std::vector<std::pair<std::string, std::string>> lookupTable;
         std::transform(
@@ -41,14 +43,16 @@ class LanguageProvider
         );
         return observe(events_->onLanguageChanged)
             .generate(
-                [lookupTable = std::move(lookupTable)](std::string const& languageKey) -> std::string
-                {
-                    for (auto const& [key, value] : lookupTable)
+                std::function<std::string(std::string const&)>{
+                    [lookupTable = std::move(lookupTable)](std::string const& languageKey) -> std::string
                     {
-                        if (key == languageKey)
-                            return value;
+                        for (auto const& [key, value] : lookupTable)
+                        {
+                            if (key == languageKey)
+                                return value;
+                        }
+                        return fmt::format("language {} does not exist", languageKey);
                     }
-                    return fmt::format("language {} does not exist", languageKey);
                 }
             );
     }
@@ -60,15 +64,11 @@ class LanguageProvider
     }
 
     template <typename... Args>
-    std::string getByLang(std::string const& languageKey, Args&&... args)
+    std::optional<std::string> findByLang(std::string const& languageKey, Args&&... args)
     {
         auto res = languageFile_.find(languageKey);
         if (res == languageFile_.end())
-        {
-            return fmt::format(
-                "{} - language {} does not exist", fmt::join(std::vector<std::string>{args...}, "."), languageKey
-            );
-        }
+            return std::nullopt;
 
         nlohmann::json::const_iterator result = res;
         nlohmann::json::const_iterator end;
@@ -78,8 +78,24 @@ class LanguageProvider
         (((result, end = result->end(), result = result->find(args)) != end) && ...);
 #pragma clang diagnostic pop
         if (result == end)
-            return fmt::format("{} - key does not exist", fmt::join(std::vector<std::string>{args...}, "."));
+            return std::nullopt;
         return result->get<std::string>();
+    }
+
+    template <typename... Args>
+    std::string getByLang(std::string const& languageKey, Args&&... args)
+    {
+        auto res = findByLang(languageKey, std::forward<Args>(args)...);
+        if (!res)
+        {
+            auto fallback = findByLang("en_US", std::forward<Args>(args)...);
+            if (!fallback)
+                return fmt::format(
+                    "No translation {} in {}.", fmt::join(std::vector<std::string>{args...}, "/"), languageKey
+                );
+            return *fallback;
+        }
+        return *res;
     }
 
   private:
@@ -87,5 +103,8 @@ class LanguageProvider
     nlohmann::json languageFile_;
     std::vector<std::string> languageKeys_{};
 };
+
+using LanguageObservedText = Nui::
+    ObservedValueCombinatorWithGenerator<std::function<std::string(std::string const&)>, Nui::Observed<std::string>>;
 
 extern std::unique_ptr<LanguageProvider> language;

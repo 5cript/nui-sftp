@@ -22,7 +22,7 @@ class ComboSetting : public Setting<ValueType>
     ComboSetting(
         Nui::Observed<ValueType>& state,
         std::vector<ValueType> availableStates,
-        std::string helpText,
+        LanguageObservedText helpText,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         Traits::Callable auto&& valueTransformer =
@@ -47,7 +47,7 @@ class ComboSetting : public Setting<ValueType>
         , transform_{std::forward<decltype(valueTransformer)>(valueTransformer)}
     {}
 
-    Nui::ElementRenderer operator()(auto& label)
+    Nui::ElementRenderer operator()(auto&& label)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
@@ -57,7 +57,7 @@ class ComboSetting : public Setting<ValueType>
             ui5::label{
                 style = "color: var(--sapTextColor); margin-right: 10px",
                 "showColon"_prop = true
-            }(label),
+            }(std::forward<decltype(label)>(label)),
             ui5::select{
                 "change"_event = [this](Nui::val event){
                     const auto index = static_cast<std::size_t>(event["detail"]["selectedOption"]["valueIndex"].as<int>());
