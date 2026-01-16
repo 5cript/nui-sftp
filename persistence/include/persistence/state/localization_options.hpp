@@ -2,7 +2,6 @@
 
 #include <persistence/state_core.hpp>
 
-#include <unordered_map>
 #include <string>
 
 namespace Persistence

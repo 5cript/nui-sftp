@@ -70,16 +70,23 @@ class LanguageProvider
         if (res == languageFile_.end())
             return std::nullopt;
 
-        nlohmann::json::const_iterator result = res;
-        nlohmann::json::const_iterator end;
+        try
+        {
+            nlohmann::json::const_iterator result = res;
+            nlohmann::json::const_iterator end;
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-value" // its the one element to be compared against end
-        (((result, end = result->end(), result = result->find(args)) != end) && ...);
+            (((result, end = result->end(), result = result->find(args)) != end) && ...);
 #pragma clang diagnostic pop
-        if (result == end)
-            return std::nullopt;
-        return result->get<std::string>();
+            if (result == end)
+                return std::nullopt;
+            return result->get<std::string>();
+        }
+        catch (std::exception const& exc)
+        {
+            return std::string{exc.what()};
+        }
     }
 
     template <typename... Args>

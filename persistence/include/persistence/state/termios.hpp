@@ -50,7 +50,7 @@ namespace Persistence
                 };
             }
         };
-        std::optional<InputFlags> inputFlags{InputFlags{}};
+        InputFlags inputFlags{InputFlags{}};
 
         struct OutputFlags
         {
@@ -91,7 +91,7 @@ namespace Persistence
                 };
             }
         };
-        std::optional<OutputFlags> outputFlags{OutputFlags{}};
+        OutputFlags outputFlags{OutputFlags{}};
 
         struct ControlFlags
         {
@@ -130,7 +130,7 @@ namespace Persistence
                 };
             }
         };
-        std::optional<ControlFlags> controlFlags{ControlFlags{}};
+        ControlFlags controlFlags{ControlFlags{}};
 
         struct LocalFlags
         {
@@ -173,7 +173,7 @@ namespace Persistence
                 };
             }
         };
-        std::optional<LocalFlags> localFlags{LocalFlags{}};
+        LocalFlags localFlags{LocalFlags{}};
 
         struct CC
         {

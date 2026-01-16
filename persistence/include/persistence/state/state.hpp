@@ -12,17 +12,20 @@
 #include <persistence/state/local_filesystem_options.hpp>
 #include <persistence/state/localization_options.hpp>
 
+#include <map>
+#include <string>
+
 namespace Persistence
 {
     struct State : public DefaultMissingMember
     {
-        std::unordered_map<std::string, TerminalOptions> terminalOptions{};
-        std::unordered_map<std::string, Termios> termios{};
-        std::unordered_map<std::string, SshOptions> sshOptions{};
-        std::unordered_map<std::string, SftpOptions> sftpOptions{};
-        std::unordered_map<std::string, TerminalEngine> sessions{};
-        std::unordered_map<std::string, SshSessionOptions> sshSessionOptions{};
-        std::unordered_map<std::string, QueueOptions> queueOptions{};
+        std::map<std::string, TerminalOptions> terminalOptions{};
+        std::map<std::string, Termios> termios{};
+        std::map<std::string, SshOptions> sshOptions{};
+        std::map<std::string, SftpOptions> sftpOptions{};
+        std::map<std::string, TerminalEngine> sessions{};
+        std::map<std::string, SshSessionOptions> sshSessionOptions{};
+        std::map<std::string, QueueOptions> queueOptions{};
         LocalFilesystemOptions localFilesystemOptions{};
         UiOptions uiOptions{};
         Log::Level logLevel{Log::Level::Info};

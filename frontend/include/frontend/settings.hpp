@@ -29,6 +29,7 @@ class Settings
     Nui::ElementRenderer side();
     Nui::ElementRenderer header();
     Nui::ElementRenderer generalSettings();
+    Nui::ElementRenderer inheritableSettings();
     Nui::ElementRenderer sections();
 
     struct GroupParameters
@@ -37,6 +38,9 @@ class Settings
         Nui::Observed<bool>* isEnabled = nullptr;
         Nui::ElementRenderer content;
         LanguageObservedText headerTitle;
+        Nui::Observed<std::string>* currentGroupKey = nullptr;
+        Nui::Observed<std::vector<std::string>>* groupKeys = nullptr;
+        bool isInheritableGroup = false;
     };
     Nui::ElementRenderer group(GroupParameters&& params);
 
@@ -59,6 +63,8 @@ class Settings
     void addNewSession();
     void onChange();
     void applySettingsToState(Persistence::State& state);
+    void loadTermiosSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void applyTermiosSettingsToStateByKey(std::string const& key, Persistence::State& state);
 
   private:
     struct Implementation;

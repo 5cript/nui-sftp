@@ -10,7 +10,7 @@ namespace Persistence
         ExecutingTerminalEngine engine{};
         engine.command = "C:/msys64/usr/bin/bash.exe";
         engine.arguments = {std::vector<std::string>{"--login", "-i"}};
-        engine.environment = {std::unordered_map<std::string, std::string>{
+        engine.environment = {std::map<std::string, std::string>{
             {"MSYSTEM", "MSYS"},
             {"CHERE_INVOKING", "1"},
             {"TERM", "xterm-256color"},
@@ -24,7 +24,7 @@ namespace Persistence
         ExecutingTerminalEngine engine{};
         engine.command = "/bin/bash";
         engine.arguments = {std::vector<std::string>{"-i"}};
-        engine.environment = {std::unordered_map<std::string, std::string>{
+        engine.environment = {std::map<std::string, std::string>{
             {"TERM", "xterm-256color"},
         }};
         engine.exitTimeoutSeconds = 3;

@@ -68,6 +68,16 @@ endfunction()
 
 set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json)
 
+set(DEPENDANT_LINK_OPTIONS "")
+set(DEPENDANT_COMPILE_OPTIONS "")
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DEPENDANT_LINK_OPTIONS "-g")
+    set(DEPENDANT_COMPILE_OPTIONS "-g")
+else()
+    set(DEPENDANT_LINK_OPTIONS "-O2")
+    set(DEPENDANT_COMPILE_OPTIONS "-O2")
+endif()
+
 nui_prepare_emscripten_target(
     TARGET
         ${PROJECT_NAME}
@@ -84,13 +94,11 @@ nui_prepare_emscripten_target(
         -sMEMORY64=1
         -sWASM_BIGINT
         -fexceptions
-        #$<$<CONFIG:Debug>:-g>
-        #$<$<CONFIG:Release>:-O2>
+        ${DEPENDANT_LINK_OPTIONS}
         # or other options, see emscripten docs.
     EMSCRIPTEN_COMPILE_OPTIONS
         -sMEMORY64=1
-        #$<$<CONFIG:Debug>:-g>
-        #$<$<CONFIG:Release>:-O2>
+        ${DEPENDANT_COMPILE_OPTIONS}
     CXX_STANDARD
         23
     OBSERVED_BUNDLE_FILES

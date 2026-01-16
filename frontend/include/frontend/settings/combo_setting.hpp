@@ -10,17 +10,18 @@
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
 
-template <typename ValueType, typename TransformedType = ValueType>
-class ComboSetting : public Setting<ValueType>
+template <typename ValueType, typename TransformedType = ValueType, bool Disengageable = false>
+class ComboSetting : public Setting<Disengageable, ValueType>
 {
   public:
-    using Setting<ValueType>::state_;
-    using Setting<ValueType>::onChange_;
-    using Setting<ValueType>::reset;
-    using Setting<ValueType>::help;
+    using SettingBase = Setting<Disengageable, ValueType>;
+    using SettingBase::state_;
+    using SettingBase::onChange_;
+    using SettingBase::reset;
+    using SettingBase::help;
+    using SettingBase::disengageable;
 
     ComboSetting(
-        Nui::Observed<ValueType>& state,
         std::vector<ValueType> availableStates,
         LanguageObservedText helpText,
         std::invocable auto&& onChange,
@@ -36,8 +37,7 @@ class ComboSetting : public Setting<ValueType>
             return std::nullopt;
         }
     )
-        : Setting<ValueType>{
-              state,
+        : SettingBase{
               std::move(helpText),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction)
@@ -54,6 +54,7 @@ class ComboSetting : public Setting<ValueType>
 
         // clang-format off
         return div{}(
+            disengageable(),
             ui5::label{
                 style = "color: var(--sapTextColor); margin-right: 10px",
                 "showColon"_prop = true
@@ -66,10 +67,10 @@ class ComboSetting : public Setting<ValueType>
                         Log::error("ComboSetting: Selected index {} is out of bounds.", index);
                         return;
                     }
-                    *state_ = availableStates_[index];
+                    state_ = availableStates_[index];
                     onChange_();
                 },
-                "value"_prop = observe(*state_).generate([this](auto const& value){
+                "value"_prop = observe(state_).generate([this](auto const& value){
                     return transform_(value);
                 })
             }(

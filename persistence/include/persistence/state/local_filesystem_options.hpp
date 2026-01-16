@@ -10,10 +10,10 @@ namespace Persistence
     struct LocalFilesystemOptions
     {
         // by default, dont allow the user to delete files locally.
-        std::optional<bool> preventDeletion{true};
-        std::optional<bool> preventRename{std::nullopt};
-        std::optional<bool> preventCreateFile{std::nullopt};
-        std::optional<bool> preventCreateDirectory{std::nullopt};
+        bool preventDeletion{true};
+        bool preventRename{false};
+        bool preventCreateFile{false};
+        bool preventCreateDirectory{false};
         std::optional<std::string> homeOverride{std::nullopt};
     };
 

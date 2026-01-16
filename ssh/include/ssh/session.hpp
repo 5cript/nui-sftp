@@ -8,7 +8,7 @@
 #include <libssh/libsshpp.hpp>
 
 #include <expected>
-#include <unordered_map>
+#include <map>
 #include <string>
 #include <optional>
 #include <memory>
@@ -59,7 +59,7 @@ namespace SecureShell
 
         struct PtyCreationOptions
         {
-            std::optional<std::unordered_map<std::string, std::string>> environment = std::nullopt;
+            std::optional<std::map<std::string, std::string>> environment = std::nullopt;
             std::string terminalType = "xterm-256color";
             int columns = 80;
             int rows = 24;
@@ -114,5 +114,6 @@ namespace SecureShell
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
-        std::vector<PasswordCacheEntry>* pwCache);
+        std::vector<PasswordCacheEntry>* pwCache
+    );
 }

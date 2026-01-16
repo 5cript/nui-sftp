@@ -32,7 +32,7 @@ void RpcFilesystem::registerRemove()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (!options_.preventDeletion.value_or(false))
+                if (!options_.preventDeletion)
                 {
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
                     return reply.error("File deletion is prevented by configuration.");
@@ -83,7 +83,7 @@ void RpcFilesystem::registerRemoveMultiple()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (options_.preventDeletion.value_or(true))
+                if (options_.preventDeletion)
                 {
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
                     return reply.error("File deletion is prevented by configuration.");
@@ -133,7 +133,7 @@ void RpcFilesystem::registerRename()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (options_.preventRename.value_or(false))
+                if (options_.preventRename)
                 {
                     Log::warn("RpcFilesystem::rename called but renaming is prevented by configuration.");
                     return reply.error("File renaming is prevented by configuration.");
@@ -221,7 +221,7 @@ void RpcFilesystem::registerCreateFile()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (options_.preventCreateFile.value_or(false))
+                if (options_.preventCreateFile)
                 {
                     Log::warn("RpcFilesystem::createFile called but file creation is prevented by configuration.");
                     return reply.error("File creation is prevented by configuration.");
@@ -258,7 +258,7 @@ void RpcFilesystem::registerCreateDirectory()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (options_.preventCreateDirectory.value_or(false))
+                if (options_.preventCreateDirectory)
                 {
                     Log::warn(
                         "RpcFilesystem::createDirectory called but directory creation is prevented by configuration."
