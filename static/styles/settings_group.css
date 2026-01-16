@@ -8,16 +8,16 @@
     border: 1px solid var(--sapBrandColor);
     border-radius: 0 0 var(--sapElement_BorderCornerRadius) var(--sapElement_BorderCornerRadius);
     border-top: none;
-    padding: 8px 16px;
     display: grid;
-    grid-template-columns: max-content 1fr max-content max-content;
+    grid-template-columns: max-content max-content 1fr max-content max-content;
     row-gap: 4px;
 
-    &>div {
+    &>div:not(.settings-group-key-container) {
         display: grid;
         grid-template-columns: subgrid;
         grid-column: 1 / -1;
         align-items: center;
+        padding: 0 16px;
     }
 
     &.uncollapsed {
@@ -28,6 +28,16 @@
         border: unset;
         border-radius: unset;
         padding: 0;
+    }
+
+
+    &>span {
+        /* a fat header spanning across with large font */
+        font-size: 1.8rem;
+        font-weight: bold;
+        border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
+        margin: 16px;
+        grid-column: span 99;
     }
 }
 
@@ -64,4 +74,17 @@
     margin-right: 4px;
     position: relative;
     top: 2px;
+}
+
+.settings-group-key-container {
+    grid-column: span 99;
+    margin-bottom: 4px;
+    padding: 4px 8px;
+    background-color: var(--sapBackgroundColor);
+    border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
+    font-size: 0.9rem;
+    color: gray;
+    display: flex;
+    gap: 5px;
+    align-items: center;
 }

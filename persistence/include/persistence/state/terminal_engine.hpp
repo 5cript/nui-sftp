@@ -8,7 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <persistence/state/terminal_options.hpp>
 
-#include <unordered_map>
+#include <map>
 #include <optional>
 #include <vector>
 #include <string>
@@ -43,7 +43,7 @@ namespace Persistence
     {
         std::string command{};
         std::optional<std::vector<std::string>> arguments{std::nullopt};
-        std::optional<std::unordered_map<std::string, std::string>> environment{std::nullopt};
+        std::optional<std::map<std::string, std::string>> environment{std::nullopt};
         std::optional<int> exitTimeoutSeconds{std::nullopt};
         std::optional<bool> cleanEnvironment{std::nullopt};
     };
@@ -67,7 +67,7 @@ namespace Persistence
         Referenceable<TerminalOptions> terminalOptions{};
         Referenceable<Termios> termios{};
         std::variant<std::monostate, ExecutingTerminalEngine, SshTerminalEngine> engine{};
-        std::optional<std::unordered_map<std::string, nlohmann::json>> layouts{};
+        std::optional<std::map<std::string, nlohmann::json>> layouts{};
         Referenceable<QueueOptions> queueOptions{};
 
         void variantDecide(nlohmann::json const& j)

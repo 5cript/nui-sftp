@@ -9,6 +9,7 @@
 #include <string>
 #include <optional>
 #include <filesystem>
+#include <map>
 
 namespace Persistence
 {
@@ -20,7 +21,7 @@ namespace Persistence
         // TODO: Remove again. This was only for testing!
         std::optional<std::string> passwordUnsafe{std::nullopt};
         std::optional<std::string> sshKey{std::nullopt};
-        std::optional<std::unordered_map<std::string, std::string>> environment{std::nullopt};
+        std::optional<std::map<std::string, std::string>> environment{std::nullopt};
         bool openSftpByDefault{true};
         std::optional<std::string> defaultDirectory{std::nullopt};
         Referenceable<SshOptions> sshOptions{};

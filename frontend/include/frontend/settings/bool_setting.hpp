@@ -5,17 +5,17 @@
 #include <log/log.hpp>
 
 #include <ui5/components/label.hpp>
-#include <ui5/components/input.hpp>
+#include <ui5/components/switch.hpp>
 
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
 
 template <bool Disengageable = false>
-class TextSetting : public Setting<Disengageable, std::string>
+class BoolSetting : public Setting<Disengageable, bool>
 {
   public:
-    using SettingBase = Setting<Disengageable, std::string>;
+    using SettingBase = Setting<Disengageable, bool>;
 
     using SettingBase::state_;
     using SettingBase::onChange_;
@@ -37,13 +37,13 @@ class TextSetting : public Setting<Disengageable, std::string>
             ui5::label{
                 style = "color: var(--sapTextColor); margin-right: 10px",
             }(std::forward<decltype(label)>(label)),
-            ui5::input{
-                "value"_prop = state_,
+            ui5::switch_{
+                "checked"_prop = state_,
                 "disabled"_prop = observe(engaged_).generate([](bool engaged){
                     return !engaged;
                 }),
                 "change"_event = [this](Nui::val event){
-                    state_ = event["target"]["value"].as<std::string>();
+                    state_ = event["target"]["checked"].as<bool>();
                     onChange_();
                 }
             }(),

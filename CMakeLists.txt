@@ -46,7 +46,7 @@ set(PREJS_FILE "${CMAKE_SOURCE_DIR}/frontend/source/frontend/js/module.js")
 
 if (EMSCRIPTEN)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/theme_compilation.cmake")
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies/ui5.cmake")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/ui5")
     add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
 else()

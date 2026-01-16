@@ -109,3 +109,37 @@
     flex-direction: column;
     gap: 8px;
 }
+
+.map-setting-table-container {
+    max-height: 300px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    -webkit-user-select: none;
+    user-select: none;
+
+    & ui5-table {
+        flex-grow: 1;
+    }
+}
+
+.map-setting-add-entry-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    align-items: flex-start;
+    margin: 1rem 2rem;
+
+    &>div {
+        display: grid;
+        width: 15rem;
+        margin-bottom: .5rem;
+    }
+}
+
+.setting-disengageable {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    margin-right: 16px;
+}

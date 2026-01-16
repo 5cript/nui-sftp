@@ -2,7 +2,7 @@
 
 #include <persistence/state_core.hpp>
 
-#include <unordered_map>
+#include <map>
 #include <string>
 
 namespace Persistence
@@ -10,7 +10,7 @@ namespace Persistence
     struct UiOptions
     {
         bool fileGridPathBarOnTop{false};
-        std::unordered_map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
+        std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/cpp.png"},
             {".hpp", "icons/cpp.png"},
             {".cxx", "icons/cpp.png"},

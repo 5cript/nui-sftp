@@ -276,8 +276,25 @@ namespace Persistence
         return {};
 #else
         return std::vector<unsigned char>{
-            VDISCARD_, VDSUSP_,   VEOF_,   VEOL_,    VEOL2_, VERASE_, VINTR_,  VKILL_, VLNEXT_,  VMIN_,
-            VQUIT_,    VREPRINT_, VSTART_, VSTATUS_, VSTOP_, VSUSP_,  VSWTCH_, VTIME_, VWERASE_,
+            VDISCARD_,
+            VDSUSP_,
+            VEOF_,
+            VEOL_,
+            VEOL2_,
+            VERASE_,
+            VINTR_,
+            VKILL_,
+            VLNEXT_,
+            VMIN_,
+            VQUIT_,
+            VREPRINT_,
+            VSTART_,
+            VSTATUS_,
+            VSTOP_,
+            VSUSP_,
+            VSWTCH_,
+            VTIME_,
+            VWERASE_,
         };
 #endif
     }
@@ -288,6 +305,7 @@ namespace Persistence
 
     void to_json(nlohmann::json& j, Termios::InputFlags const& inputFlags)
     {
+        j = nlohmann::json::object();
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, inputFlags, IGNBRK);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, inputFlags, BRKINT);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, inputFlags, IGNPAR);
@@ -324,6 +342,7 @@ namespace Persistence
     }
     void to_json(nlohmann::json& j, Termios::OutputFlags const& outputFlags)
     {
+        j = nlohmann::json::object();
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, outputFlags, OPOST);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, outputFlags, OLCUC);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, outputFlags, ONLCR);
@@ -358,6 +377,7 @@ namespace Persistence
     }
     void to_json(nlohmann::json& j, Termios::ControlFlags const& controlFlags)
     {
+        j = nlohmann::json::object();
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, controlFlags, CBAUD);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, controlFlags, CBAUDEX);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, controlFlags, CSIZE);
@@ -390,6 +410,7 @@ namespace Persistence
     }
     void to_json(nlohmann::json& j, Termios::LocalFlags const& localFlags)
     {
+        j = nlohmann::json::object();
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, localFlags, ISIG);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, localFlags, ICANON);
         TO_JSON_OPTIONAL_NO_UNDERSCORE(j, localFlags, XCASE);
@@ -427,11 +448,25 @@ namespace Persistence
     void to_json(nlohmann::json& j, Termios::CC const& cc)
     {
         j = {
-            {"VDISCARD", cc.VDISCARD_}, {"VDSUSP", cc.VDSUSP_},   {"VEOF", cc.VEOF_},       {"VEOL", cc.VEOL_},
-            {"VEOL2", cc.VEOL2_},       {"VERASE", cc.VERASE_},   {"VINTR", cc.VINTR_},     {"VKILL", cc.VKILL_},
-            {"VLNEXT", cc.VLNEXT_},     {"VMIN", cc.VMIN_},       {"VQUIT", cc.VQUIT_},     {"VREPRINT", cc.VREPRINT_},
-            {"VSTART", cc.VSTART_},     {"VSTATUS", cc.VSTATUS_}, {"VSTOP", cc.VSTOP_},     {"VSUSP", cc.VSUSP_},
-            {"VSWTCH", cc.VSWTCH_},     {"VTIME", cc.VTIME_},     {"VWERASE", cc.VWERASE_},
+            {"VDISCARD", cc.VDISCARD_},
+            {"VDSUSP", cc.VDSUSP_},
+            {"VEOF", cc.VEOF_},
+            {"VEOL", cc.VEOL_},
+            {"VEOL2", cc.VEOL2_},
+            {"VERASE", cc.VERASE_},
+            {"VINTR", cc.VINTR_},
+            {"VKILL", cc.VKILL_},
+            {"VLNEXT", cc.VLNEXT_},
+            {"VMIN", cc.VMIN_},
+            {"VQUIT", cc.VQUIT_},
+            {"VREPRINT", cc.VREPRINT_},
+            {"VSTART", cc.VSTART_},
+            {"VSTATUS", cc.VSTATUS_},
+            {"VSTOP", cc.VSTOP_},
+            {"VSUSP", cc.VSUSP_},
+            {"VSWTCH", cc.VSWTCH_},
+            {"VTIME", cc.VTIME_},
+            {"VWERASE", cc.VWERASE_},
         };
     }
     void from_json(nlohmann::json const& j, Termios::CC& cc)
@@ -478,10 +513,11 @@ namespace Persistence
 
     void to_json(nlohmann::json& j, Termios const& termios)
     {
-        TO_JSON_OPTIONAL(j, termios, inputFlags);
-        TO_JSON_OPTIONAL(j, termios, outputFlags);
-        TO_JSON_OPTIONAL(j, termios, controlFlags);
-        TO_JSON_OPTIONAL(j, termios, localFlags);
+        j = nlohmann::json::object();
+        j["inputFlags"] = termios.inputFlags;
+        j["outputFlags"] = termios.outputFlags;
+        j["controlFlags"] = termios.controlFlags;
+        j["localFlags"] = termios.localFlags;
         TO_JSON_OPTIONAL(j, termios, cc);
         TO_JSON_OPTIONAL(j, termios, iSpeed);
         TO_JSON_OPTIONAL(j, termios, oSpeed);
@@ -490,10 +526,14 @@ namespace Persistence
     {
         termios = Termios{};
 
-        FROM_JSON_OPTIONAL(j, termios, inputFlags);
-        FROM_JSON_OPTIONAL(j, termios, outputFlags);
-        FROM_JSON_OPTIONAL(j, termios, controlFlags);
-        FROM_JSON_OPTIONAL(j, termios, localFlags);
+        if (j.contains("inputFlags"))
+            j.at("inputFlags").get_to(termios.inputFlags);
+        if (j.contains("outputFlags"))
+            j.at("outputFlags").get_to(termios.outputFlags);
+        if (j.contains("controlFlags"))
+            j.at("controlFlags").get_to(termios.controlFlags);
+        if (j.contains("localFlags"))
+            j.at("localFlags").get_to(termios.localFlags);
         FROM_JSON_OPTIONAL(j, termios, cc);
         FROM_JSON_OPTIONAL(j, termios, iSpeed);
         FROM_JSON_OPTIONAL(j, termios, oSpeed);
@@ -501,25 +541,10 @@ namespace Persistence
 
     void Termios::useDefaultsFrom(Termios const& other)
     {
-        if (inputFlags)
-            inputFlags->useDefaultsFrom(other.inputFlags.value());
-        else
-            inputFlags = other.inputFlags;
-
-        if (outputFlags)
-            outputFlags->useDefaultsFrom(other.outputFlags.value());
-        else
-            outputFlags = other.outputFlags;
-
-        if (controlFlags)
-            controlFlags->useDefaultsFrom(other.controlFlags.value());
-        else
-            controlFlags = other.controlFlags;
-
-        if (localFlags)
-            localFlags->useDefaultsFrom(other.localFlags.value());
-        else
-            localFlags = other.localFlags;
+        inputFlags.useDefaultsFrom(other.inputFlags);
+        outputFlags.useDefaultsFrom(other.outputFlags);
+        controlFlags.useDefaultsFrom(other.controlFlags);
+        localFlags.useDefaultsFrom(other.localFlags);
 
         if (!cc)
             cc = other.cc;
