@@ -192,7 +192,7 @@ void Session::registerRpcCreateChannel()
                     reply, fmt::format("Session::{}::Channel::create", self->id_.value()), parameters
                 };
 
-                if (!verify.hasValueDeep("engine"))
+                if (!verify.hasValueDeep("engineOptions"))
                     return;
 
                 const bool fileMode = parameters.contains("fileMode") && parameters["fileMode"].is_boolean() &&
@@ -202,8 +202,7 @@ void Session::registerRpcCreateChannel()
                 {
                     Log::info("Creating pty channel for session '{}'", self->id_.value());
 
-                    const auto sessionOptions =
-                        parameters["engine"]["sshSessionOptions"].get<Persistence::SshSessionOptions>();
+                    const auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
 
                     const auto weakChannel =
                         self->session_->createPtyChannel({.environment = sessionOptions.environment}).get();

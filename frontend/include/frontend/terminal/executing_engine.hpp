@@ -3,7 +3,7 @@
 #include <persistence/state/termios.hpp>
 #include <frontend/terminal/terminal_engine.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <nui/utility/move_detector.hpp>
 
 #include <memory>
@@ -14,7 +14,7 @@ class ExecutingTerminalEngine : public SingleChannelTerminalEngine
   public:
     struct Settings
     {
-        Persistence::ExecutingTerminalEngine engineOptions;
+        Persistence::ExecutingSessionOptions engineOptions;
         Persistence::Termios termios;
         std::function<void(std::string)> onProcessChange;
     };

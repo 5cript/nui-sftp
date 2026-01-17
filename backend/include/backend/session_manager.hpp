@@ -2,7 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/password/password_provider.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_helper.hpp>
 
@@ -27,7 +27,8 @@ class SessionManager
         boost::asio::any_io_executor executor,
         Persistence::StateHolder& stateHolder,
         Nui::Window& wnd,
-        Nui::RpcHub& hub);
+        Nui::RpcHub& hub
+    );
     ~SessionManager() = default;
     SessionManager(SessionManager const&) = delete;
     SessionManager& operator=(SessionManager const&) = delete;
@@ -39,8 +40,9 @@ class SessionManager
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
     void addSession(
-        Persistence::SshTerminalEngine const& engine,
-        std::function<void(std::optional<Ids::SessionId> const&)> onComplete);
+        Persistence::SshSessionOptions const& sessionOptions,
+        std::function<void(std::optional<Ids::SessionId> const&)> onComplete
+    );
 
     friend int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
 

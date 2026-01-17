@@ -2,7 +2,7 @@
 
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/sftp_error.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <ssh/channel.hpp>
 
 #include <libssh/libsshpp.hpp>
@@ -110,7 +110,7 @@ namespace SecureShell
     };
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
-        Persistence::SshTerminalEngine const& engine,
+        Persistence::SshSessionOptions const& sessionOptions,
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,

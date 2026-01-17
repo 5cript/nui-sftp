@@ -84,7 +84,3 @@ body {
     --opq-accent: #2563eb;
     --opq-border: rgba(255, 255, 255, 0.06);
 }
-
-.ui5-message-strip-text {
-    color: black !important;
-}

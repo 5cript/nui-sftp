@@ -3,7 +3,7 @@
 #include <nui-file-explorer/side.hpp>
 
 #include <persistence/state_holder.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
 #include <persistence/state/terminal_options.hpp>
 #include <frontend/events/frontend_events.hpp>
@@ -25,7 +25,7 @@ class Session
     Session(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        Persistence::TerminalEngine engine,
+        Persistence::SessionOptions sessionOptions,
         Persistence::UiOptions uiOptions,
         std::string initialName,
         std::optional<std::string> layoutName,
