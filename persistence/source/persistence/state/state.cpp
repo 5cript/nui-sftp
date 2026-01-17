@@ -31,15 +31,14 @@ namespace Persistence
                 {
                     // Nothing to do here
                 },
-                [&](ExecutingTerminalEngine&)
+                [&](ExecutingSessionOptions&)
                 {
                     // Nothing to do here
                 },
-                [&](SshTerminalEngine& engine)
+                [&](SshSessionOptions& session)
                 {
-                    fillDefaults(engine.sshSessionOptions, resolved.sshSessionOptions);
-                    fillDefaults(engine.sshSessionOptions->sshOptions, resolved.sshOptions);
-                    fillDefaults(engine.sshSessionOptions->sftpOptions, resolved.sftpOptions);
+                    fillDefaults(session.sshOptions, resolved.sshOptions);
+                    fillDefaults(session.sftpOptions, resolved.sftpOptions);
                 }
             );
         }

@@ -44,6 +44,13 @@ class Settings
     };
     Nui::ElementRenderer group(GroupParameters&& params);
 
+    struct SubgroupParameters
+    {
+        Nui::Observed<bool>* engagedStatus = nullptr;
+        std::optional<LanguageObservedText> groupTitle = std::nullopt;
+    };
+    Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer content);
+
     enum class Section
     {
         GeneralSettings,
@@ -63,9 +70,19 @@ class Settings
     void addNewSession();
     void onChange();
     void applySettingsToState(Persistence::State& state);
-    void loadTermiosSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
-    void applyTermiosSettingsToStateByKey(std::string const& key, Persistence::State& state);
 
+    void loadTermiosSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void loadSshSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void loadSftpOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void loadTerminalOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void loadQueueOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
+
+    void applyTermiosSettingsToStateByKey(std::string const& key, Persistence::State& state);
+    void applySshSettingsToStateByKey(std::string const& key, Persistence::State& state);
+    void applySftpOptionsToStateByKey(std::string const& key, Persistence::State& state);
+    void applyTerminalOptionsToStateByKey(std::string const& key, Persistence::State& state);
+    void applyQueueOptionsToStateByKey(std::string const& key, Persistence::State& state);
+    
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

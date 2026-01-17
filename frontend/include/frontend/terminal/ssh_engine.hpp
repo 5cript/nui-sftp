@@ -3,7 +3,7 @@
 #include <frontend/terminal/terminal_engine.hpp>
 #include <frontend/terminal/ssh_channel.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <frontend/terminal/ssh_channel.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <ids/id.hpp>
@@ -18,7 +18,7 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
   public:
     struct Settings
     {
-        Persistence::SshTerminalEngine engineOptions;
+        Persistence::SshSessionOptions engineOptions;
         std::function<void()> onExit;
         std::function<void()> onBeforeExit = {};
     };
@@ -32,7 +32,8 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
     void createChannel(
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
-        std::function<void(std::optional<Ids::ChannelId> const&)> onCreated) override;
+        std::function<void(std::optional<Ids::ChannelId> const&)> onCreated
+    ) override;
     void createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&)> onCreated) override;
 
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onChannelClosed = []() {}) override;
@@ -56,7 +57,8 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
         std::function<void(std::optional<Ids::ChannelId> const&)> onCreated,
-        bool fileMode);
+        bool fileMode
+    );
 
   private:
     struct Implementation;

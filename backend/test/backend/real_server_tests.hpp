@@ -53,18 +53,19 @@ class RealServerTests : public ::testing::Test
     {
         std::shared_ptr<SecureShell::Test::NodeProcessResult> result{};
         std::promise<void> processResultAvailable{};
-        std::thread processThread{[this, &result, &processResultAvailable, source]() mutable {
-            result = SecureShell::Test::nodeProcess(pool_.get_executor(), isolateDirectory_, source);
-            auto resultShareCopy = result;
-            processResultAvailable.set_value();
-            if (resultShareCopy->mainModule)
-                resultShareCopy->code = resultShareCopy->wait();
-            else
+        std::thread processThread{[this, &result, &processResultAvailable, source]() mutable
             {
-                // ???
-                throw std::runtime_error("No main module, why");
-            }
-        }};
+                result = SecureShell::Test::nodeProcess(pool_.get_executor(), isolateDirectory_, source);
+                auto resultShareCopy = result;
+                processResultAvailable.set_value();
+                if (resultShareCopy->mainModule)
+                    resultShareCopy->code = resultShareCopy->wait();
+                else
+                {
+                    // ???
+                    throw std::runtime_error("No main module, why");
+                }
+            }};
         processResultAvailable.get_future().wait();
         if (result->port == 0)
         {
@@ -77,32 +78,31 @@ class RealServerTests : public ::testing::Test
 
     auto getSessionOptions(unsigned short port, std::string const& user = "test", std::string const& host = "127.0.0.1")
     {
-        auto options = Persistence::SshTerminalEngine{};
-        options.isPty = true;
-        options.sshSessionOptions = Persistence::SshSessionOptions{
-            .host = host,
-            .port = port,
-            .user = user,
+        return Persistence::SshSessionOptions{
             .sshOptions =
                 Persistence::SshOptions{
                     .connectTimeoutSeconds = connectTimeout.count(),
                 },
+            .host = host,
+            .port = port,
+            .user = user,
         };
-        return options;
     }
 
     auto makePasswordTestSession(unsigned short port)
     {
         return SecureShell::makeSession(
             getSessionOptions(port),
-            +[](char const*, char* buf, std::size_t length, int, int, void*) {
+            +[](char const*, char* buf, std::size_t length, int, int, void*)
+            {
                 static constexpr std::string_view pw = "test";
                 std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                 return 0;
             },
             nullptr,
             nullptr,
-            nullptr);
+            nullptr
+        );
     }
 
     std::pair<std::unique_ptr<SecureShell::Session>, std::shared_ptr<SecureShell::SftpSession>>
@@ -144,8 +144,9 @@ class RealServerTests : public ::testing::Test
 #define CREATE_SERVER_AND_JOINER(name) \
     auto [serverStartResult, processThread] = createServer(name); \
     ASSERT_TRUE(serverStartResult); \
-    auto joiner = Nui::ScopeExit{[&]() noexcept { \
-        serverStartResult->command("exit"); \
-        if (processThread.joinable()) \
-            processThread.join(); \
-    }};
+    auto joiner = Nui::ScopeExit{[&]() noexcept \
+        { \
+            serverStartResult->command("exit"); \
+            if (processThread.joinable()) \
+                processThread.join(); \
+        }};

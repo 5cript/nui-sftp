@@ -64,20 +64,21 @@ namespace SecureShell::Test
         {
             std::shared_ptr<NodeProcessResult> result{};
             std::promise<void> processResultAvailable{};
-            std::thread processThread{[this, &result, &processResultAvailable, source]() mutable {
-                result = nodeProcess(pool_.get_executor(), isolateDirectory_, source);
-                auto resultShareCopy = result;
-                processResultAvailable.set_value();
-                if (resultShareCopy->mainModule)
+            std::thread processThread{[this, &result, &processResultAvailable, source]() mutable
                 {
-                    resultShareCopy->wait();
-                }
-                else
-                {
-                    // ???
-                    throw std::runtime_error("No main module, why");
-                }
-            }};
+                    result = nodeProcess(pool_.get_executor(), isolateDirectory_, source);
+                    auto resultShareCopy = result;
+                    processResultAvailable.set_value();
+                    if (resultShareCopy->mainModule)
+                    {
+                        resultShareCopy->wait();
+                    }
+                    else
+                    {
+                        // ???
+                        throw std::runtime_error("No main module, why");
+                    }
+                }};
             processResultAvailable.get_future().wait();
             if (result->port == 0)
             {
@@ -101,18 +102,15 @@ namespace SecureShell::Test
         auto
         getSessionOptions(unsigned short port, std::string const& user = "test", std::string const& host = "127.0.0.1")
         {
-            auto options = Persistence::SshTerminalEngine{};
-            options.isPty = true;
-            options.sshSessionOptions = Persistence::SshSessionOptions{
-                .host = host,
-                .port = port,
-                .user = user,
+            return Persistence::SshSessionOptions{
                 .sshOptions =
                     Persistence::SshOptions{
                         .connectTimeoutSeconds = connectTimeout.count(),
                     },
+                .host = host,
+                .port = port,
+                .user = user,
             };
-            return options;
         }
 
       public:
@@ -120,14 +118,16 @@ namespace SecureShell::Test
         {
             return makeSession(
                 getSessionOptions(port),
-                +[](char const*, char* buf, std::size_t length, int, int, void*) {
+                +[](char const*, char* buf, std::size_t length, int, int, void*)
+                {
                     static constexpr std::string_view pw = "test";
                     std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                     return 0;
                 },
                 nullptr,
                 nullptr,
-                nullptr);
+                nullptr
+            );
         }
 
       protected:
@@ -135,15 +135,18 @@ namespace SecureShell::Test
             std::shared_ptr<SecureShell::Channel> const& channel,
             std::function<void(std::string const&)> onStdout = {},
             std::function<void(std::string const&)> onStderr = {},
-            std::function<void()> onExit = {})
+            std::function<void()> onExit = {}
+        )
         {
             channel->startReading(
                 onStdout ? onStdout : [](std::string const&) {},
                 onStderr ? onStderr : [](std::string const) {},
-                [onExit = std::move(onExit)]() {
+                [onExit = std::move(onExit)]()
+                {
                     if (onExit)
                         onExit();
-                });
+                }
+            );
         }
 
         void channelStartReading(
@@ -151,14 +154,20 @@ namespace SecureShell::Test
             std::promise<void>& awaiter,
             std::function<void(std::string const&)> onStdout = {},
             std::function<void(std::string const&)> onStderr = {},
-            std::function<void()> onExit = {})
+            std::function<void()> onExit = {}
+        )
         {
             channelStartReading(
-                channel, std::move(onStdout), std::move(onStderr), [onExit = std::move(onExit), &awaiter]() {
+                channel,
+                std::move(onStdout),
+                std::move(onStderr),
+                [onExit = std::move(onExit), &awaiter]()
+                {
                     if (onExit)
                         onExit();
                     awaiter.set_value();
-                });
+                }
+            );
         }
 
         Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", false};
@@ -185,8 +194,9 @@ namespace SecureShell::Test
 #define CREATE_SERVER_AND_JOINER(name) \
     auto [serverStartResult, processThread] = create##name##Server(); \
     ASSERT_TRUE(serverStartResult); \
-    auto joiner = Nui::ScopeExit{[&]() noexcept { \
-        serverStartResult->command("exit"); \
-        if (processThread.joinable()) \
-            processThread.join(); \
-    }};
+    auto joiner = Nui::ScopeExit{[&]() noexcept \
+        { \
+            serverStartResult->command("exit"); \
+            if (processThread.joinable()) \
+                processThread.join(); \
+        }};

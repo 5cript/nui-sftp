@@ -10,10 +10,18 @@ target_sources(
         session_area.cpp
         session.cpp
         settings.cpp
+        color.cpp
         dialog/input_dialog.cpp
         dialog/password_prompter.cpp
         dialog/confirm_dialog.cpp
         dialog/new_session_dialog.cpp
+        settings/general_settings.cpp
+        settings/optional_converters.cpp
+        settings/sftp_options.cpp
+        settings/ssh_options.cpp
+        settings/termios_settings.cpp
+        settings/terminal_options.cpp
+        settings/queue_options.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         terminal/frontend_ssh_manager.cpp

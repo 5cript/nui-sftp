@@ -143,3 +143,16 @@
     grid-template-rows: auto auto;
     margin-right: 16px;
 }
+
+.setting-colorpicker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-colorbox {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--sapContent_ForegroundBorderColor);
+    border-radius: 4px;
+}

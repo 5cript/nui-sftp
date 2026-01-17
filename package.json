@@ -6,7 +6,7 @@
         "tailwatch": "cross-env NODE_ENV=development tailwindcss --config tailwind.config.js --watch=always --output build/clang_debug/bin/liveload/tailwind.css"
     },
     "devDependencies": {
-        "@sap-theming/theming-base-content": "^11.24.0",
+        "@sap-theming/theming-base-content": "^11.32.3",
         "cross-env": "^7.0.3",
         "dotenv": "^16.4.5",
         "less": "^4.2.2",
@@ -16,6 +16,7 @@
         "tailwindcss": "^3.4.3"
     },
     "dependencies": {
+        "@csstools/css-color-parser": "^4.0.0",
         "@lumino/commands": "^2.3.1",
         "@lumino/datagrid": "^2.4.0",
         "@lumino/default-theme": "^2.1.6",

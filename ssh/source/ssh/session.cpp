@@ -17,9 +17,14 @@ namespace SecureShell
             }
             else
             {
-                auto it = std::find_if(container.begin(), container.end(), [ptr](const auto& c) {
-                    return c.get() == ptr;
-                });
+                auto it = std::find_if(
+                    container.begin(),
+                    container.end(),
+                    [ptr](const auto& c)
+                    {
+                        return c.get() == ptr;
+                    }
+                );
                 if (it != container.end())
                     container.erase(it);
             }
@@ -89,44 +94,52 @@ namespace SecureShell
     {
         auto promise = std::make_shared<std::promise<std::expected<std::weak_ptr<Channel>, int>>>();
 
-        processingThread_.pushTask([this, options = std::move(options), promise]() mutable {
-            auto ptyChannel = std::make_unique<ssh::Channel>(session_);
-            auto& channel = *ptyChannel;
-            auto result = Detail::sequential(
-                [&channel]() {
-                    if (!channel.isOpen())
-                        return channel.openSession();
-                    return 0;
-                },
-                [&channel, &environment = options.environment]() {
-                    if (!environment.has_value())
-                        return 0;
-                    for (auto const& [key, value] : *environment)
-                    {
-                        if (channel.requestEnv(key.c_str(), value.c_str()) != 0)
-                            return -1;
-                    }
-                    return 0;
-                },
-                [&channel, &options]() {
-                    return channel.requestPty(options.terminalType.c_str(), options.columns, options.rows);
-                },
-                [&channel, &options]() {
-                    if (!options.requestShell)
-                        return 0;
-                    return channel.requestShell();
-                });
-
-            if (result.result != SSH_OK)
+        processingThread_.pushTask(
+            [this, options = std::move(options), promise]() mutable
             {
-                return promise->set_value(std::unexpected(session_.getErrorCode()));
-            }
+                auto ptyChannel = std::make_unique<ssh::Channel>(session_);
+                auto& channel = *ptyChannel;
+                auto result = Detail::sequential(
+                    [&channel]()
+                    {
+                        if (!channel.isOpen())
+                            return channel.openSession();
+                        return 0;
+                    },
+                    [&channel, &environment = options.environment]()
+                    {
+                        if (!environment.has_value())
+                            return 0;
+                        for (auto const& [key, value] : *environment)
+                        {
+                            if (channel.requestEnv(key.c_str(), value.c_str()) != 0)
+                                return -1;
+                        }
+                        return 0;
+                    },
+                    [&channel, &options]()
+                    {
+                        return channel.requestPty(options.terminalType.c_str(), options.columns, options.rows);
+                    },
+                    [&channel, &options]()
+                    {
+                        if (!options.requestShell)
+                            return 0;
+                        return channel.requestShell();
+                    }
+                );
 
-            auto sharedChannel =
-                std::make_shared<Channel>(this, processingThread_.createStrand(), std::move(ptyChannel));
-            channels_.push_back(sharedChannel);
-            return promise->set_value(sharedChannel);
-        });
+                if (result.result != SSH_OK)
+                {
+                    return promise->set_value(std::unexpected(session_.getErrorCode()));
+                }
+
+                auto sharedChannel =
+                    std::make_shared<Channel>(this, processingThread_.createStrand(), std::move(ptyChannel));
+                channels_.push_back(sharedChannel);
+                return promise->set_value(sharedChannel);
+            }
+        );
 
         return promise->get_future();
     }
@@ -135,46 +148,57 @@ namespace SecureShell
     {
         auto promise = std::make_shared<std::promise<std::expected<std::weak_ptr<SftpSession>, SftpError>>>();
 
-        processingThread_.pushTask([this, promise]() -> void {
-            auto sftp = sftp_new(session_.getCSession());
-            if (sftp == nullptr)
+        processingThread_.pushTask(
+            [this, promise]() -> void
             {
-                return promise->set_value(std::unexpected(SftpError{
-                    .message = ssh_get_error(session_.getCSession()),
-                    .sshError = ssh_get_error_code(session_.getCSession()),
-                    .sftpError = 0,
-                }));
-            }
+                auto sftp = sftp_new(session_.getCSession());
+                if (sftp == nullptr)
+                {
+                    return promise->set_value(
+                        std::unexpected(
+                            SftpError{
+                                .message = ssh_get_error(session_.getCSession()),
+                                .sshError = ssh_get_error_code(session_.getCSession()),
+                                .sftpError = 0,
+                            }
+                        )
+                    );
+                }
 
-            auto result = sftp_init(sftp);
-            if (result != SSH_OK)
-            {
-                promise->set_value(std::unexpected(SftpError{
-                    .message = ssh_get_error(session_.getCSession()),
-                    .sshError = result,
-                    .sftpError = sftp_get_error(sftp),
-                }));
-                sftp_free(sftp);
-            }
+                auto result = sftp_init(sftp);
+                if (result != SSH_OK)
+                {
+                    promise->set_value(
+                        std::unexpected(
+                            SftpError{
+                                .message = ssh_get_error(session_.getCSession()),
+                                .sshError = result,
+                                .sftpError = sftp_get_error(sftp),
+                            }
+                        )
+                    );
+                    sftp_free(sftp);
+                }
 
-            auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), sftp);
-            promise->set_value(sftpSession);
-            sftpSessions_.push_back(sftpSession);
-        });
+                auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), sftp);
+                promise->set_value(sftpSession);
+                sftpSessions_.push_back(sftpSession);
+            }
+        );
 
         return promise->get_future();
     }
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
-        Persistence::SshTerminalEngine const& engine,
+        Persistence::SshSessionOptions const& sessionOptions,
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
-        std::vector<PasswordCacheEntry>* pwCache)
+        std::vector<PasswordCacheEntry>* pwCache
+    )
     {
         auto session = std::make_unique<Session>();
 
-        const auto sessionOptions = engine.sshSessionOptions.value();
         const auto sshOptions = sessionOptions.sshOptions.value();
 
 #ifndef _WIN32
@@ -184,40 +208,51 @@ namespace SecureShell
 #endif
 
         auto result = Detail::sequential(
-            [&] {
+            [&]
+            {
                 if (sshOptions.logVerbosity)
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_LOG_VERBOSITY_STR, sshOptions.logVerbosity.value().c_str());
+                        SSH_OPTIONS_LOG_VERBOSITY_STR, sshOptions.logVerbosity.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 int port = 22;
                 if (sessionOptions.port)
                     port = sessionOptions.port.value();
                 return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_PORT, &port);
             },
-            [&] {
+            [&]
+            {
                 return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_HOST, sessionOptions.host.c_str());
             },
-            [&] {
+            [&]
+            {
                 if (sessionOptions.user.has_value())
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_USER, sessionOptions.user.value().c_str());
+                        SSH_OPTIONS_USER, sessionOptions.user.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.sshDirectory.has_value())
                     static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_SSH_DIR, sshOptions.sshDirectory.value().generic_string().c_str());
+                        SSH_OPTIONS_SSH_DIR, sshOptions.sshDirectory.value().generic_string().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.knownHostsFile.has_value())
                     static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_KNOWNHOSTS, sshOptions.knownHostsFile.value().generic_string().c_str());
+                        SSH_OPTIONS_KNOWNHOSTS, sshOptions.knownHostsFile.value().generic_string().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 long timeout = 0;
                 if (sshOptions.connectTimeoutSeconds.has_value())
                 {
@@ -226,7 +261,8 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 long timeout = 0;
                 if (sshOptions.connectTimeoutUSeconds.has_value())
                 {
@@ -235,31 +271,40 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.keyExchangeAlgorithms.has_value())
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_KEY_EXCHANGE, sshOptions.keyExchangeAlgorithms.value().c_str());
+                        SSH_OPTIONS_KEY_EXCHANGE, sshOptions.keyExchangeAlgorithms.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.compressionClientToServer.has_value())
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_COMPRESSION_C_S, sshOptions.compressionClientToServer.value().c_str());
+                        SSH_OPTIONS_COMPRESSION_C_S, sshOptions.compressionClientToServer.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.compressionServerToClient.has_value())
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_COMPRESSION_S_C, sshOptions.compressionServerToClient.value().c_str());
+                        SSH_OPTIONS_COMPRESSION_S_C, sshOptions.compressionServerToClient.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.compressionLevel.has_value())
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_COMPRESSION_LEVEL, sshOptions.compressionLevel.value());
+                        SSH_OPTIONS_COMPRESSION_LEVEL, sshOptions.compressionLevel.value()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.strictHostKeyCheck)
                 {
                     int strict = sshOptions.strictHostKeyCheck.value() ? 1 : 0;
@@ -267,33 +312,42 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.proxyCommand)
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_PROXYCOMMAND, sshOptions.proxyCommand.value().c_str());
+                        SSH_OPTIONS_PROXYCOMMAND, sshOptions.proxyCommand.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.gssapiServerIdentity)
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_GSSAPI_SERVER_IDENTITY, sshOptions.gssapiServerIdentity.value().c_str());
+                        SSH_OPTIONS_GSSAPI_SERVER_IDENTITY, sshOptions.gssapiServerIdentity.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.gssapiDelegateCredentials)
                 {
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS, sshOptions.gssapiDelegateCredentials.value() ? 1 : 0);
+                        SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS, sshOptions.gssapiDelegateCredentials.value() ? 1 : 0
+                    );
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.gssapiClientIdentity)
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_GSSAPI_CLIENT_IDENTITY, sshOptions.gssapiClientIdentity.value().c_str());
+                        SSH_OPTIONS_GSSAPI_CLIENT_IDENTITY, sshOptions.gssapiClientIdentity.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.noDelay)
                 {
                     int noDelay = sshOptions.noDelay.value() ? 1 : 0;
@@ -301,7 +355,8 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sessionOptions.sshKey)
                 {
                     int pubkeyAuth = 1;
@@ -309,7 +364,8 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.bypassConfig)
                 {
                     int processConfig = sshOptions.bypassConfig.value() ? 0 : 1;
@@ -317,13 +373,16 @@ namespace SecureShell
                 }
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 if (sshOptions.identityAgent)
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_IDENTITY_AGENT, sshOptions.identityAgent.value().c_str());
+                        SSH_OPTIONS_IDENTITY_AGENT, sshOptions.identityAgent.value().c_str()
+                    );
                 return 0;
             },
-            [&] {
+            [&]
+            {
                 return static_cast<ssh::Session&>(*session).connect();
             },
 #ifdef _WIN32
@@ -360,14 +419,18 @@ namespace SecureShell
                         return result;
                 }
 #endif
-            });
+            }
+        );
 
         if (result.result != SSH_AUTH_SUCCESS && sshOptions.usePublicKeyAutoAuth &&
             sshOptions.usePublicKeyAutoAuth.value())
         {
-            result = Detail::sequential([&] {
-                return static_cast<ssh::Session&>(*session).userauthPublickeyAuto();
-            });
+            result = Detail::sequential(
+                [&]
+                {
+                    return static_cast<ssh::Session&>(*session).userauthPublickeyAuto();
+                }
+            );
         }
 
         if (result.result != SSH_AUTH_SUCCESS && sessionOptions.sshKey)
@@ -376,66 +439,77 @@ namespace SecureShell
 
             ssh_key key{nullptr};
             result = Detail::sequential(
-                [&sshKey, &key, askPass, askPassUserDataKeyPhrase]() {
+                [&sshKey, &key, askPass, askPassUserDataKeyPhrase]()
+                {
                     return ssh_pki_import_privkey_file(
-                        sshKey.c_str(), nullptr, askPass, askPassUserDataKeyPhrase, &key);
+                        sshKey.c_str(), nullptr, askPass, askPassUserDataKeyPhrase, &key
+                    );
                 },
-                [&key, &session]() {
+                [&key, &session]()
+                {
                     return static_cast<ssh::Session&>(*session).userauthPublickey(key);
-                });
+                }
+            );
         }
 
         if (result.result != SSH_AUTH_SUCCESS)
         {
             std::string buf(1024, '\0');
-            result = Detail::sequential([&] {
-                if (pwCache)
+            result = Detail::sequential(
+                [&]
                 {
-                    std::optional<std::string> pwFromCache{};
-                    for (const auto& cache : *pwCache)
+                    if (pwCache)
                     {
-                        if (cache.user == sessionOptions.user && cache.host == sessionOptions.host &&
-                            cache.port == sessionOptions.port)
+                        std::optional<std::string> pwFromCache{};
+                        for (const auto& cache : *pwCache)
                         {
-                            pwFromCache = cache.password;
-                            break;
+                            if (cache.user == sessionOptions.user && cache.host == sessionOptions.host &&
+                                cache.port == sessionOptions.port)
+                            {
+                                pwFromCache = cache.password;
+                                break;
+                            }
+                        }
+
+                        if (pwFromCache.has_value())
+                        {
+                            buf = pwFromCache.value();
+                            const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
+                            if (result == SSH_AUTH_SUCCESS)
+                                return (int)SSH_AUTH_SUCCESS;
                         }
                     }
 
-                    if (pwFromCache.has_value())
+                    if (sessionOptions.passwordUnsafe)
                     {
-                        buf = pwFromCache.value();
+                        buf = sessionOptions.passwordUnsafe.value();
                         const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
                         if (result == SSH_AUTH_SUCCESS)
+                        {
+                            if (pwCache)
+                                pwCache->emplace_back(
+                                    sessionOptions.user, sessionOptions.host, sessionOptions.port, buf
+                                );
                             return (int)SSH_AUTH_SUCCESS;
+                        }
                     }
-                }
 
-                if (sessionOptions.passwordUnsafe)
-                {
-                    buf = sessionOptions.passwordUnsafe.value();
-                    const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
-                    if (result == SSH_AUTH_SUCCESS)
+                    const auto r = askPass("Password: ", buf.data(), buf.size(), 0, 0, askPassUserDataPassword);
+                    if (r == 0)
                     {
-                        if (pwCache)
-                            pwCache->emplace_back(sessionOptions.user, sessionOptions.host, sessionOptions.port, buf);
-                        return (int)SSH_AUTH_SUCCESS;
+                        const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
+                        if (result == SSH_AUTH_SUCCESS)
+                        {
+                            if (pwCache)
+                                pwCache->emplace_back(
+                                    sessionOptions.user, sessionOptions.host, sessionOptions.port, buf
+                                );
+                            return (int)SSH_AUTH_SUCCESS;
+                        }
                     }
+                    return (int)SSH_AUTH_DENIED;
                 }
-
-                const auto r = askPass("Password: ", buf.data(), buf.size(), 0, 0, askPassUserDataPassword);
-                if (r == 0)
-                {
-                    const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
-                    if (result == SSH_AUTH_SUCCESS)
-                    {
-                        if (pwCache)
-                            pwCache->emplace_back(sessionOptions.user, sessionOptions.host, sessionOptions.port, buf);
-                        return (int)SSH_AUTH_SUCCESS;
-                    }
-                }
-                return (int)SSH_AUTH_DENIED;
-            });
+            );
         }
 
         if (result.result != SSH_AUTH_SUCCESS)

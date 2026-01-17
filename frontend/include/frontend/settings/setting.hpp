@@ -34,10 +34,16 @@ class Setting
 
     using OutfacingValueType = std::conditional_t<Disengageable, std::optional<ValueType>, ValueType>;
 
-    Setting(LanguageObservedText helpText, std::invocable auto&& onChange, std::invocable auto&& resetAction)
+    Setting(
+        LanguageObservedText helpText,
+        std::invocable auto&& onChange,
+        std::invocable auto&& resetAction,
+        Nui::Observed<bool>* externalDisengage = nullptr
+    )
         : state_{}
         , onChange_{std::forward<decltype(onChange)>(onChange)}
         , resetAction_{std::forward<decltype(resetAction)>(resetAction)}
+        , externalDisengage_{externalDisengage}
         , helpText_{std::move(helpText)}
     {}
     virtual ~Setting() = default;
@@ -94,6 +100,32 @@ class Setting
             return true;
     }
 
+    auto observeEngagedToBool(auto&& prop)
+    {
+        if (externalDisengage_)
+        {
+            return prop = observe(engaged_, *externalDisengage_)
+                              .generate(
+                                  std::function<bool(bool, bool)>{
+                                      [](bool engaged, bool externalDisengage)
+                                      {
+                                          return !engaged || !externalDisengage;
+                                      },
+                                  }
+                              );
+        }
+        // Trick to arrive at same return type. To solve this we would need to turn it upside down and apply to an
+        // element.
+        return prop = observe(engaged_).generate(
+                   std::function<bool(bool)>{
+                       [](bool engaged)
+                       {
+                           return !engaged;
+                       },
+                   }
+               );
+    }
+
     Nui::ElementRenderer disengageable()
     {
         using namespace Nui::Attributes;
@@ -110,8 +142,7 @@ class Setting
                         return engaged;
                     }),
                     "change"_event = [this](Nui::val event){
-                        bool engaged = event["target"]["checked"].as<bool>();
-                        engaged_ = engaged;
+                        engaged_ = event["target"]["checked"].as<bool>();
                         onChange_();
                     }
                 }(),
@@ -199,6 +230,7 @@ class Setting
     Nui::Observed<bool> engaged_{!Disengageable};
     std::function<void()> onChange_;
     std::function<void()> resetAction_;
+    Nui::Observed<bool>* externalDisengage_;
     LanguageObservedText helpText_;
     Nui::Observed<InheritanceStatus> inheritanceStatus_{InheritanceStatus::NoAncestor};
 

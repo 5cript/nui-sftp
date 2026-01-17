@@ -1,4 +1,4 @@
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <frontend/session.hpp>
 #include <frontend/terminal/frontend_ssh_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
@@ -47,7 +47,7 @@ struct Session::Implementation
     Persistence::UiOptions uiOptions;
 
     // (Ssh, ...)Session / FrontendSshManager Engine:
-    Persistence::TerminalEngine engine;
+    Persistence::SessionOptions engineOptions;
     Nui::Observed<Persistence::TerminalOptions> options;
 
     // Dialogs:
@@ -82,7 +82,7 @@ struct Session::Implementation
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        Persistence::TerminalEngine engine,
+        Persistence::SessionOptions engineOptions,
         Persistence::UiOptions uiOptions,
         std::string initialName,
         std::optional<std::string> layoutName,
@@ -98,8 +98,8 @@ struct Session::Implementation
         , closeSelf{std::move(closeSelf)}
         , isVisible{visible}
         , uiOptions{uiOptions}
-        , engine{std::move(engine)}
-        , options{this->engine.terminalOptions.value()}
+        , engineOptions{std::move(engineOptions)}
+        , options{this->engineOptions.terminalOptions.value()}
         , inputDialog{inputDialog}
         , confirmDialog{confirmDialog}
         , fileGrid{{
@@ -170,7 +170,7 @@ auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 Session::Session(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
-    Persistence::TerminalEngine engine,
+    Persistence::SessionOptions engineOptions,
     Persistence::UiOptions uiOptions,
     std::string initialName,
     std::optional<std::string> layoutName,
@@ -182,7 +182,7 @@ Session::Session(
     : impl_{std::make_unique<Implementation>(
           stateHolder,
           events,
-          std::move(engine),
+          std::move(engineOptions),
           std::move(uiOptions),
           std::move(initialName),
           std::move(layoutName),
@@ -192,12 +192,12 @@ Session::Session(
           visible
       )}
 {
-    if (std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine))
+    if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
     {
         createExecutingEngine();
         // what about files?
     }
-    else if (std::holds_alternative<Persistence::SshTerminalEngine>(impl_->engine.engine))
+    else if (std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine))
     {
         createSshEngine();
         setupFileGrid();
@@ -248,7 +248,7 @@ void Session::createSshEngine()
 
     impl_->terminal = std::make_unique<FrontendSshManager>(
         std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
-            .engineOptions = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine),
+            .engineOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine),
             .onExit = std::bind(&Session::onTerminalConnectionClose, this),
             .onBeforeExit = std::bind(&Session::onBeforeTerminalConnectionClose, this),
         }),
@@ -277,8 +277,8 @@ void Session::createExecutingEngine()
 {
     impl_->terminal = std::make_unique<FrontendSshManager>(
         std::make_unique<ExecutingTerminalEngine>(ExecutingTerminalEngine::Settings{
-            .engineOptions = std::get<Persistence::ExecutingTerminalEngine>(impl_->engine.engine),
-            .termios = impl_->engine.termios.value(),
+            .engineOptions = std::get<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine),
+            .termios = impl_->engineOptions.termios.value(),
             .onProcessChange =
                 [this](std::string const& cmdline)
             {
@@ -342,7 +342,7 @@ void Session::openSftp()
 {
     if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
     {
-        auto const& opts = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine).sshSessionOptions.value();
+        auto const& opts = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
         if (opts.openSftpByDefault)
         {
             Log::info("Opening SFTP by default");
@@ -407,14 +407,13 @@ void Session::onOpenSession(bool success, std::string const& info)
         Log::info("Session opened successfully: {}", info);
         if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
         {
-            // TODO: __todo_default__ is probably something that should be replaced with a proper default value
-            const auto user = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine)
-                                  .sshSessionOptions.value()
-                                  .user.value_or("__todo_default__");
-            auto host = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine).sshSessionOptions.value().host;
-            const auto port = std::get<Persistence::SshTerminalEngine>(impl_->engine.engine)
-                                  .sshSessionOptions.value()
-                                  .port.value_or(22);
+            const auto& sshSessionOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
+
+            // TODO: __todo_default__ is probably something that should be replaced with a proper default value.
+            // Which most of the time is the user name of the user that started this program.
+            const auto user = sshSessionOptions.user.value_or("__todo_default__");
+            auto host = sshSessionOptions.host;
+            const auto port = sshSessionOptions.port.value_or(22);
 
             // assume ipv6 when finding ':' in host
             if (host.find(":") != std::string::npos)
@@ -464,7 +463,8 @@ void Session::closeSelf()
     impl_->shuttingDown = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    const bool isExecutingEngine = std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine);
+    const bool isExecutingEngine =
+        std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine);
 
     auto closeSelfCompletion = [this]()
     {
@@ -524,7 +524,7 @@ void Session::closeSelf()
 
 std::optional<std::string> Session::getProcessIdIfExecutingEngine() const
 {
-    if (std::holds_alternative<Persistence::ExecutingTerminalEngine>(impl_->engine.engine))
+    if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
         return static_cast<ExecutingTerminalEngine&>(impl_->terminal.value()->engine()).id();
     return std::nullopt;
 }
@@ -603,9 +603,10 @@ void Session::initializeLayout()
 
     if (impl_->layoutName != Constants::defaultLayoutName)
     {
-        if (impl_->engine.layouts && impl_->layoutName)
+        if (impl_->engineOptions.layouts && impl_->layoutName)
         {
-            if (auto iter = impl_->engine.layouts->find(*impl_->layoutName); iter != impl_->engine.layouts->end())
+            if (auto iter = impl_->engineOptions.layouts->find(*impl_->layoutName);
+                iter != impl_->engineOptions.layouts->end())
             {
                 layout = iter->second.dump();
             }

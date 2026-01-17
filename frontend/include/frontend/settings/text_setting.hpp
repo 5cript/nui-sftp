@@ -22,7 +22,7 @@ class TextSetting : public Setting<Disengageable, std::string>
     using SettingBase::reset;
     using SettingBase::help;
     using SettingBase::disengageable;
-    using SettingBase::engaged_;
+    using SettingBase::observeEngagedToBool;
 
     using SettingBase::SettingBase;
 
@@ -39,9 +39,7 @@ class TextSetting : public Setting<Disengageable, std::string>
             }(std::forward<decltype(label)>(label)),
             ui5::input{
                 "value"_prop = state_,
-                "disabled"_prop = observe(engaged_).generate([](bool engaged){
-                    return !engaged;
-                }),
+                observeEngagedToBool("disabled"_prop),
                 "change"_event = [this](Nui::val event){
                     state_ = event["target"]["value"].as<std::string>();
                     onChange_();

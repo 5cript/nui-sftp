@@ -2,7 +2,7 @@
 
 #include <frontend/terminal/terminal_engine.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
-#include <persistence/state/terminal_engine.hpp>
+#include <persistence/state/session_options.hpp>
 #include <nui/utility/move_detector.hpp>
 
 #include <memory>
