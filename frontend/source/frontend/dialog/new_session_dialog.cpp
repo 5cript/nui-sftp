@@ -1,4 +1,5 @@
 #include <frontend/dialog/new_session_dialog.hpp>
+#include <frontend/session_icon_options.hpp>
 #include <log/log.hpp>
 
 #include <nui/rpc.hpp>
@@ -96,9 +97,9 @@ Nui::ElementRenderer NewSessionDialog::operator()()
     using namespace Nui::Attributes;
     using Nui::Elements::div;
 
-    auto makeOption = [](Nui::StringLiteral lit)
+    auto makeOption = [](std::string_view icon)
     {
-        return ui5::option{"icon"_prop = lit.c_str, "data-icon"_attr = lit.c_str}();
+        return ui5::option{"icon"_prop = icon, "data-icon"_attr = icon}();
     };
 
     // clang-format off
@@ -143,42 +144,12 @@ Nui::ElementRenderer NewSessionDialog::operator()()
                     impl_->icon = event["detail"]["selectedOption"]["dataset"]["icon"].as<std::string>();
                 }
             }(
-                makeOption("laptop"),
-                makeOption("ipad"),
-                makeOption("iphone"),
-                makeOption("account"),
-                makeOption("accessibility"),
-                makeOption("area-chart"),
-                makeOption("favorite"),
-                makeOption("fax-machine"),
-                makeOption("flag"),
-                makeOption("family-care"),
-                makeOption("home"),
-                makeOption("home-share"),
-                makeOption("heart"),
-                makeOption("heart-2"),
-                makeOption("key"),
-                makeOption("feed"),
-                makeOption("it-instance"),
-                makeOption("it-system"),
-                makeOption("it-host"),
-                makeOption("lab"),
-                makeOption("machine"),
-                makeOption("meal"),
-                makeOption("physical-activity"),
-                makeOption("primary-key"),
-                makeOption("shipping-status"),
-                makeOption("shield"),
-                makeOption("study-leave"),
-                makeOption("subway-train"),
-                makeOption("syringe"),
-                makeOption("tag"),
-                makeOption("web-cam"),
-                makeOption("sound-loud"),
-                makeOption("simple-payment"),
-                makeOption("print"),
-                makeOption("nutrition-activity"),
-                makeOption("lightbulb")
+                [&makeOption]{
+                    std::vector<Nui::ElementRenderer> options;
+                    for (auto icon : sessionIconOptions)
+                        options.push_back(makeOption(icon));
+                    return options;
+                }()
             )
         ),
         div{
