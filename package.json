@@ -16,7 +16,6 @@
         "tailwindcss": "^3.4.3"
     },
     "dependencies": {
-        "@csstools/css-color-parser": "^4.0.0",
         "@lumino/commands": "^2.3.1",
         "@lumino/datagrid": "^2.4.0",
         "@lumino/default-theme": "^2.1.6",
