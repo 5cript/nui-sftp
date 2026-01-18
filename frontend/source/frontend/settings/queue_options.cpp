@@ -14,3 +14,21 @@ QueueOptions::QueueOptions(std::function<void()> const& onChange)
           valueReset(startInPausedState, onChange, true),
       }
 {}
+
+void QueueOptions::applyToState(Persistence::QueueOptions& state) const
+{
+    state.autoRemoveCompletedOperations = autoRemoveCompletedOperations.value();
+    state.startInPausedState = startInPausedState.value();
+}
+
+void QueueOptions::loadFromState(Persistence::QueueOptions const& state)
+{
+    autoRemoveCompletedOperations.value(state.autoRemoveCompletedOperations);
+    startInPausedState.value(state.startInPausedState);
+}
+
+void QueueOptions::assumeDefaultsFrom(Persistence::QueueOptions const& state)
+{
+    autoRemoveCompletedOperations.inherit(state.autoRemoveCompletedOperations);
+    startInPausedState.inherit(state.startInPausedState);
+}

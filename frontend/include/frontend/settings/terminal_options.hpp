@@ -1,11 +1,14 @@
 #pragma once
 
+#include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/bool_setting.hpp>
 #include <frontend/settings/color_setting.hpp>
 #include <frontend/settings/number_setting.hpp>
 #include <frontend/settings/text_setting.hpp>
 
-struct TerminalOptions
+#include <persistence/state/terminal_options.hpp>
+
+struct TerminalOptions : public GroupKeys
 {
     struct TerminalTheme
     {
@@ -47,9 +50,11 @@ struct TerminalOptions
     NumberSetting<int, true> letterSpacing;
     TerminalTheme theme;
 
-    Nui::Observed<std::string> groupKey{"default"};
-    Nui::Observed<std::vector<std::string>> groupKeys{{"default"}};
     Nui::Observed<bool> themeEngaged;
 
     TerminalOptions(std::function<void()> const& onChange);
+
+    void applyToState(Persistence::TerminalOptions& state) const;
+    void loadFromState(Persistence::TerminalOptions const& state);
+    void assumeDefaultsFrom(Persistence::TerminalOptions const& state);
 };

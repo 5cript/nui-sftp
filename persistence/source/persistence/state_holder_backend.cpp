@@ -189,20 +189,20 @@ namespace Persistence
             Log::warn("Config file misses terminal engines, adding defaults.");
 #ifdef _WIN32
             stateCache_.sessions["msys2_default"] = SessionOptions{
-                .type = "shell",
+                .type = TerminalEngineType::shell,
+                .engine = defaultMsys2SessionOption(),
                 .terminalOptions = Reference{"default"},
                 .termios = Reference{"default"},
-                .engine = defaultMsys2SessionOption(),
             };
             extendWarning("Added default msys2 terminal engine.");
 #elif __APPLE__
 // nothing
 #else
             stateCache_.sessions["bash_default"] = SessionOptions{
-                .type = "shell",
+                .type = TerminalEngineType::shell,
+                .engine = defaultBashSessionOption(),
                 .terminalOptions = Reference{"default"},
                 .termios = Reference{"default"},
-                .engine = defaultBashSessionOption(),
             };
             extendWarning("Added default bash terminal engine.");
 #endif

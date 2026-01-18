@@ -1,12 +1,15 @@
 #pragma once
 
+#include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/bool_setting.hpp>
 #include <frontend/settings/text_setting.hpp>
 #include <frontend/settings/number_setting.hpp>
 
+#include <persistence/state/sftp_options.hpp>
+
 #include <functional>
 
-struct SftpOptions
+struct SftpOptions : public GroupKeys
 {
     struct DownloadOptions
     {
@@ -28,15 +31,17 @@ struct SftpOptions
     };
     DownloadOptions downloadOptions;
     UploadOptions uploadOptions;
+    TextSetting<true> defaultDirectory;
 
-    Nui::Observed<bool> downloadOptionsEngaged;
-    Nui::Observed<bool> uploadOptionsEngaged;
+    Nui::Observed<bool> downloadOptionsEngaged{false};
+    Nui::Observed<bool> uploadOptionsEngaged{false};
 
     NumberSetting<int, true> concurrency; // How many parallel transfers are allowed?
     NumberSetting<int> operationTimeoutSeconds;
 
-    Nui::Observed<std::string> groupKey{"default"};
-    Nui::Observed<std::vector<std::string>> groupKeys{{"default"}};
-
     SftpOptions(std::function<void()> const& onChange);
+
+    void applyToState(Persistence::SftpOptions& state) const;
+    void loadFromState(Persistence::SftpOptions const& state);
+    void assumeDefaultsFrom(Persistence::SftpOptions const& state);
 };

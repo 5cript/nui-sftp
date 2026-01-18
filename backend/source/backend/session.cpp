@@ -205,7 +205,7 @@ void Session::registerRpcCreateChannel()
                     const auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
 
                     const auto weakChannel =
-                        self->session_->createPtyChannel({.environment = sessionOptions.environment}).get();
+                        self->session_->createPtyChannel({.environment = sessionOptions.sshOptions->environment}).get();
                     if (!weakChannel.has_value())
                     {
                         Log::error("Failed to create pty channel: {}", weakChannel.error());

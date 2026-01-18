@@ -1,10 +1,14 @@
 #pragma once
 
+#include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/bool_setting.hpp>
 #include <frontend/settings/text_setting.hpp>
 #include <frontend/settings/number_setting.hpp>
+#include <frontend/settings/map_setting.hpp>
 
-struct SshOptions
+#include <persistence/state/ssh_options.hpp>
+
+struct SshOptions : public GroupKeys
 {
     TextSetting<true> sshDirectory;
     TextSetting<true> knownHostsFile;
@@ -25,9 +29,11 @@ struct SshOptions
     TextSetting<true> identityAgent;
     NumberSetting<int, true> connectTimeoutSeconds;
     NumberSetting<int, true> connectTimeoutUSeconds;
-
-    Nui::Observed<std::string> groupKey{"default"};
-    Nui::Observed<std::vector<std::string>> groupKeys{{"default"}};
+    MapSetting<true> environment;
 
     SshOptions(std::function<void()> const& onChange);
+
+    void applyToState(Persistence::SshOptions& state) const;
+    void loadFromState(Persistence::SshOptions const& state);
+    void assumeDefaultsFrom(Persistence::SshOptions const& state);
 };

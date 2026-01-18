@@ -170,3 +170,174 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
         }
     , theme{onChange}
 {}
+
+void TerminalOptions::applyToState(Persistence::TerminalOptions& state) const
+{
+    state.fontFamily = fontFamily.value();
+    state.fontSize = fontSize.value();
+    state.lineHeight = lineHeight.value();
+    state.cursorBlink = cursorBlink.value();
+    state.renderer = renderer.value();
+    state.letterSpacing = letterSpacing.value();
+    if (themeEngaged.value())
+    {
+        state.theme = Persistence::TerminalTheme{
+            .background = theme.background.value(),
+            .black = theme.black.value(),
+            .blue = theme.blue.value(),
+            .brightBlack = theme.brightBlack.value(),
+            .brightBlue = theme.brightBlue.value(),
+            .brightCyan = theme.brightCyan.value(),
+            .brightGreen = theme.brightGreen.value(),
+            .brightMagenta = theme.brightMagenta.value(),
+            .brightRed = theme.brightRed.value(),
+            .brightWhite = theme.brightWhite.value(),
+            .brightYellow = theme.brightYellow.value(),
+            .cursor = theme.cursor.value(),
+            .cursorAccent = theme.cursorAccent.value(),
+            .cyan = theme.cyan.value(),
+            .foreground = theme.foreground.value(),
+            .green = theme.green.value(),
+            .magenta = theme.magenta.value(),
+            .red = theme.red.value(),
+            .selectionBackground = theme.selectionBackground.value(),
+            .selectionForeground = theme.selectionForeground.value(),
+            .selectionInactiveBackground = theme.selectionInactiveBackground.value(),
+            .white = theme.white.value(),
+            .yellow = theme.yellow.value(),
+        };
+    }
+    else
+    {
+        state.theme = std::nullopt;
+    }
+}
+
+void TerminalOptions::loadFromState(Persistence::TerminalOptions const& state)
+{
+    fontFamily.value(state.fontFamily);
+    fontSize.value(state.fontSize);
+    lineHeight.value(state.lineHeight);
+    cursorBlink.value(state.cursorBlink);
+    renderer.value(state.renderer);
+    letterSpacing.value(state.letterSpacing);
+
+    themeEngaged = state.theme.has_value();
+    if (state.theme.has_value())
+    {
+        const auto& themeState = state.theme.value();
+        theme.background.value(themeState.background);
+        theme.black.value(themeState.black);
+        theme.blue.value(themeState.blue);
+        theme.brightBlack.value(themeState.brightBlack);
+        theme.brightBlue.value(themeState.brightBlue);
+        theme.brightCyan.value(themeState.brightCyan);
+        theme.brightGreen.value(themeState.brightGreen);
+        theme.brightMagenta.value(themeState.brightMagenta);
+        theme.brightRed.value(themeState.brightRed);
+        theme.brightWhite.value(themeState.brightWhite);
+        theme.brightYellow.value(themeState.brightYellow);
+        theme.cursor.value(themeState.cursor);
+        theme.cursorAccent.value(themeState.cursorAccent);
+        theme.cyan.value(themeState.cyan);
+        theme.foreground.value(themeState.foreground);
+        theme.green.value(themeState.green);
+        theme.magenta.value(themeState.magenta);
+        theme.red.value(themeState.red);
+        theme.selectionBackground.value(themeState.selectionBackground);
+        theme.selectionForeground.value(themeState.selectionForeground);
+        theme.selectionInactiveBackground.value(themeState.selectionInactiveBackground);
+        theme.white.value(themeState.white);
+        theme.yellow.value(themeState.yellow);
+    }
+    else
+    {
+        // All defaults:
+        theme.background.value(std::nullopt);
+        theme.black.value(std::nullopt);
+        theme.blue.value(std::nullopt);
+        theme.brightBlack.value(std::nullopt);
+        theme.brightBlue.value(std::nullopt);
+        theme.brightCyan.value(std::nullopt);
+        theme.brightGreen.value(std::nullopt);
+        theme.brightMagenta.value(std::nullopt);
+        theme.brightRed.value(std::nullopt);
+        theme.brightWhite.value(std::nullopt);
+        theme.brightYellow.value(std::nullopt);
+        theme.cursor.value(std::nullopt);
+        theme.cursorAccent.value(std::nullopt);
+        theme.cyan.value(std::nullopt);
+        theme.foreground.value(std::nullopt);
+        theme.green.value(std::nullopt);
+        theme.magenta.value(std::nullopt);
+        theme.red.value(std::nullopt);
+        theme.selectionBackground.value(std::nullopt);
+        theme.selectionForeground.value(std::nullopt);
+        theme.selectionInactiveBackground.value(std::nullopt);
+        theme.white.value(std::nullopt);
+        theme.yellow.value(std::nullopt);
+    }
+}
+
+void TerminalOptions::assumeDefaultsFrom(Persistence::TerminalOptions const& state)
+{
+    fontFamily.inherit(state.fontFamily);
+    fontSize.inherit(state.fontSize);
+    lineHeight.inherit(state.lineHeight);
+    cursorBlink.inherit(state.cursorBlink);
+    renderer.inherit(state.renderer);
+    letterSpacing.inherit(state.letterSpacing);
+
+    if (state.theme)
+    {
+        theme.background.inherit(state.theme->background);
+        theme.black.inherit(state.theme->black);
+        theme.blue.inherit(state.theme->blue);
+        theme.brightBlack.inherit(state.theme->brightBlack);
+        theme.brightBlue.inherit(state.theme->brightBlue);
+        theme.brightCyan.inherit(state.theme->brightCyan);
+        theme.brightGreen.inherit(state.theme->brightGreen);
+        theme.brightMagenta.inherit(state.theme->brightMagenta);
+        theme.brightRed.inherit(state.theme->brightRed);
+        theme.brightWhite.inherit(state.theme->brightWhite);
+        theme.brightYellow.inherit(state.theme->brightYellow);
+        theme.cursor.inherit(state.theme->cursor);
+        theme.cursorAccent.inherit(state.theme->cursorAccent);
+        theme.cyan.inherit(state.theme->cyan);
+        theme.foreground.inherit(state.theme->foreground);
+        theme.green.inherit(state.theme->green);
+        theme.magenta.inherit(state.theme->magenta);
+        theme.red.inherit(state.theme->red);
+        theme.selectionBackground.inherit(state.theme->selectionBackground);
+        theme.selectionForeground.inherit(state.theme->selectionForeground);
+        theme.selectionInactiveBackground.inherit(state.theme->selectionInactiveBackground);
+        theme.white.inherit(state.theme->white);
+        theme.yellow.inherit(state.theme->yellow);
+    }
+    else
+    {
+        theme.background.inherit(std::nullopt);
+        theme.black.inherit(std::nullopt);
+        theme.blue.inherit(std::nullopt);
+        theme.brightBlack.inherit(std::nullopt);
+        theme.brightBlue.inherit(std::nullopt);
+        theme.brightCyan.inherit(std::nullopt);
+        theme.brightGreen.inherit(std::nullopt);
+        theme.brightMagenta.inherit(std::nullopt);
+        theme.brightRed.inherit(std::nullopt);
+        theme.brightWhite.inherit(std::nullopt);
+        theme.brightYellow.inherit(std::nullopt);
+        theme.cursor.inherit(std::nullopt);
+        theme.cursorAccent.inherit(std::nullopt);
+        theme.cyan.inherit(std::nullopt);
+        theme.foreground.inherit(std::nullopt);
+        theme.green.inherit(std::nullopt);
+        theme.magenta.inherit(std::nullopt);
+        theme.red.inherit(std::nullopt);
+        theme.selectionBackground.inherit(std::nullopt);
+        theme.selectionForeground.inherit(std::nullopt);
+        theme.selectionInactiveBackground.inherit(std::nullopt);
+        theme.white.inherit(std::nullopt);
+        theme.yellow.inherit(std::nullopt);
+    }
+}

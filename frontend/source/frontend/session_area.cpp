@@ -81,7 +81,7 @@ SessionArea::SessionArea(
 
             for (auto const& [name, session] : state.sessions)
             {
-                if (session.startupSession && session.startupSession.value())
+                if (session.startupSession)
                     addSession(name);
             }
         }

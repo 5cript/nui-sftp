@@ -37,8 +37,13 @@ namespace Persistence
     {
         std::optional<DownloadOptions> downloadOptions{};
         std::optional<UploadOptions> uploadOptions{};
+        std::optional<std::string> defaultDirectory{std::nullopt};
         std::optional<int> concurrency{std::nullopt}; // How many parallel transfers are allowed?
         std::chrono::seconds operationTimeout{5};
     };
-    BOOST_DESCRIBE_STRUCT(SftpOptions, (), (downloadOptions, uploadOptions, concurrency, operationTimeout))
+    BOOST_DESCRIBE_STRUCT(
+        SftpOptions,
+        (),
+        (downloadOptions, uploadOptions, defaultDirectory, concurrency, operationTimeout)
+    )
 }
