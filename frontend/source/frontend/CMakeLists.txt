@@ -22,6 +22,9 @@ target_sources(
         settings/termios_settings.cpp
         settings/terminal_options.cpp
         settings/queue_options.cpp
+        settings/executing_session_options.cpp
+        settings/ssh_session_options.cpp
+        settings/session_options.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         terminal/frontend_ssh_manager.cpp
@@ -106,6 +109,7 @@ nui_prepare_emscripten_target(
         # or other options, see emscripten docs.
     EMSCRIPTEN_COMPILE_OPTIONS
         -sMEMORY64=1
+        -fexceptions
         ${DEPENDANT_COMPILE_OPTIONS}
     CXX_STANDARD
         23

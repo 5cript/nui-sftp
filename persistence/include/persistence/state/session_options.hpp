@@ -21,20 +21,18 @@ namespace Persistence
     enum class TerminalEngineType
     {
         shell,
-        cmd, // TODO
-        powershell, // TODO
         ssh
     };
-    BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, cmd, powershell, ssh);
+    BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, ssh);
 
     struct ExecutingSessionOptions : public DefaultMissingMember
     {
         bool isPty{true};
-        std::string command{};
+        std::string command{"/usr/bin/bash"};
         std::optional<std::vector<std::string>> arguments{std::nullopt};
         std::optional<std::map<std::string, std::string>> environment{std::nullopt};
-        std::optional<int> exitTimeoutSeconds{std::nullopt};
-        std::optional<bool> cleanEnvironment{std::nullopt};
+        int exitTimeoutSeconds{5};
+        bool cleanEnvironment{false};
     };
     BOOST_DESCRIBE_STRUCT(
         ExecutingSessionOptions,
@@ -50,35 +48,35 @@ namespace Persistence
         // TODO: Remove again. This was only for testing!
         std::optional<std::string> passwordUnsafe{std::nullopt};
         std::optional<std::string> sshKey{std::nullopt};
-        std::optional<std::map<std::string, std::string>> environment{std::nullopt};
         bool openSftpByDefault{true};
-        std::optional<std::string> defaultDirectory{std::nullopt};
+
+        // Referenceables:
+        Referenceable<SshOptions> sshOptions{};
+        Referenceable<SftpOptions> sftpOptions{};
     };
     BOOST_DESCRIBE_STRUCT(
         SshSessionOptions,
         (),
-        (sshOptions,
-            sftpOptions,
-            host,
-            port,
-            user,
-            passwordUnsafe,
-            sshKey,
-            environment,
-            openSftpByDefault,
-            defaultDirectory)
+        (sshOptions, sftpOptions, host, port, user, passwordUnsafe, sshKey, openSftpByDefault)
     )
 
     struct SessionOptions : public DefaultMissingMember
     {
-        std::string type{};
-        std::optional<std::string> icon{};
+        // Generic options:
+        TerminalEngineType type{TerminalEngineType::ssh};
+        std::string icon{};
         std::optional<std::string> orderBy{};
-        std::optional<bool> startupSession{};
+        bool startupSession{};
+
+        // Engine:
+        std::variant<std::monostate, ExecutingSessionOptions, SshSessionOptions> engine{};
+
+        // Layout:
+        std::optional<std::map<std::string, nlohmann::json>> layouts{};
+
+        // Referenceables:
         Referenceable<TerminalOptions> terminalOptions{};
         Referenceable<Termios> termios{};
-        std::variant<std::monostate, ExecutingSessionOptions, SshSessionOptions> engine{};
-        std::optional<std::map<std::string, nlohmann::json>> layouts{};
         Referenceable<QueueOptions> queueOptions{};
 
         void variantDecide(nlohmann::json const& j)
@@ -88,7 +86,7 @@ namespace Persistence
                 auto typeStr = j["type"].get<std::string>();
                 if (typeStr == "ssh")
                     engine = SshSessionOptions{};
-                else if (typeStr == "shell" || typeStr == "cmd" || typeStr == "powershell")
+                else if (typeStr == "shell")
                     engine = ExecutingSessionOptions{};
                 else
                     throw std::runtime_error("Unknown terminal engine type: " + typeStr);

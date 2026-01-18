@@ -25,6 +25,7 @@ namespace Persistence
         std::optional<std::string> identityAgent{std::nullopt};
         std::optional<int> connectTimeoutSeconds{std::nullopt};
         std::optional<int> connectTimeoutUSeconds{std::nullopt};
+        std::optional<std::map<std::string, std::string>> environment{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         SshOptions,
@@ -47,6 +48,7 @@ namespace Persistence
             bypassConfig,
             identityAgent,
             connectTimeoutSeconds,
-            connectTimeoutUSeconds)
+            connectTimeoutUSeconds,
+            environment)
     )
 }

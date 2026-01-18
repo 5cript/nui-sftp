@@ -353,7 +353,7 @@ void Session::openSftp()
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().operationQueue(&impl_->operationQueue);
-            remoteFileGridSide().path(opts.defaultDirectory.value_or("/"));
+            remoteFileGridSide().path(opts.sftpOptions->defaultDirectory.value_or("/"));
             openLocalFilesystem();
         }
     }

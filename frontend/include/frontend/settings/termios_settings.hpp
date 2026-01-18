@@ -1,10 +1,13 @@
 #pragma once
 
+#include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/bool_setting.hpp>
 #include <frontend/settings/text_setting.hpp>
 #include <frontend/settings/number_setting.hpp>
 
-struct TermiosSettings
+#include <persistence/state/termios.hpp>
+
+struct TermiosSettings : public GroupKeys
 {
     struct InputFlags
     {
@@ -106,9 +109,11 @@ struct TermiosSettings
     NumberSetting<unsigned int, true> iSpeed;
     NumberSetting<unsigned int, true> oSpeed;
 
-    Nui::Observed<std::string> groupKey{"default"};
-    Nui::Observed<std::vector<std::string>> groupKeys{{"default"}};
     Nui::Observed<bool> ccEngaged{false};
 
     TermiosSettings(std::function<void()> const& onChange);
+
+    void applyToState(Persistence::Termios& state) const;
+    void loadFromState(Persistence::Termios const& state);
+    void assumeDefaultsFrom(Persistence::Termios const& state);
 };

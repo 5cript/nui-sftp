@@ -730,3 +730,286 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         nulloptReset(oSpeed, onChange),
     }
 {}
+
+void TermiosSettings::applyToState(Persistence::Termios& state) const
+{
+    state.inputFlags = Persistence::Termios::InputFlags{
+        .IGNBRK_ = inputFlags.IGNBRK.value(),
+        .BRKINT_ = inputFlags.BRKINT.value(),
+        .IGNPAR_ = inputFlags.IGNPAR.value(),
+        .PARMRK_ = inputFlags.PARMRK.value(),
+        .INPCK_ = inputFlags.INPCK.value(),
+        .ISTRIP_ = inputFlags.ISTRIP.value(),
+        .INLCR_ = inputFlags.INLCR.value(),
+        .IGNCR_ = inputFlags.IGNCR.value(),
+        .ICRNL_ = inputFlags.ICRNL.value(),
+        .IUCLC_ = inputFlags.IUCLC.value(),
+        .IXON_ = inputFlags.IXON.value(),
+        .IXANY_ = inputFlags.IXANY.value(),
+        .IXOFF_ = inputFlags.IXOFF.value(),
+        .IMAXBEL_ = inputFlags.IMAXBEL.value(),
+        .IUTF8_ = inputFlags.IUTF8.value(),
+    };
+
+    state.outputFlags = Persistence::Termios::OutputFlags{
+        .OPOST_ = outputFlags.OPOST.value(),
+        .OLCUC_ = outputFlags.OLCUC.value(),
+        .ONLCR_ = outputFlags.ONLCR.value(),
+        .OCRNL_ = outputFlags.OCRNL.value(),
+        .ONOCR_ = outputFlags.ONOCR.value(),
+        .ONLRET_ = outputFlags.ONLRET.value(),
+        .OFILL_ = outputFlags.OFILL.value(),
+        .OFDEL_ = outputFlags.OFDEL.value(),
+        .NLDLY_ = outputFlags.NLDLY.value(),
+        .CRDLY_ = outputFlags.CRDLY.value(),
+        .TABDLY_ = outputFlags.TABDLY.value(),
+        .BSDLY_ = outputFlags.BSDLY.value(),
+        .VTDLY_ = outputFlags.VTDLY.value(),
+        .FFDLY_ = outputFlags.FFDLY.value(),
+    };
+
+    state.controlFlags = Persistence::Termios::ControlFlags{
+        .CBAUD_ = controlFlags.CBAUD.value(),
+        .CBAUDEX_ = controlFlags.CBAUDEX.value(),
+        .CSIZE_ = controlFlags.CSIZE.value(),
+        .CSTOPB_ = controlFlags.CSTOPB.value(),
+        .CREAD_ = controlFlags.CREAD.value(),
+        .PARENB_ = controlFlags.PARENB.value(),
+        .PARODD_ = controlFlags.PARODD.value(),
+        .HUPCL_ = controlFlags.HUPCL.value(),
+        .CLOCAL_ = controlFlags.CLOCAL.value(),
+        .LOBLK_ = controlFlags.LOBLK.value(),
+        .CIBAUD_ = controlFlags.CIBAUD.value(),
+        .CMSPAR_ = controlFlags.CMSPAR.value(),
+        .CRTSCTS_ = controlFlags.CRTSCTS.value(),
+    };
+
+    state.localFlags = Persistence::Termios::LocalFlags{
+        .ISIG_ = localFlags.ISIG.value(),
+        .ICANON_ = localFlags.ICANON.value(),
+        .XCASE_ = localFlags.XCASE.value(),
+        .ECHO_ = localFlags.ECHO.value(),
+        .ECHOE_ = localFlags.ECHOE.value(),
+        .ECHOK_ = localFlags.ECHOK.value(),
+        .ECHONL_ = localFlags.ECHONL.value(),
+        .ECHOCTL_ = localFlags.ECHOCTL.value(),
+        .ECHOPRT_ = localFlags.ECHOPRT.value(),
+        .ECHOKE_ = localFlags.ECHOKE.value(),
+        .FLUSHO_ = localFlags.FLUSHO.value(),
+        .NOFLSH_ = localFlags.NOFLSH.value(),
+        .TOSTOP_ = localFlags.TOSTOP.value(),
+        .PENDIN_ = localFlags.PENDIN.value(),
+        .IEXTEN_ = localFlags.IEXTEN.value(),
+    };
+
+    if (ccEngaged.value())
+    {
+        state.cc = Persistence::Termios::CC{
+            .VDISCARD_ = cc.VDISCARD.value(),
+            .VDSUSP_ = cc.VDSUSP.value(),
+            .VEOF_ = cc.VEOF.value(),
+            .VEOL_ = cc.VEOL.value(),
+            .VEOL2_ = cc.VEOL2.value(),
+            .VERASE_ = cc.VERASE.value(),
+            .VINTR_ = cc.VINTR.value(),
+            .VKILL_ = cc.VKILL.value(),
+            .VLNEXT_ = cc.VLNEXT.value(),
+            .VMIN_ = cc.VMIN.value(),
+            .VQUIT_ = cc.VQUIT.value(),
+            .VREPRINT_ = cc.VREPRINT.value(),
+            .VSTART_ = cc.VSTART.value(),
+            .VSTATUS_ = cc.VSTATUS.value(),
+            .VSTOP_ = cc.VSTOP.value(),
+            .VSUSP_ = cc.VSUSP.value(),
+            .VSWTCH_ = cc.VSWTCH.value(),
+            .VTIME_ = cc.VTIME.value(),
+            .VWERASE_ = cc.VWERASE.value(),
+        };
+    }
+
+    state.iSpeed = iSpeed.value();
+    state.oSpeed = oSpeed.value();
+}
+
+void TermiosSettings::loadFromState(Persistence::Termios const& state)
+{
+    inputFlags.IGNBRK.value(state.inputFlags.IGNBRK_);
+    inputFlags.BRKINT.value(state.inputFlags.BRKINT_);
+    inputFlags.IGNPAR.value(state.inputFlags.IGNPAR_);
+    inputFlags.PARMRK.value(state.inputFlags.PARMRK_);
+    inputFlags.INPCK.value(state.inputFlags.INPCK_);
+    inputFlags.ISTRIP.value(state.inputFlags.ISTRIP_);
+    inputFlags.INLCR.value(state.inputFlags.INLCR_);
+    inputFlags.IGNCR.value(state.inputFlags.IGNCR_);
+    inputFlags.ICRNL.value(state.inputFlags.ICRNL_);
+    inputFlags.IUCLC.value(state.inputFlags.IUCLC_);
+    inputFlags.IXON.value(state.inputFlags.IXON_);
+    inputFlags.IXANY.value(state.inputFlags.IXANY_);
+    inputFlags.IXOFF.value(state.inputFlags.IXOFF_);
+    inputFlags.IMAXBEL.value(state.inputFlags.IMAXBEL_);
+    inputFlags.IUTF8.value(state.inputFlags.IUTF8_);
+
+    outputFlags.OPOST.value(state.outputFlags.OPOST_);
+    outputFlags.OLCUC.value(state.outputFlags.OLCUC_);
+    outputFlags.ONLCR.value(state.outputFlags.ONLCR_);
+    outputFlags.OCRNL.value(state.outputFlags.OCRNL_);
+    outputFlags.ONOCR.value(state.outputFlags.ONOCR_);
+    outputFlags.ONLRET.value(state.outputFlags.ONLRET_);
+    outputFlags.OFILL.value(state.outputFlags.OFILL_);
+    outputFlags.OFDEL.value(state.outputFlags.OFDEL_);
+    outputFlags.NLDLY.value(state.outputFlags.NLDLY_);
+    outputFlags.CRDLY.value(state.outputFlags.CRDLY_);
+    outputFlags.TABDLY.value(state.outputFlags.TABDLY_);
+    outputFlags.BSDLY.value(state.outputFlags.BSDLY_);
+    outputFlags.VTDLY.value(state.outputFlags.VTDLY_);
+    outputFlags.FFDLY.value(state.outputFlags.FFDLY_);
+
+    controlFlags.CBAUD.value(state.controlFlags.CBAUD_);
+    controlFlags.CBAUDEX.value(state.controlFlags.CBAUDEX_);
+    controlFlags.CSIZE.value(state.controlFlags.CSIZE_);
+    controlFlags.CSTOPB.value(state.controlFlags.CSTOPB_);
+    controlFlags.CREAD.value(state.controlFlags.CREAD_);
+    controlFlags.PARENB.value(state.controlFlags.PARENB_);
+    controlFlags.PARODD.value(state.controlFlags.PARODD_);
+    controlFlags.HUPCL.value(state.controlFlags.HUPCL_);
+    controlFlags.CLOCAL.value(state.controlFlags.CLOCAL_);
+    controlFlags.LOBLK.value(state.controlFlags.LOBLK_);
+    controlFlags.CIBAUD.value(state.controlFlags.CIBAUD_);
+    controlFlags.CMSPAR.value(state.controlFlags.CMSPAR_);
+    controlFlags.CRTSCTS.value(state.controlFlags.CRTSCTS_);
+
+    localFlags.ISIG.value(state.localFlags.ISIG_);
+    localFlags.ICANON.value(state.localFlags.ICANON_);
+    localFlags.XCASE.value(state.localFlags.XCASE_);
+    localFlags.ECHO.value(state.localFlags.ECHO_);
+    localFlags.ECHOE.value(state.localFlags.ECHOE_);
+    localFlags.ECHOK.value(state.localFlags.ECHOK_);
+    localFlags.ECHONL.value(state.localFlags.ECHONL_);
+    localFlags.ECHOCTL.value(state.localFlags.ECHOCTL_);
+    localFlags.ECHOPRT.value(state.localFlags.ECHOPRT_);
+    localFlags.ECHOKE.value(state.localFlags.ECHOKE_);
+    localFlags.FLUSHO.value(state.localFlags.FLUSHO_);
+    localFlags.NOFLSH.value(state.localFlags.NOFLSH_);
+    localFlags.TOSTOP.value(state.localFlags.TOSTOP_);
+    localFlags.PENDIN.value(state.localFlags.PENDIN_);
+    localFlags.IEXTEN.value(state.localFlags.IEXTEN_);
+
+    if (state.cc.has_value())
+    {
+        ccEngaged = true;
+        cc.VDISCARD.value(state.cc->VDISCARD_);
+        cc.VDSUSP.value(state.cc->VDSUSP_);
+        cc.VEOF.value(state.cc->VEOF_);
+        cc.VEOL.value(state.cc->VEOL_);
+        cc.VEOL2.value(state.cc->VEOL2_);
+        cc.VERASE.value(state.cc->VERASE_);
+        cc.VINTR.value(state.cc->VINTR_);
+        cc.VKILL.value(state.cc->VKILL_);
+        cc.VLNEXT.value(state.cc->VLNEXT_);
+        cc.VMIN.value(state.cc->VMIN_);
+        cc.VQUIT.value(state.cc->VQUIT_);
+        cc.VREPRINT.value(state.cc->VREPRINT_);
+        cc.VSTART.value(state.cc->VSTART_);
+        cc.VSTATUS.value(state.cc->VSTATUS_);
+        cc.VSTOP.value(state.cc->VSTOP_);
+        cc.VSUSP.value(state.cc->VSUSP_);
+        cc.VSWTCH.value(state.cc->VSWTCH_);
+        cc.VTIME.value(state.cc->VTIME_);
+        cc.VWERASE.value(state.cc->VWERASE_);
+    }
+    else
+    {
+        ccEngaged = false;
+        cc.VDISCARD.value(Persistence::Termios::CC{}.VDISCARD_);
+        cc.VDSUSP.value(Persistence::Termios::CC{}.VDSUSP_);
+        cc.VEOF.value(Persistence::Termios::CC{}.VEOF_);
+        cc.VEOL.value(Persistence::Termios::CC{}.VEOL_);
+        cc.VEOL2.value(Persistence::Termios::CC{}.VEOL2_);
+        cc.VERASE.value(Persistence::Termios::CC{}.VERASE_);
+        cc.VINTR.value(Persistence::Termios::CC{}.VINTR_);
+        cc.VKILL.value(Persistence::Termios::CC{}.VKILL_);
+        cc.VLNEXT.value(Persistence::Termios::CC{}.VLNEXT_);
+        cc.VMIN.value(Persistence::Termios::CC{}.VMIN_);
+        cc.VQUIT.value(Persistence::Termios::CC{}.VQUIT_);
+        cc.VREPRINT.value(Persistence::Termios::CC{}.VREPRINT_);
+        cc.VSTART.value(Persistence::Termios::CC{}.VSTART_);
+        cc.VSTATUS.value(Persistence::Termios::CC{}.VSTATUS_);
+        cc.VSTOP.value(Persistence::Termios::CC{}.VSTOP_);
+        cc.VSUSP.value(Persistence::Termios::CC{}.VSUSP_);
+        cc.VSWTCH.value(Persistence::Termios::CC{}.VSWTCH_);
+        cc.VTIME.value(Persistence::Termios::CC{}.VTIME_);
+        cc.VWERASE.value(Persistence::Termios::CC{}.VWERASE_);
+    }
+
+    iSpeed.value(state.iSpeed);
+    oSpeed.value(state.oSpeed);
+}
+
+void TermiosSettings::assumeDefaultsFrom(Persistence::Termios const& state)
+{
+    inputFlags.IGNBRK.inherit(state.inputFlags.IGNBRK_);
+    inputFlags.BRKINT.inherit(state.inputFlags.BRKINT_);
+    inputFlags.IGNPAR.inherit(state.inputFlags.IGNPAR_);
+    inputFlags.PARMRK.inherit(state.inputFlags.PARMRK_);
+    inputFlags.INPCK.inherit(state.inputFlags.INPCK_);
+    inputFlags.ISTRIP.inherit(state.inputFlags.ISTRIP_);
+    inputFlags.INLCR.inherit(state.inputFlags.INLCR_);
+    inputFlags.IGNCR.inherit(state.inputFlags.IGNCR_);
+    inputFlags.ICRNL.inherit(state.inputFlags.ICRNL_);
+    inputFlags.IUCLC.inherit(state.inputFlags.IUCLC_);
+    inputFlags.IXON.inherit(state.inputFlags.IXON_);
+    inputFlags.IXANY.inherit(state.inputFlags.IXANY_);
+    inputFlags.IXOFF.inherit(state.inputFlags.IXOFF_);
+    inputFlags.IMAXBEL.inherit(state.inputFlags.IMAXBEL_);
+    inputFlags.IUTF8.inherit(state.inputFlags.IUTF8_);
+
+    outputFlags.OPOST.inherit(state.outputFlags.OPOST_);
+    outputFlags.OLCUC.inherit(state.outputFlags.OLCUC_);
+    outputFlags.ONLCR.inherit(state.outputFlags.ONLCR_);
+    outputFlags.OCRNL.inherit(state.outputFlags.OCRNL_);
+    outputFlags.ONOCR.inherit(state.outputFlags.ONOCR_);
+    outputFlags.ONLRET.inherit(state.outputFlags.ONLRET_);
+    outputFlags.OFILL.inherit(state.outputFlags.OFILL_);
+    outputFlags.OFDEL.inherit(state.outputFlags.OFDEL_);
+    outputFlags.NLDLY.inherit(state.outputFlags.NLDLY_);
+    outputFlags.CRDLY.inherit(state.outputFlags.CRDLY_);
+    outputFlags.TABDLY.inherit(state.outputFlags.TABDLY_);
+    outputFlags.BSDLY.inherit(state.outputFlags.BSDLY_);
+    outputFlags.VTDLY.inherit(state.outputFlags.VTDLY_);
+    outputFlags.FFDLY.inherit(state.outputFlags.FFDLY_);
+
+    controlFlags.CBAUD.inherit(state.controlFlags.CBAUD_);
+    controlFlags.CBAUDEX.inherit(state.controlFlags.CBAUDEX_);
+    controlFlags.CSIZE.inherit(state.controlFlags.CSIZE_);
+    controlFlags.CSTOPB.inherit(state.controlFlags.CSTOPB_);
+    controlFlags.CREAD.inherit(state.controlFlags.CREAD_);
+    controlFlags.PARENB.inherit(state.controlFlags.PARENB_);
+    controlFlags.PARODD.inherit(state.controlFlags.PARODD_);
+    controlFlags.HUPCL.inherit(state.controlFlags.HUPCL_);
+    controlFlags.CLOCAL.inherit(state.controlFlags.CLOCAL_);
+    controlFlags.LOBLK.inherit(state.controlFlags.LOBLK_);
+    controlFlags.CIBAUD.inherit(state.controlFlags.CIBAUD_);
+    controlFlags.CMSPAR.inherit(state.controlFlags.CMSPAR_);
+    controlFlags.CRTSCTS.inherit(state.controlFlags.CRTSCTS_);
+
+    localFlags.ISIG.inherit(state.localFlags.ISIG_);
+    localFlags.ICANON.inherit(state.localFlags.ICANON_);
+    localFlags.XCASE.inherit(state.localFlags.XCASE_);
+    localFlags.ECHO.inherit(state.localFlags.ECHO_);
+    localFlags.ECHOE.inherit(state.localFlags.ECHOE_);
+    localFlags.ECHOK.inherit(state.localFlags.ECHOK_);
+    localFlags.ECHONL.inherit(state.localFlags.ECHONL_);
+    localFlags.ECHOCTL.inherit(state.localFlags.ECHOCTL_);
+    localFlags.ECHOPRT.inherit(state.localFlags.ECHOPRT_);
+    localFlags.ECHOKE.inherit(state.localFlags.ECHOKE_);
+    localFlags.FLUSHO.inherit(state.localFlags.FLUSHO_);
+    localFlags.NOFLSH.inherit(state.localFlags.NOFLSH_);
+    localFlags.TOSTOP.inherit(state.localFlags.TOSTOP_);
+    localFlags.PENDIN.inherit(state.localFlags.PENDIN_);
+    localFlags.IEXTEN.inherit(state.localFlags.IEXTEN_);
+
+    // TOOD: cc inheritance?
+
+    iSpeed.inherit(state.iSpeed);
+    oSpeed.inherit(state.oSpeed);
+}

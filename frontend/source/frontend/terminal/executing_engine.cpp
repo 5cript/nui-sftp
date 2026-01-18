@@ -50,8 +50,10 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(ExecutingTerminalEngine);
 
 void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen)
 {
-    impl_->stdoutReceiver =
-        Nui::RpcClient::autoRegisterFunction("execTerminalStdout_" + impl_->id, [this](Nui::val val) {
+    impl_->stdoutReceiver = Nui::RpcClient::autoRegisterFunction(
+        "execTerminalStdout_" + impl_->id,
+        [this](Nui::val val)
+        {
             if (val.hasOwnProperty("data"))
             {
                 const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
@@ -60,10 +62,13 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
             }
             else
                 Log::error("execTerminalStdout_" + impl_->id + " received an empty message");
-        });
+        }
+    );
 
-    impl_->stderrReceiver =
-        Nui::RpcClient::autoRegisterFunction("execTerminalStderr_" + impl_->id, [this](Nui::val val) {
+    impl_->stderrReceiver = Nui::RpcClient::autoRegisterFunction(
+        "execTerminalStderr_" + impl_->id,
+        [this](Nui::val val)
+        {
             if (val.hasOwnProperty("data"))
             {
                 const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
@@ -72,7 +77,8 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
             }
             else
                 Log::error("execTerminalStderr_" + impl_->id + " received an empty message");
-        });
+        }
+    );
 
     Nui::val obj = Nui::val::object();
 
@@ -105,14 +111,8 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
         obj.set("environment", Nui::val::object());
     }
 
-    if (impl_->settings.engineOptions.exitTimeoutSeconds)
-    {
-        obj.set("defaultExitWaitTimeout", *impl_->settings.engineOptions.exitTimeoutSeconds);
-    }
-    if (impl_->settings.engineOptions.cleanEnvironment)
-    {
-        obj.set("cleanEnvironment", *impl_->settings.engineOptions.cleanEnvironment);
-    }
+    obj.set("defaultExitWaitTimeout", impl_->settings.engineOptions.exitTimeoutSeconds);
+    obj.set("cleanEnvironment", impl_->settings.engineOptions.cleanEnvironment);
     obj.set("isPty", impl_->settings.engineOptions.isPty);
 
     obj.set("stdout", "execTerminalStdout_" + impl_->id);
@@ -128,7 +128,8 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
 
     Nui::RpcClient::callWithBackChannel(
         "ProcessStore::spawn",
-        [this, onOpen = std::move(onOpen)](Nui::val val) {
+        [this, onOpen = std::move(onOpen)](Nui::val val)
+        {
             if (!val.hasOwnProperty("id"))
             {
                 Log::error("ProcessStore::spawn callback did not return an id");
@@ -143,18 +144,21 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
             onOpen(true, id);
             updatePtyProcs();
         },
-        obj);
+        obj
+    );
 }
 
 void ExecutingTerminalEngine::dispose(std::function<void()> onDisposeComplete)
 {
     Nui::RpcClient::callWithBackChannel(
         "ProcessStore::exit",
-        [onDisposeComplete = std::move(onDisposeComplete)](Nui::val) {
+        [onDisposeComplete = std::move(onDisposeComplete)](Nui::val)
+        {
             // TODO: handle error
             onDisposeComplete();
         },
-        impl_->processId);
+        impl_->processId
+    );
 
     impl_->stdoutReceiver.reset();
     impl_->stderrReceiver.reset();
@@ -164,12 +168,14 @@ void ExecutingTerminalEngine::resize(int cols, int rows)
 {
     Nui::RpcClient::callWithBackChannel(
         "ProcessStore::ptyResize",
-        [](Nui::val) {
+        [](Nui::val)
+        {
             // TODO: handle error
         },
         impl_->processId,
         cols,
-        rows);
+        rows
+    );
 }
 
 void ExecutingTerminalEngine::updatePtyProcs()
@@ -179,10 +185,12 @@ void ExecutingTerminalEngine::updatePtyProcs()
     {
         Nui::setTimeout(
             500,
-            [this]() {
+            [this]()
+            {
                 Nui::RpcClient::callWithBackChannel(
                     "ProcessStore::ptyProcesses",
-                    [this](Nui::val val) {
+                    [this](Nui::val val)
+                    {
                         if (val.hasOwnProperty("latest"))
                         {
                             Log::info("onProcessChange: {}", Nui::JSON::stringify(val));
@@ -194,11 +202,14 @@ void ExecutingTerminalEngine::updatePtyProcs()
                             Log::warn("ptyProcesses did not return latest: {}", Nui::JSON::stringify(val));
                         }
                     },
-                    impl_->processId);
+                    impl_->processId
+                );
             },
-            [this](Nui::TimerHandle&& handle) {
+            [this](Nui::TimerHandle&& handle)
+            {
                 impl_->procInfoTimer = std::move(handle);
-            });
+            }
+        );
     }
 }
 
@@ -213,7 +224,8 @@ void ExecutingTerminalEngine::write(std::string const& data)
         updatePtyProcs();
 
     Nui::RpcClient::callWithBackChannel(
-        "ProcessStore::write", [](Nui::val) {}, impl_->processId, Nui::val::global("btoa")(data).as<std::string>());
+        "ProcessStore::write", [](Nui::val) {}, impl_->processId, Nui::val::global("btoa")(data).as<std::string>()
+    );
 }
 
 void ExecutingTerminalEngine::setStdoutHandler(std::function<void(std::string const&)> handler)
