@@ -47,7 +47,7 @@ void ExecutingSessionOptions::applyToState(Persistence::ExecutingSessionOptions&
     state.cleanEnvironment = cleanEnvironment.value();
 }
 
-void ExecutingSessionOptions::loadFromState(Persistence::ExecutingSessionOptions const& state)
+void ExecutingSessionOptions::loadFromState(Persistence::ExecutingSessionOptions const& state, bool)
 {
     isPty.value(state.isPty);
     command.value(state.command);

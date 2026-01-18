@@ -24,6 +24,6 @@ struct SshSessionOptions
     SshSessionOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::SshSessionOptions& state) const;
-    void loadFromState(Persistence::SshSessionOptions const& state);
+    void loadFromState(Persistence::SshSessionOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SshSessionOptions const& state);
 };

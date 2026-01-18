@@ -128,7 +128,7 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
     state.environment = environment.value();
 }
 
-void SshOptions::loadFromState(Persistence::SshOptions const& state)
+void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
 {
     sshDirectory.value(pathOptionalToStringOptional(state.sshDirectory));
     knownHostsFile.value(pathOptionalToStringOptional(state.knownHostsFile));

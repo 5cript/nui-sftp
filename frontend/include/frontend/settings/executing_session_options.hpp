@@ -21,6 +21,6 @@ struct ExecutingSessionOptions
     ExecutingSessionOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::ExecutingSessionOptions& state) const;
-    void loadFromState(Persistence::ExecutingSessionOptions const& state);
+    void loadFromState(Persistence::ExecutingSessionOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::ExecutingSessionOptions const& state);
 };

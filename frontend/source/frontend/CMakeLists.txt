@@ -121,6 +121,8 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"

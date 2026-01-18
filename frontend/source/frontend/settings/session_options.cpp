@@ -80,9 +80,13 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     {
         executingSessionOptions.applyToState(state.engine.emplace<Persistence::ExecutingSessionOptions>());
     }
+
+    state.terminalOptions.ref(*terminalOptions.groupKey);
+    state.termios.ref(*termios.groupKey);
+    state.queueOptions.ref(*queueOptions.groupKey);
 }
 
-void SessionOptions::loadFromState(Persistence::SessionOptions const& state)
+void SessionOptions::loadFromState(Persistence::SessionOptions const& state, bool loadRefs)
 {
     terminalEngineType.value(state.type);
     icon.value(state.icon);
@@ -94,11 +98,22 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state)
 
     if (state.type == Persistence::TerminalEngineType::ssh)
     {
-        sshSessionOptions.loadFromState(std::get<Persistence::SshSessionOptions>(state.engine));
+        sshSessionOptions.loadFromState(std::get<Persistence::SshSessionOptions>(state.engine), loadRefs);
     }
     else if (state.type == Persistence::TerminalEngineType::shell)
     {
-        executingSessionOptions.loadFromState(std::get<Persistence::ExecutingSessionOptions>(state.engine));
+        executingSessionOptions.loadFromState(std::get<Persistence::ExecutingSessionOptions>(state.engine), loadRefs);
+    }
+
+    if (loadRefs)
+    {
+        terminalOptions.groupKey = state.terminalOptions.hasReference()
+            ? std::optional<std::string>{state.terminalOptions.ref()}
+            : std::nullopt;
+        termios.groupKey =
+            state.termios.hasReference() ? std::optional<std::string>{state.termios.ref()} : std::nullopt;
+        queueOptions.groupKey =
+            state.queueOptions.hasReference() ? std::optional<std::string>{state.queueOptions.ref()} : std::nullopt;
     }
 }
 

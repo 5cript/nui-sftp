@@ -42,6 +42,6 @@ struct SftpOptions : public GroupKeys
     SftpOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::SftpOptions& state) const;
-    void loadFromState(Persistence::SftpOptions const& state);
+    void loadFromState(Persistence::SftpOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SftpOptions const& state);
 };

@@ -1,3 +1,4 @@
+
 #include <frontend/main_page.hpp>
 #include <frontend/sidebar.hpp>
 #include <frontend/toolbar.hpp>
@@ -90,6 +91,12 @@ Nui::ElementRenderer MainPage::render()
     using Nui::Elements::div; // because of the global div.
 
     Log::info("MainPage::render()");
+    Nui::ScopeExit onLeaveRender(
+        []() noexcept
+        {
+            Log::info("MainPage::render() complete");
+        }
+    );
 
     // clang-format off
     return div{

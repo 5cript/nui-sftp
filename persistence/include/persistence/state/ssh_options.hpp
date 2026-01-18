@@ -8,7 +8,7 @@ namespace Persistence
     {
         std::optional<std::filesystem::path> sshDirectory{std::nullopt};
         std::optional<std::filesystem::path> knownHostsFile{std::nullopt};
-        std::optional<bool> tryAgentForAuthentication{true};
+        std::optional<bool> tryAgentForAuthentication{std::nullopt};
         std::optional<bool> usePublicKeyAutoAuth{std::nullopt};
         std::optional<std::string> logVerbosity{std::nullopt};
         std::optional<std::string> keyExchangeAlgorithms{std::nullopt};

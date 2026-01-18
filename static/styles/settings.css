@@ -171,25 +171,17 @@
 }
 
 .setting-fixed {
-    margin-left: 30px;
+    grid-column: 2;
+    max-width: 280px;
 }
 
 .setting-disengageable {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    grid-template-rows: auto auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: 20px 20px;
     margin-right: 16px;
-
-    &>ui5-checkbox {
-        /* span the row */
-        grid-row: 1 / -1;
-        margin-bottom: 8px;
-    }
-
-    &>ui5-label {
-        grid-column: 2;
-        align-self: center;
-    }
+    align-items: center;
+    max-width: 280px;
 }
 
 .setting-colorpicker {
@@ -212,4 +204,18 @@
     border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
     margin: 0 16px;
     grid-column: 1 / -1;
+}
+
+.setting-disengage-checkbox {
+    padding-top: 4px;
+    padding-right: 8px;
+}
+
+ui5-checkbox.setting-disengage-checkbox::part(root) {
+    --_ui5-v2-18-0_checkbox_width_height: 0;
+    --_ui5-v2-18-0_checkbox_wrapper_padding: 0;
+}
+
+.setting-input {
+    width: auto;
 }

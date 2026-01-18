@@ -37,6 +37,7 @@ class NumberSetting : public Setting<Disengageable, ValueType>
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             ui5::input{
+                class_ = "setting-input",
                 "type"_prop = "Number",
                 // FIXME: I convert to a string here because of an error message
                 // ListItemStandardExpandableTextTemplate.1a93b8ba.js:3172  [UI5-FWK] numeric value for property [value] of component [ui5-input]

@@ -233,48 +233,62 @@ Nui::ElementRenderer SessionArea::operator()()
     using Nui::Elements::div; // because of the global div.
 
     Log::info("SessionArea::operator()");
-
-    // clang-format off
-    return div{
-        class_ = "session-area"
-    }(
-        ui5::tabcontainer{
-            style = "width: 100%; display: block",
-            class_ = "session-area-tabs",
-            "tab-select"_event = [this](Nui::val event){
-                const auto index = event["detail"]["tabIndex"].as<int>();
-                if (index >= 0 && index < static_cast<int>(impl_->sessions.size()))
-                {
-                    // Could do some logic, but this is easier when tabs are getting deleted.
-                    for (auto const& session : impl_->sessions.value())
-                    {
-                        if (session->visible())
-                            session->visible(false);
-                    }
-                    impl_->sessions.value()[index]->visible(true);
-                }
-            },
-            "fixed"_prop = true
-        }(
-            range(impl_->sessions),
-            [this](long long i, auto& session) -> Nui::ElementRenderer {
-                // tabs dont actually reside here:
-                return ui5::tab{
-                    "text"_prop = session->tabTitle(),
-                    "selected"_prop = i == impl_->selected,
-                    "moveable"_prop = true
-                }();
-            }
-        ),
-        div{
-            style = "position: relative; width: 100%; height: calc(100% - 30px); display: block",
-            class_ = "session-area-content"
-        }(
-            range(impl_->sessions),
-            [this](long long i, auto& session) -> Nui::ElementRenderer {
-                return session->operator()(i == impl_->selected);
-            }
-        )
+    auto onExit = Nui::ScopeExit(
+        []() noexcept
+        {
+            Log::info("SessionArea::operator() complete");
+        }
     );
-    // clang-format on
+
+    try
+    {
+        // clang-format off
+        return div{
+            class_ = "session-area"
+        }(
+            ui5::tabcontainer{
+                style = "width: 100%; display: block",
+                class_ = "session-area-tabs",
+                "tab-select"_event = [this](Nui::val event){
+                    const auto index = event["detail"]["tabIndex"].as<int>();
+                    if (index >= 0 && index < static_cast<int>(impl_->sessions.size()))
+                    {
+                        // Could do some logic, but this is easier when tabs are getting deleted.
+                        for (auto const& session : impl_->sessions.value())
+                        {
+                            if (session->visible())
+                                session->visible(false);
+                        }
+                        impl_->sessions.value()[index]->visible(true);
+                    }
+                },
+                "fixed"_prop = true
+            }(
+                range(impl_->sessions),
+                [this](long long i, auto& session) -> Nui::ElementRenderer {
+                    // tabs dont actually reside here:
+                    return ui5::tab{
+                        "text"_prop = session->tabTitle(),
+                        "selected"_prop = i == impl_->selected,
+                        "moveable"_prop = true
+                    }();
+                }
+            ),
+            div{
+                style = "position: relative; width: 100%; height: calc(100% - 30px); display: block",
+                class_ = "session-area-content"
+            }(
+                range(impl_->sessions),
+                [this](long long i, auto& session) -> Nui::ElementRenderer {
+                    return session->operator()(i == impl_->selected);
+                }
+            )
+        );
+        // clang-format on
+    }
+    catch (std::exception const& e)
+    {
+        Log::error("Exception in SessionArea::operator(): {}", e.what());
+        return div{}("Error loading session area: "s + e.what());
+    }
 }

@@ -70,6 +70,7 @@ class ColorSetting : public Setting<Disengageable, std::string>
                     ),
                 }(),
                 ui5::input{
+                    class_ = "setting-input",
                     "value"_prop = observedValueWithInheritance(),
                     observeEngagedToBool("disabled"_prop),
                     "change"_event = [this](Nui::val event){
