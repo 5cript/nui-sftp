@@ -149,7 +149,7 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
     state.defaultDirectory = defaultDirectory.value();
 }
 
-void SftpOptions::loadFromState(Persistence::SftpOptions const& state)
+void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
 {
     if (state.downloadOptions.has_value())
     {

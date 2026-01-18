@@ -30,6 +30,6 @@ struct SessionOptions
     SessionOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::SessionOptions& state) const;
-    void loadFromState(Persistence::SessionOptions const& state);
+    void loadFromState(Persistence::SessionOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SessionOptions const& state);
 };

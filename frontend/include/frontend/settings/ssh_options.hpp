@@ -34,6 +34,6 @@ struct SshOptions : public GroupKeys
     SshOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::SshOptions& state) const;
-    void loadFromState(Persistence::SshOptions const& state);
+    void loadFromState(Persistence::SshOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SshOptions const& state);
 };

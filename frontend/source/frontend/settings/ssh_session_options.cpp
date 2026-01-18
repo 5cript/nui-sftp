@@ -43,17 +43,28 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
     state.openSftpByDefault = openSftpByDefault.value();
     sshOptions.applyToState(state.sshOptions.value());
     sftpOptions.applyToState(state.sftpOptions.value());
+
+    state.sshOptions.ref(*sshOptions.groupKey);
+    state.sftpOptions.ref(*sftpOptions.groupKey);
 }
 
-void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& state)
+void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& state, bool loadRefs)
 {
     host.value(state.host);
     port.value(state.port);
     user.value(state.user);
     sshKey.value(state.sshKey);
     openSftpByDefault.value(state.openSftpByDefault);
-    sshOptions.loadFromState(state.sshOptions.value());
-    sftpOptions.loadFromState(state.sftpOptions.value());
+    sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
+    sftpOptions.loadFromState(state.sftpOptions.value(), loadRefs);
+
+    if (loadRefs)
+    {
+        sshOptions.groupKey =
+            state.sshOptions.hasReference() ? std::optional<std::string>{state.sshOptions.ref()} : std::nullopt;
+        sftpOptions.groupKey =
+            state.sftpOptions.hasReference() ? std::optional<std::string>{state.sftpOptions.ref()} : std::nullopt;
+    }
 }
 
 void SshSessionOptions::assumeDefaultsFrom(Persistence::SshSessionOptions const& state)

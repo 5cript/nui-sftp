@@ -36,6 +36,7 @@ class TextSetting : public Setting<Disengageable, std::string>
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             ui5::input{
+                class_ = "setting-input",
                 "value"_prop = SettingBase::observedValueWithInheritance(),
                 observeEngagedToBool("disabled"_prop),
                 "change"_event = [this](Nui::val event){

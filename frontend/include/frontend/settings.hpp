@@ -43,7 +43,6 @@ class Settings
         };
 
         Nui::Observed<bool>& isCollapsed;
-        Nui::Observed<bool>* isEnabled = nullptr;
         Nui::ElementRenderer content;
         LanguageObservedText headerTitle;
         Nui::Observed<std::optional<std::string>>* currentGroupKey = nullptr;
@@ -91,6 +90,7 @@ class Settings
 
     void applySessionOptionsToState();
     void applySessionToState(std::string const& sessionId);
+    void applyReferencesToState();
 
     void reloadInheritables();
     void reloadInheritance();

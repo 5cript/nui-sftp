@@ -9,5 +9,5 @@
 struct GroupKeys
 {
     Nui::Observed<std::optional<std::string>> groupKey{std::nullopt};
-    Nui::Observed<std::vector<std::string>> groupKeys{{"default"}};
+    Nui::Observed<std::vector<std::string>> groupKeys{};
 };

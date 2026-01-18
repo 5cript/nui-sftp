@@ -45,6 +45,17 @@ namespace Persistence
         {
             ref_ = std::move(ref);
         }
+        void ref(std::optional<Reference> ref)
+        {
+            ref_ = std::move(ref);
+        }
+        void ref(std::optional<std::string> ref)
+        {
+            if (ref)
+                ref_ = Reference{std::move(*ref)};
+            else
+                ref_ = std::nullopt;
+        }
         bool hasReference() const
         {
             return ref_.has_value();
