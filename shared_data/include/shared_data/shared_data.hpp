@@ -13,6 +13,11 @@
 #    include <nui/frontend/utility/val_conversion.hpp>
 #endif
 
+#ifdef NUI_BACKEND
+#    include <boost/type_index.hpp>
+#endif
+#include <fmt/format.h>
+
 namespace SharedData
 {
     template <typename EnumT, typename EnumDescription = boost::describe::describe_enumerators<EnumT>>
@@ -255,20 +260,43 @@ namespace SharedData
         );
     }
 
+    template <typename T, typename ElementT, typename = void>
+    struct CanCallHandleMissingElementOnObject : std::false_type
+    {};
+
+    template <typename T, typename ElementT>
+    struct CanCallHandleMissingElementOnObject<
+        T,
+        ElementT,
+        std::void_t<decltype(std::declval<T>()
+                .handleMissingElement(std::declval<T&>(), std::declval<ElementT&>(), std::declval<char const*>()))>>
+        : std::true_type
+    {};
+
+    template <typename T, typename ElementT>
+    concept HasHandleMissingElementOnObject = CanCallHandleMissingElementOnObject<T, ElementT>::value;
+
     template <typename T, typename ElementT>
     void invokeElementMissingHandler(T&, ElementT&, char const* memberName)
     {
-        throw std::runtime_error(std::string("Missing required field '") + memberName + "' in JSON object");
+#ifdef NUI_BACKEND
+        throw std::runtime_error(
+            fmt::format(
+                "Missing required field '{}' in JSON object on type '{}'.",
+                memberName,
+                boost::typeindex::type_id<T>().pretty_name()
+            )
+        );
+#else
+        throw std::runtime_error(fmt::format("Missing required field '{}' in JSON object.", memberName));
+#endif
     }
 
-    template <
-        typename T,
-        typename ElementT,
-        typename Enable = std::void_t<
-            decltype(std::declval<T>().handleMissingElement(std::declval<ElementT&>(), std::declval<char const*>()))>>
+    template <typename T, typename ElementT>
+    requires(HasHandleMissingElementOnObject<T, ElementT>)
     void invokeElementMissingHandler(T& obj, ElementT& member, char const* memberName)
     {
-        obj.handleMissingElement(member, memberName);
+        obj.handleMissingElement(obj, member, memberName);
     }
 
     template <
@@ -299,7 +327,7 @@ namespace SharedData
                     if (j.contains(memAccessor.name))
                         Detail::from_json_impl(obj, j, j.at(memAccessor.name), obj.*memAccessor.pointer);
                     else
-                        invokeElementMissingHandler(obj, obj.*memAccessor.pointer, memAccessor.name);
+                        invokeElementMissingHandler(obj, memAccessor.pointer, memAccessor.name);
                 }
             }
         );
