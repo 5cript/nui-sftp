@@ -22,6 +22,7 @@
 
     &.uncollapsed {
         max-height: unset;
+        padding-bottom: 8px;
     }
 
     &.collapsed {
@@ -29,15 +30,6 @@
         border-radius: unset;
         padding: 0;
         padding-bottom: 0px;
-    }
-
-    &>span {
-        /* a fat header spanning across with large font */
-        font-size: 1.8rem;
-        font-weight: bold;
-        border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
-        margin: 0 16px;
-        grid-column: span 99;
     }
 }
 
