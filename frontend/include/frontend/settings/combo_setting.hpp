@@ -48,7 +48,18 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         , availableStates_{std::move(availableStates)}
         , iconAccessor_{std::move(iconAccessor)}
         , transform_{std::forward<decltype(valueTransformer)>(valueTransformer)}
-    {}
+    {
+        if (!transform_)
+        {
+            Log::error("ComboSetting: Invalid value transformer provided.");
+            throw std::invalid_argument("Invalid value transformer provided to ComboSetting.");
+        }
+        if (!iconAccessor_)
+        {
+            Log::error("ComboSetting: Invalid icon accessor provided.");
+            throw std::invalid_argument("Invalid icon accessor provided to ComboSetting.");
+        }
+    }
 
     Nui::ElementRenderer operator()(auto&& labelText)
     {
@@ -71,10 +82,15 @@ class ComboSetting : public Setting<Disengageable, ValueType>
                 },
                 SettingBase::observeEngagedToBool("disabled"_prop),
                 "value"_prop = observe(engaged_, state_, inheritedState_, inheritanceStatus_).generate(
-                    [this](bool engaged, auto const& value, std::optional<ValueType> const& inheritedValue, SettingBase::InheritanceStatus status) {
-                        if (!engaged && inheritedValue && status == SettingBase::InheritanceStatus::AncestorEngaged)
-                            return transform_(inheritedValue.value());
-                        return transform_(value);
+                    [this]() {
+                        try {
+                            if (!*engaged_ && *inheritedState_ && *inheritanceStatus_ == SettingBase::InheritanceStatus::AncestorEngaged)
+                                return transform_(**inheritedState_);
+                            return transform_(*state_);
+                        } catch (std::exception const& e) {
+                            Log::error("ComboSetting: Exception in value generation: {}", e.what());
+                            return TransformedType{};
+                        }
                     }
                 )
             }(
