@@ -7,7 +7,7 @@
 
 namespace Persistence
 {
-    struct UiOptions
+    struct UiOptions : public DefaultMissingMember
     {
         bool fileGridPathBarOnTop{false};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{

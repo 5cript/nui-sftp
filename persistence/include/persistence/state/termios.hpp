@@ -7,9 +7,9 @@
 
 namespace Persistence
 {
-    struct Termios
+    struct Termios : public DefaultMissingMember
     {
-        struct InputFlags
+        struct InputFlags : public DefaultMissingMember
         {
             std::optional<bool> IGNBRK_{std::nullopt};
             std::optional<bool> BRKINT_{std::nullopt};
@@ -52,7 +52,7 @@ namespace Persistence
         };
         InputFlags inputFlags{InputFlags{}};
 
-        struct OutputFlags
+        struct OutputFlags : public DefaultMissingMember
         {
             std::optional<bool> OPOST_{std::nullopt};
             std::optional<bool> OLCUC_{std::nullopt};
@@ -93,7 +93,7 @@ namespace Persistence
         };
         OutputFlags outputFlags{OutputFlags{}};
 
-        struct ControlFlags
+        struct ControlFlags : public DefaultMissingMember
         {
             std::optional<unsigned int> CBAUD_{std::nullopt};
             std::optional<bool> CBAUDEX_{std::nullopt};
@@ -132,7 +132,7 @@ namespace Persistence
         };
         ControlFlags controlFlags{ControlFlags{}};
 
-        struct LocalFlags
+        struct LocalFlags : public DefaultMissingMember
         {
             std::optional<bool> ISIG_{std::nullopt};
             std::optional<bool> ICANON_{std::nullopt};
@@ -175,7 +175,7 @@ namespace Persistence
         };
         LocalFlags localFlags{LocalFlags{}};
 
-        struct CC
+        struct CC : public DefaultMissingMember
         {
             unsigned char VDISCARD_{3};
             unsigned char VDSUSP_{28};

@@ -6,7 +6,7 @@
 
 namespace Persistence
 {
-    struct TerminalTheme
+    struct TerminalTheme : public DefaultMissingMember
     {
         std::optional<std::string> background{std::nullopt};
         std::optional<std::string> black{std::nullopt};

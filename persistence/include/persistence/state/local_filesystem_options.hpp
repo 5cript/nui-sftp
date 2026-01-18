@@ -7,7 +7,7 @@
 
 namespace Persistence
 {
-    struct LocalFilesystemOptions
+    struct LocalFilesystemOptions : public DefaultMissingMember
     {
         // by default, dont allow the user to delete files locally.
         bool preventDeletion{true};
