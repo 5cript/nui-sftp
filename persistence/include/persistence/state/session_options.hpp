@@ -27,7 +27,7 @@ namespace Persistence
     };
     BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, cmd, powershell, ssh);
 
-    struct ExecutingSessionOptions
+    struct ExecutingSessionOptions : public DefaultMissingMember
     {
         bool isPty{true};
         std::string command{};
@@ -42,10 +42,8 @@ namespace Persistence
         (isPty, command, arguments, environment, exitTimeoutSeconds, cleanEnvironment)
     )
 
-    struct SshSessionOptions
+    struct SshSessionOptions : public DefaultMissingMember
     {
-        Referenceable<SshOptions> sshOptions{};
-        Referenceable<SftpOptions> sftpOptions{};
         std::string host{};
         std::optional<int> port{std::nullopt};
         std::optional<std::string> user{std::nullopt};
@@ -71,7 +69,7 @@ namespace Persistence
             defaultDirectory)
     )
 
-    struct SessionOptions
+    struct SessionOptions : public DefaultMissingMember
     {
         std::string type{};
         std::optional<std::string> icon{};

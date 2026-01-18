@@ -9,7 +9,7 @@
 
 namespace Persistence
 {
-    struct TerminalOptions
+    struct TerminalOptions : public DefaultMissingMember
     {
         std::optional<std::string> fontFamily{std::nullopt};
         std::optional<unsigned int> fontSize{std::nullopt};

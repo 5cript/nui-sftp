@@ -4,7 +4,7 @@
 
 namespace Persistence
 {
-    struct SshOptions
+    struct SshOptions : public DefaultMissingMember
     {
         std::optional<std::filesystem::path> sshDirectory{std::nullopt};
         std::optional<std::filesystem::path> knownHostsFile{std::nullopt};

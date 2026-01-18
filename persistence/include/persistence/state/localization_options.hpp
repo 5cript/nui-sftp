@@ -6,7 +6,7 @@
 
 namespace Persistence
 {
-    struct LocalizationOptions
+    struct LocalizationOptions : public DefaultMissingMember
     {
         std::string languageCode{"en_US"};
         std::string dateTimeFormatString{"YYYY-MM-DD HH:mm:ss"};

@@ -8,7 +8,7 @@
 
 namespace Persistence
 {
-    struct CommonTransferOptions
+    struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};
         std::optional<bool> mayOverwrite{std::nullopt};

@@ -6,7 +6,7 @@
 
 namespace Persistence
 {
-    struct QueueOptions
+    struct QueueOptions : public DefaultMissingMember
     {
         std::optional<bool> autoRemoveCompletedOperations{std::nullopt};
         std::optional<bool> startInPausedState{std::nullopt};
