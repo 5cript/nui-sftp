@@ -107,7 +107,13 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+
+    &>div {
+        display: contents;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
 }
 
 .map-setting-table-container {
@@ -137,11 +143,53 @@
     }
 }
 
+.list-setting-table-container {
+    max-height: 300px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    -webkit-user-select: none;
+    user-select: none;
+
+    & ui5-table {
+        flex-grow: 1;
+    }
+}
+
+.list-setting-add-entry-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    align-items: flex-start;
+    margin: 1rem 2rem;
+
+    &>div {
+        display: grid;
+        width: 15rem;
+        margin-bottom: .5rem;
+    }
+}
+
+.setting-fixed {
+    margin-left: 30px;
+}
+
 .setting-disengageable {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: max-content 1fr;
     grid-template-rows: auto auto;
     margin-right: 16px;
+
+    &>ui5-checkbox {
+        /* span the row */
+        grid-row: 1 / -1;
+        margin-bottom: 8px;
+    }
+
+    &>ui5-label {
+        grid-column: 2;
+        align-self: center;
+    }
 }
 
 .setting-colorpicker {
@@ -155,4 +203,13 @@
     height: 24px;
     border: 1px solid var(--sapContent_ForegroundBorderColor);
     border-radius: 4px;
+}
+
+.settings-header {
+    /* a fat header spanning across with large font */
+    font-size: 1.8rem;
+    font-weight: bold;
+    border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
+    margin: 0 16px;
+    grid-column: 1 / -1;
 }
