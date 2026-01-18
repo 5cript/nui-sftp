@@ -21,24 +21,20 @@ class BoolSetting : public Setting<Disengageable, bool>
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
-    using SettingBase::disengageable;
     using SettingBase::observeEngagedToBool;
 
     using SettingBase::SettingBase;
 
-    Nui::ElementRenderer operator()(auto&& label)
+    Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
         // clang-format off
         return div{}(
-            disengageable(),
-            ui5::label{
-                style = "color: var(--sapTextColor); margin-right: 10px",
-            }(std::forward<decltype(label)>(label)),
+            SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             ui5::switch_{
-                "checked"_prop = state_,
+                "checked"_prop = SettingBase::observedValueWithInheritance(),
                 observeEngagedToBool("disabled"_prop),
                 "change"_event = [this](Nui::val event){
                     state_ = event["target"]["checked"].as<bool>();

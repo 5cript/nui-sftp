@@ -21,11 +21,14 @@ class ColorSetting : public Setting<Disengageable, std::string>
     using SettingBase = Setting<Disengageable, std::string>;
 
     using SettingBase::state_;
+    using SettingBase::inheritedState_;
+    using SettingBase::engaged_;
+    using SettingBase::inheritanceStatus_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
-    using SettingBase::disengageable;
     using SettingBase::observeEngagedToBool;
+    using SettingBase::observedValueWithInheritance;
 
     using SettingBase::SettingBase;
 
@@ -43,7 +46,7 @@ class ColorSetting : public Setting<Disengageable, std::string>
         }
     }
 
-    Nui::ElementRenderer operator()(auto&& label)
+    Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
@@ -52,21 +55,22 @@ class ColorSetting : public Setting<Disengageable, std::string>
 
         // clang-format off
         return div{}(
-            disengageable(),
-            ui5::label{
-                style = "color: var(--sapTextColor); margin-right: 10px",
-            }(std::forward<decltype(label)>(label)),
+            SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             div{
                 class_ = "setting-colorpicker"
             }(
                 div{
                     class_ = "setting-colorbox",
-                    style = observe(state_).generate([](std::string const& colorValue){
-                        return "background-color: " + colorValue + ";";
-                    }),
+                    style = observe(engaged_, state_, inheritedState_, inheritanceStatus_).generate(
+                        [](bool engaged, std::string const& colorValue, std::optional<std::string> const& inheritedValue, SettingBase::InheritanceStatus status) {
+                            if (!engaged && inheritedValue && status == SettingBase::InheritanceStatus::AncestorEngaged)
+                                return "background-color: " + *inheritedValue + ";";
+                            return "background-color: " + colorValue + ";";
+                        }
+                    ),
                 }(),
                 ui5::input{
-                    "value"_prop = state_,
+                    "value"_prop = observedValueWithInheritance(),
                     observeEngagedToBool("disabled"_prop),
                     "change"_event = [this](Nui::val event){
                         state_ = static_cast<std::string>(event["target"]["value"].as<std::string>());

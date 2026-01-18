@@ -30,17 +30,28 @@ class Settings
     Nui::ElementRenderer header();
     Nui::ElementRenderer generalSettings();
     Nui::ElementRenderer inheritableSettings();
+    Nui::ElementRenderer currentSession();
     Nui::ElementRenderer sections();
 
     struct GroupParameters
     {
+        enum class InheritanceBehavior
+        {
+            None,
+            Inheritable,
+            Inheriting
+        };
+
         Nui::Observed<bool>& isCollapsed;
         Nui::Observed<bool>* isEnabled = nullptr;
         Nui::ElementRenderer content;
         LanguageObservedText headerTitle;
-        Nui::Observed<std::string>* currentGroupKey = nullptr;
+        Nui::Observed<std::optional<std::string>>* currentGroupKey = nullptr;
         Nui::Observed<std::vector<std::string>>* groupKeys = nullptr;
-        bool isInheritableGroup = false;
+        InheritanceBehavior inheritanceBehavior = InheritanceBehavior::None;
+
+        Nui::Observed<Persistence::TerminalEngineType>* engineTypeFilter = nullptr;
+        Persistence::TerminalEngineType engineTypeFilterValue{Persistence::TerminalEngineType::ssh};
     };
     Nui::ElementRenderer group(GroupParameters&& params);
 
@@ -71,18 +82,19 @@ class Settings
     void onChange();
     void applySettingsToState(Persistence::State& state);
 
-    void loadTermiosSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
-    void loadSshSettingsFromStateByKey(std::string const& key, Persistence::State const& state);
-    void loadSftpOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
-    void loadTerminalOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
-    void loadQueueOptionsFromStateByKey(std::string const& key, Persistence::State const& state);
+    void loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadSshSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadSftpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadTerminalOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadQueueOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadSessionFromState(std::string const& sessionId);
 
-    void applyTermiosSettingsToStateByKey(std::string const& key, Persistence::State& state);
-    void applySshSettingsToStateByKey(std::string const& key, Persistence::State& state);
-    void applySftpOptionsToStateByKey(std::string const& key, Persistence::State& state);
-    void applyTerminalOptionsToStateByKey(std::string const& key, Persistence::State& state);
-    void applyQueueOptionsToStateByKey(std::string const& key, Persistence::State& state);
-    
+    void applySessionOptionsToState();
+    void applySessionToState(std::string const& sessionId);
+
+    void reloadInheritables();
+    void reloadInheritance();
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
