@@ -53,6 +53,12 @@ namespace Persistence
     }
     void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
+        if (!onLoadComplete)
+        {
+            Log::error("StateHolder::loadLanguageFile called with nullish onLoadComplete");
+            return;
+        }
+
         Nui::RpcClient::getRemoteCallableWithBackChannel(
             "StateHolder::loadLanguageFile",
             [onLoadComplete](Nui::val const& val) {
