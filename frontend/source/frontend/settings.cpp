@@ -7,6 +7,7 @@
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/queue_options.hpp>
 #include <frontend/settings/general_settings.hpp>
+#include <frontend/settings/session_options.hpp>
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/terminal_options.hpp>
@@ -46,6 +47,13 @@ struct Settings::Implementation
         Nui::Observed<bool> termios{false};
         Nui::Observed<bool> terminalOptions{false};
         Nui::Observed<bool> queueOptions{false};
+
+        struct SessionCollapsibles
+        {
+            Nui::Observed<bool> overarchingSettings{false};
+            Nui::Observed<bool> sshOptions{false};
+            Nui::Observed<bool> sftpOptions{false};
+        } sessionCollapsibles{};
     } collapsibleStates{};
 
     Persistence::StateHolder* stateHolder;
@@ -67,6 +75,10 @@ struct Settings::Implementation
     TerminalOptions terminalOptions;
     QueueOptions queueOptions;
 
+    // Values exchange here when switching, we dont have X session option uis, also because performance wise
+    // impractical.
+    SessionOptions currentSessionOptions;
+
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
@@ -84,6 +96,7 @@ struct Settings::Implementation
         , sftpOptions{onChange}
         , terminalOptions{onChange}
         , queueOptions{onChange}
+        , currentSessionOptions{onChange}
     {}
 };
 
@@ -153,19 +166,47 @@ void Settings::applySettingsToState(Persistence::State& state)
     state.localFilesystemOptions.homeOverride = impl_->generalSettings.localFilesystemOptions.homeOverride.value();
 
     // Termios
-    applyTermiosSettingsToStateByKey(impl_->termiosSettings.groupKey.value(), state);
+    if (impl_->termiosSettings.groupKey.value())
+    {
+        Persistence::Termios termiosEntry{};
+        impl_->termiosSettings.applyToState(termiosEntry);
+        state.termios[*impl_->termiosSettings.groupKey.value()] = std::move(termiosEntry);
+    }
 
     // SSH Options:
-    applySshSettingsToStateByKey(impl_->sshOptions.groupKey.value(), state);
+    if (impl_->sshOptions.groupKey.value())
+    {
+        Persistence::SshOptions sshOptionsEntry{};
+        impl_->sshOptions.applyToState(sshOptionsEntry);
+        state.sshOptions[*impl_->sshOptions.groupKey.value()] = std::move(sshOptionsEntry);
+    }
 
     // SftpOptions:
-    applySftpOptionsToStateByKey(impl_->sftpOptions.groupKey.value(), state);
+    if (impl_->sftpOptions.groupKey.value())
+    {
+        Persistence::SftpOptions sftpOptionsEntry{};
+        impl_->sftpOptions.applyToState(sftpOptionsEntry);
+        state.sftpOptions[*impl_->sftpOptions.groupKey.value()] = std::move(sftpOptionsEntry);
+    }
 
     // Terminal Options
-    applyTerminalOptionsToStateByKey(impl_->terminalOptions.groupKey.value(), state);
+    if (impl_->terminalOptions.groupKey.value())
+    {
+        Persistence::TerminalOptions terminalOptionsEntry{};
+        impl_->terminalOptions.applyToState(terminalOptionsEntry);
+        state.terminalOptions[*impl_->terminalOptions.groupKey.value()] = std::move(terminalOptionsEntry);
+    }
 
     // Queue Options:
-    applyQueueOptionsToStateByKey(impl_->queueOptions.groupKey.value(), state);
+    if (impl_->queueOptions.groupKey.value())
+    {
+        Persistence::QueueOptions queueOptionsEntry{};
+        impl_->queueOptions.applyToState(queueOptionsEntry);
+        state.queueOptions[*impl_->queueOptions.groupKey.value()] = std::move(queueOptionsEntry);
+    }
+
+    // Session Options:
+    applySessionOptionsToState();
 }
 
 void Settings::applySettingsToUi()
@@ -185,10 +226,11 @@ void Settings::applySettingsToUi()
                     Settings::SectionSelectorOptions{
                         .thisSection = Settings::Section::Session,
                         .sessionId = sessionId,
-                        .icon = session.icon.value_or("it-system"),
+                        .icon = !session.icon.empty() ? session.icon : "it-system"s,
                     }
                 );
             }
+            impl_->sessionSelectors.modify();
 
             impl_->generalSettings.logLevel.value(impl_->stateHolder->stateCache().logLevel);
             impl_->generalSettings.localization.language.value(
@@ -260,504 +302,109 @@ void Settings::applySettingsToUi()
             impl_->queueOptions.groupKeys = groupKeys(impl_->stateHolder->stateCache().queueOptions);
             loadQueueOptionsFromStateByKey(impl_->queueOptions.groupKey.value(), impl_->stateHolder->stateCache());
 
+            if (*impl_->activeSection == Section::Session && *impl_->activeSession)
+            {
+                const auto sessionId = **impl_->activeSession;
+                if (impl_->stateHolder->stateCache().sessions.contains(sessionId))
+                {
+                    impl_->currentSessionOptions.loadFromState(impl_->stateHolder->stateCache().sessions.at(sessionId));
+                }
+            }
+
+            reloadInheritance();
+
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
 }
 
-void Settings::loadTermiosSettingsFromStateByKey(std::string const& key, Persistence::State const& state)
+void Settings::loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
 {
-    if (!state.termios.contains(key))
+    if (!key || !state.termios.contains(*key))
+        return;
+    impl_->termiosSettings.loadFromState(state.termios.at(*key));
+}
+void Settings::loadSshSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
+{
+    if (!key || !state.sshOptions.contains(*key))
+        return;
+    impl_->sshOptions.loadFromState(state.sshOptions.at(*key));
+}
+void Settings::loadSftpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
+{
+    if (!key || !state.sftpOptions.contains(*key))
         return;
 
-    auto const& termiosState = state.termios.at(key);
-
-    impl_->termiosSettings.inputFlags.IGNBRK.value(termiosState.inputFlags.IGNBRK_);
-    impl_->termiosSettings.inputFlags.BRKINT.value(termiosState.inputFlags.BRKINT_);
-    impl_->termiosSettings.inputFlags.IGNPAR.value(termiosState.inputFlags.IGNPAR_);
-    impl_->termiosSettings.inputFlags.PARMRK.value(termiosState.inputFlags.PARMRK_);
-    impl_->termiosSettings.inputFlags.INPCK.value(termiosState.inputFlags.INPCK_);
-    impl_->termiosSettings.inputFlags.ISTRIP.value(termiosState.inputFlags.ISTRIP_);
-    impl_->termiosSettings.inputFlags.INLCR.value(termiosState.inputFlags.INLCR_);
-    impl_->termiosSettings.inputFlags.IGNCR.value(termiosState.inputFlags.IGNCR_);
-    impl_->termiosSettings.inputFlags.ICRNL.value(termiosState.inputFlags.ICRNL_);
-    impl_->termiosSettings.inputFlags.IUCLC.value(termiosState.inputFlags.IUCLC_);
-    impl_->termiosSettings.inputFlags.IXON.value(termiosState.inputFlags.IXON_);
-    impl_->termiosSettings.inputFlags.IXANY.value(termiosState.inputFlags.IXANY_);
-    impl_->termiosSettings.inputFlags.IXOFF.value(termiosState.inputFlags.IXOFF_);
-    impl_->termiosSettings.inputFlags.IMAXBEL.value(termiosState.inputFlags.IMAXBEL_);
-    impl_->termiosSettings.inputFlags.IUTF8.value(termiosState.inputFlags.IUTF8_);
-
-    impl_->termiosSettings.outputFlags.OPOST.value(termiosState.outputFlags.OPOST_);
-    impl_->termiosSettings.outputFlags.OLCUC.value(termiosState.outputFlags.OLCUC_);
-    impl_->termiosSettings.outputFlags.ONLCR.value(termiosState.outputFlags.ONLCR_);
-    impl_->termiosSettings.outputFlags.OCRNL.value(termiosState.outputFlags.OCRNL_);
-    impl_->termiosSettings.outputFlags.ONOCR.value(termiosState.outputFlags.ONOCR_);
-    impl_->termiosSettings.outputFlags.ONLRET.value(termiosState.outputFlags.ONLRET_);
-    impl_->termiosSettings.outputFlags.OFILL.value(termiosState.outputFlags.OFILL_);
-    impl_->termiosSettings.outputFlags.OFDEL.value(termiosState.outputFlags.OFDEL_);
-    impl_->termiosSettings.outputFlags.NLDLY.value(termiosState.outputFlags.NLDLY_);
-    impl_->termiosSettings.outputFlags.CRDLY.value(termiosState.outputFlags.CRDLY_);
-    impl_->termiosSettings.outputFlags.TABDLY.value(termiosState.outputFlags.TABDLY_);
-    impl_->termiosSettings.outputFlags.BSDLY.value(termiosState.outputFlags.BSDLY_);
-    impl_->termiosSettings.outputFlags.VTDLY.value(termiosState.outputFlags.VTDLY_);
-    impl_->termiosSettings.outputFlags.FFDLY.value(termiosState.outputFlags.FFDLY_);
-
-    impl_->termiosSettings.controlFlags.CBAUD.value(termiosState.controlFlags.CBAUD_);
-    impl_->termiosSettings.controlFlags.CBAUDEX.value(termiosState.controlFlags.CBAUDEX_);
-    impl_->termiosSettings.controlFlags.CSIZE.value(termiosState.controlFlags.CSIZE_);
-    impl_->termiosSettings.controlFlags.CSTOPB.value(termiosState.controlFlags.CSTOPB_);
-    impl_->termiosSettings.controlFlags.CREAD.value(termiosState.controlFlags.CREAD_);
-    impl_->termiosSettings.controlFlags.PARENB.value(termiosState.controlFlags.PARENB_);
-    impl_->termiosSettings.controlFlags.PARODD.value(termiosState.controlFlags.PARODD_);
-    impl_->termiosSettings.controlFlags.HUPCL.value(termiosState.controlFlags.HUPCL_);
-    impl_->termiosSettings.controlFlags.CLOCAL.value(termiosState.controlFlags.CLOCAL_);
-    impl_->termiosSettings.controlFlags.LOBLK.value(termiosState.controlFlags.LOBLK_);
-    impl_->termiosSettings.controlFlags.CIBAUD.value(termiosState.controlFlags.CIBAUD_);
-    impl_->termiosSettings.controlFlags.CMSPAR.value(termiosState.controlFlags.CMSPAR_);
-    impl_->termiosSettings.controlFlags.CRTSCTS.value(termiosState.controlFlags.CRTSCTS_);
-
-    impl_->termiosSettings.localFlags.ISIG.value(termiosState.localFlags.ISIG_);
-    impl_->termiosSettings.localFlags.ICANON.value(termiosState.localFlags.ICANON_);
-    impl_->termiosSettings.localFlags.XCASE.value(termiosState.localFlags.XCASE_);
-    impl_->termiosSettings.localFlags.ECHO.value(termiosState.localFlags.ECHO_);
-    impl_->termiosSettings.localFlags.ECHOE.value(termiosState.localFlags.ECHOE_);
-    impl_->termiosSettings.localFlags.ECHOK.value(termiosState.localFlags.ECHOK_);
-    impl_->termiosSettings.localFlags.ECHONL.value(termiosState.localFlags.ECHONL_);
-    impl_->termiosSettings.localFlags.ECHOCTL.value(termiosState.localFlags.ECHOCTL_);
-    impl_->termiosSettings.localFlags.ECHOPRT.value(termiosState.localFlags.ECHOPRT_);
-    impl_->termiosSettings.localFlags.ECHOKE.value(termiosState.localFlags.ECHOKE_);
-    impl_->termiosSettings.localFlags.FLUSHO.value(termiosState.localFlags.FLUSHO_);
-    impl_->termiosSettings.localFlags.NOFLSH.value(termiosState.localFlags.NOFLSH_);
-    impl_->termiosSettings.localFlags.TOSTOP.value(termiosState.localFlags.TOSTOP_);
-    impl_->termiosSettings.localFlags.PENDIN.value(termiosState.localFlags.PENDIN_);
-    impl_->termiosSettings.localFlags.IEXTEN.value(termiosState.localFlags.IEXTEN_);
-
-    impl_->termiosSettings.ccEngaged = termiosState.cc.has_value();
-    if (impl_->termiosSettings.ccEngaged.value())
-    {
-        impl_->termiosSettings.cc.VDISCARD.value(termiosState.cc->VDISCARD_);
-        impl_->termiosSettings.cc.VDSUSP.value(termiosState.cc->VDSUSP_);
-        impl_->termiosSettings.cc.VEOF.value(termiosState.cc->VEOF_);
-        impl_->termiosSettings.cc.VEOL.value(termiosState.cc->VEOL_);
-        impl_->termiosSettings.cc.VEOL2.value(termiosState.cc->VEOL2_);
-        impl_->termiosSettings.cc.VERASE.value(termiosState.cc->VERASE_);
-        impl_->termiosSettings.cc.VINTR.value(termiosState.cc->VINTR_);
-        impl_->termiosSettings.cc.VKILL.value(termiosState.cc->VKILL_);
-        impl_->termiosSettings.cc.VLNEXT.value(termiosState.cc->VLNEXT_);
-        impl_->termiosSettings.cc.VMIN.value(termiosState.cc->VMIN_);
-        impl_->termiosSettings.cc.VQUIT.value(termiosState.cc->VQUIT_);
-        impl_->termiosSettings.cc.VREPRINT.value(termiosState.cc->VREPRINT_);
-        impl_->termiosSettings.cc.VSTART.value(termiosState.cc->VSTART_);
-        impl_->termiosSettings.cc.VSTATUS.value(termiosState.cc->VSTATUS_);
-        impl_->termiosSettings.cc.VSTOP.value(termiosState.cc->VSTOP_);
-        impl_->termiosSettings.cc.VSUSP.value(termiosState.cc->VSUSP_);
-        impl_->termiosSettings.cc.VSWTCH.value(termiosState.cc->VSWTCH_);
-        impl_->termiosSettings.cc.VTIME.value(termiosState.cc->VTIME_);
-        impl_->termiosSettings.cc.VWERASE.value(termiosState.cc->VWERASE_);
-    }
-    else
-    {
-        // All defaults:
-        impl_->termiosSettings.cc.VDISCARD.value(Persistence::Termios::CC{}.VDISCARD_);
-        impl_->termiosSettings.cc.VDSUSP.value(Persistence::Termios::CC{}.VDSUSP_);
-        impl_->termiosSettings.cc.VEOF.value(Persistence::Termios::CC{}.VEOF_);
-        impl_->termiosSettings.cc.VEOL.value(Persistence::Termios::CC{}.VEOL_);
-        impl_->termiosSettings.cc.VEOL2.value(Persistence::Termios::CC{}.VEOL2_);
-        impl_->termiosSettings.cc.VERASE.value(Persistence::Termios::CC{}.VERASE_);
-        impl_->termiosSettings.cc.VINTR.value(Persistence::Termios::CC{}.VINTR_);
-        impl_->termiosSettings.cc.VKILL.value(Persistence::Termios::CC{}.VKILL_);
-        impl_->termiosSettings.cc.VLNEXT.value(Persistence::Termios::CC{}.VLNEXT_);
-        impl_->termiosSettings.cc.VMIN.value(Persistence::Termios::CC{}.VMIN_);
-        impl_->termiosSettings.cc.VQUIT.value(Persistence::Termios::CC{}.VQUIT_);
-        impl_->termiosSettings.cc.VREPRINT.value(Persistence::Termios::CC{}.VREPRINT_);
-        impl_->termiosSettings.cc.VSTART.value(Persistence::Termios::CC{}.VSTART_);
-        impl_->termiosSettings.cc.VSTATUS.value(Persistence::Termios::CC{}.VSTATUS_);
-        impl_->termiosSettings.cc.VSTOP.value(Persistence::Termios::CC{}.VSTOP_);
-        impl_->termiosSettings.cc.VSUSP.value(Persistence::Termios::CC{}.VSUSP_);
-        impl_->termiosSettings.cc.VSWTCH.value(Persistence::Termios::CC{}.VSWTCH_);
-        impl_->termiosSettings.cc.VTIME.value(Persistence::Termios::CC{}.VTIME_);
-        impl_->termiosSettings.cc.VWERASE.value(Persistence::Termios::CC{}.VWERASE_);
-    }
-
-    impl_->termiosSettings.iSpeed.value(termiosState.iSpeed);
-    impl_->termiosSettings.oSpeed.value(termiosState.oSpeed);
+    impl_->sftpOptions.loadFromState(state.sftpOptions.at(*key));
 }
-void Settings::loadSshSettingsFromStateByKey(std::string const& key, Persistence::State const& state)
+void Settings::loadTerminalOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
 {
-    if (!state.sshOptions.contains(key))
+    if (!key || !state.terminalOptions.contains(*key))
+        return;
+    impl_->terminalOptions.loadFromState(state.terminalOptions.at(*key));
+}
+void Settings::loadQueueOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
+{
+    if (!key || !state.queueOptions.contains(*key))
+        return;
+    impl_->queueOptions.loadFromState(state.queueOptions.at(*key));
+}
+
+void Settings::applySessionOptionsToState()
+{
+    if (*impl_->activeSection != Section::Session || !*impl_->activeSession)
+        return;
+    applySessionToState(**impl_->activeSession);
+}
+void Settings::reloadInheritables()
+{
+    if (*impl_->activeSection != Section::GlobalInheritables)
         return;
 
-    const auto& sshOptions = state.sshOptions.at(key);
-
-    impl_->sshOptions.sshDirectory.value(pathOptionalToStringOptional(sshOptions.sshDirectory));
-    impl_->sshOptions.knownHostsFile.value(pathOptionalToStringOptional(sshOptions.knownHostsFile));
-    impl_->sshOptions.tryAgentForAuthentication.value(sshOptions.tryAgentForAuthentication);
-    impl_->sshOptions.usePublicKeyAutoAuth.value(sshOptions.usePublicKeyAutoAuth);
-    impl_->sshOptions.logVerbosity.value(sshOptions.logVerbosity);
-    impl_->sshOptions.keyExchangeAlgorithms.value(sshOptions.keyExchangeAlgorithms);
-    impl_->sshOptions.compressionClientToServer.value(sshOptions.compressionClientToServer);
-    impl_->sshOptions.compressionServerToClient.value(sshOptions.compressionServerToClient);
-    impl_->sshOptions.compressionLevel.value(sshOptions.compressionLevel);
-    impl_->sshOptions.strictHostKeyCheck.value(sshOptions.strictHostKeyCheck);
-    impl_->sshOptions.proxyCommand.value(sshOptions.proxyCommand);
-    impl_->sshOptions.gssapiServerIdentity.value(sshOptions.gssapiServerIdentity);
-    impl_->sshOptions.gssapiClientIdentity.value(sshOptions.gssapiClientIdentity);
-    impl_->sshOptions.gssapiDelegateCredentials.value(sshOptions.gssapiDelegateCredentials);
-    impl_->sshOptions.noDelay.value(sshOptions.noDelay);
-    impl_->sshOptions.bypassConfig.value(sshOptions.bypassConfig);
-    impl_->sshOptions.identityAgent.value(sshOptions.identityAgent);
-    impl_->sshOptions.connectTimeoutSeconds.value(sshOptions.connectTimeoutSeconds);
-    impl_->sshOptions.connectTimeoutUSeconds.value(sshOptions.connectTimeoutUSeconds);
-}
-void Settings::loadSftpOptionsFromStateByKey(std::string const& key, Persistence::State const& state)
-{
-    if (!state.sftpOptions.contains(key))
-        return;
-
-    const auto& sftpOptions = state.sftpOptions.at(key);
-
-    impl_->sftpOptions.downloadOptionsEngaged = sftpOptions.downloadOptions.has_value();
-    if (impl_->sftpOptions.downloadOptionsEngaged.value())
-    {
-        impl_->sftpOptions.downloadOptions.tempFileSuffix.value(sftpOptions.downloadOptions->tempFileSuffix);
-        impl_->sftpOptions.downloadOptions.mayOverwrite.value(sftpOptions.downloadOptions->mayOverwrite);
-        impl_->sftpOptions.downloadOptions.tryContinue.value(sftpOptions.downloadOptions->tryContinue);
-        impl_->sftpOptions.downloadOptions.inheritPermissions.value(sftpOptions.downloadOptions->inheritPermissions);
-        impl_->sftpOptions.downloadOptions.customPermissions.value(
-            filesystemPermsOptionalToUShortOptional(sftpOptions.downloadOptions->customPermissions)
-        );
-        impl_->sftpOptions.downloadOptions.reserveSpace.value(sftpOptions.downloadOptions->reserveSpace);
-        impl_->sftpOptions.downloadOptions.doCleanup.value(sftpOptions.downloadOptions->doCleanup);
-    }
-    else
-    {
-        // All defaults:
-        impl_->sftpOptions.downloadOptions.tempFileSuffix.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.mayOverwrite.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.tryContinue.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.inheritPermissions.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.customPermissions.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.reserveSpace.value(std::nullopt);
-        impl_->sftpOptions.downloadOptions.doCleanup.value(std::nullopt);
-    }
-
-    impl_->sftpOptions.uploadOptionsEngaged = sftpOptions.uploadOptions.has_value();
-    if (!sftpOptions.uploadOptions.has_value())
-    {
-        // All defaults:
-        impl_->sftpOptions.uploadOptions.tempFileSuffix.value(std::nullopt);
-        impl_->sftpOptions.uploadOptions.mayOverwrite.value(std::nullopt);
-        impl_->sftpOptions.uploadOptions.tryContinue.value(std::nullopt);
-        impl_->sftpOptions.uploadOptions.inheritPermissions.value(std::nullopt);
-        impl_->sftpOptions.uploadOptions.customPermissions.value(std::nullopt);
-    }
-    else
-    {
-        impl_->sftpOptions.uploadOptions.tempFileSuffix.value(sftpOptions.uploadOptions->tempFileSuffix);
-        impl_->sftpOptions.uploadOptions.mayOverwrite.value(sftpOptions.uploadOptions->mayOverwrite);
-        impl_->sftpOptions.uploadOptions.tryContinue.value(sftpOptions.uploadOptions->tryContinue);
-        impl_->sftpOptions.uploadOptions.inheritPermissions.value(sftpOptions.uploadOptions->inheritPermissions);
-        impl_->sftpOptions.uploadOptions.customPermissions.value(
-            filesystemPermsOptionalToUShortOptional(sftpOptions.uploadOptions->customPermissions)
-        );
-    }
-    impl_->sftpOptions.concurrency.value(sftpOptions.concurrency);
-    impl_->sftpOptions.operationTimeoutSeconds.value(sftpOptions.operationTimeout.count());
-}
-void Settings::loadTerminalOptionsFromStateByKey(std::string const& key, Persistence::State const& state)
-{
-    if (!state.terminalOptions.contains(key))
-        return;
-
-    const auto& terminalOptions = state.terminalOptions.at(key);
-
-    impl_->terminalOptions.fontFamily.value(terminalOptions.fontFamily);
-    impl_->terminalOptions.fontSize.value(terminalOptions.fontSize);
-    impl_->terminalOptions.lineHeight.value(terminalOptions.lineHeight);
-    impl_->terminalOptions.cursorBlink.value(terminalOptions.cursorBlink);
-    impl_->terminalOptions.renderer.value(terminalOptions.renderer);
-    impl_->terminalOptions.letterSpacing.value(terminalOptions.letterSpacing);
-
-    impl_->terminalOptions.themeEngaged = terminalOptions.theme.has_value();
-    if (terminalOptions.theme.has_value())
-    {
-        const auto& theme = terminalOptions.theme.value();
-        impl_->terminalOptions.theme.background.value(theme.background);
-        impl_->terminalOptions.theme.black.value(theme.black);
-        impl_->terminalOptions.theme.blue.value(theme.blue);
-        impl_->terminalOptions.theme.brightBlack.value(theme.brightBlack);
-        impl_->terminalOptions.theme.brightBlue.value(theme.brightBlue);
-        impl_->terminalOptions.theme.brightCyan.value(theme.brightCyan);
-        impl_->terminalOptions.theme.brightGreen.value(theme.brightGreen);
-        impl_->terminalOptions.theme.brightMagenta.value(theme.brightMagenta);
-        impl_->terminalOptions.theme.brightRed.value(theme.brightRed);
-        impl_->terminalOptions.theme.brightWhite.value(theme.brightWhite);
-        impl_->terminalOptions.theme.brightYellow.value(theme.brightYellow);
-        impl_->terminalOptions.theme.cursor.value(theme.cursor);
-        impl_->terminalOptions.theme.cursorAccent.value(theme.cursorAccent);
-        impl_->terminalOptions.theme.cyan.value(theme.cyan);
-        impl_->terminalOptions.theme.foreground.value(theme.foreground);
-        impl_->terminalOptions.theme.green.value(theme.green);
-        impl_->terminalOptions.theme.magenta.value(theme.magenta);
-        impl_->terminalOptions.theme.red.value(theme.red);
-        impl_->terminalOptions.theme.selectionBackground.value(theme.selectionBackground);
-        impl_->terminalOptions.theme.selectionForeground.value(theme.selectionForeground);
-        impl_->terminalOptions.theme.selectionInactiveBackground.value(theme.selectionInactiveBackground);
-        impl_->terminalOptions.theme.white.value(theme.white);
-        impl_->terminalOptions.theme.yellow.value(theme.yellow);
-    }
-    else
-    {
-        // All defaults:
-        impl_->terminalOptions.theme.background.value(std::nullopt);
-        impl_->terminalOptions.theme.black.value(std::nullopt);
-        impl_->terminalOptions.theme.blue.value(std::nullopt);
-        impl_->terminalOptions.theme.brightBlack.value(std::nullopt);
-        impl_->terminalOptions.theme.brightBlue.value(std::nullopt);
-        impl_->terminalOptions.theme.brightCyan.value(std::nullopt);
-        impl_->terminalOptions.theme.brightGreen.value(std::nullopt);
-        impl_->terminalOptions.theme.brightMagenta.value(std::nullopt);
-        impl_->terminalOptions.theme.brightRed.value(std::nullopt);
-        impl_->terminalOptions.theme.brightWhite.value(std::nullopt);
-        impl_->terminalOptions.theme.brightYellow.value(std::nullopt);
-        impl_->terminalOptions.theme.cursor.value(std::nullopt);
-        impl_->terminalOptions.theme.cursorAccent.value(std::nullopt);
-        impl_->terminalOptions.theme.cyan.value(std::nullopt);
-        impl_->terminalOptions.theme.foreground.value(std::nullopt);
-        impl_->terminalOptions.theme.green.value(std::nullopt);
-        impl_->terminalOptions.theme.magenta.value(std::nullopt);
-        impl_->terminalOptions.theme.red.value(std::nullopt);
-        impl_->terminalOptions.theme.selectionBackground.value(std::nullopt);
-        impl_->terminalOptions.theme.selectionForeground.value(std::nullopt);
-        impl_->terminalOptions.theme.selectionInactiveBackground.value(std::nullopt);
-        impl_->terminalOptions.theme.white.value(std::nullopt);
-        impl_->terminalOptions.theme.yellow.value(std::nullopt);
-    }
-}
-void Settings::loadQueueOptionsFromStateByKey(std::string const& key, Persistence::State const& state)
-{
-    if (!state.queueOptions.contains(key))
-        return;
-
-    const auto& queueOptions = state.queueOptions.at(key);
-
-    impl_->queueOptions.autoRemoveCompletedOperations.value(queueOptions.autoRemoveCompletedOperations);
-    impl_->queueOptions.startInPausedState.value(queueOptions.startInPausedState);
+    loadTermiosSettingsFromStateByKey(impl_->termiosSettings.groupKey.value(), impl_->stateHolder->stateCache());
+    loadSshSettingsFromStateByKey(impl_->sshOptions.groupKey.value(), impl_->stateHolder->stateCache());
+    loadSftpOptionsFromStateByKey(impl_->sftpOptions.groupKey.value(), impl_->stateHolder->stateCache());
+    loadTerminalOptionsFromStateByKey(impl_->terminalOptions.groupKey.value(), impl_->stateHolder->stateCache());
+    loadQueueOptionsFromStateByKey(impl_->queueOptions.groupKey.value(), impl_->stateHolder->stateCache());
 }
 
-void Settings::applyTermiosSettingsToStateByKey(std::string const& key, Persistence::State& state)
+void Settings::reloadInheritance()
 {
-    Persistence::Termios termiosEntry{
-        .inputFlags =
-            Persistence::Termios::InputFlags{
-                .IGNBRK_ = impl_->termiosSettings.inputFlags.IGNBRK.value(),
-                .BRKINT_ = impl_->termiosSettings.inputFlags.BRKINT.value(),
-                .IGNPAR_ = impl_->termiosSettings.inputFlags.IGNPAR.value(),
-                .PARMRK_ = impl_->termiosSettings.inputFlags.PARMRK.value(),
-                .INPCK_ = impl_->termiosSettings.inputFlags.INPCK.value(),
-                .ISTRIP_ = impl_->termiosSettings.inputFlags.ISTRIP.value(),
-                .INLCR_ = impl_->termiosSettings.inputFlags.INLCR.value(),
-                .IGNCR_ = impl_->termiosSettings.inputFlags.IGNCR.value(),
-                .ICRNL_ = impl_->termiosSettings.inputFlags.ICRNL.value(),
-                .IUCLC_ = impl_->termiosSettings.inputFlags.IUCLC.value(),
-                .IXON_ = impl_->termiosSettings.inputFlags.IXON.value(),
-                .IXANY_ = impl_->termiosSettings.inputFlags.IXANY.value(),
-                .IXOFF_ = impl_->termiosSettings.inputFlags.IXOFF.value(),
-                .IMAXBEL_ = impl_->termiosSettings.inputFlags.IMAXBEL.value(),
-                .IUTF8_ = impl_->termiosSettings.inputFlags.IUTF8.value(),
-            },
-        .outputFlags =
-            Persistence::Termios::OutputFlags{
-                .OPOST_ = impl_->termiosSettings.outputFlags.OPOST.value(),
-                .OLCUC_ = impl_->termiosSettings.outputFlags.OLCUC.value(),
-                .ONLCR_ = impl_->termiosSettings.outputFlags.ONLCR.value(),
-                .OCRNL_ = impl_->termiosSettings.outputFlags.OCRNL.value(),
-                .ONOCR_ = impl_->termiosSettings.outputFlags.ONOCR.value(),
-                .ONLRET_ = impl_->termiosSettings.outputFlags.ONLRET.value(),
-                .OFILL_ = impl_->termiosSettings.outputFlags.OFILL.value(),
-                .OFDEL_ = impl_->termiosSettings.outputFlags.OFDEL.value(),
-                .NLDLY_ = impl_->termiosSettings.outputFlags.NLDLY.value(),
-                .CRDLY_ = impl_->termiosSettings.outputFlags.CRDLY.value(),
-                .TABDLY_ = impl_->termiosSettings.outputFlags.TABDLY.value(),
-                .BSDLY_ = impl_->termiosSettings.outputFlags.BSDLY.value(),
-                .VTDLY_ = impl_->termiosSettings.outputFlags.VTDLY.value(),
-                .FFDLY_ = impl_->termiosSettings.outputFlags.FFDLY.value(),
-            },
-        .controlFlags =
-            Persistence::Termios::ControlFlags{
-                .CBAUD_ = impl_->termiosSettings.controlFlags.CBAUD.value(),
-                .CBAUDEX_ = impl_->termiosSettings.controlFlags.CBAUDEX.value(),
-                .CSIZE_ = impl_->termiosSettings.controlFlags.CSIZE.value(),
-                .CSTOPB_ = impl_->termiosSettings.controlFlags.CSTOPB.value(),
-                .CREAD_ = impl_->termiosSettings.controlFlags.CREAD.value(),
-                .PARENB_ = impl_->termiosSettings.controlFlags.PARENB.value(),
-                .PARODD_ = impl_->termiosSettings.controlFlags.PARODD.value(),
-                .HUPCL_ = impl_->termiosSettings.controlFlags.HUPCL.value(),
-                .CLOCAL_ = impl_->termiosSettings.controlFlags.CLOCAL.value(),
-                .LOBLK_ = impl_->termiosSettings.controlFlags.LOBLK.value(),
-                .CIBAUD_ = impl_->termiosSettings.controlFlags.CIBAUD.value(),
-                .CMSPAR_ = impl_->termiosSettings.controlFlags.CMSPAR.value(),
-                .CRTSCTS_ = impl_->termiosSettings.controlFlags.CRTSCTS.value(),
-            },
-        .localFlags =
-            Persistence::Termios::LocalFlags{
-                .ISIG_ = impl_->termiosSettings.localFlags.ISIG.value(),
-                .ICANON_ = impl_->termiosSettings.localFlags.ICANON.value(),
-                .XCASE_ = impl_->termiosSettings.localFlags.XCASE.value(),
-                .ECHO_ = impl_->termiosSettings.localFlags.ECHO.value(),
-                .ECHOE_ = impl_->termiosSettings.localFlags.ECHOE.value(),
-                .ECHOK_ = impl_->termiosSettings.localFlags.ECHOK.value(),
-                .ECHONL_ = impl_->termiosSettings.localFlags.ECHONL.value(),
-                .ECHOCTL_ = impl_->termiosSettings.localFlags.ECHOCTL.value(),
-                .ECHOPRT_ = impl_->termiosSettings.localFlags.ECHOPRT.value(),
-                .ECHOKE_ = impl_->termiosSettings.localFlags.ECHOKE.value(),
-                .FLUSHO_ = impl_->termiosSettings.localFlags.FLUSHO.value(),
-                .NOFLSH_ = impl_->termiosSettings.localFlags.NOFLSH.value(),
-                .TOSTOP_ = impl_->termiosSettings.localFlags.TOSTOP.value(),
-                .PENDIN_ = impl_->termiosSettings.localFlags.PENDIN.value(),
-                .IEXTEN_ = impl_->termiosSettings.localFlags.IEXTEN.value(),
-            },
-        .cc = impl_->termiosSettings.ccEngaged.value()
-            ? std::optional<Persistence::Termios::CC>{Persistence::Termios::CC{
-                  .VDISCARD_ = impl_->termiosSettings.cc.VDISCARD.value(),
-                  .VDSUSP_ = impl_->termiosSettings.cc.VDSUSP.value(),
-                  .VEOF_ = impl_->termiosSettings.cc.VEOF.value(),
-                  .VEOL_ = impl_->termiosSettings.cc.VEOL.value(),
-                  .VEOL2_ = impl_->termiosSettings.cc.VEOL2.value(),
-                  .VERASE_ = impl_->termiosSettings.cc.VERASE.value(),
-                  .VINTR_ = impl_->termiosSettings.cc.VINTR.value(),
-                  .VKILL_ = impl_->termiosSettings.cc.VKILL.value(),
-                  .VLNEXT_ = impl_->termiosSettings.cc.VLNEXT.value(),
-                  .VMIN_ = impl_->termiosSettings.cc.VMIN.value(),
-                  .VQUIT_ = impl_->termiosSettings.cc.VQUIT.value(),
-                  .VREPRINT_ = impl_->termiosSettings.cc.VREPRINT.value(),
-                  .VSTART_ = impl_->termiosSettings.cc.VSTART.value(),
-                  .VSTATUS_ = impl_->termiosSettings.cc.VSTATUS.value(),
-                  .VSTOP_ = impl_->termiosSettings.cc.VSTOP.value(),
-                  .VSUSP_ = impl_->termiosSettings.cc.VSUSP.value(),
-                  .VSWTCH_ = impl_->termiosSettings.cc.VSWTCH.value(),
-                  .VTIME_ = impl_->termiosSettings.cc.VTIME.value(),
-                  .VWERASE_ = impl_->termiosSettings.cc.VWERASE.value(),
-              }}
-            : std::nullopt,
-        .iSpeed = impl_->termiosSettings.iSpeed.value(),
-        .oSpeed = impl_->termiosSettings.oSpeed.value(),
+    auto assumeDefaultsFrom = [](auto& setting, auto const& stateMap, std::optional<std::string> const& groupKey)
+    {
+        if (groupKey)
+        {
+            auto iter = stateMap.find(*groupKey);
+            if (iter != stateMap.end())
+                setting.assumeDefaultsFrom(iter->second);
+        }
     };
-    state.termios[key] = std::move(termiosEntry);
-}
-void Settings::applySshSettingsToStateByKey(std::string const& key, Persistence::State& state)
-{
-    Persistence::SshOptions sshOptionsEntry{
-        .sshDirectory = stringOptionalToPathOptional(impl_->sshOptions.sshDirectory.value()),
-        .knownHostsFile = stringOptionalToPathOptional(impl_->sshOptions.knownHostsFile.value()),
-        .tryAgentForAuthentication = impl_->sshOptions.tryAgentForAuthentication.value(),
-        .usePublicKeyAutoAuth = impl_->sshOptions.usePublicKeyAutoAuth.value(),
-        .logVerbosity = impl_->sshOptions.logVerbosity.value(),
-        .keyExchangeAlgorithms = impl_->sshOptions.keyExchangeAlgorithms.value(),
-        .compressionClientToServer = impl_->sshOptions.compressionClientToServer.value(),
-        .compressionServerToClient = impl_->sshOptions.compressionServerToClient.value(),
-        .compressionLevel = impl_->sshOptions.compressionLevel.value(),
-        .strictHostKeyCheck = impl_->sshOptions.strictHostKeyCheck.value(),
-        .proxyCommand = impl_->sshOptions.proxyCommand.value(),
-        .gssapiServerIdentity = impl_->sshOptions.gssapiServerIdentity.value(),
-        .gssapiClientIdentity = impl_->sshOptions.gssapiClientIdentity.value(),
-        .gssapiDelegateCredentials = impl_->sshOptions.gssapiDelegateCredentials.value(),
-        .noDelay = impl_->sshOptions.noDelay.value(),
-        .bypassConfig = impl_->sshOptions.bypassConfig.value(),
-        .identityAgent = impl_->sshOptions.identityAgent.value(),
-        .connectTimeoutSeconds = impl_->sshOptions.connectTimeoutSeconds.value(),
-        .connectTimeoutUSeconds = impl_->sshOptions.connectTimeoutUSeconds.value(),
-    };
-    state.sshOptions[key] = std::move(sshOptionsEntry);
-}
-void Settings::applySftpOptionsToStateByKey(std::string const& key, Persistence::State& state)
-{
-    Persistence::SftpOptions sftpOptionsEntry{};
 
-    if (impl_->sftpOptions.downloadOptionsEngaged.value())
-    {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc99-designator"
-        sftpOptionsEntry.downloadOptions = Persistence::DownloadOptions{
-            Persistence::CommonTransferOptions{
-                .tempFileSuffix = impl_->sftpOptions.downloadOptions.tempFileSuffix.value(),
-                .mayOverwrite = impl_->sftpOptions.downloadOptions.mayOverwrite.value(),
-                .tryContinue = impl_->sftpOptions.downloadOptions.tryContinue.value(),
-                .inheritPermissions = impl_->sftpOptions.downloadOptions.inheritPermissions.value(),
-                .customPermissions = uShortOptionalToFilesystemPermsOptional(
-                    impl_->sftpOptions.downloadOptions.customPermissions.value()
-                ),
-            },
-            .reserveSpace = impl_->sftpOptions.downloadOptions.reserveSpace.value(),
-            .doCleanup = impl_->sftpOptions.downloadOptions.doCleanup.value(),
-        };
-    }
-#pragma clang diagnostic pop
-
-    if (impl_->sftpOptions.uploadOptionsEngaged.value())
-    {
-        sftpOptionsEntry.uploadOptions = Persistence::UploadOptions{Persistence::CommonTransferOptions{
-            .tempFileSuffix = impl_->sftpOptions.uploadOptions.tempFileSuffix.value(),
-            .mayOverwrite = impl_->sftpOptions.uploadOptions.mayOverwrite.value(),
-            .tryContinue = impl_->sftpOptions.uploadOptions.tryContinue.value(),
-            .inheritPermissions = impl_->sftpOptions.uploadOptions.inheritPermissions.value(),
-            .customPermissions =
-                uShortOptionalToFilesystemPermsOptional(impl_->sftpOptions.uploadOptions.customPermissions.value()),
-        }};
-    }
-
-    sftpOptionsEntry.concurrency = impl_->sftpOptions.concurrency.value();
-    sftpOptionsEntry.operationTimeout = std::chrono::seconds{impl_->sftpOptions.operationTimeoutSeconds.value()};
-
-    state.sftpOptions[key] = std::move(sftpOptionsEntry);
-}
-void Settings::applyTerminalOptionsToStateByKey(std::string const& key, Persistence::State& state)
-{
-    Persistence::TerminalOptions terminalOptionsEntry{
-        .fontFamily = impl_->terminalOptions.fontFamily.value(),
-        .fontSize = impl_->terminalOptions.fontSize.value(),
-        .lineHeight = impl_->terminalOptions.lineHeight.value(),
-        .cursorBlink = impl_->terminalOptions.cursorBlink.value(),
-        .renderer = impl_->terminalOptions.renderer.value(),
-        .letterSpacing = impl_->terminalOptions.letterSpacing.value(),
-        .theme = impl_->terminalOptions.themeEngaged.value()
-            ? std::optional<Persistence::TerminalTheme>{Persistence::TerminalTheme{
-                  .background = impl_->terminalOptions.theme.background.value(),
-                  .black = impl_->terminalOptions.theme.black.value(),
-                  .blue = impl_->terminalOptions.theme.blue.value(),
-                  .brightBlack = impl_->terminalOptions.theme.brightBlack.value(),
-                  .brightBlue = impl_->terminalOptions.theme.brightBlue.value(),
-                  .brightCyan = impl_->terminalOptions.theme.brightCyan.value(),
-                  .brightGreen = impl_->terminalOptions.theme.brightGreen.value(),
-                  .brightMagenta = impl_->terminalOptions.theme.brightMagenta.value(),
-                  .brightRed = impl_->terminalOptions.theme.brightRed.value(),
-                  .brightWhite = impl_->terminalOptions.theme.brightWhite.value(),
-                  .brightYellow = impl_->terminalOptions.theme.brightYellow.value(),
-                  .cursor = impl_->terminalOptions.theme.cursor.value(),
-                  .cursorAccent = impl_->terminalOptions.theme.cursorAccent.value(),
-                  .cyan = impl_->terminalOptions.theme.cyan.value(),
-                  .foreground = impl_->terminalOptions.theme.foreground.value(),
-                  .green = impl_->terminalOptions.theme.green.value(),
-                  .magenta = impl_->terminalOptions.theme.magenta.value(),
-                  .red = impl_->terminalOptions.theme.red.value(),
-                  .selectionBackground = impl_->terminalOptions.theme.selectionBackground.value(),
-                  .selectionForeground = impl_->terminalOptions.theme.selectionForeground.value(),
-                  .selectionInactiveBackground = impl_->terminalOptions.theme.selectionInactiveBackground.value(),
-                  .white = impl_->terminalOptions.theme.white.value(),
-                  .yellow = impl_->terminalOptions.theme.yellow.value(),
-              }}
-            : std::nullopt,
-    };
-    state.terminalOptions[key] = std::move(terminalOptionsEntry);
-}
-void Settings::applyQueueOptionsToStateByKey(std::string const& key, Persistence::State& state)
-{
-    Persistence::QueueOptions queueOptionsEntry{
-        .autoRemoveCompletedOperations = impl_->queueOptions.autoRemoveCompletedOperations.value(),
-        .startInPausedState = impl_->queueOptions.startInPausedState.value(),
-    };
-    state.queueOptions[key] = std::move(queueOptionsEntry);
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.sshSessionOptions.sshOptions,
+        impl_->stateHolder->stateCache().sshOptions,
+        *impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKey
+    );
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.sshSessionOptions.sftpOptions,
+        impl_->stateHolder->stateCache().sftpOptions,
+        *impl_->currentSessionOptions.sshSessionOptions.sftpOptions.groupKey
+    );
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.termios,
+        impl_->stateHolder->stateCache().termios,
+        *impl_->currentSessionOptions.termios.groupKey
+    );
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.terminalOptions,
+        impl_->stateHolder->stateCache().terminalOptions,
+        *impl_->currentSessionOptions.terminalOptions.groupKey
+    );
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.queueOptions,
+        impl_->stateHolder->stateCache().queueOptions,
+        *impl_->currentSessionOptions.queueOptions.groupKey
+    );
 }
 
 void Settings::onChange()
@@ -833,24 +480,28 @@ Nui::ElementRenderer Settings::sections()
 
     // clang-format off
     return div{
-        class_ = "settings-page-sections",
+        class_ = "settings-page-sections"
     }(
-        observe(impl_->activeSection).generate(
-            [this](Section activeSection) -> Nui::ElementRenderer {
-                switch (activeSection) {
-                    case Section::GeneralSettings:
-                        return generalSettings();
-                    case Section::GlobalInheritables:
-                        return inheritableSettings();
-                    case Section::Session:
-                        return Nui::nil(); // TODO
-                    default:
-                        return Nui::nil(); // TODO
-                }
-                return Nui::nil();
+        div{style = observe(impl_->activeSection).generate(
+            [this]() -> std::string
+            {
+                return *impl_->activeSection == Section::GeneralSettings ? "" : "display: none;";
             }
-        )
+        )}(generalSettings()),
+        div{style = observe(impl_->activeSection).generate(
+            [this]() -> std::string
+            {
+                return *impl_->activeSection == Section::GlobalInheritables ? "" : "display: none;";
+            }
+        )}(inheritableSettings()),
+        div{style = observe(impl_->activeSection).generate(
+            [this]() -> std::string
+            {
+                return *impl_->activeSection == Section::Session ? "" : "display: none;";
+            }
+        )}(currentSession())
     );
+    // clang-format on
 }
 
 Nui::ElementRenderer Settings::header()
@@ -906,11 +557,72 @@ bool Settings::isActive(SectionSelectorOptions const& options)
 void Settings::addNewSession()
 {
     impl_->newSessionDialog.open(
-        [](auto const& result)
+        [this](auto const& result)
         {
             Log::info("New session created: {} with icon {}", result.sessionName, result.iconName);
+            impl_->stateHolder->stateCache().sessions[result.sessionName] = Persistence::SessionOptions{
+                .icon = result.iconName,
+            };
+
+            impl_->stateHolder->save(
+                [this, result](std::optional<std::string> const& error)
+                {
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Negative,
+                            .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
+
+                    impl_->sessionSelectors.value().push_back(
+                        Settings::SectionSelectorOptions{
+                            .thisSection = Settings::Section::Session,
+                            .sessionId = result.sessionName,
+                            .icon = result.iconName,
+                        }
+                    );
+                    impl_->sessionSelectors.modifyNow();
+                }
+            );
         }
     );
+}
+
+void Settings::loadSessionFromState(std::string const& sessionId)
+{
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this, sessionId](bool success, Persistence::State const&)
+        {
+            if (!success)
+                return;
+
+            Nui::WebApi::Console::log("Loading session from state: {}", sessionId);
+
+            auto sessionIter = impl_->stateHolder->stateCache().sessions.find(sessionId);
+            if (sessionIter == impl_->stateHolder->stateCache().sessions.end())
+                return;
+            impl_->currentSessionOptions.loadFromState(sessionIter->second);
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+    );
+}
+
+void Settings::applySessionToState(std::string const& sessionId)
+{
+    auto sessionIter = impl_->stateHolder->stateCache().sessions.find(sessionId);
+    if (sessionIter == impl_->stateHolder->stateCache().sessions.end())
+    {
+        Log::error("Tried to apply session settings to state for unknown session id: {}.", sessionId);
+        return;
+    }
+    impl_->currentSessionOptions.applyToState(sessionIter->second);
 }
 
 Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& options)
@@ -935,9 +647,12 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                 return;
             }
 
+            if (impl_->activeSession.value())
+                applySessionToState(*impl_->activeSession.value());
             if (options.thisSection == Section::Session && options.sessionId.has_value()) {
                 impl_->activeSection = Section::Session;
                 impl_->activeSession = options.sessionId;
+                loadSessionFromState(options.sessionId.value_or(""));
             } else {
                 impl_->activeSection = options.thisSection;
                 impl_->activeSession = std::nullopt;
@@ -1213,7 +928,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
 
     // clang-format off
     auto termios = fragment(
-        span{}(language->getObserved("settings", "termios", "inputFlagsSubgroupTitle")),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "inputFlagsSubgroupTitle")),
         subgroup({}, fragment(
             impl_->termiosSettings.inputFlags.IGNBRK("IGNBRK"),
             impl_->termiosSettings.inputFlags.BRKINT("BRKINT"),
@@ -1231,7 +946,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             impl_->termiosSettings.inputFlags.IMAXBEL("IMAXBEL"),
             impl_->termiosSettings.inputFlags.IUTF8("IUTF8")
         )),
-        span{}(language->getObserved("settings", "termios", "outputFlagsSubgroupTitle")),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "outputFlagsSubgroupTitle")),
         subgroup({}, fragment(
             impl_->termiosSettings.outputFlags.OPOST("OPOST"),
             impl_->termiosSettings.outputFlags.OLCUC("OLCUC"),
@@ -1248,7 +963,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             impl_->termiosSettings.outputFlags.VTDLY("VTDLY"),
             impl_->termiosSettings.outputFlags.FFDLY("FFDLY")
         )),
-        span{}(language->getObserved("settings", "termios", "controlFlagsSubgroupTitle")),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "controlFlagsSubgroupTitle")),
         subgroup({}, fragment(
             impl_->termiosSettings.controlFlags.CBAUD("CBAUD"),
             impl_->termiosSettings.controlFlags.CBAUDEX("CBAUDEX"),
@@ -1264,7 +979,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             impl_->termiosSettings.controlFlags.CMSPAR("CMSPAR"),
             impl_->termiosSettings.controlFlags.CRTSCTS("CRTSCTS")
         )),
-        span{}(language->getObserved("settings", "termios", "localFlagsSubgroupTitle")),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "localFlagsSubgroupTitle")),
         subgroup({}, fragment(
             impl_->termiosSettings.localFlags.ISIG("ISIG"),
             impl_->termiosSettings.localFlags.ICANON("ICANON"),
@@ -1281,7 +996,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             impl_->termiosSettings.localFlags.PENDIN("PENDIN"),
             impl_->termiosSettings.localFlags.IEXTEN("IEXTEN")
         )),
-        span{}(language->getObserved("settings", "termios", "ccSettingsSubgroupTitle")),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "ccSettingsSubgroupTitle")),
         subgroup({
             .engagedStatus = &impl_->termiosSettings.ccEngaged,
             .groupTitle = language->getObserved("settings", "ccSettingsSubgroupTitle")
@@ -1325,7 +1040,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
             .currentGroupKey = &impl_->sshOptions.groupKey,
             .groupKeys = &impl_->sshOptions.groupKeys,
-            .isInheritableGroup = true,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
         }),
         group({
             .isCollapsed = impl_->collapsibleStates.sftpOptions,
@@ -1333,7 +1048,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
             .currentGroupKey = &impl_->sftpOptions.groupKey,
             .groupKeys = &impl_->sftpOptions.groupKeys,
-            .isInheritableGroup = true,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
         }),
         group({
             .isCollapsed = impl_->collapsibleStates.terminalOptions,
@@ -1341,7 +1056,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
             .currentGroupKey = &impl_->terminalOptions.groupKey,
             .groupKeys = &impl_->terminalOptions.groupKeys,
-            .isInheritableGroup = true,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
         }),
         group({
             .isCollapsed = impl_->collapsibleStates.queueOptions,
@@ -1349,7 +1064,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
             .currentGroupKey = &impl_->queueOptions.groupKey,
             .groupKeys = &impl_->queueOptions.groupKeys,
-            .isInheritableGroup = true,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
         }),
         group({
             .isCollapsed = impl_->collapsibleStates.termios,
@@ -1357,7 +1072,120 @@ Nui::ElementRenderer Settings::inheritableSettings()
             .headerTitle = language->getObserved("settings", "termiosGroupName"),
             .currentGroupKey = &impl_->termiosSettings.groupKey,
             .groupKeys = &impl_->termiosSettings.groupKeys,
-            .isInheritableGroup = true,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+        })
+    );
+    // clang-format on
+}
+
+Nui::ElementRenderer Settings::currentSession()
+{
+    using namespace Nui;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // clang-format off
+    auto overarchingSettings = fragment(
+        impl_->currentSessionOptions.terminalEngineType(
+            language->getObserved("settings", "sessionOptions", "terminalEngineType")
+        ),
+        impl_->currentSessionOptions.icon(
+            language->getObserved("settings", "sessionOptions", "icon")
+        ),
+        impl_->currentSessionOptions.orderBy(
+            language->getObserved("settings", "sessionOptions", "orderBy")
+        ),
+        impl_->currentSessionOptions.isStartupSession(
+            language->getObserved("settings", "sessionOptions", "isStartupSession")
+        ),
+        div{
+            style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
+                return type == Persistence::TerminalEngineType::ssh ? "" : "display: none;";
+            }),
+        }(
+            h1{
+                class_ = "settings-header"
+            }(language->getObserved("settings", "sessionOptions", "sshSessionServerOptions")),
+            subgroup({},
+                fragment(
+                    impl_->currentSessionOptions.sshSessionOptions.host(language->getObserved("settings", "sessionOptions", "host")),
+                    impl_->currentSessionOptions.sshSessionOptions.port(language->getObserved("settings", "sessionOptions", "port")),
+                    impl_->currentSessionOptions.sshSessionOptions.user(language->getObserved("settings", "sessionOptions", "user")),
+                    impl_->currentSessionOptions.sshSessionOptions.sshKey(language->getObserved("settings", "sessionOptions", "sshKey")),
+                    impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(language->getObserved("settings", "sessionOptions", "openSftpByDefault"))
+                )
+            )
+        ),
+        div{
+            style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
+                return type == Persistence::TerminalEngineType::shell ? "" : "display: none;";
+            }),
+        }(
+            h1{
+                class_ = "settings-header"
+            }(language->getObserved("settings", "sessionOptions", "localSessionOptions")),
+            subgroup({},
+                fragment(
+                    impl_->currentSessionOptions.executingSessionOptions.isPty(language->getObserved("settings", "sessionOptions", "isPty")),
+                    impl_->currentSessionOptions.executingSessionOptions.command(language->getObserved("settings", "sessionOptions", "command")),
+                    impl_->currentSessionOptions.executingSessionOptions.arguments(language->getObserved("settings", "sessionOptions", "arguments")),
+                    impl_->currentSessionOptions.executingSessionOptions.environment(
+                        language->getObserved("settings", "sessionOptions", "environmentVariables")),
+                    impl_->currentSessionOptions.executingSessionOptions.exitTimeoutSeconds(
+                        language->getObserved("settings", "sessionOptions", "exitTimeoutSeconds")),
+                    impl_->currentSessionOptions.executingSessionOptions.cleanEnvironment(
+                        language->getObserved("settings", "sessionOptions", "cleanEnvironment"))
+                )
+            )
+        )
+    );
+
+    auto& sshOptionStruct = impl_->currentSessionOptions.sshSessionOptions.sshOptions;
+    auto sshOptions = fragment(
+        sshOptionStruct.sshDirectory(language->getObserved("settings", "sshOptions", "sshDirectory")),
+        sshOptionStruct.knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
+        sshOptionStruct.tryAgentForAuthentication(language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")),
+        sshOptionStruct.usePublicKeyAutoAuth(language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")),
+        sshOptionStruct.logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
+        sshOptionStruct.keyExchangeAlgorithms(language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")),
+        sshOptionStruct.compressionClientToServer(language->getObserved("settings", "sshOptions", "compressionClientToServer")),
+        sshOptionStruct.compressionServerToClient(language->getObserved("settings", "sshOptions", "compressionServerToClient")),
+        sshOptionStruct.compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
+        sshOptionStruct.strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
+        sshOptionStruct.proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
+        sshOptionStruct.gssapiServerIdentity(language->getObserved("settings", "sshOptions", "gssapiServerIdentity")),
+        sshOptionStruct.gssapiClientIdentity(language->getObserved("settings", "sshOptions", "gssapiClientIdentity")),
+        sshOptionStruct.gssapiDelegateCredentials(language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")),
+        sshOptionStruct.noDelay(language->getObserved("settings", "sshOptions", "noDelay")),
+        sshOptionStruct.bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
+        sshOptionStruct.identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
+        sshOptionStruct.connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
+        sshOptionStruct.connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds"))
+    );
+
+    return fragment(
+        ui5::message_strip{
+            "design"_prop = "Information",
+            "hideCloseButton"_prop = true,
+        }(
+            language->getObserved("settings", "inheritableSettingsInfoMessage")
+        ),
+        group({
+            .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
+            .content = std::move(overarchingSettings),
+            .headerTitle = language->getObserved("settings", "sessionOptions", "basicSettings")
+        }),
+        group({
+            .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sshOptions,
+            .content = std::move(sshOptions),
+            .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
+            .currentGroupKey = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKey,
+            .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKeys,
+            .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting,
+            .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
+            .engineTypeFilterValue = Persistence::TerminalEngineType::ssh
         })
     );
     // clang-format on
@@ -1427,7 +1255,7 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
 
         auto addGroupButton = [&params, this]() -> Nui::ElementRenderer
         {
-            if (!params.isInheritableGroup)
+            if (params.inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
                 return Nui::nil();
 
             return ui5::button{
@@ -1471,7 +1299,7 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
 
         auto removeGroupButton = [&params, this]() -> Nui::ElementRenderer
         {
-            if (!params.isInheritableGroup)
+            if (params.inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
                 return Nui::nil();
 
             return ui5::button{
@@ -1479,6 +1307,9 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                 "icon"_prop = "delete",
                 "click"_event = [this, currentGroupKey = params.currentGroupKey, groupKeys = params.groupKeys]()
                 {
+                    if (!**currentGroupKey)
+                        return;
+
                     impl_->confirmDialog->open({
                         .state = ConfirmDialog::State::Critical,
                         .headerText = language->get("settings", "confirmDeleteGroupKeyHeader"),
@@ -1486,11 +1317,15 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                         .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
                         .onClose = [currentGroupKey, groupKeys](ConfirmDialog::Button btn)
                         {
+                            if (!**currentGroupKey)
+                                return;
+
+                            const auto key = ***currentGroupKey;
+
                             if (btn == ConfirmDialog::Button::Ok)
                             {
                                 groupKeys->erase(
-                                    std::remove((*groupKeys)->begin(), (*groupKeys)->end(), currentGroupKey->value()),
-                                    (*groupKeys)->end()
+                                    std::remove((*groupKeys)->begin(), (*groupKeys)->end(), key), (*groupKeys)->end()
                                 );
                                 groupKeys->modify();
                                 if (!(*groupKeys)->empty())
@@ -1517,10 +1352,15 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
             }(language->getObserved("settings", "groupKey")),
             ui5::select{
                 "change"_event =
-                    [this, currentGroupKey = params.currentGroupKey](Nui::val event)
+                    [this,
+                        currentGroupKey = params.currentGroupKey,
+                        inheritanceBehavior = params.inheritanceBehavior](Nui::val event)
                 {
                     *currentGroupKey = event["detail"]["selectedOption"]["leKey"].as<std::string>();
-                    loadTermiosSettingsFromStateByKey(currentGroupKey->value(), impl_->stateHolder->stateCache());
+                    if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheritable)
+                        reloadInheritables();
+                    else if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
+                        reloadInheritance();
                 },
                 "value"_prop = *params.currentGroupKey,
             }(params.groupKeys->map(
@@ -1536,10 +1376,29 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
         );
     };
 
+    auto makeSessionTypeFilteredDiv =
+        [engineTypeFilter = params.engineTypeFilter, engineTypeFilterValue = params.engineTypeFilterValue]()
+    {
+        if (engineTypeFilter)
+        {
+            return div{
+                class_ = "settings-group",
+                style = observe(*engineTypeFilter)
+                    .generate(
+                        [engineTypeFilterValue](Persistence::TerminalEngineType type)
+                        {
+                            return type == engineTypeFilterValue ? "" : "display: none;";
+                        }
+                    ),
+            };
+        }
+        return div{
+            class_ = "settings-group",
+        };
+    };
+
     // clang-format off
-    return div{
-        class_ = "settings-group",
-    }(
+    return makeSessionTypeFilteredDiv()(
         div{
             class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
                 return classes("settings-group-header", isCollapsed ? "collapsed" : "uncollapsed");

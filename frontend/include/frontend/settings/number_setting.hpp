@@ -18,34 +18,37 @@ class NumberSetting : public Setting<Disengageable, ValueType>
     using SettingBase = Setting<Disengageable, ValueType>;
 
     using SettingBase::state_;
+    using SettingBase::engaged_;
+    using SettingBase::inheritedState_;
+    using SettingBase::inheritanceStatus_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
-    using SettingBase::disengageable;
     using SettingBase::observeEngagedToBool;
 
     using SettingBase::SettingBase;
 
-    Nui::ElementRenderer operator()(auto&& label)
+    Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
         // clang-format off
         return div{}(
-            disengageable(),
-            ui5::label{
-                style = "color: var(--sapTextColor); margin-right: 10px",
-            }(std::forward<decltype(label)>(label)),
+            SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             ui5::input{
                 "type"_prop = "Number",
                 // FIXME: I convert to a string here because of an error message
                 // ListItemStandardExpandableTextTemplate.1a93b8ba.js:3172  [UI5-FWK] numeric value for property [value] of component [ui5-input]
                 // is missing "{ type: Number }" in its property decorator. Attribute conversion will treat it as a string.
                 // If this is intended, pass the value converted to string, otherwise add the type to the property decorator
-                "value"_prop = Nui::observe(state_).generate([](ValueType const& value){
-                    return std::to_string(value);
-                }),
+                "value"_prop = Nui::observe(engaged_, state_, inheritedState_, inheritanceStatus_).generate(
+                    [](bool engaged, ValueType const& value, std::optional<ValueType> const& inheritedValue, SettingBase::InheritanceStatus status) {
+                        if (!engaged && inheritedValue && status == SettingBase::InheritanceStatus::AncestorEngaged)
+                            return std::to_string(*inheritedValue);
+                        return std::to_string(value);
+                    }
+                ),
                 observeEngagedToBool("disabled"_prop),
                 "change"_event = [this](Nui::val event){
                     state_ = static_cast<ValueType>(event["target"]["value"].as<int>());

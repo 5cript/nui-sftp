@@ -10,6 +10,7 @@
 #include <ui5/components/responsive_popover.hpp>
 #include <ui5/components/label.hpp>
 #include <ui5/components/switch.hpp>
+#include <ui5/components/check_box.hpp>
 
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/reference.hpp>
@@ -82,6 +83,21 @@ class Setting
         else
             state_ = ValueType{};
     }
+    auto observedValueWithInheritance()
+    {
+        return observe(engaged_, state_, inheritedState_, inheritanceStatus_)
+            .generate(
+                [](bool engaged,
+                    ValueType const& value,
+                    std::optional<ValueType> const& inheritedValue,
+                    InheritanceStatus status)
+                {
+                    if (!engaged && inheritedValue && status == InheritanceStatus::AncestorEngaged)
+                        return *inheritedValue;
+                    return value;
+                }
+            );
+    }
 
     InheritanceStatus inheritanceStatus() const
     {
@@ -99,6 +115,20 @@ class Setting
         else
             return true;
     }
+    void inherit(std::optional<ValueType> const& value)
+    {
+        if (value)
+        {
+            inheritedState_ = value;
+            inheritanceStatus(InheritanceStatus::AncestorEngaged);
+        }
+        else
+        {
+            inheritedState_ = std::nullopt;
+            inheritanceStatus(InheritanceStatus::AncestorDisengaged);
+        }
+    }
+    void inherit(ValueType const&) = delete;
 
     auto observeEngagedToBool(auto&& prop)
     {
@@ -126,54 +156,67 @@ class Setting
                );
     }
 
-    Nui::ElementRenderer disengageable()
+    Nui::ElementRenderer label(auto&& label)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
-        if constexpr (Disengageable)
+        if constexpr (!Disengageable)
         {
-            // clang-format off
-            return div{
-                class_ = "setting-disengageable"
-            }(
-                ui5::switch_{
-                    "checked"_prop = Nui::observe(engaged_).generate([](bool engaged){
+            div{class_ = "setting-fixed"}(ui5::label{
+                style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
+            }(std::forward<decltype(label)>(label)));
+        }
+
+        return div{class_ = "setting-disengageable"}(
+            ui5::checkbox{
+                "checked"_prop = Nui::observe(engaged_).generate(
+                    [](bool engaged)
+                    {
                         return engaged;
-                    }),
-                    "change"_event = [this](Nui::val event){
-                        engaged_ = event["target"]["checked"].as<bool>();
-                        onChange_();
                     }
-                }(),
-                ui5::label{
-                    style = "color: var(--subduedText);",
-                }(observe(engaged_, inheritanceStatus_).generate([](bool engaged, InheritanceStatus status) {
-                    if (!engaged) {
-                        switch (status) {
-                            case InheritanceStatus::NoAncestor:
-                            case InheritanceStatus::AncestorDisengaged:
-                                return language->get("settings", "setting", "settingInactive");
-                            case InheritanceStatus::AncestorEngaged:
-                                return language->get("settings", "setting", "settingInherits");
+                ),
+                "change"_event =
+                    [this](Nui::val event)
+                {
+                    engaged_ = event["target"]["checked"].as<bool>();
+                    onChange_();
+                }
+            }(),
+            ui5::label{
+                style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
+            }(std::forward<decltype(label)>(label)),
+            ui5::label{
+                style = "color: var(--subduedText);",
+            }(observe(engaged_, inheritanceStatus_)
+                    .generate(
+                        [](bool engaged, InheritanceStatus status)
+                        {
+                            if (!engaged)
+                            {
+                                switch (status)
+                                {
+                                    case InheritanceStatus::NoAncestor:
+                                    case InheritanceStatus::AncestorDisengaged:
+                                        return language->get("settings", "setting", "settingInactive");
+                                    case InheritanceStatus::AncestorEngaged:
+                                        return language->get("settings", "setting", "settingInherits");
+                                }
+                            }
+                            else
+                            {
+                                switch (status)
+                                {
+                                    case InheritanceStatus::NoAncestor:
+                                    case InheritanceStatus::AncestorDisengaged:
+                                        return language->get("settings", "setting", "settingActive");
+                                    case InheritanceStatus::AncestorEngaged:
+                                        return language->get("settings", "setting", "settingOverrides");
+                                }
+                            }
                         }
-                    } else {
-                        switch (status) {
-                            case InheritanceStatus::NoAncestor:
-                            case InheritanceStatus::AncestorDisengaged:
-                                return language->get("settings", "setting", "settingActive");
-                            case InheritanceStatus::AncestorEngaged:
-                                return language->get("settings", "setting", "settingOverrides");
-                        }
-                    }
-                }))
-            );
-            // clang-format on
-        }
-        else
-        {
-            return div{style = "visibility: hidden;"}();
-        }
+                    ))
+        );
     }
 
     Nui::ElementRenderer reset()
@@ -227,6 +270,7 @@ class Setting
 
   protected:
     Nui::Observed<ValueType> state_;
+    Nui::Observed<std::optional<ValueType>> inheritedState_;
     Nui::Observed<bool> engaged_{!Disengageable};
     std::function<void()> onChange_;
     std::function<void()> resetAction_;

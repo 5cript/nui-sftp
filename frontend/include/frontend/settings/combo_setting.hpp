@@ -16,10 +16,13 @@ class ComboSetting : public Setting<Disengageable, ValueType>
   public:
     using SettingBase = Setting<Disengageable, ValueType>;
     using SettingBase::state_;
+    using SettingBase::inheritedState_;
+    using SettingBase::inheritanceStatus_;
+    using SettingBase::engaged_;
+
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
-    using SettingBase::disengageable;
 
     ComboSetting(
         std::vector<ValueType> availableStates,
@@ -47,18 +50,14 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         , transform_{std::forward<decltype(valueTransformer)>(valueTransformer)}
     {}
 
-    Nui::ElementRenderer operator()(auto&& label)
+    Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
         // clang-format off
         return div{}(
-            disengageable(),
-            ui5::label{
-                style = "color: var(--sapTextColor); margin-right: 10px",
-                "showColon"_prop = true
-            }(std::forward<decltype(label)>(label)),
+            SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             ui5::select{
                 "change"_event = [this](Nui::val event){
                     const auto index = static_cast<std::size_t>(event["detail"]["selectedOption"]["valueIndex"].as<int>());
@@ -70,14 +69,21 @@ class ComboSetting : public Setting<Disengageable, ValueType>
                     state_ = availableStates_[index];
                     onChange_();
                 },
-                "value"_prop = observe(state_).generate([this](auto const& value){
-                    return transform_(value);
-                })
+                SettingBase::observeEngagedToBool("disabled"_prop),
+                "value"_prop = observe(engaged_, state_, inheritedState_, inheritanceStatus_).generate(
+                    [this](bool engaged, auto const& value, std::optional<ValueType> const& inheritedValue, SettingBase::InheritanceStatus status) {
+                        if (!engaged && inheritedValue && status == SettingBase::InheritanceStatus::AncestorEngaged)
+                            return transform_(inheritedValue.value());
+                        return transform_(value);
+                    }
+                )
             }(
                 Nui::range(availableStates_),
                 [this](auto index, ValueType const& value) {
                     return ui5::option{
-                        "icon"_prop = iconAccessor_ ? iconAccessor_(value) : std::nullopt,
+                        "icon"_prop = observe(state_).generate([this, value](){
+                            return iconAccessor_ ? iconAccessor_(value) : std::nullopt;
+                        }),
                         "valueIndex"_prop = static_cast<int>(index),
                     }(transform_(value));
                 }
