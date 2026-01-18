@@ -1,0 +1,42 @@
+#pragma once
+
+#include <string_view>
+
+constexpr static std::string_view sessionIconOptions[] = {
+    "laptop",
+    "ipad",
+    "iphone",
+    "account",
+    "accessibility",
+    "area-chart",
+    "favorite",
+    "fax-machine",
+    "flag",
+    "family-care",
+    "home",
+    "home-share",
+    "heart",
+    "heart-2",
+    "key",
+    "feed",
+    "it-instance",
+    "it-system",
+    "it-host",
+    "lab",
+    "machine",
+    "meal",
+    "physical-activity",
+    "primary-key",
+    "shipping-status",
+    "shield",
+    "study-leave",
+    "subway-train",
+    "syringe",
+    "tag",
+    "web-cam",
+    "sound-loud",
+    "simple-payment",
+    "print",
+    "nutrition-activity",
+    "lightbulb"
+};
