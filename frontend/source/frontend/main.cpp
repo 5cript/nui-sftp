@@ -52,22 +52,37 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
                 persistence->loadLanguageFile(
                     [](std::optional<nlohmann::json> lang)
                     {
-                        language = std::make_unique<LanguageProvider>(
-                            frontendEvents.get(),
-                            lang.value_or(
-                                []()
-                                {
-                                    auto res = nlohmann::json::object();
-                                    res["en_US"] = nlohmann::json::object();
-                                    return res;
-                                }()
-                            )
-                        );
-                        mainPage = std::make_unique<MainPage>(persistence.get(), frontendEvents.get());
-                        dom = std::make_unique<Nui::Dom::Dom>();
+                        try
+                        {
+                            language = std::make_unique<LanguageProvider>(
+                                frontendEvents.get(),
+                                lang.value_or(
+                                    []()
+                                    {
+                                        auto res = nlohmann::json::object();
+                                        res["en_US"] = nlohmann::json::object();
+                                        return res;
+                                    }()
+                                )
+                            );
 
-                        dom->setBody(Nui::Elements::body{}(mainPage->render()));
-                        mainPage->onSetupComplete();
+                            Log::info("Language file loaded.");
+                            Log::info("Creating main page.");
+                            mainPage = std::make_unique<MainPage>(persistence.get(), frontendEvents.get());
+
+                            Log::info("Creating DOM.");
+                            dom = std::make_unique<Nui::Dom::Dom>();
+
+                            Log::info("Rendering main page into DOM.");
+                            dom->setBody(Nui::Elements::body{}(mainPage->render()));
+
+                            Log::info("Calling setup completion function");
+                            mainPage->onSetupComplete();
+                        }
+                        catch (std::exception const& exc)
+                        {
+                            Log::error("Failed to continue setup after loading language file: {}", exc.what());
+                        }
                     }
                 );
             }
