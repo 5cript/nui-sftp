@@ -79,13 +79,13 @@ class RealServerTests : public ::testing::Test
     auto getSessionOptions(unsigned short port, std::string const& user = "test", std::string const& host = "127.0.0.1")
     {
         return Persistence::SshSessionOptions{
+            .host = host,
+            .port = port,
+            .user = user,
             .sshOptions =
                 Persistence::SshOptions{
                     .connectTimeoutSeconds = connectTimeout.count(),
                 },
-            .host = host,
-            .port = port,
-            .user = user,
         };
     }
 
