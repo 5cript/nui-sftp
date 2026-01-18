@@ -18,12 +18,25 @@ class LanguageProvider
   public:
     LanguageProvider(AppWideEvents* events, nlohmann::json languageFile)
         : events_{events}
-        , languageFile_(std::move(languageFile))
     {
-        for (auto const& [key, _] : languageFile_.items())
+        std::unordered_map<std::string, std::string> lookupMap;
+        auto extendTable =
+            [&](this const auto& self, nlohmann::json const& json, std::string const& parentKey = "") -> void
         {
+            for (auto const& [subkey, value] : json.items())
+            {
+                if (value.is_string())
+                    lookupMap.insert({fmt::format("{}/{}", parentKey, subkey), value.get<std::string>()});
+                else if (value.is_object())
+                    self(value, fmt::format("{}/{}", parentKey, subkey));
+            }
+        };
+
+        for (auto const& [key, _] : languageFile.items())
             languageKeys_.push_back(key);
-        }
+
+        extendTable(languageFile, "");
+        lookupMap_ = std::move(lookupMap);
     }
 
     template <typename... Args>
@@ -66,39 +79,23 @@ class LanguageProvider
     template <typename... Args>
     std::optional<std::string> findByLang(std::string const& languageKey, Args&&... args)
     {
-        auto res = languageFile_.find(languageKey);
-        if (res == languageFile_.end())
-            return std::nullopt;
-
-        try
-        {
-            nlohmann::json::const_iterator result = res;
-            nlohmann::json::const_iterator end;
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-value" // its the one element to be compared against end
-            (((result, end = result->end(), result = result->find(args)) != end) && ...);
-#pragma clang diagnostic pop
-            if (result == end)
-                return std::nullopt;
-            return result->get<std::string>();
-        }
-        catch (std::exception const& exc)
-        {
-            return std::string{exc.what()};
-        }
+        auto iter =
+            lookupMap_.find(fmt::format("/{}", fmt::join(std::initializer_list{languageKey.c_str(), args...}, "/")));
+        if (iter != lookupMap_.end())
+            return iter->second;
+        return std::nullopt;
     }
 
     template <typename... Args>
     std::string getByLang(std::string const& languageKey, Args&&... args)
     {
-        auto res = findByLang(languageKey, std::forward<Args>(args)...);
+        auto res = findByLang(languageKey, args...);
         if (!res)
         {
-            auto fallback = findByLang("en_US", std::forward<Args>(args)...);
+            auto fallback = findByLang("en_US", args...);
             if (!fallback)
                 return fmt::format(
-                    "No translation {} in {}.", fmt::join(std::vector<std::string>{args...}, "/"), languageKey
+                    "No translation {} in {}.", fmt::join(std::initializer_list{args...}, "/"), languageKey
                 );
             return *fallback;
         }
@@ -107,7 +104,7 @@ class LanguageProvider
 
   private:
     AppWideEvents* events_;
-    nlohmann::json languageFile_;
+    std::unordered_map<std::string, std::string> lookupMap_;
     std::vector<std::string> languageKeys_{};
 };
 
