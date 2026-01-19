@@ -27,6 +27,7 @@
 #include <ui5/components/switch.hpp>
 #include <ui5/components/busy_indicator.hpp>
 #include <ui5/components/message_strip.hpp>
+#include <ui5/components/busy_indicator.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -83,6 +84,10 @@ struct Settings::Implementation
     // Values exchange here when switching, we dont have X session option uis, also because performance wise
     // impractical.
     SessionOptions currentSessionOptions;
+
+    Nui::TimerHandle initialLoadDelay;
+    Nui::Observed<bool> wasInitiallyLoaded{false};
+    Nui::Observed<bool> initialLoadDone{false};
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -180,7 +185,24 @@ Settings::Settings(
         [this](bool open)
         {
             if (open)
+            {
                 applySettingsToUi();
+                if (!*impl_->wasInitiallyLoaded)
+                {
+                    Nui::setTimeout(
+                        100,
+                        [this]()
+                        {
+                            impl_->wasInitiallyLoaded = true;
+                            Nui::globalEventContext.executeActiveEventsImmediately();
+                        },
+                        [this](Nui::TimerHandle handle)
+                        {
+                            impl_->initialLoadDelay = std::move(handle);
+                        }
+                    );
+                }
+            }
         }
     );
 }
@@ -571,6 +593,7 @@ Nui::ElementRenderer Settings::operator()()
 
     try
     {
+        // clang-format off
         return div{
             class_ = "settings-page-background-blocker",
             style = observe(impl_->events->settingsOpen)
@@ -580,16 +603,45 @@ Nui::ElementRenderer Settings::operator()()
                         return isOpen ? "display: flex;" : "display: none;";
                     }
                 ),
-        }(impl_->newSessionDialog(),
+        }(
+            div{
+                class_ = "settings-loader-blocker",
+                style = observe(impl_->initialLoadDone).generate(
+                    [](bool initialLoadDone) -> std::string
+                    {
+                        return initialLoadDone ? "display: none;" : "display: flex;";
+                    }
+                ),
+            }(
+                Nui::Elements::span{}(language->get("settings", "loadingSettings")),
+                ui5::busy_indicator{
+                    "size"_prop = "L",
+                    "active"_prop = observe(impl_->initialLoadDone).generate([](bool done) { return !done; }),
+                }()
+            ),
+            impl_->newSessionDialog(),
             div{
                 class_ = "settings-page",
-            }(header(),
+            }(
+                header(),
                 div{
                     class_ = "settings-page-content",
-                }(side(),
+                }(
+                    side(),
                     div{
                         class_ = "settings-page-content main",
-                    }(sections()))));
+                    }(
+                        observe(impl_->wasInitiallyLoaded),
+                        [this](bool wasLoaded) {
+                            if (!wasLoaded)
+                                return div{}();
+                            return sections();
+                        }
+                    )
+                )
+            )
+        );
+        // clang-format on
     }
     catch (std::exception const& e)
     {
@@ -628,7 +680,23 @@ Nui::ElementRenderer Settings::sections()
                 {
                     return *impl_->activeSection == Section::Session ? "" : "display: none;";
                 }
-            )}(currentSession())
+            )}(currentSession()),
+            // This is the last thing to be inserted, so use it as a signal that initial load is done.
+            [this](){
+                Nui::setTimeout(
+                    100,
+                    [this]()
+                    {
+                        impl_->initialLoadDone = true;
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    },
+                    [this](Nui::TimerHandle handle)
+                    {
+                        impl_->initialLoadDelay = std::move(handle);
+                    }
+                );
+                return Nui::nil();
+            }()
         );
         // clang-format on
     }
