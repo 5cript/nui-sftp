@@ -74,11 +74,11 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     termios.applyToState(state.termios.value());
     queueOptions.applyToState(state.queueOptions.value());
 
-    if (state.type == Persistence::TerminalEngineType::ssh)
+    if (std::holds_alternative<Persistence::SshSessionOptions>(state.engine))
     {
         sshSessionOptions.applyToState(state.engine.emplace<Persistence::SshSessionOptions>());
     }
-    else if (state.type == Persistence::TerminalEngineType::shell)
+    else if (std::holds_alternative<Persistence::ExecutingSessionOptions>(state.engine))
     {
         executingSessionOptions.applyToState(state.engine.emplace<Persistence::ExecutingSessionOptions>());
     }
@@ -104,13 +104,17 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state, boo
     termios.loadFromState(state.termios.value());
     queueOptions.loadFromState(state.queueOptions.value());
 
-    if (state.type == Persistence::TerminalEngineType::ssh)
+    if (std::holds_alternative<Persistence::SshSessionOptions>(state.engine))
     {
         sshSessionOptions.loadFromState(std::get<Persistence::SshSessionOptions>(state.engine), loadRefs);
     }
-    else if (state.type == Persistence::TerminalEngineType::shell)
+    else if (std::holds_alternative<Persistence::ExecutingSessionOptions>(state.engine))
     {
         executingSessionOptions.loadFromState(std::get<Persistence::ExecutingSessionOptions>(state.engine), loadRefs);
+    }
+    else
+    {
+        Log::warn("SessionOptions::loadFromState: engine variant holds no value.");
     }
 
     if (loadRefs)
@@ -130,11 +134,11 @@ void SessionOptions::assumeDefaultsFrom(Persistence::SessionOptions const& state
     terminalOptions.assumeDefaultsFrom(state.terminalOptions.value());
     termios.assumeDefaultsFrom(state.termios.value());
     queueOptions.assumeDefaultsFrom(state.queueOptions.value());
-    if (state.type == Persistence::TerminalEngineType::shell)
+    if (std::holds_alternative<Persistence::ExecutingSessionOptions>(state.engine))
     {
         executingSessionOptions.assumeDefaultsFrom(std::get<Persistence::ExecutingSessionOptions>(state.engine));
     }
-    else if (state.type == Persistence::TerminalEngineType::ssh)
+    else if (std::holds_alternative<Persistence::SshSessionOptions>(state.engine))
     {
         sshSessionOptions.assumeDefaultsFrom(std::get<Persistence::SshSessionOptions>(state.engine));
     }
