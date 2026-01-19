@@ -1,10 +1,10 @@
 #pragma once
 
 #include <frontend/settings/group_keys.hpp>
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/color_setting.hpp>
-#include <frontend/settings/number_setting.hpp>
-#include <frontend/settings/text_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/color_setting.hpp>
+#include <frontend/settings/atomic_setting/number_setting.hpp>
+#include <frontend/settings/atomic_setting/text_setting.hpp>
 
 #include <persistence/state/terminal_options.hpp>
 

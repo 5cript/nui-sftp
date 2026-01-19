@@ -1,6 +1,7 @@
 #include <ssh/session.hpp>
 #include <ssh/sequential.hpp>
 #include <ssh/sftp_session.hpp>
+#include <ssh/u8_path.hpp>
 
 #include <fmt/format.h>
 #include <libssh/sftp.h>
@@ -376,9 +377,11 @@ namespace SecureShell
             [&]
             {
                 if (sshOptions.identityAgent)
+                {
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_IDENTITY_AGENT, sshOptions.identityAgent.value().c_str()
+                        SSH_OPTIONS_IDENTITY_AGENT, u8Path(sshOptions.identityAgent.value()).c_str()
                     );
+                }
                 return 0;
             },
             [&]
@@ -442,7 +445,7 @@ namespace SecureShell
                 [&sshKey, &key, askPass, askPassUserDataKeyPhrase]()
                 {
                     return ssh_pki_import_privkey_file(
-                        sshKey.c_str(), nullptr, askPass, askPassUserDataKeyPhrase, &key
+                        u8Path(sshKey).c_str(), nullptr, askPass, askPassUserDataKeyPhrase, &key
                     );
                 },
                 [&key, &session]()

@@ -148,8 +148,9 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                     onChange();
                 },
             },
-        .homeOverride = TextSetting<true>{
+        .homeOverride = PathSetting<true>{
             language->getObserved("settings", "general", "localFilesystemOptions", "homeOverrideHelpText"),
+            PathSettingType::Directory,
             onChange,
             [this, onChange]()
             {

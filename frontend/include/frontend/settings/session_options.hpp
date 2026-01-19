@@ -5,8 +5,8 @@
 #include <frontend/settings/queue_options.hpp>
 #include <frontend/settings/executing_session_options.hpp>
 #include <frontend/settings/ssh_session_options.hpp>
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/combo_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
 
 #include <persistence/state/state.hpp>
 #include <persistence/state/session_options.hpp>

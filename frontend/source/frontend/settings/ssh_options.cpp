@@ -5,11 +5,13 @@
 SshOptions::SshOptions(std::function<void()> const& onChange)
     : sshDirectory{
             language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
+            PathSettingType::Directory,
             onChange,
             nulloptReset(sshDirectory, onChange),
         }
     , knownHostsFile{
             language->getObserved("settings", "sshOptions", "knownHostsFileHelpText"),
+            PathSettingType::File,
             onChange,
             nulloptReset(knownHostsFile, onChange),
         }
@@ -85,6 +87,7 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
         }
     , identityAgent{
             language->getObserved("settings", "sshOptions", "identityAgentHelpText"),
+            PathSettingType::File,
             onChange,
             nulloptReset(identityAgent, onChange),
         }
@@ -106,8 +109,8 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
 
 void SshOptions::applyToState(Persistence::SshOptions& state) const
 {
-    state.sshDirectory = stringOptionalToPathOptional(sshDirectory.value());
-    state.knownHostsFile = stringOptionalToPathOptional(knownHostsFile.value());
+    state.sshDirectory = sshDirectory.value();
+    state.knownHostsFile = knownHostsFile.value();
     state.tryAgentForAuthentication = tryAgentForAuthentication.value();
     state.usePublicKeyAutoAuth = usePublicKeyAutoAuth.value();
     state.logVerbosity = logVerbosity.value();
@@ -130,8 +133,8 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
 
 void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
 {
-    sshDirectory.value(pathOptionalToStringOptional(state.sshDirectory));
-    knownHostsFile.value(pathOptionalToStringOptional(state.knownHostsFile));
+    sshDirectory.value(state.sshDirectory);
+    knownHostsFile.value(state.knownHostsFile);
     tryAgentForAuthentication.value(state.tryAgentForAuthentication);
     usePublicKeyAutoAuth.value(state.usePublicKeyAutoAuth);
     logVerbosity.value(state.logVerbosity);
@@ -154,8 +157,8 @@ void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
 
 void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
 {
-    sshDirectory.inherit(pathOptionalToStringOptional(state.sshDirectory));
-    knownHostsFile.inherit(pathOptionalToStringOptional(state.knownHostsFile));
+    sshDirectory.inherit(state.sshDirectory);
+    knownHostsFile.inherit(state.knownHostsFile);
     tryAgentForAuthentication.inherit(state.tryAgentForAuthentication);
     usePublicKeyAutoAuth.inherit(state.usePublicKeyAutoAuth);
     logVerbosity.inherit(state.logVerbosity);

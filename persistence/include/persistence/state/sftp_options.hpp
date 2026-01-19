@@ -37,7 +37,7 @@ namespace Persistence
     {
         std::optional<DownloadOptions> downloadOptions{};
         std::optional<UploadOptions> uploadOptions{};
-        std::optional<std::string> defaultDirectory{std::nullopt};
+        std::optional<std::filesystem::path> defaultDirectory{std::nullopt};
         std::optional<int> concurrency{std::nullopt}; // How many parallel transfers are allowed?
         std::chrono::seconds operationTimeout{5};
     };

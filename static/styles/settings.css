@@ -188,6 +188,20 @@
     display: flex;
     align-items: center;
     gap: 8px;
+
+    & ui5-input {
+        flex-grow: 1;
+    }
+}
+
+.setting-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    & ui5-input {
+        flex-grow: 1;
+    }
 }
 
 .setting-colorbox {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <frontend/settings/setting.hpp>
+#include <frontend/settings/atomic_setting/setting.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 

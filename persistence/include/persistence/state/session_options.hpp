@@ -28,7 +28,7 @@ namespace Persistence
     struct ExecutingSessionOptions : public DefaultMissingMember
     {
         bool isPty{true};
-        std::string command{"/usr/bin/bash"};
+        std::filesystem::path command{"/usr/bin/bash"};
         std::optional<std::vector<std::string>> arguments{std::nullopt};
         std::optional<std::map<std::string, std::string>> environment{std::nullopt};
         int exitTimeoutSeconds{5};
@@ -47,7 +47,7 @@ namespace Persistence
         std::optional<std::string> user{std::nullopt};
         // TODO: Remove again. This was only for testing!
         std::optional<std::string> passwordUnsafe{std::nullopt};
-        std::optional<std::string> sshKey{std::nullopt};
+        std::optional<std::filesystem::path> sshKey{std::nullopt};
         bool openSftpByDefault{true};
 
         // Referenceables:

@@ -22,7 +22,7 @@ namespace Persistence
         std::optional<bool> gssapiDelegateCredentials{std::nullopt};
         std::optional<bool> noDelay{std::nullopt};
         std::optional<bool> bypassConfig{std::nullopt};
-        std::optional<std::string> identityAgent{std::nullopt};
+        std::optional<std::filesystem::path> identityAgent{std::nullopt};
         std::optional<int> connectTimeoutSeconds{std::nullopt};
         std::optional<int> connectTimeoutUSeconds{std::nullopt};
         std::optional<std::map<std::string, std::string>> environment{std::nullopt};
