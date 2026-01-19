@@ -617,6 +617,7 @@ Nui::ElementRenderer Settings::operator()()
                 ui5::busy_indicator{
                     "size"_prop = "L",
                     "active"_prop = observe(impl_->initialLoadDone).generate([](bool done) { return !done; }),
+                    "delay"_prop = 1,
                 }()
             ),
             impl_->newSessionDialog(),
@@ -1144,6 +1145,68 @@ Nui::ElementRenderer Settings::currentSession()
     {
         // clang-format off
         auto overarchingSettings = fragment(
+            div{
+                class_ = "settings-session-deleter",
+                style = "grid-template-columns: unset; padding: 0;"
+            }(
+                ui5::button{
+                    "design"_prop = "Negative",
+                    "icon"_prop = "delete",
+                    "click"_event = [this]() {
+                        if (!*impl_->activeSession)
+                            return;
+
+                        const auto sessionId = **impl_->activeSession;
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Critical,
+                            .headerText = language->get("settings", "deleteSessionConfirmHeader"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("settings", "deleteSessionConfirmText") + ": {}"),
+                                sessionId
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+                            .onClose = [this, sessionId](ConfirmDialog::Button button) {
+                                if (button != ConfirmDialog::Button::Ok)
+                                    return;
+
+                                impl_->stateHolder->stateCache().sessions.erase(sessionId);
+                                impl_->stateHolder->save(
+                                    [this](std::optional<std::string> const& error)
+                                    {
+                                        if (error)
+                                        {
+                                            impl_->confirmDialog->open({
+                                                .state = ConfirmDialog::State::Negative,
+                                                .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                                                .text = fmt::format(
+                                                    fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                                ),
+                                                .buttons = ConfirmDialog::Button::Ok,
+                                            });
+                                        }
+                                    }
+                                );
+
+                                // delete session from session selectors:
+                                impl_->sessionSelectors.value().erase(
+                                    std::remove_if(
+                                        impl_->sessionSelectors.value().begin(),
+                                        impl_->sessionSelectors.value().end(),
+                                        [sessionId](auto const& item) {
+                                            return item.sessionId == sessionId;
+                                        }
+                                    ),
+                                    impl_->sessionSelectors.value().end()
+                                );
+
+                                impl_->activeSession = std::nullopt;
+                                impl_->activeSection = Section::GeneralSettings;
+                                impl_->sessionSelectors.modifyNow();
+                            }
+                        });
+                    },
+                }(language->getObserved("settings", "deleteSessionButton"))
+            ),
             impl_->currentSessionOptions.terminalEngineType(
                 language->getObserved("settings", "sessionOptions", "terminalEngineType")
             ),
