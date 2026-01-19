@@ -4,6 +4,9 @@ en_US:
   add: "Add"
   settings:
     loadingSettings: "Loading Settings UI"
+    deleteSessionButton: "Delete Session"
+    deleteSessionConfirmHeader: "Are you sure you want to delete this session?"
+    deleteSessionConfirmText: "Deleting the session configuration cannot be undone"
     title: "Settings"
     generalSettings: "General Settings"
     loggingAndErrorReportingGroupHeader: "Logging and Error Reporting"
@@ -367,7 +370,10 @@ de_DE:
   cancel: "Abbrechen"
   add: "Hinzufügen"
   settings:
-    loadingSettings: "Einstellungen Benutzeroberfläche wird geladen"
+    loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
+    deleteSessionButton: "Sitzung löschen"
+    deleteSessionConfirmHeader: "Sind Sie sicher, dass Sie diese Sitzung löschen möchten?"
+    deleteSessionConfirmText: "Das Löschen der Sitzungskonfiguration kann nicht rückgängig gemacht werden"
     title: "Einstellungen"
     generalSettings: "Allgemeine Einstellungen"
     loggingAndErrorReportingGroupHeader: "Protokollierung und Fehlerberichterstattung"
