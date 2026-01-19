@@ -3,6 +3,7 @@ en_US:
   cancel: "Cancel"
   add: "Add"
   settings:
+    loadingSettings: "Loading Settings UI"
     title: "Settings"
     generalSettings: "General Settings"
     loggingAndErrorReportingGroupHeader: "Logging and Error Reporting"
@@ -366,6 +367,7 @@ de_DE:
   cancel: "Abbrechen"
   add: "Hinzufügen"
   settings:
+    loadingSettings: "Einstellungen Benutzeroberfläche wird geladen"
     title: "Einstellungen"
     generalSettings: "Allgemeine Einstellungen"
     loggingAndErrorReportingGroupHeader: "Protokollierung und Fehlerberichterstattung"

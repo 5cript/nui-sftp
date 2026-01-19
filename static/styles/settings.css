@@ -15,6 +15,30 @@
     bottom: 0;
 }
 
+.settings-loader-blocker {
+    z-index: 10;
+
+    background-color: rgba(0, 0, 0, 0.8);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+
+    position: absolute;
+    box-sizing: border-box;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 8px;
+
+    color: white;
+    font-size: 1.5rem;
+}
+
 .settings-page {
     margin: 40px;
     position: relative;
