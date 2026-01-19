@@ -45,4 +45,8 @@ struct SftpOptions : public GroupKeys
     void applyToState(Persistence::SftpOptions& state) const;
     void loadFromState(Persistence::SftpOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SftpOptions const& state);
+    Nui::ElementRenderer render();
+
+  private:
+    std::function<void()> onChange_;
 };

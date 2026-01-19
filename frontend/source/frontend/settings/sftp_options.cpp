@@ -2,6 +2,10 @@
 
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/optional_converters.hpp>
+#include <frontend/settings/subgroup.hpp>
+
+#include <nui/frontend/elements.hpp>
+#include <nui/frontend/attributes.hpp>
 
 SftpOptions::SftpOptions(std::function<void()> const& onChange)
     : downloadOptions{
@@ -111,7 +115,8 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             operationTimeoutSeconds.value(5);
             onChange();
         }
-    }
+    },
+    onChange_{onChange}
 {}
 
 void SftpOptions::applyToState(Persistence::SftpOptions& state) const
@@ -251,4 +256,64 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
 
     concurrency.inherit(state.concurrency);
     defaultDirectory.inherit(state.defaultDirectory);
+}
+
+Nui::ElementRenderer SftpOptions::render()
+{
+    using namespace Nui::Elements;
+
+    return fragment(
+        subgroup(
+            {.engagedStatus = &downloadOptionsEngaged,
+                .groupTitle = language->getObserved("settings", "sftpOptions", "downloadOptionsSubgroupTitle"),
+                .onChange = onChange_},
+            fragment(
+                downloadOptions.tempFileSuffix(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "tempFileSuffix")
+                ),
+                downloadOptions.mayOverwrite(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "mayOverwrite")
+                ),
+                downloadOptions.tryContinue(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "tryContinue")
+                ),
+                downloadOptions.inheritPermissions(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "inheritPermissions")
+                ),
+                downloadOptions.customPermissions(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "customPermissions")
+                ),
+                downloadOptions.reserveSpace(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "reserveSpace")
+                ),
+                downloadOptions.doCleanup(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "doCleanup")
+                )
+            )
+        ),
+        subgroup(
+            {.engagedStatus = &uploadOptionsEngaged,
+                .groupTitle = language->getObserved("settings", "sftpOptions", "uploadOptionsSubgroupTitle"),
+                .onChange = onChange_},
+            fragment(
+                uploadOptions.tempFileSuffix(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "tempFileSuffix")
+                ),
+                uploadOptions.mayOverwrite(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "mayOverwrite")
+                ),
+                uploadOptions.tryContinue(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "tryContinue")
+                ),
+                uploadOptions.inheritPermissions(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "inheritPermissions")
+                ),
+                uploadOptions.customPermissions(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "customPermissions")
+                )
+            )
+        ),
+        concurrency(language->getObserved("settings", "sftpOptions", "concurrency")),
+        operationTimeoutSeconds(language->getObserved("settings", "sftpOptions", "operationTimeoutSeconds"))
+    );
 }

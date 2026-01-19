@@ -19,6 +19,7 @@
 #include <frontend/settings/atomic_setting/color_setting.hpp>
 #include <frontend/settings/optional_converters.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/subgroup.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
@@ -53,6 +54,9 @@ struct Settings::Implementation
             Nui::Observed<bool> overarchingSettings{false};
             Nui::Observed<bool> sshOptions{false};
             Nui::Observed<bool> sftpOptions{false};
+            Nui::Observed<bool> terminalOptions{false};
+            Nui::Observed<bool> termios{false};
+            Nui::Observed<bool> queueOptions{false};
         } sessionCollapsibles{};
     } collapsibleStates{};
 
@@ -1002,308 +1006,6 @@ Nui::ElementRenderer Settings::inheritableSettings()
 
     try
     {
-        auto sshOptions = fragment(
-            impl_->sshOptions.sshDirectory(language->getObserved("settings", "sshOptions", "sshDirectory")),
-            impl_->sshOptions.knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
-            impl_->sshOptions.tryAgentForAuthentication(
-                language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")
-            ),
-            impl_->sshOptions.usePublicKeyAutoAuth(
-                language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")
-            ),
-            impl_->sshOptions.logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
-            impl_->sshOptions.keyExchangeAlgorithms(
-                language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")
-            ),
-            impl_->sshOptions.compressionClientToServer(
-                language->getObserved("settings", "sshOptions", "compressionClientToServer")
-            ),
-            impl_->sshOptions.compressionServerToClient(
-                language->getObserved("settings", "sshOptions", "compressionServerToClient")
-            ),
-            impl_->sshOptions.compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
-            impl_->sshOptions.strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
-            impl_->sshOptions.proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
-            impl_->sshOptions.gssapiServerIdentity(
-                language->getObserved("settings", "sshOptions", "gssapiServerIdentity")
-            ),
-            impl_->sshOptions.gssapiClientIdentity(
-                language->getObserved("settings", "sshOptions", "gssapiClientIdentity")
-            ),
-            impl_->sshOptions.gssapiDelegateCredentials(
-                language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")
-            ),
-            impl_->sshOptions.noDelay(language->getObserved("settings", "sshOptions", "noDelay")),
-            impl_->sshOptions.bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
-            impl_->sshOptions.identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
-            impl_->sshOptions.connectTimeoutSeconds(
-                language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")
-            ),
-            impl_->sshOptions.connectTimeoutUSeconds(
-                language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds")
-            )
-        );
-
-        auto sftpOptions = fragment(
-            subgroup(
-                {.engagedStatus = &impl_->sftpOptions.downloadOptionsEngaged,
-                    .groupTitle = language->getObserved("settings", "sftpOptions", "downloadOptionsSubgroupTitle")},
-                fragment(
-                    impl_->sftpOptions.downloadOptions.tempFileSuffix(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "tempFileSuffix")
-                    ),
-                    impl_->sftpOptions.downloadOptions.mayOverwrite(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "mayOverwrite")
-                    ),
-                    impl_->sftpOptions.downloadOptions.tryContinue(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "tryContinue")
-                    ),
-                    impl_->sftpOptions.downloadOptions.inheritPermissions(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "inheritPermissions")
-                    ),
-                    impl_->sftpOptions.downloadOptions.customPermissions(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "customPermissions")
-                    ),
-                    impl_->sftpOptions.downloadOptions.reserveSpace(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "reserveSpace")
-                    ),
-                    impl_->sftpOptions.downloadOptions.doCleanup(
-                        language->getObserved("settings", "sftpOptions", "downloadOptions", "doCleanup")
-                    )
-                )
-            ),
-            subgroup(
-                {.engagedStatus = &impl_->sftpOptions.uploadOptionsEngaged,
-                    .groupTitle = language->getObserved("settings", "sftpOptions", "uploadOptionsSubgroupTitle")},
-                fragment(
-                    impl_->sftpOptions.uploadOptions.tempFileSuffix(
-                        language->getObserved("settings", "sftpOptions", "uploadOptions", "tempFileSuffix")
-                    ),
-                    impl_->sftpOptions.uploadOptions.mayOverwrite(
-                        language->getObserved("settings", "sftpOptions", "uploadOptions", "mayOverwrite")
-                    ),
-                    impl_->sftpOptions.uploadOptions.tryContinue(
-                        language->getObserved("settings", "sftpOptions", "uploadOptions", "tryContinue")
-                    ),
-                    impl_->sftpOptions.uploadOptions.inheritPermissions(
-                        language->getObserved("settings", "sftpOptions", "uploadOptions", "inheritPermissions")
-                    ),
-                    impl_->sftpOptions.uploadOptions.customPermissions(
-                        language->getObserved("settings", "sftpOptions", "uploadOptions", "customPermissions")
-                    )
-                )
-            ),
-            impl_->sftpOptions.concurrency(language->getObserved("settings", "sftpOptions", "concurrency")),
-            impl_->sftpOptions.operationTimeoutSeconds(
-                language->getObserved("settings", "sftpOptions", "operationTimeoutSeconds")
-            )
-        );
-
-        auto terminalOptions = fragment(
-            impl_->terminalOptions.fontFamily(language->getObserved("settings", "terminalOptions", "fontFamily")),
-            impl_->terminalOptions.fontSize(language->getObserved("settings", "terminalOptions", "fontSize")),
-            impl_->terminalOptions.lineHeight(language->getObserved("settings", "terminalOptions", "lineHeight")),
-            impl_->terminalOptions.cursorBlink(language->getObserved("settings", "terminalOptions", "cursorBlink")),
-            impl_->terminalOptions.renderer(language->getObserved("settings", "terminalOptions", "renderer")),
-            impl_->terminalOptions.letterSpacing(language->getObserved("settings", "terminalOptions", "letterSpacing")),
-            subgroup(
-                {.engagedStatus = &impl_->terminalOptions.themeEngaged,
-                    .groupTitle = language->getObserved("settings", "terminalOptions", "themeSubgroupTitle")},
-                fragment(
-                    impl_->terminalOptions.theme.background(
-                        language->getObserved("settings", "terminalOptions", "theme", "background")
-                    ),
-                    impl_->terminalOptions.theme.black(
-                        language->getObserved("settings", "terminalOptions", "theme", "black")
-                    ),
-                    impl_->terminalOptions.theme.blue(
-                        language->getObserved("settings", "terminalOptions", "theme", "blue")
-                    ),
-                    impl_->terminalOptions.theme.brightBlack(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightBlack")
-                    ),
-                    impl_->terminalOptions.theme.brightBlue(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightBlue")
-                    ),
-                    impl_->terminalOptions.theme.brightCyan(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightCyan")
-                    ),
-                    impl_->terminalOptions.theme.brightGreen(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightGreen")
-                    ),
-                    impl_->terminalOptions.theme.brightMagenta(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightMagenta")
-                    ),
-                    impl_->terminalOptions.theme.brightRed(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightRed")
-                    ),
-                    impl_->terminalOptions.theme.brightWhite(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightWhite")
-                    ),
-                    impl_->terminalOptions.theme.brightYellow(
-                        language->getObserved("settings", "terminalOptions", "theme", "brightYellow")
-                    ),
-                    impl_->terminalOptions.theme.cursor(
-                        language->getObserved("settings", "terminalOptions", "theme", "cursor")
-                    ),
-                    impl_->terminalOptions.theme.cursorAccent(
-                        language->getObserved("settings", "terminalOptions", "theme", "cursorAccent")
-                    ),
-                    impl_->terminalOptions.theme.cyan(
-                        language->getObserved("settings", "terminalOptions", "theme", "cyan")
-                    ),
-                    impl_->terminalOptions.theme.foreground(
-                        language->getObserved("settings", "terminalOptions", "theme", "foreground")
-                    ),
-                    impl_->terminalOptions.theme.green(
-                        language->getObserved("settings", "terminalOptions", "theme", "green")
-                    ),
-                    impl_->terminalOptions.theme.magenta(
-                        language->getObserved("settings", "terminalOptions", "theme", "magenta")
-                    ),
-                    impl_->terminalOptions.theme.red(
-                        language->getObserved("settings", "terminalOptions", "theme", "red")
-                    ),
-                    impl_->terminalOptions.theme.selectionBackground(
-                        language->getObserved("settings", "terminalOptions", "theme", "selectionBackground")
-                    ),
-                    impl_->terminalOptions.theme.selectionForeground(
-                        language->getObserved("settings", "terminalOptions", "theme", "selectionForeground")
-                    ),
-                    impl_->terminalOptions.theme.selectionInactiveBackground(
-                        language->getObserved("settings", "terminalOptions", "theme", "selectionInactiveBackground")
-                    ),
-                    impl_->terminalOptions.theme.white(
-                        language->getObserved("settings", "terminalOptions", "theme", "white")
-                    ),
-                    impl_->terminalOptions.theme.yellow(
-                        language->getObserved("settings", "terminalOptions", "theme", "yellow")
-                    )
-                )
-            )
-        );
-
-        auto queueOptions = fragment(
-            impl_->queueOptions.autoRemoveCompletedOperations(
-                language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperations")
-            ),
-            impl_->queueOptions.startInPausedState(
-                language->getObserved("settings", "queueOptions", "startInPausedState")
-            )
-        );
-
-        auto termios = fragment(
-            h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "inputFlagsSubgroupTitle")),
-            subgroup(
-                {},
-                fragment(
-                    impl_->termiosSettings.inputFlags.IGNBRK("IGNBRK"),
-                    impl_->termiosSettings.inputFlags.BRKINT("BRKINT"),
-                    impl_->termiosSettings.inputFlags.IGNPAR("IGNPAR"),
-                    impl_->termiosSettings.inputFlags.PARMRK("PARMRK"),
-                    impl_->termiosSettings.inputFlags.INPCK("INPCK"),
-                    impl_->termiosSettings.inputFlags.ISTRIP("ISTRIP"),
-                    impl_->termiosSettings.inputFlags.INLCR("INLCR"),
-                    impl_->termiosSettings.inputFlags.IGNCR("IGNCR"),
-                    impl_->termiosSettings.inputFlags.ICRNL("ICRNL"),
-                    impl_->termiosSettings.inputFlags.IUCLC("IUCLC"),
-                    impl_->termiosSettings.inputFlags.IXON("IXON"),
-                    impl_->termiosSettings.inputFlags.IXANY("IXANY"),
-                    impl_->termiosSettings.inputFlags.IXOFF("IXOFF"),
-                    impl_->termiosSettings.inputFlags.IMAXBEL("IMAXBEL"),
-                    impl_->termiosSettings.inputFlags.IUTF8("IUTF8")
-                )
-            ),
-            h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "outputFlagsSubgroupTitle")),
-            subgroup(
-                {},
-                fragment(
-                    impl_->termiosSettings.outputFlags.OPOST("OPOST"),
-                    impl_->termiosSettings.outputFlags.OLCUC("OLCUC"),
-                    impl_->termiosSettings.outputFlags.ONLCR("ONLCR"),
-                    impl_->termiosSettings.outputFlags.OCRNL("OCRNL"),
-                    impl_->termiosSettings.outputFlags.ONOCR("ONOCR"),
-                    impl_->termiosSettings.outputFlags.ONLRET("ONLRET"),
-                    impl_->termiosSettings.outputFlags.OFILL("OFILL"),
-                    impl_->termiosSettings.outputFlags.OFDEL("OFDEL"),
-                    impl_->termiosSettings.outputFlags.NLDLY("NLDLY"),
-                    impl_->termiosSettings.outputFlags.CRDLY("CRDLY"),
-                    impl_->termiosSettings.outputFlags.TABDLY("TABDLY"),
-                    impl_->termiosSettings.outputFlags.BSDLY("BSDLY"),
-                    impl_->termiosSettings.outputFlags.VTDLY("VTDLY"),
-                    impl_->termiosSettings.outputFlags.FFDLY("FFDLY")
-                )
-            ),
-            h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "controlFlagsSubgroupTitle")),
-            subgroup(
-                {},
-                fragment(
-                    impl_->termiosSettings.controlFlags.CBAUD("CBAUD"),
-                    impl_->termiosSettings.controlFlags.CBAUDEX("CBAUDEX"),
-                    impl_->termiosSettings.controlFlags.CSIZE("CSIZE"),
-                    impl_->termiosSettings.controlFlags.CSTOPB("CSTOPB"),
-                    impl_->termiosSettings.controlFlags.CREAD("CREAD"),
-                    impl_->termiosSettings.controlFlags.PARENB("PARENB"),
-                    impl_->termiosSettings.controlFlags.PARODD("PARODD"),
-                    impl_->termiosSettings.controlFlags.HUPCL("HUPCL"),
-                    impl_->termiosSettings.controlFlags.CLOCAL("CLOCAL"),
-                    impl_->termiosSettings.controlFlags.LOBLK("LOBLK"),
-                    impl_->termiosSettings.controlFlags.CIBAUD("CIBAUD"),
-                    impl_->termiosSettings.controlFlags.CMSPAR("CMSPAR"),
-                    impl_->termiosSettings.controlFlags.CRTSCTS("CRTSCTS")
-                )
-            ),
-            h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "localFlagsSubgroupTitle")),
-            subgroup(
-                {},
-                fragment(
-                    impl_->termiosSettings.localFlags.ISIG("ISIG"),
-                    impl_->termiosSettings.localFlags.ICANON("ICANON"),
-                    impl_->termiosSettings.localFlags.XCASE("XCASE"),
-                    impl_->termiosSettings.localFlags.ECHO("ECHO"),
-                    impl_->termiosSettings.localFlags.ECHOE("ECHOE"),
-                    impl_->termiosSettings.localFlags.ECHOK("ECHOK"),
-                    impl_->termiosSettings.localFlags.ECHONL("ECHONL"),
-                    impl_->termiosSettings.localFlags.ECHOPRT("ECHOPRT"),
-                    impl_->termiosSettings.localFlags.ECHOKE("ECHOKE"),
-                    impl_->termiosSettings.localFlags.FLUSHO("FLUSHO"),
-                    impl_->termiosSettings.localFlags.NOFLSH("NOFLSH"),
-                    impl_->termiosSettings.localFlags.TOSTOP("TOSTOP"),
-                    impl_->termiosSettings.localFlags.PENDIN("PENDIN"),
-                    impl_->termiosSettings.localFlags.IEXTEN("IEXTEN")
-                )
-            ),
-            h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "ccSettingsSubgroupTitle")),
-            subgroup(
-                {.engagedStatus = &impl_->termiosSettings.ccEngaged,
-                    .groupTitle = language->getObserved("settings", "ccSettingsSubgroupTitle")},
-                fragment(
-                    impl_->termiosSettings.cc.VDISCARD("VDISCARD"),
-                    impl_->termiosSettings.cc.VDSUSP("VDSUSP"),
-                    impl_->termiosSettings.cc.VEOF("VEOF"),
-                    impl_->termiosSettings.cc.VEOL("VEOL"),
-                    impl_->termiosSettings.cc.VEOL2("VEOL2"),
-                    impl_->termiosSettings.cc.VERASE("VERASE"),
-                    impl_->termiosSettings.cc.VINTR("VINTR"),
-                    impl_->termiosSettings.cc.VKILL("VKILL"),
-                    impl_->termiosSettings.cc.VLNEXT("VLNEXT"),
-                    impl_->termiosSettings.cc.VMIN("VMIN"),
-                    impl_->termiosSettings.cc.VQUIT("VQUIT"),
-                    impl_->termiosSettings.cc.VREPRINT("VREPRINT"),
-                    impl_->termiosSettings.cc.VSTART("VSTART"),
-                    impl_->termiosSettings.cc.VSTATUS("VSTATUS"),
-                    impl_->termiosSettings.cc.VSTOP("VSTOP"),
-                    impl_->termiosSettings.cc.VSUSP("VSUSP"),
-                    impl_->termiosSettings.cc.VSWTCH("VSWTCH"),
-                    impl_->termiosSettings.cc.VTIME("VTIME"),
-                    impl_->termiosSettings.cc.VWERASE("VWERASE")
-                )
-            ),
-            impl_->termiosSettings.iSpeed(language->getObserved("settings", "termios", "iSpeedHelpText")),
-            impl_->termiosSettings.oSpeed(language->getObserved("settings", "termios", "oSpeedHelpText"))
-        );
-        // clang-format on
-
         // clang-format off
         return fragment(
             ui5::message_strip{
@@ -1314,7 +1016,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             ),
             group({
                 .isCollapsed = impl_->collapsibleStates.sshOptions,
-                .content = std::move(sshOptions),
+                .content = impl_->sshOptions.render(),
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
                 .currentGroupKey = &impl_->sshOptions.groupKey,
                 .groupKeys = &impl_->sshOptions.groupKeys,
@@ -1322,7 +1024,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sftpOptions,
-                .content = std::move(sftpOptions),
+                .content = impl_->sftpOptions.render(),
                 .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
                 .currentGroupKey = &impl_->sftpOptions.groupKey,
                 .groupKeys = &impl_->sftpOptions.groupKeys,
@@ -1330,7 +1032,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.terminalOptions,
-                .content = std::move(terminalOptions),
+                .content = impl_->terminalOptions.render(),
                 .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
                 .currentGroupKey = &impl_->terminalOptions.groupKey,
                 .groupKeys = &impl_->terminalOptions.groupKeys,
@@ -1338,7 +1040,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.queueOptions,
-                .content = std::move(queueOptions),
+                .content = impl_->queueOptions.render(),
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->queueOptions.groupKey,
                 .groupKeys = &impl_->queueOptions.groupKeys,
@@ -1346,7 +1048,7 @@ Nui::ElementRenderer Settings::inheritableSettings()
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.termios,
-                .content = std::move(termios),
+                .content = impl_->termiosSettings.render(),
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
                 .currentGroupKey = &impl_->termiosSettings.groupKey,
                 .groupKeys = &impl_->termiosSettings.groupKeys,
@@ -1395,7 +1097,11 @@ Nui::ElementRenderer Settings::currentSession()
                 h1{
                     class_ = "settings-header"
                 }(language->getObserved("settings", "sessionOptions", "sshSessionServerOptions")),
-                subgroup({},
+                subgroup({.onChange =
+                        [this]()
+                    {
+                        onChange();
+                    }},
                     fragment(
                         impl_->currentSessionOptions.sshSessionOptions.host(language->getObserved("settings", "sessionOptions", "host")),
                         impl_->currentSessionOptions.sshSessionOptions.port(language->getObserved("settings", "sessionOptions", "port")),
@@ -1414,7 +1120,11 @@ Nui::ElementRenderer Settings::currentSession()
                 h1{
                     class_ = "settings-header"
                 }(language->getObserved("settings", "sessionOptions", "localSessionOptions")),
-                subgroup({},
+                subgroup({.onChange =
+                        [this]()
+                    {
+                        onChange();
+                    }},
                     fragment(
                         impl_->currentSessionOptions.executingSessionOptions.isPty(language->getObserved("settings", "sessionOptions", "isPty")),
                         impl_->currentSessionOptions.executingSessionOptions.command(language->getObserved("settings", "sessionOptions", "command")),
@@ -1428,29 +1138,6 @@ Nui::ElementRenderer Settings::currentSession()
                     )
                 )
             )
-        );
-
-        auto& sshOptionStruct = impl_->currentSessionOptions.sshSessionOptions.sshOptions;
-        auto sshOptions = fragment(
-            sshOptionStruct.sshDirectory(language->getObserved("settings", "sshOptions", "sshDirectory")),
-            sshOptionStruct.knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
-            sshOptionStruct.tryAgentForAuthentication(language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")),
-            sshOptionStruct.usePublicKeyAutoAuth(language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")),
-            sshOptionStruct.logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
-            sshOptionStruct.keyExchangeAlgorithms(language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")),
-            sshOptionStruct.compressionClientToServer(language->getObserved("settings", "sshOptions", "compressionClientToServer")),
-            sshOptionStruct.compressionServerToClient(language->getObserved("settings", "sshOptions", "compressionServerToClient")),
-            sshOptionStruct.compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
-            sshOptionStruct.strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
-            sshOptionStruct.proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
-            sshOptionStruct.gssapiServerIdentity(language->getObserved("settings", "sshOptions", "gssapiServerIdentity")),
-            sshOptionStruct.gssapiClientIdentity(language->getObserved("settings", "sshOptions", "gssapiClientIdentity")),
-            sshOptionStruct.gssapiDelegateCredentials(language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")),
-            sshOptionStruct.noDelay(language->getObserved("settings", "sshOptions", "noDelay")),
-            sshOptionStruct.bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
-            sshOptionStruct.identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
-            sshOptionStruct.connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
-            sshOptionStruct.connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds"))
         );
 
         return fragment(
@@ -1467,13 +1154,47 @@ Nui::ElementRenderer Settings::currentSession()
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sshOptions,
-                .content = std::move(sshOptions),
+                .content = impl_->currentSessionOptions.sshSessionOptions.sshOptions.render(),
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKeys,
                 .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
                 .engineTypeFilterValue = Persistence::TerminalEngineType::ssh
+            }),
+            group({
+                .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sftpOptions,
+                .content = impl_->currentSessionOptions.sshSessionOptions.sftpOptions.render(),
+                .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
+                .currentGroupKey = &impl_->currentSessionOptions.sshSessionOptions.sftpOptions.groupKey,
+                .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sftpOptions.groupKeys,
+                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting,
+                .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
+                .engineTypeFilterValue = Persistence::TerminalEngineType::ssh
+            }),
+            group({
+                .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.terminalOptions,
+                .content = impl_->currentSessionOptions.terminalOptions.render(),
+                .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
+                .currentGroupKey = &impl_->currentSessionOptions.terminalOptions.groupKey,
+                .groupKeys = &impl_->currentSessionOptions.terminalOptions.groupKeys,
+                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
+            }),
+            group({
+                .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.queueOptions,
+                .content = impl_->currentSessionOptions.queueOptions.render(),
+                .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
+                .currentGroupKey = &impl_->currentSessionOptions.queueOptions.groupKey,
+                .groupKeys = &impl_->currentSessionOptions.queueOptions.groupKeys,
+                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
+            }),
+            group({
+                .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.termios,
+                .content = impl_->currentSessionOptions.termios.render(),
+                .headerTitle = language->getObserved("settings", "termiosGroupName"),
+                .currentGroupKey = &impl_->currentSessionOptions.termios.groupKey,
+                .groupKeys = &impl_->currentSessionOptions.termios.groupKeys,
+                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
             })
         );
         // clang-format on
@@ -1482,63 +1203,6 @@ Nui::ElementRenderer Settings::currentSession()
     {
         Log::error("Exception in Settings::currentSession(): {}", e.what());
         return div{}("Error loading current session settings section: "s + e.what());
-    }
-}
-
-Nui::ElementRenderer Settings::subgroup(SubgroupParameters&& params, Nui::ElementRenderer content)
-{
-    using namespace Nui;
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-
-    try
-    {
-        // clang-format off
-        return div{
-            class_ = "settings-subgroup",
-        }(
-            div{
-                class_ = "settings-subgroup-header",
-                style = params.engagedStatus ? "border: 1px solid var(--sapContent_ForegroundBorderColor); background-color: var(--darkerBackground)" : "",
-                onClick = [engagedStatus = params.engagedStatus]() {
-                    if (engagedStatus)
-                        *engagedStatus = !*engagedStatus;
-                }
-            }(
-                // switch to enable/disable entire subgroup:
-                [this, engagedStatus = params.engagedStatus, title = std::move(params.groupTitle)]() mutable -> Nui::ElementRenderer {
-                    if (!engagedStatus || !title)
-                        return Nui::nil();
-
-                    return fragment(
-                        ui5::label{
-                            "design"_prop = "Bold",
-                        }(std::move(title).value()),
-                        ui5::switch_{
-                            "checked"_prop = engagedStatus->value(), // initial not observed
-                            "change"_event = [this, engagedStatus](Nui::val event) {
-                                *engagedStatus = event["target"]["checked"].as<bool>();
-                                onChange();
-                            },
-                        }()
-                    );
-                }()
-            ),
-            div{
-                class_ = "settings-subgroup-content",
-                style = params.engagedStatus ? "margin-top: 20px; padding-top: 32px;" : ""
-            }(
-                std::move(content)
-            )
-        );
-        // clang-format on
-    }
-    catch (std::exception const& e)
-    {
-        Log::error("Exception in Settings::subgroup(): {}", e.what());
-        return div{}("Error loading subgroup: "s + e.what());
     }
 }
 
@@ -1769,7 +1433,9 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                     return classes("settings-group-content", isCollapsed ? "collapsed" : "uncollapsed");
                 }),
                 style = Nui::Attributes::Style{
-                    "padding-top"_style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed]() -> std::string {
+                    "padding-top"_style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed, currentGroupKey = params.currentGroupKey]() -> std::string {
+                        if (currentGroupKey)
+                            return "0px";
                         return *isCollapsed ? "0px" : "8px";
                     }),
                 },

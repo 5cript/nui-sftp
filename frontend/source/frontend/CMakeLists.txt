@@ -25,6 +25,7 @@ target_sources(
         settings/executing_session_options.cpp
         settings/ssh_session_options.cpp
         settings/session_options.cpp
+        settings/subgroup.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         terminal/frontend_ssh_manager.cpp

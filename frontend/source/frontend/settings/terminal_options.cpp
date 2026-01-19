@@ -1,99 +1,121 @@
 #include <frontend/settings/terminal_options.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/subgroup.hpp>
+
+#include <nui/frontend/elements.hpp>
+#include <nui/frontend/attributes.hpp>
 
 using namespace std::string_literals;
 
-TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onChange)
+TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onChange, Nui::Observed<bool>* externalEngage)
     : background{
             language->getObserved("settings", "terminalOptions", "theme", "backgroundHelpText"),
             onChange,
             valueReset(background, onChange, "#202020"s),
+            externalEngage
         }
     , black{
             language->getObserved("settings", "terminalOptions", "theme", "blackHelpText"),
             onChange,
             valueReset(black, onChange, "#000000"s),
-        }
+            externalEngage
+    }
     , blue{
             language->getObserved("settings", "terminalOptions", "theme", "blueHelpText"),
             onChange,
             valueReset(blue, onChange, "#0000FF"s),
+            externalEngage
         }
     , brightBlack{
             language->getObserved("settings", "terminalOptions", "theme", "brightBlackHelpText"),
             onChange,
             valueReset(brightBlack, onChange, "#555555"s),
+            externalEngage
         }
     , brightBlue{
             language->getObserved("settings", "terminalOptions", "theme", "brightBlueHelpText"),
             onChange,
             valueReset(brightBlue, onChange, "#5555FF"s),
+            externalEngage
         }
     , brightCyan{
             language->getObserved("settings", "terminalOptions", "theme", "brightCyanHelpText"),
             onChange,
             valueReset(brightCyan, onChange, "#55FFFF"s),
+            externalEngage
         }
     , brightGreen{
             language->getObserved("settings", "terminalOptions", "theme", "brightGreenHelpText"),
             onChange,
             valueReset(brightGreen, onChange, "#55FF55"s),
+            externalEngage
         }
     , brightMagenta{
             language->getObserved("settings", "terminalOptions", "theme", "brightMagentaHelpText"),
             onChange,
             valueReset(brightMagenta, onChange, "#FF55FF"s),
+            externalEngage
         }
     , brightRed{
             language->getObserved("settings", "terminalOptions", "theme", "brightRedHelpText"),
             onChange,
             valueReset(brightRed, onChange, "#FF5555"s),
+            externalEngage
         }
     , brightWhite{
             language->getObserved("settings", "terminalOptions", "theme", "brightWhiteHelpText"),
             onChange,
             valueReset(brightWhite, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , brightYellow{
             language->getObserved("settings", "terminalOptions", "theme", "brightYellowHelpText"),
             onChange,
             valueReset(brightYellow, onChange, "#FFFF55"s),
+            externalEngage
         }
     , cursor{
             language->getObserved("settings", "terminalOptions", "theme", "cursorHelpText"),
             onChange,
             valueReset(cursor, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , cursorAccent{
             language->getObserved("settings", "terminalOptions", "theme", "cursorAccentHelpText"),
             onChange,
             valueReset(cursorAccent, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , cyan{
             language->getObserved("settings", "terminalOptions", "theme", "cyanHelpText"),
             onChange,
             valueReset(cyan, onChange, "#00FFFF"s),
+            externalEngage
         }
     , foreground{
             language->getObserved("settings", "terminalOptions", "theme", "foregroundHelpText"),
             onChange,
             valueReset(foreground, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , green{
             language->getObserved("settings", "terminalOptions", "theme", "greenHelpText"),
             onChange,
             valueReset(green, onChange, "#00FF00"s),
+            externalEngage
         }
     , magenta{
             language->getObserved("settings", "terminalOptions", "theme", "magentaHelpText"),
             onChange,
             valueReset(magenta, onChange, "#FF00FF"s),
+            externalEngage
         }
     , red{
             language->getObserved("settings", "terminalOptions", "theme", "redHelpText"),
             onChange,
             valueReset(red, onChange, "#FF0000"s),
+            externalEngage
         }
     , selectionBackground{
             language->getObserved(
@@ -104,6 +126,7 @@ TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onCha
             ),
             onChange,
             valueReset(selectionBackground, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , selectionForeground{
             language->getObserved(
@@ -114,6 +137,7 @@ TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onCha
             ),
             onChange,
             valueReset(selectionForeground, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , selectionInactiveBackground{
             language->getObserved(
@@ -124,16 +148,19 @@ TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onCha
             ),
             onChange,
             valueReset(selectionInactiveBackground, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , white{
             language->getObserved("settings", "terminalOptions", "theme", "whiteHelpText"),
             onChange,
             valueReset(white, onChange, "#FFFFFF"s),
+            externalEngage
         }
     , yellow{
             language->getObserved("settings", "terminalOptions", "theme", "yellowHelpText"),
             onChange,
             valueReset(yellow, onChange, "#FFFF00"s),
+            externalEngage
         }
 {}
 
@@ -168,7 +195,8 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             onChange,
             valueReset(letterSpacing, onChange, 0),
         }
-    , theme{onChange}
+    , theme{onChange, &themeEngaged}
+    , onChange_{onChange}
 {}
 
 void TerminalOptions::applyToState(Persistence::TerminalOptions& state) const
@@ -340,4 +368,55 @@ void TerminalOptions::assumeDefaultsFrom(Persistence::TerminalOptions const& sta
         theme.white.inherit(std::nullopt);
         theme.yellow.inherit(std::nullopt);
     }
+}
+
+Nui::ElementRenderer TerminalOptions::render()
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+
+    return fragment(
+        fontFamily(language->getObserved("settings", "terminalOptions", "fontFamily")),
+        fontSize(language->getObserved("settings", "terminalOptions", "fontSize")),
+        lineHeight(language->getObserved("settings", "terminalOptions", "lineHeight")),
+        cursorBlink(language->getObserved("settings", "terminalOptions", "cursorBlink")),
+        renderer(language->getObserved("settings", "terminalOptions", "renderer")),
+        letterSpacing(language->getObserved("settings", "terminalOptions", "letterSpacing")),
+        subgroup(
+            {.engagedStatus = &themeEngaged,
+                .groupTitle = language->getObserved("settings", "terminalOptions", "themeSubgroupTitle"),
+                .onChange = onChange_},
+            fragment(
+                theme.background(language->getObserved("settings", "terminalOptions", "theme", "background")),
+                theme.black(language->getObserved("settings", "terminalOptions", "theme", "black")),
+                theme.blue(language->getObserved("settings", "terminalOptions", "theme", "blue")),
+                theme.brightBlack(language->getObserved("settings", "terminalOptions", "theme", "brightBlack")),
+                theme.brightBlue(language->getObserved("settings", "terminalOptions", "theme", "brightBlue")),
+                theme.brightCyan(language->getObserved("settings", "terminalOptions", "theme", "brightCyan")),
+                theme.brightGreen(language->getObserved("settings", "terminalOptions", "theme", "brightGreen")),
+                theme.brightMagenta(language->getObserved("settings", "terminalOptions", "theme", "brightMagenta")),
+                theme.brightRed(language->getObserved("settings", "terminalOptions", "theme", "brightRed")),
+                theme.brightWhite(language->getObserved("settings", "terminalOptions", "theme", "brightWhite")),
+                theme.brightYellow(language->getObserved("settings", "terminalOptions", "theme", "brightYellow")),
+                theme.cursor(language->getObserved("settings", "terminalOptions", "theme", "cursor")),
+                theme.cursorAccent(language->getObserved("settings", "terminalOptions", "theme", "cursorAccent")),
+                theme.cyan(language->getObserved("settings", "terminalOptions", "theme", "cyan")),
+                theme.foreground(language->getObserved("settings", "terminalOptions", "theme", "foreground")),
+                theme.green(language->getObserved("settings", "terminalOptions", "theme", "green")),
+                theme.magenta(language->getObserved("settings", "terminalOptions", "theme", "magenta")),
+                theme.red(language->getObserved("settings", "terminalOptions", "theme", "red")),
+                theme.selectionBackground(
+                    language->getObserved("settings", "terminalOptions", "theme", "selectionBackground")
+                ),
+                theme.selectionForeground(
+                    language->getObserved("settings", "terminalOptions", "theme", "selectionForeground")
+                ),
+                theme.selectionInactiveBackground(
+                    language->getObserved("settings", "terminalOptions", "theme", "selectionInactiveBackground")
+                ),
+                theme.white(language->getObserved("settings", "terminalOptions", "theme", "white")),
+                theme.yellow(language->getObserved("settings", "terminalOptions", "theme", "yellow"))
+            )
+        )
+    );
 }

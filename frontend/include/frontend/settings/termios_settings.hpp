@@ -116,4 +116,8 @@ struct TermiosSettings : public GroupKeys
     void applyToState(Persistence::Termios& state) const;
     void loadFromState(Persistence::Termios const& state);
     void assumeDefaultsFrom(Persistence::Termios const& state);
+    Nui::ElementRenderer render();
+
+  private:
+    std::function<void()> onChange_;
 };

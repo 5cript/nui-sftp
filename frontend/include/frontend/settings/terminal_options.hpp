@@ -39,7 +39,7 @@ struct TerminalOptions : public GroupKeys
         // TODO:
         // std::optional<std::vector<std::string>> extendedAnsi{std::nullopt};
 
-        TerminalTheme(std::function<void()> const& onChange);
+        TerminalTheme(std::function<void()> const& onChange, Nui::Observed<bool>* externalEngage);
     };
 
     TextSetting<true> fontFamily;
@@ -48,13 +48,16 @@ struct TerminalOptions : public GroupKeys
     BoolSetting<true> cursorBlink;
     TextSetting<true> renderer;
     NumberSetting<int, true> letterSpacing;
-    TerminalTheme theme;
-
     Nui::Observed<bool> themeEngaged;
+    TerminalTheme theme;
 
     TerminalOptions(std::function<void()> const& onChange);
 
     void applyToState(Persistence::TerminalOptions& state) const;
     void loadFromState(Persistence::TerminalOptions const& state);
     void assumeDefaultsFrom(Persistence::TerminalOptions const& state);
+    Nui::ElementRenderer render();
+
+  private:
+    std::function<void()> onChange_;
 };

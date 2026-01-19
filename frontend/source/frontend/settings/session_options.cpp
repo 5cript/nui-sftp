@@ -2,6 +2,8 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/session_icon_options.hpp>
 
+#include <log/log.hpp>
+
 #include <utility/enum_string_convert.hpp>
 
 using namespace std::string_literals;
@@ -81,8 +83,14 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
         executingSessionOptions.applyToState(state.engine.emplace<Persistence::ExecutingSessionOptions>());
     }
 
+    Log::debug("SessionOptions::applyToState: setting references:");
+    Log::debug(
+        "TerminalOptions group key: {}", terminalOptions.groupKey->has_value() ? **terminalOptions.groupKey : "nullopt"
+    );
     state.terminalOptions.ref(*terminalOptions.groupKey);
+    Log::debug("Termios group key: {}", termios.groupKey->has_value() ? **termios.groupKey : "nullopt");
     state.termios.ref(*termios.groupKey);
+    Log::debug("QueueOptions group key: {}", queueOptions.groupKey->has_value() ? **queueOptions.groupKey : "nullopt");
     state.queueOptions.ref(*queueOptions.groupKey);
 }
 
