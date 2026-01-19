@@ -122,12 +122,6 @@ namespace SharedData
             std::variant<std::monostate, Ts...>& value
         )
         {
-            if (j.is_null())
-            {
-                value = std::monostate{};
-                return;
-            }
-
             // initalizes the variant based on the type info in ObjT
             obj.variantDecide(jParent);
             Utility::visitOverloaded(
