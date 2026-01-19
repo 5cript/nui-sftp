@@ -60,6 +60,11 @@ int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, 
             }
         );
     };
+
+    if (manager->passwordProviders_.empty())
+    {
+        return -1;
+    }
     askNextProvider(manager->passwordProviders_.begin());
 
     const auto pw = pwPromise.get_future().get();

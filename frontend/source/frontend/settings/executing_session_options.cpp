@@ -12,6 +12,7 @@ ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& on
       }
     , command{
           language->getObserved("settings", "sessionOptions", "executingSessionOptions", "commandHelpText"),
+          PathSettingType::File,
           onChange,
           valueReset(command, onChange, Persistence::ExecutingSessionOptions{}.command)
       }

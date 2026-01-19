@@ -11,12 +11,12 @@
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/terminal_options.hpp>
-#include <frontend/settings/combo_setting.hpp>
-#include <frontend/settings/text_setting.hpp>
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/map_setting.hpp>
-#include <frontend/settings/number_setting.hpp>
-#include <frontend/settings/color_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
+#include <frontend/settings/atomic_setting/text_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/map_setting.hpp>
+#include <frontend/settings/atomic_setting/number_setting.hpp>
+#include <frontend/settings/atomic_setting/color_setting.hpp>
 #include <frontend/settings/optional_converters.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
 #include <utility/language.hpp>
@@ -44,7 +44,7 @@ struct Settings::Implementation
         Nui::Observed<bool> localFilesystemOptions{false};
         Nui::Observed<bool> sshOptions{false};
         Nui::Observed<bool> sftpOptions{false};
-        Nui::Observed<bool> termios{false};
+        Nui::Observed<bool> termios{true};
         Nui::Observed<bool> terminalOptions{false};
         Nui::Observed<bool> queueOptions{false};
 
@@ -1769,7 +1769,9 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                     return classes("settings-group-content", isCollapsed ? "collapsed" : "uncollapsed");
                 }),
                 style = Nui::Attributes::Style{
-                    "padding-top"_style = params.currentGroupKey ? "0px" : "8px"
+                    "padding-top"_style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed]() -> std::string {
+                        return *isCollapsed ? "0px" : "8px";
+                    }),
                 },
             }(
                 groupKeyContainer(),

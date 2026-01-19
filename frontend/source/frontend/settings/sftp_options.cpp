@@ -95,6 +95,7 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
     }
     , defaultDirectory{
         language->getObserved("settings", "sftpOptions", "defaultDirectoryHelpText"),
+        PathSettingType::Directory,
         onChange,
         nulloptReset(defaultDirectory, onChange),
     }

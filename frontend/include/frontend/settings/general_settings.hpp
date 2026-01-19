@@ -2,11 +2,12 @@
 
 #include <frontend/events/frontend_events.hpp>
 
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/text_setting.hpp>
-#include <frontend/settings/number_setting.hpp>
-#include <frontend/settings/combo_setting.hpp>
-#include <frontend/settings/map_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/text_setting.hpp>
+#include <frontend/settings/atomic_setting/number_setting.hpp>
+#include <frontend/settings/atomic_setting/path_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
+#include <frontend/settings/atomic_setting/map_setting.hpp>
 
 struct GeneralSettings
 {
@@ -30,7 +31,7 @@ struct GeneralSettings
         BoolSetting<> preventRename;
         BoolSetting<> preventCreateFile;
         BoolSetting<> preventCreateDirectory;
-        TextSetting<true> homeOverride;
+        PathSetting<true> homeOverride;
     } localFilesystemOptions;
 
     GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events);

@@ -2,11 +2,12 @@
 
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/combo_setting.hpp>
-#include <frontend/settings/map_setting.hpp>
-#include <frontend/settings/number_setting.hpp>
-#include <frontend/settings/text_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
+#include <frontend/settings/atomic_setting/map_setting.hpp>
+#include <frontend/settings/atomic_setting/number_setting.hpp>
+#include <frontend/settings/atomic_setting/text_setting.hpp>
+#include <frontend/settings/atomic_setting/path_setting.hpp>
 
 #include <persistence/state/session_options.hpp>
 
@@ -15,7 +16,7 @@ struct SshSessionOptions
     TextSetting<> host;
     NumberSetting<int, true> port;
     TextSetting<true> user;
-    TextSetting<true> sshKey;
+    PathSetting<true> sshKey;
     BoolSetting<> openSftpByDefault;
 
     SshOptions sshOptions;

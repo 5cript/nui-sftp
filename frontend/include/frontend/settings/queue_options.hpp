@@ -1,7 +1,7 @@
 #pragma once
 
 #include <frontend/settings/group_keys.hpp>
-#include <frontend/settings/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
 
 #include <persistence/state/queue_options.hpp>
 

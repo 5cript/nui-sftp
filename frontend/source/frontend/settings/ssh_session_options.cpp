@@ -22,6 +22,7 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange)
       }
     , sshKey{
           language->getObserved("settings", "sessionSettings", "sshKey"),
+          PathSettingType::File,
           onChange,
           nulloptReset(sshKey, onChange)
       }

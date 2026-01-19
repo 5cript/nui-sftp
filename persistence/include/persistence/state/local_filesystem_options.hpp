@@ -14,7 +14,7 @@ namespace Persistence
         bool preventRename{false};
         bool preventCreateFile{false};
         bool preventCreateDirectory{false};
-        std::optional<std::string> homeOverride{std::nullopt};
+        std::optional<std::filesystem::path> homeOverride{std::nullopt};
     };
 
     BOOST_DESCRIBE_STRUCT(

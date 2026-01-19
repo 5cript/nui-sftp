@@ -1,9 +1,10 @@
 #pragma once
 
 #include <frontend/settings/group_keys.hpp>
-#include <frontend/settings/bool_setting.hpp>
-#include <frontend/settings/text_setting.hpp>
-#include <frontend/settings/number_setting.hpp>
+#include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/text_setting.hpp>
+#include <frontend/settings/atomic_setting/number_setting.hpp>
+#include <frontend/settings/atomic_setting/path_setting.hpp>
 
 #include <persistence/state/sftp_options.hpp>
 
@@ -31,7 +32,7 @@ struct SftpOptions : public GroupKeys
     };
     DownloadOptions downloadOptions;
     UploadOptions uploadOptions;
-    TextSetting<true> defaultDirectory;
+    PathSetting<true> defaultDirectory;
 
     Nui::Observed<bool> downloadOptionsEngaged{false};
     Nui::Observed<bool> uploadOptionsEngaged{false};

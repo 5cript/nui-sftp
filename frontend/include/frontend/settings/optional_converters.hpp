@@ -1,13 +1,8 @@
 #pragma once
 
 #include <optional>
-#include <string>
 #include <filesystem>
 #include <chrono>
-
-std::optional<std::string> pathOptionalToStringOptional(std::optional<std::filesystem::path> const& opt);
-
-std::optional<std::filesystem::path> stringOptionalToPathOptional(std::optional<std::string> const& opt);
 
 std::optional<unsigned short> filesystemPermsOptionalToUShortOptional(std::optional<std::filesystem::perms> const& opt);
 
