@@ -15,6 +15,7 @@ struct SshOptions : public GroupKeys
     PathSetting<true> knownHostsFile;
     BoolSetting<true> tryAgentForAuthentication;
     BoolSetting<true> usePublicKeyAutoAuth;
+    BoolSetting<true> usePasswordAuth;
     TextSetting<true> logVerbosity;
     TextSetting<true> keyExchangeAlgorithms;
     TextSetting<true> compressionClientToServer;
