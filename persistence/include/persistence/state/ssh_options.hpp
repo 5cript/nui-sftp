@@ -10,6 +10,7 @@ namespace Persistence
         std::optional<std::filesystem::path> knownHostsFile{std::nullopt};
         std::optional<bool> tryAgentForAuthentication{std::nullopt};
         std::optional<bool> usePublicKeyAutoAuth{std::nullopt};
+        std::optional<bool> usePasswordAuth{std::nullopt};
         std::optional<std::string> logVerbosity{std::nullopt};
         std::optional<std::string> keyExchangeAlgorithms{std::nullopt};
         std::optional<std::string> compressionClientToServer{std::nullopt};
@@ -34,6 +35,7 @@ namespace Persistence
             knownHostsFile,
             tryAgentForAuthentication,
             usePublicKeyAutoAuth,
+            usePasswordAuth,
             logVerbosity,
             keyExchangeAlgorithms,
             compressionClientToServer,

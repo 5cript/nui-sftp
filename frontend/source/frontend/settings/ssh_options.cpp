@@ -27,6 +27,11 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
             onChange,
             nulloptReset(usePublicKeyAutoAuth, onChange),
         }
+    , usePasswordAuth{
+            language->getObserved("settings", "sshOptions", "usePasswordAuthHelpText"),
+            onChange,
+            nulloptReset(usePasswordAuth, onChange),
+        }
     , logVerbosity{
             language->getObserved("settings", "sshOptions", "logVerbosityHelpText"),
             onChange,
@@ -117,6 +122,7 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
     state.knownHostsFile = knownHostsFile.value();
     state.tryAgentForAuthentication = tryAgentForAuthentication.value();
     state.usePublicKeyAutoAuth = usePublicKeyAutoAuth.value();
+    state.usePasswordAuth = usePasswordAuth.value();
     state.logVerbosity = logVerbosity.value();
     state.keyExchangeAlgorithms = keyExchangeAlgorithms.value();
     state.compressionClientToServer = compressionClientToServer.value();
@@ -141,6 +147,7 @@ void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
     knownHostsFile.value(state.knownHostsFile);
     tryAgentForAuthentication.value(state.tryAgentForAuthentication);
     usePublicKeyAutoAuth.value(state.usePublicKeyAutoAuth);
+    usePasswordAuth.value(state.usePasswordAuth);
     logVerbosity.value(state.logVerbosity);
     keyExchangeAlgorithms.value(state.keyExchangeAlgorithms);
     compressionClientToServer.value(state.compressionClientToServer);
@@ -165,6 +172,7 @@ void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
     knownHostsFile.inherit(state.knownHostsFile);
     tryAgentForAuthentication.inherit(state.tryAgentForAuthentication);
     usePublicKeyAutoAuth.inherit(state.usePublicKeyAutoAuth);
+    usePasswordAuth.inherit(state.usePasswordAuth);
     logVerbosity.inherit(state.logVerbosity);
     keyExchangeAlgorithms.inherit(state.keyExchangeAlgorithms);
     compressionClientToServer.inherit(state.compressionClientToServer);
@@ -192,6 +200,7 @@ Nui::ElementRenderer SshOptions::render()
         knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
         tryAgentForAuthentication(language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")),
         usePublicKeyAutoAuth(language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")),
+        usePasswordAuth(language->getObserved("settings", "sshOptions", "usePasswordAuth")),
         logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
         keyExchangeAlgorithms(language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")),
         compressionClientToServer(language->getObserved("settings", "sshOptions", "compressionClientToServer")),

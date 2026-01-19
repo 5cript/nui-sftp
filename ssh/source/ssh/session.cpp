@@ -455,7 +455,8 @@ namespace SecureShell
             );
         }
 
-        if (result.result != SSH_AUTH_SUCCESS)
+        const auto usePasswordAuth = !sshOptions.usePasswordAuth || sshOptions.usePasswordAuth.value();
+        if (result.result != SSH_AUTH_SUCCESS && usePasswordAuth)
         {
             std::string buf(1024, '\0');
             result = Detail::sequential(
