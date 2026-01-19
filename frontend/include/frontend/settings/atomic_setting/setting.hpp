@@ -143,6 +143,12 @@ class Setting
         }
     }
     void inherit(ValueType const&) = delete;
+    // As opposed to inherit(value), because this is intentional:
+    void inheritValue(ValueType const& value)
+    {
+        inheritedState_ = value;
+        inheritanceStatus(InheritanceStatus::AncestorEngaged);
+    }
 
     auto observeEngagedToBool(auto&& prop)
     {

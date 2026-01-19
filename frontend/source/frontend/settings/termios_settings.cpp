@@ -1,7 +1,11 @@
 #include <frontend/settings/termios_settings.hpp>
+#include <frontend/settings/subgroup.hpp>
 #include <persistence/state/termios.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+
+#include <nui/frontend/elements.hpp>
+#include <nui/frontend/attributes.hpp>
 
 TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
     : inputFlags{
@@ -728,7 +732,8 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         language->getObserved("settings", "termios", "oSpeedHelpText"),
         onChange,
         nulloptReset(oSpeed, onChange),
-    }
+    },
+    onChange_{onChange}
 {}
 
 void TermiosSettings::applyToState(Persistence::Termios& state) const
@@ -825,6 +830,10 @@ void TermiosSettings::applyToState(Persistence::Termios& state) const
             .VTIME_ = cc.VTIME.value(),
             .VWERASE_ = cc.VWERASE.value(),
         };
+    }
+    else
+    {
+        state.cc = std::nullopt;
     }
 
     state.iSpeed = iSpeed.value();
@@ -1008,8 +1017,169 @@ void TermiosSettings::assumeDefaultsFrom(Persistence::Termios const& state)
     localFlags.PENDIN.inherit(state.localFlags.PENDIN_);
     localFlags.IEXTEN.inherit(state.localFlags.IEXTEN_);
 
-    // TOOD: cc inheritance?
+    if (state.cc)
+    {
+        cc.VDISCARD.inheritValue(state.cc->VDISCARD_);
+        cc.VDSUSP.inheritValue(state.cc->VDSUSP_);
+        cc.VEOF.inheritValue(state.cc->VEOF_);
+        cc.VEOL.inheritValue(state.cc->VEOL_);
+        cc.VEOL2.inheritValue(state.cc->VEOL2_);
+        cc.VERASE.inheritValue(state.cc->VERASE_);
+        cc.VINTR.inheritValue(state.cc->VINTR_);
+        cc.VKILL.inheritValue(state.cc->VKILL_);
+        cc.VLNEXT.inheritValue(state.cc->VLNEXT_);
+        cc.VMIN.inheritValue(state.cc->VMIN_);
+        cc.VQUIT.inheritValue(state.cc->VQUIT_);
+        cc.VREPRINT.inheritValue(state.cc->VREPRINT_);
+        cc.VSTART.inheritValue(state.cc->VSTART_);
+        cc.VSTATUS.inheritValue(state.cc->VSTATUS_);
+        cc.VSTOP.inheritValue(state.cc->VSTOP_);
+        cc.VSUSP.inheritValue(state.cc->VSUSP_);
+        cc.VSWTCH.inheritValue(state.cc->VSWTCH_);
+        cc.VTIME.inheritValue(state.cc->VTIME_);
+        cc.VWERASE.inheritValue(state.cc->VWERASE_);
+    }
+    else
+    {
+        cc.VDISCARD.inherit(std::nullopt);
+        cc.VDSUSP.inherit(std::nullopt);
+        cc.VEOF.inherit(std::nullopt);
+        cc.VEOL.inherit(std::nullopt);
+        cc.VEOL2.inherit(std::nullopt);
+        cc.VERASE.inherit(std::nullopt);
+        cc.VINTR.inherit(std::nullopt);
+        cc.VKILL.inherit(std::nullopt);
+        cc.VLNEXT.inherit(std::nullopt);
+        cc.VMIN.inherit(std::nullopt);
+        cc.VQUIT.inherit(std::nullopt);
+        cc.VREPRINT.inherit(std::nullopt);
+        cc.VSTART.inherit(std::nullopt);
+        cc.VSTATUS.inherit(std::nullopt);
+        cc.VSTOP.inherit(std::nullopt);
+        cc.VSUSP.inherit(std::nullopt);
+        cc.VSWTCH.inherit(std::nullopt);
+        cc.VTIME.inherit(std::nullopt);
+        cc.VWERASE.inherit(std::nullopt);
+    }
 
     iSpeed.inherit(state.iSpeed);
     oSpeed.inherit(state.oSpeed);
+}
+
+Nui::ElementRenderer TermiosSettings::render()
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+
+    return fragment(
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "inputFlagsSubgroupTitle")),
+        subgroup(
+            {.onChange = onChange_},
+            fragment(
+                inputFlags.IGNBRK("IGNBRK"),
+                inputFlags.BRKINT("BRKINT"),
+                inputFlags.IGNPAR("IGNPAR"),
+                inputFlags.PARMRK("PARMRK"),
+                inputFlags.INPCK("INPCK"),
+                inputFlags.ISTRIP("ISTRIP"),
+                inputFlags.INLCR("INLCR"),
+                inputFlags.IGNCR("IGNCR"),
+                inputFlags.ICRNL("ICRNL"),
+                inputFlags.IUCLC("IUCLC"),
+                inputFlags.IXON("IXON"),
+                inputFlags.IXANY("IXANY"),
+                inputFlags.IXOFF("IXOFF"),
+                inputFlags.IMAXBEL("IMAXBEL"),
+                inputFlags.IUTF8("IUTF8")
+            )
+        ),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "outputFlagsSubgroupTitle")),
+        subgroup(
+            {.onChange = onChange_},
+            fragment(
+                outputFlags.OPOST("OPOST"),
+                outputFlags.OLCUC("OLCUC"),
+                outputFlags.ONLCR("ONLCR"),
+                outputFlags.OCRNL("OCRNL"),
+                outputFlags.ONOCR("ONOCR"),
+                outputFlags.ONLRET("ONLRET"),
+                outputFlags.OFILL("OFILL"),
+                outputFlags.OFDEL("OFDEL"),
+                outputFlags.NLDLY("NLDLY"),
+                outputFlags.CRDLY("CRDLY"),
+                outputFlags.TABDLY("TABDLY"),
+                outputFlags.BSDLY("BSDLY"),
+                outputFlags.VTDLY("VTDLY"),
+                outputFlags.FFDLY("FFDLY")
+            )
+        ),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "controlFlagsSubgroupTitle")),
+        subgroup(
+            {.onChange = onChange_},
+            fragment(
+                controlFlags.CBAUD("CBAUD"),
+                controlFlags.CBAUDEX("CBAUDEX"),
+                controlFlags.CSIZE("CSIZE"),
+                controlFlags.CSTOPB("CSTOPB"),
+                controlFlags.CREAD("CREAD"),
+                controlFlags.PARENB("PARENB"),
+                controlFlags.PARODD("PARODD"),
+                controlFlags.HUPCL("HUPCL"),
+                controlFlags.CLOCAL("CLOCAL"),
+                controlFlags.LOBLK("LOBLK"),
+                controlFlags.CIBAUD("CIBAUD"),
+                controlFlags.CMSPAR("CMSPAR"),
+                controlFlags.CRTSCTS("CRTSCTS")
+            )
+        ),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "localFlagsSubgroupTitle")),
+        subgroup(
+            {.onChange = onChange_},
+            fragment(
+                localFlags.ISIG("ISIG"),
+                localFlags.ICANON("ICANON"),
+                localFlags.XCASE("XCASE"),
+                localFlags.ECHO("ECHO"),
+                localFlags.ECHOE("ECHOE"),
+                localFlags.ECHOK("ECHOK"),
+                localFlags.ECHONL("ECHONL"),
+                localFlags.ECHOPRT("ECHOPRT"),
+                localFlags.ECHOKE("ECHOKE"),
+                localFlags.FLUSHO("FLUSHO"),
+                localFlags.NOFLSH("NOFLSH"),
+                localFlags.TOSTOP("TOSTOP"),
+                localFlags.PENDIN("PENDIN"),
+                localFlags.IEXTEN("IEXTEN")
+            )
+        ),
+        h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "ccSettingsSubgroupTitle")),
+        subgroup(
+            {.engagedStatus = &ccEngaged,
+                .groupTitle = language->getObserved("settings", "ccSettingsSubgroupTitle"),
+                .onChange = onChange_},
+            fragment(
+                cc.VDISCARD("VDISCARD"),
+                cc.VDSUSP("VDSUSP"),
+                cc.VEOF("VEOF"),
+                cc.VEOL("VEOL"),
+                cc.VEOL2("VEOL2"),
+                cc.VERASE("VERASE"),
+                cc.VINTR("VINTR"),
+                cc.VKILL("VKILL"),
+                cc.VLNEXT("VLNEXT"),
+                cc.VMIN("VMIN"),
+                cc.VQUIT("VQUIT"),
+                cc.VREPRINT("VREPRINT"),
+                cc.VSTART("VSTART"),
+                cc.VSTATUS("VSTATUS"),
+                cc.VSTOP("VSTOP"),
+                cc.VSUSP("VSUSP"),
+                cc.VSWTCH("VSWTCH"),
+                cc.VTIME("VTIME"),
+                cc.VWERASE("VWERASE")
+            )
+        ),
+        iSpeed(language->getObserved("settings", "termios", "iSpeedHelpText")),
+        oSpeed(language->getObserved("settings", "termios", "oSpeedHelpText"))
+    );
 }

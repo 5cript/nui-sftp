@@ -15,4 +15,5 @@ struct QueueOptions : public GroupKeys
     void applyToState(Persistence::QueueOptions& state) const;
     void loadFromState(Persistence::QueueOptions const& state);
     void assumeDefaultsFrom(Persistence::QueueOptions const& state);
+    Nui::ElementRenderer render();
 };

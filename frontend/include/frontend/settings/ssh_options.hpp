@@ -37,4 +37,8 @@ struct SshOptions : public GroupKeys
     void applyToState(Persistence::SshOptions& state) const;
     void loadFromState(Persistence::SshOptions const& state, bool loadRefs);
     void assumeDefaultsFrom(Persistence::SshOptions const& state);
+    Nui::ElementRenderer render();
+
+  private:
+    std::function<void()> onChange_;
 };

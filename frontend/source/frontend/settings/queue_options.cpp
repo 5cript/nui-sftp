@@ -2,6 +2,9 @@
 
 #include <frontend/settings/nullopt_reset.hpp>
 
+#include <nui/frontend/elements.hpp>
+#include <nui/frontend/attributes.hpp>
+
 QueueOptions::QueueOptions(std::function<void()> const& onChange)
     : autoRemoveCompletedOperations{
           language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperationsHelpText"),
@@ -31,4 +34,16 @@ void QueueOptions::assumeDefaultsFrom(Persistence::QueueOptions const& state)
 {
     autoRemoveCompletedOperations.inherit(state.autoRemoveCompletedOperations);
     startInPausedState.inherit(state.startInPausedState);
+}
+
+Nui::ElementRenderer QueueOptions::render()
+{
+    using namespace Nui::Elements;
+
+    return fragment(
+        autoRemoveCompletedOperations(
+            language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperations")
+        ),
+        startInPausedState(language->getObserved("settings", "queueOptions", "startInPausedState"))
+    );
 }

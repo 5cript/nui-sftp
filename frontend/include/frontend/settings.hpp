@@ -4,6 +4,8 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <frontend/settings/termios_settings.hpp>
+#include <frontend/settings/session_options.hpp>
 #include <utility/language.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -53,13 +55,6 @@ class Settings
         Persistence::TerminalEngineType engineTypeFilterValue{Persistence::TerminalEngineType::ssh};
     };
     Nui::ElementRenderer group(GroupParameters&& params);
-
-    struct SubgroupParameters
-    {
-        Nui::Observed<bool>* engagedStatus = nullptr;
-        std::optional<LanguageObservedText> groupTitle = std::nullopt;
-    };
-    Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer content);
 
     enum class Section
     {

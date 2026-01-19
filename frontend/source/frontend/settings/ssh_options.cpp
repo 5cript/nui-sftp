@@ -2,6 +2,8 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/optional_converters.hpp>
 
+#include <nui/frontend/elements.hpp>
+
 SshOptions::SshOptions(std::function<void()> const& onChange)
     : sshDirectory{
             language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
@@ -100,11 +102,13 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
             language->getObserved("settings", "sshOptions", "connectTimeoutUSecondsHelpText"),
             onChange,
             nulloptReset(connectTimeoutUSeconds, onChange)
-    }, environment{
+    },
+    environment{
             language->getObserved("settings", "sshOptions", "environmentHelpText"),
             onChange,
             nulloptReset(environment, onChange)
-     }
+     },
+     onChange_{onChange}
 {}
 
 void SshOptions::applyToState(Persistence::SshOptions& state) const
@@ -177,4 +181,31 @@ void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
     connectTimeoutSeconds.inherit(state.connectTimeoutSeconds);
     connectTimeoutUSeconds.inherit(state.connectTimeoutUSeconds);
     environment.inherit(state.environment);
+}
+
+Nui::ElementRenderer SshOptions::render()
+{
+    using namespace Nui::Elements;
+
+    return fragment(
+        sshDirectory(language->getObserved("settings", "sshOptions", "sshDirectory")),
+        knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
+        tryAgentForAuthentication(language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")),
+        usePublicKeyAutoAuth(language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")),
+        logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
+        keyExchangeAlgorithms(language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")),
+        compressionClientToServer(language->getObserved("settings", "sshOptions", "compressionClientToServer")),
+        compressionServerToClient(language->getObserved("settings", "sshOptions", "compressionServerToClient")),
+        compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
+        strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
+        proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
+        gssapiServerIdentity(language->getObserved("settings", "sshOptions", "gssapiServerIdentity")),
+        gssapiClientIdentity(language->getObserved("settings", "sshOptions", "gssapiClientIdentity")),
+        gssapiDelegateCredentials(language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")),
+        noDelay(language->getObserved("settings", "sshOptions", "noDelay")),
+        bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
+        identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
+        connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
+        connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds"))
+    );
 }

@@ -513,7 +513,6 @@ namespace Persistence
 
     void to_json(nlohmann::json& j, Termios const& termios)
     {
-        j = nlohmann::json::object();
         j["inputFlags"] = termios.inputFlags;
         j["outputFlags"] = termios.outputFlags;
         j["controlFlags"] = termios.controlFlags;
