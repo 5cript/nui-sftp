@@ -16,8 +16,8 @@ Still under construction :construction:
 - [ ] Unify style of operation queue and rest of the ui.
 
 ## Settings UI
-- [ ] Add UI for settings.
-- [ ] Document settings.
+- [x] Add UI for settings.
+- [x] Document settings.
 
 ## SSH
 - [x] Keyboard interactive password auth.
