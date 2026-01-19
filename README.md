@@ -7,17 +7,27 @@ Still under construction :construction:
 
 ## General UI
 - [x] Layouting.
-- [ ] Save Layout (done partially).
 - [x] Load Layout (on session start only, not afterwards).
 - [ ] Custom themes?
 - [ ] Custom top bar with moveability and minimize, maximize, close buttons.
 - [ ] Accessible logs.
 - [x] Multi session support.
 - [ ] Unify style of operation queue and rest of the ui.
+- [ ] Fix session being in hanging state when connect fails.
+- [ ] Implement proper handling of connection loss.
+- [ ] Move settings over to the right of the top bar and give it a gear icon.
+- [ ] Add lumino button to add file explorer (at least back to 1, if not X times).
+- [ ] Add lumino button to add operation queue (exactly 1).
 
 ## Settings UI
 - [x] Add UI for settings.
 - [x] Document settings.
+- [ ] Save / Delete Current Layout.
+- [ ] Better number boxes.
+- [ ] Number box value constraining.
+- [ ] list & map settings proper inheritance display.
+- [ ] Fix list & map settings language keys.
+- [ ] Terminal options: When whole thmee group is off, all setting should show as inherit, even if single ones are checked.
 
 ## SSH
 - [x] Keyboard interactive password auth.

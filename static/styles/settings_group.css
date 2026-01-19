@@ -1,13 +1,19 @@
-.settings-group {}
+.settings-group {
+    background: rgba(43, 43, 43, 0.6);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    /* border-radius: 0 0 16px 16px; */
+    margin-bottom: 2rem;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    transition: transform 0.2s ease;
+}
 
 .settings-group-content {
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.3s ease;
-    /* border: 1px solid var(--sapContent_ForegroundBorderColor); */
-    border: 1px solid var(--sapBrandColor);
-    border-radius: 0 0 var(--sapElement_BorderCornerRadius) var(--sapElement_BorderCornerRadius);
-    border-top: none;
+
     display: grid;
     grid-template-columns: max-content max-content 1fr max-content max-content;
     row-gap: 4px;
@@ -39,31 +45,61 @@
 
 .settings-group-header {
     padding: 8px 12px;
-    background-color: color-mix(in srgb, var(--sapBrandColor) 20%, black 80%);
+
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
     -webkit-user-select: none;
     user-select: none;
-    /* border: 1px solid var(--sapContent_ForegroundBorderColor); */
-    border: 1px solid var(--sapBrandColor);
-    border-radius: var(--sapElement_BorderCornerRadius) var(--sapElement_BorderCornerRadius) 0 0;
     transition: background-color 0.3s ease;
 
+    background: linear-gradient(90deg, rgba(144, 210, 109, 0.1) 0%, rgba(0, 0, 0, 0) 100%);
+    padding: 1.2rem 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+
     &.uncollapsed {
-        box-shadow: inset 0 -4px 8px color-mix(in srgb, var(--sapBrandColor) 30%, transparent 70%);
+        /*box-shadow: inset 0 -4px 8px color-mix(in srgb, var(--sapBrandColor) 30%, transparent 70%);*/
     }
 
     &.collapsed {
         background-color: color-mix(in srgb, #404040 50%, black 50%);
-        border: 1px solid var(--brighterBackground);
+        /* border: 1px solid var(--brighterBackground); */
+    }
+
+    position: relative;
+    transition: background-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.2s ease;
+
+    &:hover {
+        background: linear-gradient(90deg,
+                rgba(144, 210, 109, 0.22) 0%,
+                rgba(144, 210, 109, 0.08) 40%,
+                rgba(0, 0, 0, 0) 100%);
+
+        box-shadow:
+            inset 0 0 0 1px rgba(144, 210, 109, 0.35),
+            0 6px 14px rgba(0, 0, 0, 0.35);
+
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+        box-shadow:
+            inset 0 0 0 1px rgba(144, 210, 109, 0.25),
+            0 3px 8px rgba(0, 0, 0, 0.3);
     }
 }
 
 .settings-group-header-title {
-    margin-left: auto;
-    margin-right: auto;
+    font-family: "72", sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    color: var(--sapBrandColor, #90d26d);
 }
 
 .settings-group-header-collapse-indicator {
