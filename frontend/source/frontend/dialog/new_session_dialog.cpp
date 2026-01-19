@@ -23,7 +23,7 @@ struct NewSessionDialog::Implementation
     std::weak_ptr<Nui::Dom::BasicElement> input;
     std::function<void(NewSessionDialog::ConfirmResult const&)> onConfirm;
     Nui::Observed<bool> nameValid{false};
-    std::string icon{};
+    std::string icon{"laptop"};
 
     Implementation(std::string id)
         : id{std::move(id)}
