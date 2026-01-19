@@ -43,20 +43,20 @@ struct Settings::Implementation
         Nui::Observed<bool> loggingAndErrorReporting{false};
         Nui::Observed<bool> userInterface{false};
         Nui::Observed<bool> localFilesystemOptions{false};
-        Nui::Observed<bool> sshOptions{false};
-        Nui::Observed<bool> sftpOptions{false};
+        Nui::Observed<bool> sshOptions{true};
+        Nui::Observed<bool> sftpOptions{true};
         Nui::Observed<bool> termios{true};
-        Nui::Observed<bool> terminalOptions{false};
-        Nui::Observed<bool> queueOptions{false};
+        Nui::Observed<bool> terminalOptions{true};
+        Nui::Observed<bool> queueOptions{true};
 
         struct SessionCollapsibles
         {
             Nui::Observed<bool> overarchingSettings{false};
-            Nui::Observed<bool> sshOptions{false};
-            Nui::Observed<bool> sftpOptions{false};
-            Nui::Observed<bool> terminalOptions{false};
-            Nui::Observed<bool> termios{false};
-            Nui::Observed<bool> queueOptions{false};
+            Nui::Observed<bool> sshOptions{true};
+            Nui::Observed<bool> sftpOptions{true};
+            Nui::Observed<bool> terminalOptions{true};
+            Nui::Observed<bool> termios{true};
+            Nui::Observed<bool> queueOptions{true};
         } sessionCollapsibles{};
     } collapsibleStates{};
 
