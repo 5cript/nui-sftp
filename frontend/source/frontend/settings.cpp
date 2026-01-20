@@ -92,6 +92,7 @@ struct Settings::Implementation
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
+        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
         InputDialog* inputDialog,
         ConfirmDialog* confirmDialog,
         std::invocable auto const& onChange,
@@ -127,19 +128,21 @@ struct Settings::Implementation
                   onChange();
                   reloadInheritance();
               }}
-        , currentSessionOptions{onChange}
+        , currentSessionOptions{onChange, obtainCurrentLayout, confirmDialog, inputDialog}
     {}
 };
 
 Settings::Settings(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
+    std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
     InputDialog* inputDialog,
     ConfirmDialog* confirmDialog
 )
     : impl_{std::make_unique<Implementation>(
           stateHolder,
           events,
+          obtainCurrentLayout,
           inputDialog,
           confirmDialog,
           [this]()
@@ -1219,6 +1222,7 @@ Nui::ElementRenderer Settings::currentSession()
             impl_->currentSessionOptions.isStartupSession(
                 language->getObserved("settings", "sessionOptions", "isStartupSession")
             ),
+            impl_->currentSessionOptions.layout(),
             div{
                 class_ = "settings-visibility-box",
                 style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {

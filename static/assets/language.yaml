@@ -2,6 +2,9 @@ en_US:
   language: "Language"
   cancel: "Cancel"
   add: "Add"
+  sessionFrontend:
+    sessionCreationFailedHeader: "Session Creation Failed"
+    sessionCreationFailedText: "Failed to create session instance:\n{}"
   settings:
     loadingSettings: "Loading Settings UI"
     deleteSessionButton: "Delete Session"
@@ -35,8 +38,25 @@ en_US:
     groupKeyExistsText: "The entered inheritance ID already exists."
     inheritableSettingsInfoMessage: "The settings in this category can be inherited by sessions and servers. Configure some base settings to reuse across multiple sessions! Setting groups are associated by keys. Individual settings can be turned off, meaning that they will not be inherited."
     ccSettingsSubgroupTitle: "Control Characters (cc) Active?"
+    layoutSetting:
+      layoutKeysLabel: "Saved layouts"
+
+      saveCurrentLayout: "Save current layout"
+
+      addLayoutKeyHeader: "Save layout"
+      addLayoutKeyBody: "Enter a name for the new layout."
+
+      addLayoutKeyErrorHeader: "Layout already exists"
+      addLayoutKeyErrorText: "A layout with this name already exists. Please choose a different name."
+
+      saveLayoutErrorHeader: "Unable to save layout"
+      saveLayoutErrorText: "The current layout could not be saved."
+
+      removeLayoutKeyConfirmHeader: "Remove layout"
+      removeLayoutKeyConfirmText: "Are you sure you want to remove the following layout"
     sessionOptions:
       terminalEngineType: "Session Type"
+      layoutHelpText: "Layout configuration for this session. Here you can save and delete layouts."
       icon: "Session Icon"
       orderBy: "Sort by this instead"
       isStartupSession: "Is Startup Session"
@@ -369,6 +389,9 @@ de_DE:
   language: "Sprache"
   cancel: "Abbrechen"
   add: "Hinzufügen"
+  sessionFrontend:
+    sessionCreationFailedHeader: "Sitzungserstellung fehlgeschlagen"
+    sessionCreationFailedText: "Sitzungsinstanz konnte nicht erstellt werden:\n{}"
   settings:
     loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
     deleteSessionButton: "Sitzung löschen"
@@ -402,8 +425,25 @@ de_DE:
     groupKeyExistsText: "Die eingegebene Vererbungs-ID ist bereits vorhanden."
     inheritableSettingsInfoMessage: "Die Einstellungen in dieser Kategorie können von Sitzungen und Servern geerbt werden. Konfigurieren Sie einige Basiseinstellungen, die Sie in mehreren Sitzungen wiederverwenden können! Einstellungsgruppen werden durch Schlüssel zugeordnet. Einzelne Einstellungen können deaktiviert werden, was bedeutet, dass sie nicht vererbt werden."
     ccSettingsSubgroupTitle: "Steuerungszeichen (cc) Aktiv?"
+    layoutSetting:
+      layoutKeysLabel: "Gespeicherte Layouts"
+
+      saveCurrentLayout: "Aktuelles Layout speichern"
+
+      addLayoutKeyHeader: "Layout speichern"
+      addLayoutKeyBody: "Geben Sie einen Namen für das neue Layout ein."
+
+      addLayoutKeyErrorHeader: "Layout existiert bereits"
+      addLayoutKeyErrorText: "Ein Layout mit diesem Namen existiert bereits. Bitte wählen Sie einen anderen Namen."
+
+      saveLayoutErrorHeader: "Layout konnte nicht gespeichert werden"
+      saveLayoutErrorText: "Das aktuelle Layout konnte nicht gespeichert werden."
+
+      removeLayoutKeyConfirmHeader: "Layout entfernen"
+      removeLayoutKeyConfirmText: "Möchten Sie das folgende Layout wirklich entfernen"
     sessionOptions:
       terminalEngineType: "Sitzungs Typ"
+      layoutHelpText: "Layout Konfiguration für diese Sitzung. Hier können Layouts gespeichert und gelöscht werden."
       icon: "Sitzungssymbol"
       orderBy: "Sondersortierung"
       isStartupSession: "Starte Sitzung bei Programmstart?"

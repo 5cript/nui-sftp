@@ -37,7 +37,9 @@ struct MainPage::Implementation
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events, &confirmDialog}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
-        , settings{stateHolder, events, &newItemAskDialog, &confirmDialog}
+        , settings{stateHolder, events, [this](){
+            return sessionArea.getActiveSessionLayout();
+        },&newItemAskDialog, &confirmDialog}
         , darkMode{true}
         , setupWait{}
     {

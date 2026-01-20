@@ -25,7 +25,7 @@
 #include <concepts>
 #include <optional>
 
-template <bool Disengageable, typename ValueType>
+template <bool Disengageable, typename ValueT>
 class Setting
 {
   public:
@@ -36,6 +36,7 @@ class Setting
         AncestorDisengaged
     };
 
+    using ValueType = ValueT;
     using OutfacingValueType = std::conditional_t<Disengageable, std::optional<ValueType>, ValueType>;
 
     Setting(
@@ -68,7 +69,7 @@ class Setting
         return state_;
     }
 
-    void value(ValueType const& value)
+    virtual void value(ValueType const& value)
     {
         if constexpr (Disengageable)
         {
@@ -76,7 +77,7 @@ class Setting
         }
         state_ = value;
     }
-    OutfacingValueType value() const
+    virtual OutfacingValueType value() const
     {
         if constexpr (Disengageable)
         {
@@ -89,7 +90,7 @@ class Setting
             return state_.value();
         }
     }
-    void value(std::optional<ValueType> const& value)
+    virtual void value(std::optional<ValueType> const& value)
     {
         engaged_ = value.has_value();
         if (value)

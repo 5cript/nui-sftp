@@ -225,6 +225,21 @@ void SessionArea::addSession(std::string const& name)
     );
 }
 
+std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
+{
+    Session* activeSession = getActiveSession();
+    if (activeSession)
+        return activeSession->getLayout();
+    return std::nullopt;
+}
+
+Session* SessionArea::getActiveSession()
+{
+    if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
+        return impl_->sessions.value()[impl_->selected].get();
+    return nullptr;
+}
+
 Nui::ElementRenderer SessionArea::operator()()
 {
     using namespace Nui;

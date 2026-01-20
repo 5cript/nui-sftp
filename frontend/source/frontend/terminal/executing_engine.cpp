@@ -82,7 +82,7 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
 
     Nui::val obj = Nui::val::object();
 
-    obj.set("command", impl_->settings.engineOptions.command);
+    obj.set("command", impl_->settings.engineOptions.command.generic_string());
     if (impl_->settings.engineOptions.arguments)
     {
         Nui::val args = Nui::val::array();
