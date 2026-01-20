@@ -11,6 +11,7 @@
 #include <ui5/components/toolbar_button.hpp>
 #include <ui5/components/toolbar_select.hpp>
 #include <ui5/components/toolbar_select_option.hpp>
+#include <ui5/components/toolbar_spacer.hpp>
 #include <ui5/components/select.hpp>
 
 #include <nui/event_system/observed_value.hpp>
@@ -180,12 +181,14 @@ Nui::ElementRenderer Toolbar::operator()()
             ),
             ui5::toolbar_button{
                 "text"_prop = language->getObserved("toolbar", "newSession"),
+                "icon"_prop = "add",
                 "click"_event = [this](Nui::val) {
                     impl_->events->onNewSession.modifyNow();
                 }
             }(),
             ui5::toolbar_button{
                 "text"_prop = language->getObserved("toolbar", "endSession"),
+                "icon"_prop = "decline",
                 "click"_event = [this](Nui::val) {
                     if (impl_->sessionArea) {
                         impl_->sessionArea->removeActiveSession();
@@ -194,8 +197,9 @@ Nui::ElementRenderer Toolbar::operator()()
                     }
                 }
             }(),
+            ui5::toolbar_spacer{}(),
             ui5::toolbar_button{
-                "text"_prop = language->getObserved("toolbar", "settings"),
+                "icon"_prop = "settings",
                 "click"_event = [this](Nui::val) {
                     impl_->events->settingsOpen = true;
                 }
