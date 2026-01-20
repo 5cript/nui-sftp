@@ -5,6 +5,12 @@ en_US:
   sessionFrontend:
     sessionCreationFailedHeader: "Session Creation Failed"
     sessionCreationFailedText: "Failed to create session instance:\n{}"
+    layoutCreationFailedHeader: "Layout Creation Failed"
+    layoutCreationFailedText: "Failed to create layout instance"
+    terminal: "Terminal"
+    fileExplorer: "File Explorer"
+    operationQueue: "Operation Queue"
+    sessionOptions: "Session Options"
   settings:
     loadingSettings: "Loading Settings UI"
     deleteSessionButton: "Delete Session"
@@ -392,6 +398,12 @@ de_DE:
   sessionFrontend:
     sessionCreationFailedHeader: "Sitzungserstellung fehlgeschlagen"
     sessionCreationFailedText: "Sitzungsinstanz konnte nicht erstellt werden:\n{}"
+    layoutCreationFailedHeader: "Layout-Erstellung fehlgeschlagen"
+    layoutCreationFailedText: "Layout-Instanz konnte nicht erstellt werden"
+    terminal: "Terminal"
+    fileExplorer: "Datei Explorer"
+    operationQueue: "Operationswarteschlange"
+    sessionOptions: "Sitzungsoptionen"
   settings:
     loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
     deleteSessionButton: "Sitzung löschen"

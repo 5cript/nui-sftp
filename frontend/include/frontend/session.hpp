@@ -86,6 +86,8 @@ class Session
 
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
+    Nui::ElementRenderer addTabMenu();
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
