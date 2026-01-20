@@ -56,6 +56,8 @@ class Session
     auto makeFileExplorerElement() -> Nui::ElementRenderer;
     auto makeOperationQueueElement() -> Nui::ElementRenderer;
 
+    std::optional<nlohmann::json> getLayout() const;
+
   private:
     void onOpenSession(bool success, std::string const& info);
     void onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string const& info);
@@ -81,6 +83,8 @@ class Session
 
     RemoteSideModel& remoteSideModel();
     LocalSideModel& localSideModel();
+
+    void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
   private:
     struct Implementation;

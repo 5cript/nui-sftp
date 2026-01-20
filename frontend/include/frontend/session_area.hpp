@@ -29,6 +29,9 @@ class SessionArea
     void setSelected(int index);
     void removeActiveSession();
 
+    Session* getActiveSession();
+    std::optional<nlohmann::json> getActiveSessionLayout();
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

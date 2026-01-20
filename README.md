@@ -17,11 +17,12 @@ Still under construction :construction:
 - [ ] Implement proper handling of connection loss.
 - [ ] Add lumino button to add file explorer (at least back to 1, if not X times).
 - [ ] Add lumino button to add operation queue (exactly 1).
+- [ ] Bright mode.
 
 ## Settings UI
 - [x] Add UI for settings.
 - [x] Document settings.
-- [ ] Save / Delete Current Layout.
+- [x] Save / Delete Current Layout.
 - [ ] Better number boxes.
 - [ ] Number box value constraining.
 - [ ] list & map settings proper inheritance display.
@@ -84,7 +85,7 @@ Still under construction :construction:
 - [ ] Better indication that on drag drop, all selected items are being dragged.
 - [ ] Improve arrow navigation with shift and control.
 - [ ] Same side drag and drop for moving files locally or remotely.
-- [ ] Persist mode as part of layout.
+- [x] Persist mode as part of layout.
 - [ ] Delete remote files deep (non empty dirs) -> operation queue.
 - [ ] Open files with associated application.
 - [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.

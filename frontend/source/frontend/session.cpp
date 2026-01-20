@@ -14,6 +14,7 @@
 #include <persistence/state_holder.hpp>
 #include <constants/layouts.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -211,6 +212,34 @@ Session::Session(
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
+std::optional<nlohmann::json> Session::getLayout() const
+{
+    // session layout id is not the name in the setting, but the id for the lumino datastructure in the
+    // contentPanelManager where this session lives in.
+    auto layout = Nui::val::global("contentPanelManager").call<Nui::val>("getPanelLayout", impl_->sessionLayoutId);
+    if (layout.isUndefined())
+        return std::nullopt;
+    auto layoutObject = nlohmann::json::parse(Nui::JSON::stringify(layout));
+    layoutObject["__extra"] = {{
+        "fileGrid",
+        {
+            {
+                "leftSide",
+                {
+                    {"flavor", fileGridFlavorToString(impl_->fileGrid.leftSide().flavor())},
+                },
+            },
+            {
+                "rightSide",
+                {
+                    {"flavor", fileGridFlavorToString(impl_->fileGrid.rightSide().flavor())},
+                },
+            },
+        },
+    }};
+    return layoutObject;
+}
+
 void Session::setupFileGrid()
 {
     impl_->fileGrid.onError(
@@ -399,8 +428,14 @@ void Session::onOpenSession(bool success, std::string const& info)
 {
     if (!success)
     {
-        Log::info("Failed to create session instance: {}", info);
-        fallbackToUserControlEngine();
+        impl_->confirmDialog->open({
+            .state = ConfirmDialog::State::Negative,
+            .headerText = language->get("sessionFrontend", "sessionCreationFailedHeader"),
+            .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "sessionCreationFailedText")), info),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
+        closeSelf();
+        return;
     }
     else
     {
@@ -585,6 +620,26 @@ void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
     impl_->terminal.value()->closeChannel(channelId);
 }
 
+void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
+{
+    if (layoutExtra.contains("fileGrid"))
+    {
+        auto fileGridExtra = layoutExtra["fileGrid"];
+        if (fileGridExtra.contains("leftSide") && fileGridExtra["leftSide"].contains("flavor"))
+        {
+            impl_->fileGrid.leftSide().flavor(
+                NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["leftSide"]["flavor"].get<std::string>())
+            );
+        }
+        if (fileGridExtra.contains("rightSide") && fileGridExtra["rightSide"].contains("flavor"))
+        {
+            impl_->fileGrid.rightSide().flavor(
+                NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["rightSide"]["flavor"].get<std::string>())
+            );
+        }
+    }
+}
+
 void Session::initializeLayout()
 {
     Nui::val element;
@@ -599,7 +654,7 @@ void Session::initializeLayout()
         return;
     }
 
-    std::optional<std::string> layout = std::nullopt;
+    std::optional<nlohmann::json> layout = std::nullopt;
 
     if (impl_->layoutName != Constants::defaultLayoutName)
     {
@@ -608,7 +663,7 @@ void Session::initializeLayout()
             if (auto iter = impl_->engineOptions.layouts->find(*impl_->layoutName);
                 iter != impl_->engineOptions.layouts->end())
             {
-                layout = iter->second.dump();
+                layout = iter->second;
             }
             else
             {
@@ -617,14 +672,21 @@ void Session::initializeLayout()
         }
     }
 
-    Log::info("Initializing layout with name: {}", layout.value_or("(none)"));
+    Log::info(
+        "Initializing layout with name '{}': {}",
+        impl_->layoutName.value_or("(none)"),
+        layout ? layout->dump() : "(none)"
+    );
+
+    if (layout && layout->contains("__extra"))
+        loadLayoutExtras((*layout)["__extra"]);
 
     Nui::val::global("contentPanelManager")
         .call<void>(
             "addPanel",
             element,
             impl_->sessionLayoutId,
-            layout.value_or(""),
+            layout ? layout->dump() : "",
             Nui::bind(
                 [this]() -> Nui::val
                 {

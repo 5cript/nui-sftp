@@ -3,8 +3,10 @@
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/terminal_options.hpp>
 #include <frontend/settings/queue_options.hpp>
+#include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/executing_session_options.hpp>
 #include <frontend/settings/ssh_session_options.hpp>
+#include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 
@@ -17,6 +19,7 @@ struct SessionOptions
     ComboSetting<std::string> icon;
     TextSetting<true> orderBy;
     BoolSetting<> isStartupSession;
+    LayoutSetting layout;
 
     TerminalOptions terminalOptions;
     TermiosSettings termios;
@@ -27,7 +30,12 @@ struct SessionOptions
     ExecutingSessionOptions executingSessionOptions;
     SshSessionOptions sshSessionOptions;
 
-    SessionOptions(std::function<void()> const& onChange);
+    SessionOptions(
+        std::function<void()> const& onChange,
+        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
+        ConfirmDialog* confirmDialog,
+        InputDialog* newItemDialog
+    );
 
     void applyToState(Persistence::SessionOptions& state) const;
     void loadFromState(Persistence::SessionOptions const& state, bool loadRefs);

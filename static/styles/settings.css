@@ -258,3 +258,16 @@ ui5-checkbox.setting-disengage-checkbox::part(root) {
 .setting-input {
     width: auto;
 }
+
+.layout-setting-container {
+    & ui5-label {
+        grid-column: 2;
+    }
+}
+
+.layout-setting-controls {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+}

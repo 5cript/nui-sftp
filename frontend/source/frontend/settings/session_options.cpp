@@ -8,7 +8,7 @@
 
 using namespace std::string_literals;
 
-SessionOptions::SessionOptions(std::function<void()> const& onChange)
+SessionOptions::SessionOptions(std::function<void()> const& onChange, std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout, ConfirmDialog* confirmDialog, InputDialog* newItemDialog)
     : terminalEngineType{
           {
               Persistence::TerminalEngineType::shell,
@@ -57,6 +57,13 @@ SessionOptions::SessionOptions(std::function<void()> const& onChange)
           onChange,
           valueReset(isStartupSession, onChange, Persistence::SessionOptions{}.startupSession)
       }
+    , layout{
+          language->getObserved("settings", "sessionOptions", "layoutHelpText"),
+          onChange,
+          obtainCurrentLayout,
+          confirmDialog,
+          newItemDialog
+      }
     , terminalOptions{onChange}
     , termios{onChange}
     , queueOptions{onChange}
@@ -70,6 +77,7 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     state.icon = icon.value();
     state.orderBy = orderBy.value();
     state.startupSession = isStartupSession.value();
+    state.layouts = layout.value();
     terminalOptions.applyToState(state.terminalOptions.value());
     termios.applyToState(state.termios.value());
     queueOptions.applyToState(state.queueOptions.value());
@@ -100,6 +108,7 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state, boo
     icon.value(state.icon);
     orderBy.value(state.orderBy);
     isStartupSession.value(state.startupSession);
+    layout.value(state.layouts);
     terminalOptions.loadFromState(state.terminalOptions.value());
     termios.loadFromState(state.termios.value());
     queueOptions.loadFromState(state.queueOptions.value());

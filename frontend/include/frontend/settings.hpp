@@ -11,6 +11,10 @@
 #include <nui/frontend/element_renderer.hpp>
 
 #include <roar/detail/pimpl_special_functions.hpp>
+#include <nlohmann/json.hpp>
+
+#include <functional>
+#include <optional>
 
 class Settings
 {
@@ -18,6 +22,7 @@ class Settings
     Settings(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
+        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
         InputDialog* inputDialog,
         ConfirmDialog* confirmDialog
     );
