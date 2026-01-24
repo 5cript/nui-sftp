@@ -186,9 +186,10 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             valueReset(cursorBlink, onChange, false),
         }
     , renderer{
+            std::vector<std::string>{"dom", "webgl"},
             language->getObserved("settings", "terminalOptions", "rendererHelpText"),
             onChange,
-            valueReset(renderer, onChange, "canvas"s),
+            valueReset(renderer, onChange, "webgl"s),
         }
     , letterSpacing{
             language->getObserved("settings", "terminalOptions", "letterSpacingHelpText"),

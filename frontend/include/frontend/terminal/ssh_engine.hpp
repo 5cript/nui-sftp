@@ -19,8 +19,7 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
     struct Settings
     {
         Persistence::SshSessionOptions engineOptions;
-        std::function<void()> onExit;
-        std::function<void()> onBeforeExit = {};
+        std::function<void()> onConnectionLoss;
     };
 
   public:
@@ -49,9 +48,9 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
     Ids::SessionId sshSessionId() const;
 
   private:
-    void disconnect(std::function<void()> onDisconnect, bool fromDtor = false);
-    // Usually indicates that the entire session is closed
-    void onChannelDeath();
+    void disconnect(std::function<void()> onDisconnect, bool byLossOfConnection = false);
+
+    void onSuccessfulOpen();
 
     void createChannelImpl(
         std::function<void(std::string const&)> handler,

@@ -162,6 +162,7 @@ Main::Main(int const, char const* const* argv)
       }
     , hub_{window_}
     , rpcFilesystem_{nullptr}
+    , rpcSystem_{nullptr}
     , processes_{window_.getExecutor(), window_, hub_}
     , prompter_{hub_}
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
@@ -181,6 +182,8 @@ Main::Main(int const, char const* const* argv)
                 Log::warn("Warning loading state: {}", *warning);
                 initialPersistenceLoadWarning_ = *warning;
             }
+
+            rpcSystem_ = std::make_unique<RpcSystem>(window_.getExecutor(), window_, hub_);
 
             if (error)
             {

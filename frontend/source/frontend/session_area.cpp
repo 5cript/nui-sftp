@@ -23,7 +23,7 @@ struct SessionArea::Implementation
     ConfirmDialog* confirmDialog;
     Toolbar* toolbar;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
-    int selected;
+    Nui::Observed<std::optional<int>> selected;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -38,20 +38,19 @@ struct SessionArea::Implementation
         , confirmDialog{confirmDialog}
         , toolbar{toolbar}
         , sessions{}
-        , selected{0}
+        , selected{std::nullopt}
     {}
 };
 
 void SessionArea::removeActiveSession()
 {
-    if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
+    if (!impl_->selected->has_value())
     {
-        removeSession(impl_->selected);
+        Log::error("SessionArea::removeActiveSession: No active session to remove (selected is nullopt)");
+        return;
     }
-    else
-    {
-        Log::error("SessionArea::removeActiveSession: No active session to remove.");
-    }
+
+    removeSession(impl_->selected->value());
 }
 
 SessionArea::SessionArea(
@@ -122,9 +121,9 @@ void SessionArea::registerRpc()
     );
 }
 
-void SessionArea::removeSession(std::size_t index)
+void SessionArea::removeSession(int index)
 {
-    if (index >= impl_->sessions.size())
+    if (index < 0 || index >= static_cast<int>(impl_->sessions.size()))
     {
         Log::critical("Session index out of bounds: {}", index);
         return;
@@ -133,7 +132,7 @@ void SessionArea::removeSession(std::size_t index)
     Log::info("Removing session: {}", impl_->sessions.value()[index]->name());
 
     if (impl_->sessions.value()[index]->visible() && impl_->sessions.size() > 1)
-        setSelected(std::max(0ull, index - 1ull));
+        setSelected(0);
 
     impl_->sessions.value()[index]->shutdown(
         [this, index]()
@@ -144,25 +143,31 @@ void SessionArea::removeSession(std::size_t index)
     );
 }
 
-void SessionArea::setSelected(int index)
+void SessionArea::setSelected(int newIndex)
 {
-    const auto wasAnythingSelected = [this, index]()
+    [this, newIndex]()
     {
-        if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
+        if (!impl_->selected->has_value())
         {
-            impl_->sessions.value()[impl_->selected]->visible(false);
+            Log::info("Setting selected session to index: {}", newIndex);
+            impl_->sessions.value()[newIndex]->visible(true);
+            impl_->selected = newIndex;
+            return;
         }
-        if (index >= 0 && index < static_cast<int>(impl_->sessions.size()))
+
+        const auto oldIndex = impl_->selected->value();
+        if (oldIndex >= 0 && oldIndex < static_cast<int>(impl_->sessions.size()))
         {
-            impl_->sessions.value()[index]->visible(true);
-            impl_->selected = index;
-            return true;
+            Log::info("Changing selected session from index '{}' to index '{}'", oldIndex, newIndex);
+            impl_->sessions.value()[oldIndex]->visible(false);
+            impl_->sessions.value()[newIndex]->visible(true);
+            impl_->selected = newIndex;
+            return;
         }
-        return false;
+        return;
     }();
 
-    if (wasAnythingSelected)
-        Nui::globalEventContext.executeActiveEventsImmediately();
+    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 void SessionArea::addSession(std::string const& name)
@@ -212,14 +217,34 @@ void SessionArea::addSession(std::string const& name)
                         );
                         removeSession(index);
                     },
+                    [this](std::string const& desiredTitle) -> std::string
+                    {
+                        std::string disambiguatedTitle = desiredTitle;
+                        int suffix = 1;
+                        bool titleExists = false;
+
+                        do
+                        {
+                            titleExists = false;
+                            for (auto const& session : impl_->sessions.value())
+                            {
+                                if (session->name() == disambiguatedTitle)
+                                {
+                                    titleExists = true;
+                                    disambiguatedTitle = desiredTitle + " ("s + std::to_string(suffix) + ")"s;
+                                    ++suffix;
+                                    break;
+                                }
+                            }
+                        } while (titleExists);
+
+                        return disambiguatedTitle;
+                    },
                     impl_->sessions.size() == 0
                 )
             );
 
-            if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
-                impl_->sessions.value()[impl_->selected]->visible(false);
-            impl_->selected = impl_->sessions.size() - 1;
-            Nui::globalEventContext.executeActiveEventsImmediately();
+            setSelected(static_cast<int>(impl_->sessions.size()) - 1);
         },
         "Cannot add session."
     );
@@ -235,8 +260,9 @@ std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
 
 Session* SessionArea::getActiveSession()
 {
-    if (impl_->selected >= 0 && impl_->selected < static_cast<int>(impl_->sessions.size()))
-        return impl_->sessions.value()[impl_->selected].get();
+    if (impl_->selected.value() && *impl_->selected.value() >= 0 &&
+        *impl_->selected.value() < static_cast<int>(impl_->sessions.size()))
+        return impl_->sessions.value()[*impl_->selected.value()].get();
     return nullptr;
 }
 
@@ -266,16 +292,7 @@ Nui::ElementRenderer SessionArea::operator()()
                 class_ = "session-area-tabs",
                 "tab-select"_event = [this](Nui::val event){
                     const auto index = event["detail"]["tabIndex"].as<int>();
-                    if (index >= 0 && index < static_cast<int>(impl_->sessions.size()))
-                    {
-                        // Could do some logic, but this is easier when tabs are getting deleted.
-                        for (auto const& session : impl_->sessions.value())
-                        {
-                            if (session->visible())
-                                session->visible(false);
-                        }
-                        impl_->sessions.value()[index]->visible(true);
-                    }
+                    setSelected(index);
                 },
                 "fixed"_prop = true
             }(
@@ -284,7 +301,11 @@ Nui::ElementRenderer SessionArea::operator()()
                     // tabs dont actually reside here:
                     return ui5::tab{
                         "text"_prop = session->tabTitle(),
-                        "selected"_prop = i == impl_->selected,
+                        "selected"_prop = observe(impl_->selected).generate([i](std::optional<int> index){
+                            if (index.has_value())
+                                return *index == i;
+                            return false;
+                        }),
                         "moveable"_prop = true
                     }();
                 }
@@ -294,8 +315,8 @@ Nui::ElementRenderer SessionArea::operator()()
                 class_ = "session-area-content"
             }(
                 range(impl_->sessions),
-                [this](long long i, auto& session) -> Nui::ElementRenderer {
-                    return session->operator()(i == impl_->selected);
+                [](long long, auto& session) -> Nui::ElementRenderer {
+                    return (*session)();
                 }
             )
         );

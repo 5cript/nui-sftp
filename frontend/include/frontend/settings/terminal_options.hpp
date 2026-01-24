@@ -5,6 +5,7 @@
 #include <frontend/settings/atomic_setting/color_setting.hpp>
 #include <frontend/settings/atomic_setting/number_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
 
 #include <persistence/state/terminal_options.hpp>
 
@@ -46,7 +47,7 @@ struct TerminalOptions : public GroupKeys
     NumberSetting<unsigned int, true> fontSize;
     NumberSetting<float, true> lineHeight;
     BoolSetting<true> cursorBlink;
-    TextSetting<true> renderer;
+    ComboSetting<std::string, std::string, true> renderer;
     NumberSetting<int, true> letterSpacing;
     Nui::Observed<bool> themeEngaged;
     TerminalTheme theme;

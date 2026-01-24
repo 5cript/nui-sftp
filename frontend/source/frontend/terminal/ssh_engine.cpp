@@ -13,7 +13,7 @@ struct SshTerminalEngine::Implementation
     SshTerminalEngine::Settings settings;
     Ids::SessionId sshSessionId;
     std::unordered_map<Ids::ChannelId, SshChannel, Ids::IdHash> channels;
-    std::function<void()> disposer;
+    Nui::RpcClient::AutoUnregister onDisconnectReceiver_;
     bool wasDisposed;
     bool blockedByDestruction;
 
@@ -21,7 +21,7 @@ struct SshTerminalEngine::Implementation
         : settings{std::move(settings)}
         , sshSessionId{}
         , channels{}
-        , disposer{}
+        , onDisconnectReceiver_{}
         , wasDisposed{false}
         , blockedByDestruction{false}
     {}
@@ -36,7 +36,7 @@ SshTerminalEngine::~SshTerminalEngine()
     {
         // Does not do channel close chain, but quick-kills the session.
         Log::info("Disconnecting from destructor");
-        disconnect([]() {}, true);
+        disconnect([]() {});
     }
 }
 
@@ -66,43 +66,52 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
                 return onOpen(false, error);
             }
             impl_->sshSessionId = Ids::makeSessionId(val["id"].as<std::string>());
+            onSuccessfulOpen();
             onOpen(true, "");
         },
         obj
     );
 }
 
-void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool fromDtor)
+void SshTerminalEngine::onSuccessfulOpen()
 {
-    if (!impl_->wasDisposed)
+    impl_->onDisconnectReceiver_ = Nui::RpcClient::autoRegisterFunction(
+        fmt::format("Session::{}::onDisconnect", impl_->sshSessionId.value()),
+        [this](Nui::val)
+        {
+            Log::info("SSH session '{}' disconnected", impl_->sshSessionId.value());
+            disconnect([]() {}, true);
+        }
+    );
+}
+
+void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool byLossOfConnection)
+{
+    if (impl_->wasDisposed)
+        return onDisconnect();
+
+    impl_->wasDisposed = true;
+    Log::info("Disconnecting session: {}", impl_->sshSessionId.value());
+    if (!byLossOfConnection)
     {
-        impl_->wasDisposed = true;
-        Log::info("Disconnecting session: {}", impl_->sshSessionId.value());
         Nui::RpcClient::callWithBackChannel(
             "SessionManager::disconnect",
             [onDisconnect = std::move(onDisconnect)](Nui::val)
             {
                 // TODO: handle error
+                Log::info("Frontend SshEngine: Disconnected");
                 onDisconnect();
             },
             impl_->sshSessionId.value()
         );
-        if (!fromDtor)
-        {
-            if (impl_->settings.onExit)
-                impl_->settings.onExit();
-        }
     }
-}
-
-void SshTerminalEngine::onChannelDeath()
-{
-    if (!impl_->wasDisposed)
+    else
     {
-        if (impl_->settings.onBeforeExit)
-            impl_->settings.onBeforeExit();
+        Log::info("Frontend SshEngine: Disconnected by loss of connection.");
+        onDisconnect();
+        if (impl_->settings.onConnectionLoss)
+            impl_->settings.onConnectionLoss();
     }
-    dispose([]() {});
 }
 
 void SshTerminalEngine::createChannelImpl(
@@ -149,18 +158,8 @@ void SshTerminalEngine::createChannelImpl(
             [[maybe_unused]] const auto [iter, _] =
                 impl_->channels.emplace(channelId, SshChannel{impl_->sshSessionId, channelId});
 
-            // Creates recepticals for stdout/stderr/exit
-            iter->second.open(
-                handler,
-                errorHandler,
-                [this]()
-                {
-                    // If one channel dies, destroy everything.
-                    Log::info("Channel died, disconnecting entire session");
-                    onChannelDeath();
-                },
-                fileMode
-            );
+            // Creates recepticals for stdout/stderr
+            iter->second.open(handler, errorHandler, fileMode);
 
             if (!fileMode)
             {
@@ -211,39 +210,20 @@ Ids::SessionId SshTerminalEngine::sshSessionId() const
 
 void SshTerminalEngine::dispose(std::function<void()> onDisposeComplete)
 {
-    impl_->blockedByDestruction = true;
-
-    if (impl_->disposer)
+    if (impl_->blockedByDestruction)
     {
         Log::error("SshTerminalEngine, dispose already in progress");
         return;
     }
-
-    impl_->disposer = [this, onDisposeComplete = std::move(onDisposeComplete)]() mutable
-    {
-        if (impl_->channels.empty())
-        {
-            disconnect(onDisposeComplete);
-        }
-        else
-        {
-            auto currentChannel = impl_->channels.begin();
-            const auto channelId = currentChannel->first;
-            closeChannel(
-                channelId,
-                [this, onDisposeComplete]() mutable
-                {
-                    impl_->disposer();
-                }
-            );
-        }
-    };
-
-    impl_->disposer();
+    Log::info("Disposing SshTerminalEngine");
+    impl_->blockedByDestruction = true;
+    // dont destroy channels, host process already cleans up
+    disconnect(std::move(onDisposeComplete));
 }
 
 void SshTerminalEngine::closeChannel(Ids::ChannelId const& channelId, std::function<void()> onChannelClosed)
 {
+    Log::info("SshTerminalEngine: Closing channel: {}", channelId.value());
     if (auto channel = impl_->channels.find(channelId); channel != impl_->channels.end())
     {
         channel->second.dispose(

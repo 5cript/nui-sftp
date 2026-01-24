@@ -18,13 +18,7 @@ struct SftpFileEngine::Implementation
 SftpFileEngine::SftpFileEngine(SshTerminalEngine* engine)
     : impl_{std::make_unique<Implementation>(engine)}
 {}
-SftpFileEngine::~SftpFileEngine()
-{
-    if (!moveDetector_.wasMoved())
-    {
-        dispose([]() {});
-    }
-}
+SftpFileEngine::~SftpFileEngine() = default;
 
 std::optional<Ids::ChannelId> SftpFileEngine::release()
 {

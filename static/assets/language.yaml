@@ -11,6 +11,8 @@ en_US:
     fileExplorer: "File Explorer"
     operationQueue: "Operation Queue"
     sessionOptions: "Session Options"
+    connectionLostTerminalMessage: "\n\e[31mConnection lost\e[0m\n\t- Press \e[35m<return>\e[0m to exit\n\t- Press \e[35mS\e[0m to save terminal output to file"
+    connectionLost: "Connection Lost"
   settings:
     loadingSettings: "Loading Settings UI"
     deleteSessionButton: "Delete Session"
@@ -391,6 +393,16 @@ en_US:
     newSession: "New Session"
     endSession: "End Session"
     settings: "Settings"
+
+
+
+
+
+
+
+
+
+
 de_DE:
   language: "Sprache"
   cancel: "Abbrechen"
@@ -404,6 +416,8 @@ de_DE:
     fileExplorer: "Datei Explorer"
     operationQueue: "Operationswarteschlange"
     sessionOptions: "Sitzungsoptionen"
+    connectionLostTerminalMessage: "\e[31mVerbindung verloren\e[0m\n\t- Drücken Sie \e[35m<return>\e[0m um die Sitzung zu beenden\n\t- Drücken Sie \e[35mR\e[0m um die Sitzung neu zu starten\n\t- Drücken Sie \e[35mS\e[0m um die Terminalausgabe in eine Datei zu speichern"
+    connectionLost: "Verbindung verloren"
   settings:
     loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
     deleteSessionButton: "Sitzung löschen"

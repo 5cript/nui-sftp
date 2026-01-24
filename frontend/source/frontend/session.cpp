@@ -28,6 +28,7 @@
 #include <nui/frontend/utility/delocalized.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
+#include <nui/frontend/filesystem/file_dialog.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -50,7 +51,7 @@ struct Session::Implementation
     Nui::Observed<bool> isVisible;
     Persistence::UiOptions uiOptions;
 
-    // (Ssh, ...)Session / FrontendSshManager Engine:
+    // Session Options Tab
     Persistence::SessionOptions engineOptions;
     Nui::Observed<Persistence::TerminalOptions> options;
 
@@ -71,21 +72,25 @@ struct Session::Implementation
     std::optional<std::string> layoutName;
     bool waitingForLayoutHost{false};
 
-    // Channels & FrontendSshManager Connection
-    Nui::Observed<std::unique_ptr<FrontendSshManager>> terminal;
+    // Channels & FrontendSessionManager Connection
+    Nui::Observed<std::unique_ptr<FrontendSessionManager>> frontendSessionManager;
     std::vector<std::shared_ptr<Nui::Dom::Element>> channelElements;
 
     // Session Options
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
     SessionOptions sessionOptions;
 
-    // Shutdown:
-    Nui::Observed<bool> shuttingDown{false};
+    // Shutdown & Connection Status:
+    Nui::Observed<bool> inertEverything{false};
+    Nui::Observed<bool> isInLostConnectionState{false};
     std::function<void()> onShutdownComplete{};
+    std::vector<std::string> savedTerminalContents{};
 
     // Add Tab Context Menu
     std::weak_ptr<Nui::Dom::BasicElement> tabAddMenu;
     Nui::Observed<std::optional<std::string>> addButtonId{std::nullopt};
+
+    std::function<std::string(std::string const&)> disambiguateTitle;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -97,6 +102,7 @@ struct Session::Implementation
         InputDialog* inputDialog,
         ConfirmDialog* confirmDialog,
         std::function<void(Session const*)> closeSelf,
+        std::function<std::string(std::string const&)> disambiguateTitle,
         bool visible)
         : stateHolder{stateHolder}
         , events{events}
@@ -121,10 +127,11 @@ struct Session::Implementation
         , operationQueueElement{}
         , layoutHost{}
         , layoutName{std::move(layoutName)}
-        , terminal{}
+        , frontendSessionManager{}
         , channelElements{}
         , sessionOptionsElement{}
         , sessionOptions{stateHolder, events, this->initialName, this->sessionLayoutId, confirmDialog}
+        , disambiguateTitle{std::move(disambiguateTitle)}
     {}
 };
 
@@ -134,16 +141,16 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
 
     // clang-format off
     return div{}(
-        observe(impl_->terminal),
+        observe(impl_->frontendSessionManager),
         [this]() -> Nui::ElementRenderer {
             return div{
                 style = "height: 100%; width: 100%",
                 class_ = "terminal-channel",
                 reference.onMaterialize([this](Nui::val element) {
                     Log::info("Channel terminal materialized");
-                    if (impl_->terminal.value())
+                    if (impl_->frontendSessionManager.value())
                     {
-                        impl_->terminal.value()->createChannel(element, *impl_->options, std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2));
+                        impl_->frontendSessionManager.value()->createChannel(element, *impl_->options, std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2));
                     }
                 })
             }();
@@ -163,13 +170,26 @@ NuiFileExplorer::Side& Session::localFileGridSide()
 
 auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 {
-    using Nui::Elements::div; // because of the global div.
     using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
 
     // clang-format off
     return div{
         style = "width: 100%; height: auto; display: block",
     }(
+        div{
+            style = Style {
+                "display"_style = observe(impl_->isInLostConnectionState).generate(
+                    [this]() {
+                        return impl_->isInLostConnectionState.value() ? "flex" : "none";
+                    }
+                )
+            },
+            class_ = "session-filegrid-connection-lost-overlay",
+        }(
+            span{}(language->getObserved("sessionFrontend", "connectionLost"))
+        ),
         impl_->fileGrid()
     );
     // clang-format on
@@ -185,6 +205,7 @@ Session::Session(
     InputDialog* inputDialog,
     ConfirmDialog* confirmDialog,
     std::function<void(Session const*)> closeSelf,
+    std::function<std::string(std::string const&)> disambiguateTitle,
     bool visible
 )
     : impl_{std::make_unique<Implementation>(
@@ -197,6 +218,7 @@ Session::Session(
           inputDialog,
           confirmDialog,
           std::move(closeSelf),
+          std::move(disambiguateTitle),
           visible
       )}
 {
@@ -212,7 +234,7 @@ Session::Session(
     }
     else
     {
-        Log::error("Unsupported terminal engine type");
+        Log::error("Unsupported frontendSessionManager engine type");
         return;
     }
 
@@ -278,40 +300,98 @@ void Session::setupFileGrid()
     localSideModel().setRemoteModel(&remoteSideModel());
 }
 
+void Session::saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents)
+{
+    // Save channels to file(s):
+    int indexIncrement = 0;
+    const auto basePath = file.string();
+    const auto extension = file.extension().string();
+    const auto baseName = file.stem().string();
+    for (auto const& textContent : contents)
+    {
+        const auto filePath = fmt::format("{}_{}{}", baseName, indexIncrement++, extension);
+        Nui::RpcClient::callWithBackChannel(
+            "RpcFilesystem::writeFile",
+            [filePath](Nui::val response)
+            {
+                if (!response.hasOwnProperty("success"))
+                {
+                    Log::error("Invalid response from RpcFilesystem::writeFile for file '{}'", filePath);
+                    return;
+                }
+
+                const auto success = response["success"].as<bool>();
+                if (!success)
+                {
+                    const auto error = response["error"].as<std::string>();
+                    Log::error("Failed to write file '{}': {}", filePath, error);
+                    return;
+                }
+
+                Log::info("Successfully wrote file '{}'", filePath);
+            },
+            filePath,
+            textContent
+        );
+    }
+}
+
+void Session::onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input)
+{
+    Log::info("Received user input by channel '{}' in locked mode: {}", channelId.id(), input);
+    if (input == "\r" || input == "\n")
+        return closeSelf();
+
+    if (input == "s" || input == "S")
+    {
+        if (!impl_->frontendSessionManager.value())
+            return;
+
+        Nui::FileDialog::showSaveDialog(
+            Nui::FileDialog::SaveDialogOptions{
+                // all are optional
+                .title = "Pick directory / file",
+                .defaultPath = "%userprofile%",
+                .filters = {},
+                .forcePath = false,
+                .forceOverwrite = false,
+            },
+            [this](std::optional<std::filesystem::path> const& result)
+            {
+                if (!result.has_value())
+                {
+                    Log::info("User cancelled save dialog in locked mode");
+                    return;
+                }
+
+                saveTerminalContents(result.value(), impl_->savedTerminalContents);
+            }
+        );
+        return;
+    }
+}
+
 void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");
 
-    impl_->terminal = std::make_unique<FrontendSshManager>(
+    impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
         std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
             .engineOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine),
-            .onExit = std::bind(&Session::onTerminalConnectionClose, this),
-            .onBeforeExit = std::bind(&Session::onBeforeTerminalConnectionClose, this),
+            .onConnectionLoss = std::bind(&Session::onTerminalConnectionLoss, this),
         }),
-        true
+        true,
+        std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    impl_->terminal.value()->open(
+    impl_->frontendSessionManager.value()->open(
         std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
     );
 }
 
-void Session::onBeforeTerminalConnectionClose()
-{
-    // TODO:
-    // if (impl_->terminal.value())
-    // {
-    //     impl_->terminal.value()->iterateAllChannels([](std::string const& /*channelId*/, TerminalChannel&
-    //     channel) {
-    //         std::string id = channel.stealTerminal();
-    //         return true;
-    //     });
-    // }
-}
-
 void Session::createExecutingEngine()
 {
-    impl_->terminal = std::make_unique<FrontendSshManager>(
+    impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
         std::make_unique<ExecutingTerminalEngine>(ExecutingTerminalEngine::Settings{
             .engineOptions = std::get<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine),
             .termios = impl_->engineOptions.termios.value(),
@@ -319,14 +399,15 @@ void Session::createExecutingEngine()
                 [this](std::string const& cmdline)
             {
                 Log::info("Tab title changed: {}", cmdline);
-                *impl_->tabTitle = cmdline;
+                *impl_->tabTitle = impl_->disambiguateTitle(cmdline);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
         }),
-        false
+        false,
+        std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    impl_->terminal.value()->open(
+    impl_->frontendSessionManager.value()->open(
         std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
     );
 }
@@ -439,13 +520,13 @@ void Session::openLocalFilesystem()
 
 void Session::openSftp()
 {
-    if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
+    if (impl_->frontendSessionManager.value() && impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
     {
         auto const& opts = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
         if (opts.openSftpByDefault)
         {
             Log::info("Opening SFTP by default");
-            auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->terminal.value()->engine());
+            auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
             auto fileEngine = std::make_shared<SftpFileEngine>(sshTerminalEngine);
             remoteSideModel().engine(fileEngine);
             localSideModel().engine(std::move(fileEngine));
@@ -460,38 +541,6 @@ void Session::openSftp()
     {
         Log::info("Cannot open SFTP for non-ssh terminal");
     }
-}
-
-void Session::fallbackToUserControlEngine()
-{
-    // TODO:
-
-    // impl_->terminal = std::make_unique<FrontendSshManager>(
-    //     std::make_unique<UserControlEngine>(UserControlEngine::Settings{
-    //         .onInput =
-    //             [this](std::string const& input) {
-    //                 if (input == "\u0003" && impl_->closeSelf)
-    //                     impl_->closeSelf(*this);
-    //             },
-    //     }),
-    //     false);
-
-    // impl_->terminal.value()->open([](bool success, std::string const& info) {
-    //     if (!success)
-    //     {
-    //         Log::error("Failed to open user control terminal: {}", info);
-    //         return;
-    //     }
-    //     Log::info("User control terminal opened successfully");
-    // });
-
-    // impl_->terminal.value()->write(
-    //     fmt::format("\033[1;31mFailed to create instance: {}.\r\nPress Ctrl+C do close this tab.\033[00m", info),
-    //     false);
-    // Nui::globalEventContext.executeActiveEventsImmediately();
-
-    // New layout?:
-    // initializeLayout();
 }
 
 void Session::onOpenSession(bool success, std::string const& info)
@@ -510,25 +559,36 @@ void Session::onOpenSession(bool success, std::string const& info)
     else
     {
         Log::info("Session opened successfully: {}", info);
-        if (impl_->terminal.value() && impl_->terminal.value()->engine().engineName() == "ssh")
+        if (impl_->frontendSessionManager.value() &&
+            impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
         {
             const auto& sshSessionOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
 
-            // TODO: __todo_default__ is probably something that should be replaced with a proper default value.
-            // Which most of the time is the user name of the user that started this program.
-            const auto user = sshSessionOptions.user.value_or("__todo_default__");
-            auto host = sshSessionOptions.host;
-            const auto port = sshSessionOptions.port.value_or(22);
+            Log::info("Retrieving username for tab title");
+            Nui::RpcClient::callWithBackChannel(
+                "RpcSystem::getUsername",
+                [this, &sshSessionOptions](Nui::val response)
+                {
+                    std::string username = "errorName";
+                    if (response.hasOwnProperty("username"))
+                        username = response["username"].as<std::string>();
+                    Log::info("Retrieved username: {}", username);
 
-            // assume ipv6 when finding ':' in host
-            if (host.find(":") != std::string::npos)
-                host = "[" + host + "]";
-            *impl_->tabTitle = user + "@" + host + ":" + std::to_string(port);
+                    const auto user = sshSessionOptions.user.value_or(username);
+                    auto host = sshSessionOptions.host;
+                    const auto port = sshSessionOptions.port.value_or(22);
 
-            openSftp();
+                    // assume ipv6 when finding ':' in host
+                    if (host.find(":") != std::string::npos)
+                        host = "[" + host + "]";
+                    *impl_->tabTitle = impl_->disambiguateTitle(user + "@" + host + ":" + std::to_string(port));
+
+                    openSftp();
+                }
+            );
         }
 
-        impl_->terminal.value()->focus();
+        impl_->frontendSessionManager.value()->focus();
         initializeLayout();
     }
 }
@@ -544,16 +604,46 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
     Log::info("Channel opened successfully: {}", channelId->value());
 }
 
-void Session::onTerminalConnectionClose()
+void Session::onTerminalConnectionLoss()
 {
-    // TODO:
-    Log::debug("onTerminalConnectionClose");
+    Log::debug("onTerminalConnectionLoss");
+    if (!impl_->isInLostConnectionState.value())
+        onConnectionLoss();
 }
 
 void Session::onFileExplorerConnectionClose()
 {
-    // TODO:
     Log::debug("onFileExplorerConnectionClose");
+    if (!impl_->isInLostConnectionState.value())
+        onConnectionLoss();
+}
+
+void Session::onConnectionLoss()
+{
+    if (impl_->isInLostConnectionState.value())
+        return;
+
+    impl_->isInLostConnectionState = true;
+    Nui::globalEventContext.executeActiveEventsImmediately();
+
+    if (!impl_->frontendSessionManager.value())
+    {
+        Log::error("Cannot write broadcast message, no frontend session manager");
+        return;
+    }
+
+    impl_->frontendSessionManager.value()->connectionLossMode(true);
+    impl_->frontendSessionManager.value()->iterateAllChannels(
+        [this](Ids::ChannelId const&, TerminalChannel& channel) -> bool
+        {
+            const auto content = channel.getAllTextContent();
+            impl_->savedTerminalContents.push_back(content);
+            return true;
+        }
+    );
+    impl_->frontendSessionManager.value()->writeBroadcast(
+        language->get("sessionFrontend", "connectionLostTerminalMessage")
+    );
 }
 
 void Session::shutdown(std::function<void()> onShutdown)
@@ -566,7 +656,7 @@ void Session::closeSelf()
 {
     Log::info("Session::closeSelf called");
     // Immediately make page inert to prevent user interaction from this point on.
-    impl_->shuttingDown = true;
+    impl_->inertEverything = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     const bool isExecutingEngine =
@@ -584,17 +674,11 @@ void Session::closeSelf()
             impl_->onShutdownComplete();
             return;
         }
-
-        // "inside" shutdown (connection loss etc)
-        if (impl_->closeSelf)
-        {
-            Log::info("Calling close self callback.");
+        else
             impl_->closeSelf(this);
-            return;
-        }
     };
 
-    if (!isExecutingEngine && (impl_->terminal.value() || remoteSideModel().engine()))
+    if (!isExecutingEngine && (impl_->frontendSessionManager.value() || remoteSideModel().engine()))
     {
         Log::info("Session shutdown started.");
 
@@ -602,23 +686,25 @@ void Session::closeSelf()
         auto terminalDispose = [this, closeSelfCompletion]()
         {
             Log::info("Disposing frontend ssh manager.");
-            if (impl_->terminal.value())
+            if (impl_->frontendSessionManager.value())
             {
-                impl_->terminal.value()->dispose(
+                impl_->frontendSessionManager.value()->dispose(
                     [closeSelfCompletion]()
                     {
-                        Log::info("Frontend ssh manager disposed.");
+                        Log::info("Session.closeSelfCompletion()");
                         closeSelfCompletion();
                     }
                 );
             }
         };
 
-        if (auto fileEngine = remoteSideModel().engine(); fileEngine)
-        {
-            Log::info("Disposing file engine.");
-            fileEngine->dispose(terminalDispose);
-        }
+        // Not necessary, because the session destruction will take care of it:
+        // if (auto fileEngine = remoteSideModel().engine(); fileEngine)
+        // {
+        //     Log::info("Disposing file engine.");
+        //     fileEngine->dispose(terminalDispose);
+        //     return;
+        // }
         terminalDispose();
     }
     else
@@ -631,7 +717,7 @@ void Session::closeSelf()
 std::optional<std::string> Session::getProcessIdIfExecutingEngine() const
 {
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
-        return static_cast<ExecutingTerminalEngine&>(impl_->terminal.value()->engine()).id();
+        return static_cast<ExecutingTerminalEngine&>(impl_->frontendSessionManager.value()->engine()).id();
     return std::nullopt;
 }
 
@@ -655,7 +741,7 @@ void Session::visible(bool value)
     impl_->isVisible = value;
     Nui::globalEventContext.executeActiveEventsImmediately();
     if (value)
-        impl_->terminal.value()->focus();
+        impl_->frontendSessionManager.value()->focus();
 }
 
 auto Session::makeOperationQueueElement() -> Nui::ElementRenderer
@@ -688,7 +774,7 @@ void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
 
     // Removing channel in frontend:
     using namespace std::string_literals;
-    impl_->terminal.value()->closeChannel(channelId);
+    impl_->frontendSessionManager.value()->closeChannel(channelId);
 }
 
 void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
@@ -939,12 +1025,10 @@ void Session::initializeLayout()
     }
 }
 
-Nui::ElementRenderer Session::operator()(bool visible)
+Nui::ElementRenderer Session::operator()()
 {
     using Nui::Elements::div; // because of the global div.
     Log::info("Session::operator()");
-
-    impl_->isVisible = visible;
 
     // clang-format off
     return div{
@@ -967,8 +1051,8 @@ Nui::ElementRenderer Session::operator()(bool visible)
                 impl_->waitingForLayoutHost = false;
             }
         }),
-        "inert"_attr = observe(impl_->shuttingDown).generate([this]() -> std::optional<std::string> {
-            return impl_->shuttingDown.value() ? "true"s : std::optional<std::string>{std::nullopt};
+        "inert"_attr = observe(impl_->inertEverything).generate([this]() -> std::optional<std::string> {
+            return impl_->inertEverything.value() ? "true"s : std::optional<std::string>{std::nullopt};
         })
     }(
         addTabMenu()
