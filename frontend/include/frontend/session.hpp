@@ -32,11 +32,12 @@ class Session
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
         std::function<void(Session const*)> closeSelf,
+        std::function<std::string(std::string const&)> disambiguateTitle,
         bool visible
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Session);
 
-    Nui::ElementRenderer operator()(bool visible);
+    Nui::ElementRenderer operator()();
 
     /**
      * @brief initiates shutdown of the session manager and calls onShutdown when done.
@@ -63,8 +64,7 @@ class Session
     void onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string const& info);
 
     void onFileExplorerConnectionClose();
-    void onTerminalConnectionClose();
-    void onBeforeTerminalConnectionClose();
+    void onTerminalConnectionLoss();
     void openSftp();
     void openLocalFilesystem();
     void closeSelf();
@@ -76,7 +76,6 @@ class Session
 
     void createExecutingEngine();
     void createSshEngine();
-    void fallbackToUserControlEngine();
 
     NuiFileExplorer::Side& remoteFileGridSide();
     NuiFileExplorer::Side& localFileGridSide();
@@ -87,6 +86,9 @@ class Session
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
     Nui::ElementRenderer addTabMenu();
+    void onConnectionLoss();
+    void onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input);
+    void saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents);
 
   private:
     struct Implementation;

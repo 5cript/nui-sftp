@@ -5,12 +5,17 @@
 #include <ids/ids.hpp>
 
 #include <nui/frontend/val.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
 class TerminalChannel
 {
   public:
-    TerminalChannel(MultiChannelTerminalEngine* engine, Ids::ChannelId channelId);
+    TerminalChannel(
+        MultiChannelTerminalEngine* engine,
+        Ids::ChannelId channelId,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    );
     virtual ~TerminalChannel();
     TerminalChannel(TerminalChannel const&) = delete;
     TerminalChannel(TerminalChannel&&);
@@ -26,19 +31,25 @@ class TerminalChannel
     void write(std::string const& data, bool isUserInput);
     void writeStderr(std::string const& data, bool isUserInput);
     void focus();
-    void dispose(std::function<void()> onComplete);
+    void dispose(std::function<void()> onComplete, bool closeBackendChannel = true);
     std::string stealTerminal();
+    void connectionLossMode(bool isLocked);
+    std::string getAllTextContent() const;
 
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
 };
 
-class FrontendSshManager
+class FrontendSessionManager
 {
   public:
-    FrontendSshManager(std::unique_ptr<TerminalEngine> engine, bool isMultiChannel);
-    ROAR_PIMPL_SPECIAL_FUNCTIONS(FrontendSshManager);
+    FrontendSessionManager(
+        std::unique_ptr<TerminalEngine> engine,
+        bool isMultiChannel,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    );
+    ROAR_PIMPL_SPECIAL_FUNCTIONS(FrontendSessionManager);
 
     void open(std::function<void(bool, std::string const&)> onOpen);
 
@@ -59,6 +70,12 @@ class FrontendSshManager
 
     // Focusses the first terminal channel if it exists
     void focus();
+
+    // This is never user input
+    void writeBroadcast(std::string const& msg);
+
+    // No more user interaction.
+    void connectionLossMode(bool isLocked);
 
   private:
     bool isBeingDisposed() const;

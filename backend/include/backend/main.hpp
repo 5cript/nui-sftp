@@ -4,6 +4,7 @@
 #include <backend/session_manager.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_filesystem.hpp>
+#include <backend/rpc_system.hpp>
 #include <backend/password/password_prompter.hpp>
 #include <ssh/async/processing_thread.hpp>
 
@@ -42,6 +43,7 @@ class Main
     Nui::Window window_;
     Nui::RpcHub hub_;
     std::unique_ptr<RpcFilesystem> rpcFilesystem_;
+    std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
     std::shared_ptr<SessionManager> sshSessionManager_;

@@ -5,34 +5,29 @@
 SshChannel::SshChannel(Ids::SessionId sessionId, Ids::ChannelId channelId)
     : stdoutReceiver_{}
     , stderrReceiver_{}
-    , onExitReceiver_{}
     , sshChannelId_{channelId}
     , sshSessionId_{std::move(sessionId)}
     , stdoutHandler_{}
     , stderrHandler_{}
 {}
 
-SshChannel::~SshChannel()
-{
-    if (!moveDetector_.wasMoved())
-    {
-        dispose([]() {});
-    }
-}
+SshChannel::~SshChannel() = default;
 
 void SshChannel::open(
     std::function<void(std::string const&)> onStdout,
     std::function<void(std::string const&)> onStderr,
-    std::function<void()> onExit,
-    bool fileMode)
+    bool fileMode
+)
 {
     if (!fileMode)
     {
         stdoutHandler_ = std::move(onStdout);
         stderrHandler_ = std::move(onStderr);
 
-        stdoutReceiver_ =
-            Nui::RpcClient::autoRegisterFunction("sshTerminalStdout_" + sshChannelId_.value(), [this](Nui::val val) {
+        stdoutReceiver_ = Nui::RpcClient::autoRegisterFunction(
+            "sshTerminalStdout_" + sshChannelId_.value(),
+            [this](Nui::val val)
+            {
                 if (val.hasOwnProperty("data"))
                 {
                     const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
@@ -41,10 +36,13 @@ void SshChannel::open(
                 }
                 else
                     Log::info("sshTerminalStdout_" + sshChannelId_.value() + " received an empty message");
-            });
+            }
+        );
 
-        stderrReceiver_ =
-            Nui::RpcClient::autoRegisterFunction("sshTerminalStderr_" + sshChannelId_.value(), [this](Nui::val val) {
+        stderrReceiver_ = Nui::RpcClient::autoRegisterFunction(
+            "sshTerminalStderr_" + sshChannelId_.value(),
+            [this](Nui::val val)
+            {
                 if (val.hasOwnProperty("data"))
                 {
                     const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
@@ -53,41 +51,43 @@ void SshChannel::open(
                 }
                 else
                     Log::error("sshTerminalStderr_" + sshChannelId_.value() + " received an empty message");
-            });
+            }
+        );
     }
-
-    onExitReceiver_ =
-        Nui::RpcClient::autoRegisterFunction("sshTerminalOnExit_" + sshChannelId_.value(), [onExit](Nui::val) {
-            onExit();
-        });
 }
 void SshChannel::write(std::string const& data)
 {
     Nui::RpcClient::callWithBackChannel(
         fmt::format("Session::{}::Channel::write", sshSessionId_.value()),
-        [](Nui::val) {
+        [](Nui::val)
+        {
             // TODO: handle error
         },
         sshChannelId_.value(),
-        Nui::val::global("btoa")(data).as<std::string>());
+        Nui::val::global("btoa")(data).as<std::string>()
+    );
 }
 void SshChannel::resize(int cols, int rows)
 {
     Nui::RpcClient::callWithBackChannel(
         fmt::format("Session::{}::Channel::ptyResize", sshSessionId_.value()),
-        [](Nui::val) {
+        [](Nui::val)
+        {
             // TODO: handle error
         },
         sshChannelId_.value(),
         cols,
-        rows);
+        rows
+    );
 }
 void SshChannel::dispose(std::function<void()> onExit)
 {
     Nui::RpcClient::callWithBackChannel(
         fmt::format("Session::{}::Channel::close", sshSessionId_.value()),
-        [onExit = std::move(onExit)](Nui::val) {
+        [onExit = std::move(onExit)](Nui::val)
+        {
             onExit();
         },
-        sshChannelId_.value());
+        sshChannelId_.value()
+    );
 }

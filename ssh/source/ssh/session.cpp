@@ -82,6 +82,11 @@ namespace SecureShell
         }
     }
 
+    std::string Session::getErrorMessage()
+    {
+        return fmt::format("SSH Error (code {}): {}", ssh_get_error(session_.getCSession()), session_.getError());
+    }
+
     void Session::channelRemoveItself(Channel* channel, bool isBackElement)
     {
         removeFromContainer(channels_, channel, isBackElement);
@@ -424,6 +429,11 @@ namespace SecureShell
 #endif
             }
         );
+
+        if (result.result == SSH_ERROR)
+        {
+            return std::unexpected(fmt::format("Failed to connect: {}", session->getErrorMessage()));
+        }
 
         if (result.result != SSH_AUTH_SUCCESS && sshOptions.usePublicKeyAutoAuth &&
             sshOptions.usePublicKeyAutoAuth.value())

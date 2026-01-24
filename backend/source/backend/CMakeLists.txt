@@ -8,6 +8,7 @@ add_library(
         session_manager.cpp
         session.cpp
         rpc_filesystem.cpp
+        rpc_system.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
@@ -63,6 +64,7 @@ target_link_libraries(
         secure-shell
         ids
         events
+        utf8cpp
 )
 
 target_link_libraries(

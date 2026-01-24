@@ -23,8 +23,8 @@ class SshChannel : public ChannelInterface
     void open(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
-        std::function<void()> onExit,
-        bool fileMode) override;
+        bool fileMode
+    ) override;
     void write(std::string const& data) override;
     void resize(int cols, int rows) override;
     void dispose(std::function<void()> onExit) override;
@@ -42,7 +42,6 @@ class SshChannel : public ChannelInterface
     Nui::MoveDetector moveDetector_;
     Nui::RpcClient::AutoUnregister stdoutReceiver_;
     Nui::RpcClient::AutoUnregister stderrReceiver_;
-    Nui::RpcClient::AutoUnregister onExitReceiver_;
     Ids::ChannelId sshChannelId_;
     Ids::SessionId sshSessionId_;
 

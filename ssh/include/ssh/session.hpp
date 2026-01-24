@@ -79,6 +79,8 @@ namespace SecureShell
          */
         std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> createSftpSession();
 
+        std::string getErrorMessage();
+
       private:
         void channelRemoveItself(Channel* channel, bool isBackElement);
         void removeAllChannels();

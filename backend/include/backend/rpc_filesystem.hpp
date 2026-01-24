@@ -23,6 +23,7 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     void registerProperties();
     void registerGetHome();
     void registerDoesExist();
+    void registerWriteFile();
 
   private:
     Persistence::LocalFilesystemOptions options_;

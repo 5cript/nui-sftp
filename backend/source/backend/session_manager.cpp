@@ -88,6 +88,12 @@ SessionManager::SessionManager(
     , stateHolder_{&stateHolder}
 {}
 
+SessionManager::~SessionManager()
+{
+    for (auto& [id, session] : sessions_)
+        session->stop();
+}
+
 void SessionManager::addPasswordProvider(int priority, PasswordProvider* provider)
 {
     within_strand_do(
@@ -122,7 +128,33 @@ void SessionManager::addSession(
                     strand_,
                     *wnd_,
                     *hub_,
-                    sessionOptions.sftpOptions.value()
+                    sessionOptions.sftpOptions.value(),
+                    // Self destruct callback
+                    [weak = weak_from_this(), sessionId]()
+                    {
+                        auto self = weak.lock();
+                        if (self)
+                            self->removeSession(sessionId);
+
+                        // Notify frontend of session loss:
+                        self->wnd_->runInJavascriptThread(
+                            [hub_ = self->hub_, sessionId]()
+                            {
+                                try
+                                {
+                                    hub_->callRemote(fmt::format("Session::{}::onDisconnect", sessionId.value()));
+                                }
+                                catch (const std::exception& e)
+                                {
+                                    // There should never anything throw here, but lets log just in case and dont let an
+                                    // exception escape out of this lambda.
+                                    Log::error(
+                                        "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), e.what()
+                                    );
+                                }
+                            }
+                        );
+                    }
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)
@@ -152,6 +184,7 @@ void SessionManager::removeSession(Ids::SessionId sessionId)
             if (auto iter = sessions_.find(sessionId); iter != sessions_.end())
             {
                 Log::info("Removing session with id: {}", sessionId.value());
+                iter->second->stop();
                 sessions_.erase(iter);
             }
             else

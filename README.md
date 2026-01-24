@@ -15,8 +15,6 @@ Still under construction :construction:
 - [ ] Unify style of operation queue and rest of the ui.
 - [ ] Fix session being in hanging state when connect fails.
 - [ ] Implement proper handling of connection loss.
-- [ ] Add lumino button to add file explorer (at least back to 1, if not X times).
-- [ ] Add lumino button to add operation queue (exactly 1).
 - [ ] Bright mode.
 
 ## Settings UI

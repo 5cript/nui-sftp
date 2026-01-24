@@ -29,7 +29,7 @@ class SessionManager
         Nui::Window& wnd,
         Nui::RpcHub& hub
     );
-    ~SessionManager() = default;
+    ~SessionManager();
     SessionManager(SessionManager const&) = delete;
     SessionManager& operator=(SessionManager const&) = delete;
     SessionManager(SessionManager&&) = delete;

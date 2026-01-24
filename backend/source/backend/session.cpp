@@ -3,6 +3,8 @@
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
 
+#include <nui/utility/scope_exit.hpp>
+
 using namespace std::chrono_literals;
 
 Session::Session(
@@ -12,13 +14,15 @@ Session::Session(
     std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
     Nui::Window& wnd,
     Nui::RpcHub& hub,
-    Persistence::SftpOptions const& sftpOptions
+    Persistence::SftpOptions const& sftpOptions,
+    std::function<void()> onSelfDestruct
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
     , session_{std::move(session)}
     , operationQueue_{std::make_shared<
           OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(1))}
+    , onSelfDestruct_{std::move(onSelfDestruct)}
 {}
 
 void Session::start()
@@ -65,6 +69,59 @@ void Session::stop()
 {
     running_ = false;
     timer_.cancel();
+    onSelfDestruct_ = nullptr;
+
+    std::promise<void> waitForPostedWork;
+    within_strand_do(
+        [weak = weak_from_this(), &waitForPostedWork]() mutable
+        {
+            const auto scopeExit = Nui::ScopeExit(
+                [&waitForPostedWork]() noexcept
+                {
+                    waitForPostedWork.set_value();
+                }
+            );
+
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+
+            Log::info("Stopping session '{}'", self->id_.value());
+
+            // Close all channels
+            for (auto& [channelId, weakChannel] : self->channels_)
+            {
+                if (auto channel = weakChannel.lock(); channel)
+                {
+                    Log::info("Closing channel '{}' for session '{}'", channelId.value(), self->id_.value());
+                    channel->close();
+                }
+            }
+            self->channels_.clear();
+
+            // Close all sftp channels
+            for (auto& [channelId, weakChannel] : self->sftpChannels_)
+            {
+                if (auto channel = weakChannel.lock(); channel)
+                {
+                    Log::info("Closing sftp channel '{}' for session '{}'", channelId.value(), self->id_.value());
+                    channel->close();
+                }
+            }
+            self->sftpChannels_.clear();
+
+            // Close session
+            if (self->session_)
+            {
+                Log::info("Closing ssh session '{}'", self->id_.value());
+                self->session_.reset();
+            }
+        }
+    );
+
+    waitForPostedWork.get_future().get();
 }
 
 void Session::doOperationQueueWork()
@@ -314,30 +371,27 @@ void Session::registerRpcStartChannelRead()
                         );
                     },
                     // On channel exit:
-                    [removeChannel =
-                            [weak = self->weak_from_this(), channelId]()
-                        {
-                            if (auto self = weak.lock(); self)
-                                self->removeChannel(channelId);
-                        },
-                        sessionId = self->id_,
-                        channelId,
-                        onExit =
-                            RpcHelper::RpcInCorrectThread{
-                                *self->wnd_,
-                                *self->hub_,
-                                fmt::format("sshTerminalOnExit_{}", channelId.value()),
-                            }]()
+                    [weak = self->weak_from_this(), sessionId = self->id_, channelId]
                     {
-                        Log::info("Channel for session '{}' lost with id: {}", sessionId.value(), channelId.value());
-                        removeChannel();
-                        onExit({{"sessionId", sessionId.value()}, {"channelId", channelId.value()}});
+                        Log::info(
+                            "Channel for session '{}' lost with id: {}. Tearing down entire session.",
+                            sessionId.value(),
+                            channelId.value()
+                        );
+                        if (auto self = weak.lock(); self)
+                            self->selfDestruct();
                     }
                 );
 
                 return reply({{"success", true}});
             }
         );
+}
+
+void Session::selfDestruct()
+{
+    if (onSelfDestruct_)
+        onSelfDestruct_();
 }
 
 void Session::registerRpcChannelClose()

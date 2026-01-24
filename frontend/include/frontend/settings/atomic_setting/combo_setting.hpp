@@ -29,7 +29,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         LanguageObservedText helpText,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
-        Traits::Callable auto&& valueTransformer =
+        std::function<TransformedType(ValueType const&)> valueTransformer =
             [](ValueType const& v)
         {
             return v;
@@ -47,7 +47,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
           }
         , availableStates_{std::move(availableStates)}
         , iconAccessor_{std::move(iconAccessor)}
-        , transform_{std::forward<decltype(valueTransformer)>(valueTransformer)}
+        , transform_{std::move(valueTransformer)}
     {
         if (!transform_)
         {

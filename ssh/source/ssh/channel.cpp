@@ -33,35 +33,47 @@ namespace SecureShell
         if (strand_->isFinalized())
             return false;
 
+        // Dont call on exit, its expected now and onExit is used for connection loss.
+        onExit_ = nullptr;
+
         return strand_
-            ->pushFinalPromiseTask([this, isBackElement]() {
-                if (channel_ && channel_->isOpen())
+            ->pushFinalPromiseTask(
+                [this, isBackElement]()
                 {
-                    channel_->sendEof();
-                    channel_->close();
+                    if (channel_ && channel_->isOpen())
+                    {
+                        channel_->sendEof();
+                        channel_->close();
+                    }
+                    channel_.reset();
+                    owner_->channelRemoveItself(this, isBackElement);
+                    return true;
                 }
-                channel_.reset();
-                owner_->channelRemoveItself(this, isBackElement);
-                return true;
-            })
+            )
             .get();
     }
     bool Channel::write(std::string data)
     {
-        return strand_->pushTask([this, data = std::move(data)]() {
-            if (channel_)
-                channel_->write(data.data(), data.size());
-        });
+        return strand_->pushTask(
+            [this, data = std::move(data)]()
+            {
+                if (channel_)
+                    channel_->write(data.data(), data.size());
+            }
+        );
     }
     std::future<int> Channel::resizePty(int cols, int rows)
     {
         auto promise = std::make_shared<std::promise<int>>();
-        if (!strand_->pushTask([this, cols, rows, promise]() {
-                if (channel_)
-                    promise->set_value(channel_->changePtySize(cols, rows));
-                else
-                    promise->set_value(SSH_ERROR);
-            }))
+        if (!strand_->pushTask(
+                [this, cols, rows, promise]()
+                {
+                    if (channel_)
+                        promise->set_value(channel_->changePtySize(cols, rows));
+                    else
+                        promise->set_value(SSH_ERROR);
+                }
+            ))
         {
             promise->set_value(SSH_ERROR);
         }
@@ -81,7 +93,8 @@ namespace SecureShell
         constexpr static int bufferSize = 1024;
         char buffer[bufferSize];
 
-        auto readOne = [this, &buffer, pollTimeout](bool stdout_) {
+        auto readOne = [this, &buffer, pollTimeout](bool stdout_)
+        {
             auto rdy = ssh_channel_poll_timeout(channel_->getCChannel(), pollTimeout.count(), stdout_ ? 0 : 1);
             if (rdy < 0)
                 return -1;
@@ -123,15 +136,19 @@ namespace SecureShell
     void Channel::startReading(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
-        std::function<void()> onExit)
+        std::function<void()> onExit
+    )
     {
         onStdout_ = std::move(onStdout);
         onStderr_ = std::move(onStderr);
         onExit_ = std::move(onExit);
 
-        auto [success, id] = strand_->pushPermanentTask([this]() {
-            readTask();
-        });
+        auto [success, id] = strand_->pushPermanentTask(
+            [this]()
+            {
+                readTask();
+            }
+        );
         if (!success)
         {
             // TODO: Do I want to throw here?

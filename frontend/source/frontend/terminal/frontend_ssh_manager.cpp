@@ -13,8 +13,8 @@
 // @inline(js, xterm-js)
 js_import { Terminal } from "@xterm/xterm";
 js_import { FitAddon } from "@xterm/addon-fit";
+js_import { SerializeAddon } from "@xterm/addon-serialize";
 js_import { WebglAddon } from "@xterm/addon-webgl";
-js_import { CanvasAddon } from "@xterm/addon-canvas";
 js_import { nanoid } from "nanoid";
 
 globalThis.terminalUtility = {};
@@ -26,9 +26,7 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
 
     let renderer = undefined;
     if (options.hasOwnProperty("renderer")) {
-        if (options.renderer === "canvas") {
-            renderer = new CanvasAddon();
-        } else if (options.renderer === "dom") {
+        if (options.renderer === "dom") {
             renderer = undefined;
         } else if (options.renderer === "webgl") {
             renderer = new WebglAddon();
@@ -51,7 +49,8 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
     const terminal = new Terminal(defaultedOptions);
     const addons = {
         fitAddon: new FitAddon(),
-        rendererAddon: renderer
+        rendererAddon: renderer,
+        serializeAddon: new SerializeAddon()
     };
     for (const [key, value] of Object.entries(addons))
     {
@@ -107,6 +106,12 @@ globalThis.terminalUtility.set = (id, terminal, addons) => {
         terminal: terminal,
         addons: addons
     });
+};
+globalThis.terminalUtility.dumpTerminal = (id) => {
+    const found = globalThis.terminalUtility.get(id);
+    if (!found)
+        return undefined;
+    return found.addons.serializeAddon.serialize();
 };
 globalThis.terminalUtility.get = (id) => {
     if (!globalThis.terminalUtility.terminals.has(id))
@@ -170,6 +175,8 @@ struct GenericTerminalChannel
     std::string command{};
     std::vector<std::pair<std::string, bool>> writeCache{};
     std::function<void(std::string const&, bool)> doWrite{};
+    bool isLocked{false};
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
 
     Nui::val terminal() const
     {
@@ -181,8 +188,12 @@ struct GenericTerminalChannel
     void writeRespectingCache(std::string const& data, bool isUserInput);
     void writeAfterCache(std::string const& data, bool isUserInput);
 
-    GenericTerminalChannel(Ids::ChannelId channelId)
+    GenericTerminalChannel(
+        Ids::ChannelId channelId,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    )
         : channelId{std::move(channelId)}
+        , onLockedUserInput{std::move(onLockedUserInput)}
     {
         doWrite = [this](std::string const& data, bool isUserInput)
         {
@@ -204,14 +215,24 @@ struct TerminalChannel::Implementation : public GenericTerminalChannel
 
     void writeUser(std::string const& data) override
     {
+        if (isLocked)
+        {
+            onLockedUserInput(channelId, data);
+            return;
+        }
+
         if (auto* chan = channel(); chan)
         {
             chan->write(data);
         }
     }
 
-    Implementation(MultiChannelTerminalEngine* engine, Ids::ChannelId channelId)
-        : GenericTerminalChannel{std::move(channelId)}
+    Implementation(
+        MultiChannelTerminalEngine* engine,
+        Ids::ChannelId channelId,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    )
+        : GenericTerminalChannel{std::move(channelId), std::move(onLockedUserInput)}
         , engine{engine}
     {}
 };
@@ -283,14 +304,31 @@ void GenericTerminalChannel::writeAfterCache(std::string const& data, bool isUse
     }
 }
 
-TerminalChannel::TerminalChannel(MultiChannelTerminalEngine* engine, Ids::ChannelId channelId)
-    : impl_{std::make_unique<Implementation>(engine, std::move(channelId))}
+TerminalChannel::TerminalChannel(
+    MultiChannelTerminalEngine* engine,
+    Ids::ChannelId channelId,
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+)
+    : impl_{std::make_unique<Implementation>(engine, std::move(channelId), std::move(onLockedUserInput))}
 {}
-TerminalChannel::~TerminalChannel()
-{
-    dispose([]() {});
-}
+TerminalChannel::~TerminalChannel() = default;
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(TerminalChannel);
+
+void TerminalChannel::connectionLossMode(bool isLocked)
+{
+    impl_->isLocked = isLocked;
+}
+
+std::string TerminalChannel::getAllTextContent() const
+{
+    const auto result = terminalUtility().call<Nui::val>("dumpTerminal", impl_->termId);
+    if (!result.isString())
+    {
+        Log::error("Failed to dump terminal content for id: '{}'", impl_->termId);
+        return "";
+    }
+    return result.as<std::string>();
+}
 
 std::string TerminalChannel::stealTerminal()
 {
@@ -378,31 +416,43 @@ void TerminalChannel::focus()
     }
     term.call<void>("focus");
 }
-void TerminalChannel::dispose(std::function<void()> onComplete)
+void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBackendChannel)
 {
-    if (!impl_->termId.empty() && impl_->engine)
+    if (impl_->termId.empty())
+        return onComplete();
+
+    auto cleanupFrontendChannel = [this, onComplete = std::move(onComplete)]()
     {
+        auto term = impl_->terminal();
+        if (term.isUndefined())
+        {
+            Log::error("Failed to get terminal with id to dispose it: '{}", impl_->termId);
+            onComplete();
+            return;
+        }
+        Log::info("Disposing terminal channel with id: '{}'", impl_->termId);
+        terminalUtility().call<void>("disposeTerminal", impl_->termId);
+        impl_->termId.clear();
+        impl_->channelId.invalidate();
+        onComplete();
+    };
+
+    if (impl_->engine && closeBackendChannel)
+    {
+        Log::info("Disposing channel backend for channel id: '{}'", impl_->channelId.value());
         impl_->engine->closeChannel(
             impl_->channelId,
-            [this, onComplete = std::move(onComplete)]()
+            [cleanupFrontendChannel = std::move(cleanupFrontendChannel)]()
             {
-                auto term = impl_->terminal();
-                if (term.isUndefined())
-                {
-                    Log::error("Failed to get terminal with id to dispose it: '{}", impl_->termId);
-                    onComplete();
-                    return;
-                }
-                Log::info("Disposing terminal channel with id: '{}'", impl_->termId);
-                terminalUtility().call<void>("disposeTerminal", impl_->termId);
-                impl_->termId.clear();
-                impl_->channelId.invalidate();
-                onComplete();
+                cleanupFrontendChannel();
             }
         );
-        return;
     }
-    onComplete();
+    else
+    {
+        Log::info("Disposing channel without closing backend channel for id: '{}'", impl_->termId);
+        cleanupFrontendChannel();
+    }
 }
 
 bool TerminalChannel::isOpen() const
@@ -419,13 +469,17 @@ struct SingleTerminalChannel : public GenericTerminalChannel
         engine->write(data);
     }
 
-    SingleTerminalChannel(SingleChannelTerminalEngine* engine, Ids::ChannelId channelId)
-        : GenericTerminalChannel{std::move(channelId)}
+    SingleTerminalChannel(
+        SingleChannelTerminalEngine* engine,
+        Ids::ChannelId channelId,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    )
+        : GenericTerminalChannel{std::move(channelId), std::move(onLockedUserInput)}
         , engine{engine}
     {}
 };
 
-struct FrontendSshManager::Implementation
+struct FrontendSessionManager::Implementation
 {
     std::unique_ptr<TerminalEngine> engine;
     std::unordered_map<Ids::ChannelId, std::unique_ptr<TerminalChannel>, Ids::IdHash> channels;
@@ -433,12 +487,19 @@ struct FrontendSshManager::Implementation
     std::unique_ptr<SingleTerminalChannel> singleModeChannel;
     bool beingDisposed{false};
     bool disposeComplete{false};
+    bool isInLockedMode{false};
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
 
-    Implementation(std::unique_ptr<TerminalEngine> engine, bool isMultiChannel)
+    Implementation(
+        std::unique_ptr<TerminalEngine> engine,
+        bool isMultiChannel,
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    )
         : engine{std::move(engine)}
         , channels{}
         , isMultiChannel{isMultiChannel}
         , singleModeChannel{}
+        , onLockedUserInput{std::move(onLockedUserInput)}
     {}
 };
 
@@ -449,11 +510,15 @@ struct FrontendSshManager::Implementation
         return; \
     }
 
-FrontendSshManager::FrontendSshManager(std::unique_ptr<TerminalEngine> engine, bool isMultiChannel)
-    : impl_{std::make_unique<Implementation>(std::move(engine), isMultiChannel)}
+FrontendSessionManager::FrontendSessionManager(
+    std::unique_ptr<TerminalEngine> engine,
+    bool isMultiChannel,
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+)
+    : impl_{std::make_unique<Implementation>(std::move(engine), isMultiChannel, std::move(onLockedUserInput))}
 {}
 
-void FrontendSshManager::iterateAllChannels(
+void FrontendSessionManager::iterateAllChannels(
     std::function<bool(Ids::ChannelId const& channelId, TerminalChannel& channel)> const& handler
 )
 {
@@ -466,7 +531,40 @@ void FrontendSshManager::iterateAllChannels(
     }
 }
 
-void FrontendSshManager::createChannel(
+void FrontendSessionManager::connectionLossMode(bool isLocked)
+{
+    CHECK_DISPOSAL()
+
+    impl_->isInLockedMode = isLocked;
+
+    iterateAllChannels(
+        [isLocked](Ids::ChannelId const&, TerminalChannel& channel) -> bool
+        {
+            channel.connectionLossMode(isLocked);
+            return true;
+        }
+    );
+}
+
+void FrontendSessionManager::writeBroadcast(std::string const& msg)
+{
+    CHECK_DISPOSAL()
+
+    iterateAllChannels(
+        [&msg](Ids::ChannelId const&, TerminalChannel& channel) -> bool
+        {
+            channel.write(msg, false);
+            return true;
+        }
+    );
+
+    if (impl_->singleModeChannel)
+    {
+        impl_->singleModeChannel->doWrite(msg, false);
+    }
+}
+
+void FrontendSessionManager::createChannel(
     Nui::val host,
     Persistence::TerminalOptions const& options,
     std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated
@@ -475,6 +573,13 @@ void FrontendSshManager::createChannel(
     CHECK_DISPOSAL()
 
     using namespace std::string_literals;
+
+    if (impl_->isInLockedMode)
+    {
+        Log::warn("Cannot create channel, frontend ssh manager is in locked mode");
+        onChannelCreated(std::nullopt, "Cannot create channel, connection is lost");
+        return;
+    }
 
     Log::info("Creating channel");
 
@@ -529,7 +634,8 @@ void FrontendSshManager::createChannel(
                 }
 
                 [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
-                    **channelId, std::make_unique<TerminalChannel>(multiChannelEngine, **channelId)
+                    **channelId,
+                    std::make_unique<TerminalChannel>(multiChannelEngine, **channelId, impl_->onLockedUserInput)
                 );
                 if (channelIter == impl_->channels.end())
                 {
@@ -558,8 +664,6 @@ void FrontendSshManager::createChannel(
     }
     else
     {
-        onChannelCreated(std::nullopt, "Single channel mode not implemented");
-
         auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
 
         singleChannelEngine->open(
@@ -577,7 +681,8 @@ void FrontendSshManager::createChannel(
                 const auto channelId = Ids::makeChannelId(infoOrUuid);
                 auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
 
-                impl_->singleModeChannel = std::make_unique<SingleTerminalChannel>(singleChannelEngine, channelId);
+                impl_->singleModeChannel =
+                    std::make_unique<SingleTerminalChannel>(singleChannelEngine, channelId, impl_->onLockedUserInput);
 
                 singleChannelEngine->setStderrHandler(
                     [this](std::string const& data)
@@ -624,7 +729,7 @@ void FrontendSshManager::createChannel(
                     Nui::bind(
                         [this](Nui::val obj, Nui::val)
                         {
-                            // Log::debug("FrontendSshManager resized {}:{}. ", obj["cols"].as<int>(),
+                            // Log::debug("FrontendSessionManager resized {}:{}. ", obj["cols"].as<int>(),
                             // obj["rows"].as<int>());
                             impl_->singleModeChannel->engine->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
                         },
@@ -640,7 +745,7 @@ void FrontendSshManager::createChannel(
         );
     }
 }
-TerminalChannel* FrontendSshManager::channel(Ids::ChannelId const& channelId)
+TerminalChannel* FrontendSessionManager::channel(Ids::ChannelId const& channelId)
 {
     if (isBeingDisposed())
     {
@@ -655,7 +760,7 @@ TerminalChannel* FrontendSshManager::channel(Ids::ChannelId const& channelId)
     }
     return nullptr;
 }
-void FrontendSshManager::closeChannel(Ids::ChannelId const& channelId)
+void FrontendSessionManager::closeChannel(Ids::ChannelId const& channelId)
 {
     CHECK_DISPOSAL()
 
@@ -665,7 +770,7 @@ void FrontendSshManager::closeChannel(Ids::ChannelId const& channelId)
         impl_->channels.erase(channel);
     }
 }
-void FrontendSshManager::closeAllChannels()
+void FrontendSessionManager::closeAllChannels()
 {
     CHECK_DISPOSAL()
 
@@ -673,11 +778,11 @@ void FrontendSshManager::closeAllChannels()
     impl_->channels.clear();
 }
 
-TerminalEngine& FrontendSshManager::engine()
+TerminalEngine& FrontendSessionManager::engine()
 {
     return *impl_->engine;
 }
-void FrontendSshManager::focus()
+void FrontendSessionManager::focus()
 {
     CHECK_DISPOSAL()
 
@@ -697,12 +802,12 @@ void FrontendSshManager::focus()
     }
 }
 
-bool FrontendSshManager::isBeingDisposed() const
+bool FrontendSessionManager::isBeingDisposed() const
 {
     return impl_->beingDisposed;
 }
 
-void FrontendSshManager::open(std::function<void(bool, std::string const&)> onOpen)
+void FrontendSessionManager::open(std::function<void(bool, std::string const&)> onOpen)
 {
     CHECK_DISPOSAL()
 
@@ -726,48 +831,49 @@ void FrontendSshManager::open(std::function<void(bool, std::string const&)> onOp
         }
     );
 }
-void FrontendSshManager::dispose(std::function<void()> onComplete, bool recursion)
+void FrontendSessionManager::dispose(std::function<void()> onComplete, bool recursion)
 {
     if (impl_->disposeComplete)
+    {
+        onComplete();
         return;
+    }
 
     if (!recursion && isBeingDisposed())
     {
         Log::warn("Frontend ssh manager, dispose already in progress");
+        onComplete();
         return;
     }
 
     impl_->beingDisposed = true;
-    if (impl_->channels.empty())
+
+    /** Dont close backend channels, those will be cleaned up anyway by the entire session getting destroyed */
+    for (auto& [id, channel] : impl_->channels)
     {
-        Log::info("No more channels to dispose, disposing engine.");
-        impl_->engine->dispose(
-            [this, onComplete = std::move(onComplete)]()
-            {
-                Log::info("Frontend ssh manager disposed.");
-                impl_->disposeComplete = true;
-                onComplete();
-            }
-        );
-    }
-    else
-    {
-        auto iter = impl_->channels.begin();
-        auto id = iter->first;
         Log::info("Disposing channel as apart of frontend ssh manager dispose: '{}'", id.value());
-        iter->second->dispose(
-            [this, onComplete = std::move(onComplete), id]() mutable
+        channel->dispose(
+            []()
             {
-                Log::info("Disposed channel channel as apart of frontend ssh manager dispose: '{}'", id.value());
-                impl_->channels.erase(id);
-                dispose(std::move(onComplete), true);
-            }
+                Log::info("Disposed channel as apart of frontend ssh manager dispose");
+            },
+            false
         );
     }
+
+    Log::info("No more channels to dispose, disposing engine.");
+    impl_->engine->dispose(
+        [this, onComplete = std::move(onComplete)]()
+        {
+            Log::info("Frontend ssh manager disposed.");
+            impl_->disposeComplete = true;
+            onComplete();
+        }
+    );
 }
-FrontendSshManager::~FrontendSshManager()
+FrontendSessionManager::~FrontendSessionManager()
 {
     dispose([]() {});
 }
 
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(FrontendSshManager);
+ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(FrontendSessionManager);
