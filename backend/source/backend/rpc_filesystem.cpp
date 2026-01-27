@@ -180,38 +180,47 @@ void RpcFilesystem::registerListFiles()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                const auto directoryPath = parameters["path"].get<std::string>();
+                auto directoryPath = std::filesystem::path{parameters["path"].get<std::string>()};
                 const auto fileNameOnly = parameters.value("fileNameOnly", false);
                 nlohmann::json fileList = nlohmann::json::array();
 
+#ifdef _WIN32
+                if (directoryPath == directoryPath.root_path())
+                    directoryPath = std::filesystem::path(directoryPath.string() + "/");
+#endif
+                Log::info("Listing files in directory: {}", directoryPath.generic_string());
+
                 std::error_code ec;
-                for (const auto& entry : std::filesystem::directory_iterator(directoryPath, ec))
+                auto iter = std::filesystem::directory_iterator(directoryPath, ec);
+                if (ec)
                 {
-                    if (ec)
-                    {
-                        Log::error("Failed to list files in directory '{}': {}", directoryPath, ec.message());
-                        return reply.error(ec.message());
-                    }
-
-                    const auto path = [&]() -> std::string
-                    {
-                        if (fileNameOnly)
-                        {
-                            const auto u8String = entry.path().filename().generic_u8string();
-                            return {u8String.begin(), u8String.end()};
-                        }
-                        const auto u8String = entry.path().generic_u8string();
-                        return {u8String.begin(), u8String.end()};
-                    }();
-
+                    Log::error(
+                        "Failed to list files in directory '{}': {}", directoryPath.generic_string(), ec.message()
+                    );
+                    return reply.error(ec.message());
+                }
+                for (const auto& entry : iter)
+                {
                     fileList.push_back({
-                        {"path", path},
+                        {
+                            "path",
+                            [&entry, fileNameOnly]() -> std::string
+                            {
+                                if (fileNameOnly)
+                                {
+                                    const auto u8String = entry.path().filename().generic_u8string();
+                                    return {u8String.begin(), u8String.end()};
+                                }
+                                const auto u8String = entry.path().generic_u8string();
+                                return {u8String.begin(), u8String.end()};
+                            }(),
+                        },
                         {"type", static_cast<int>(entry.status().type())},
                         {"size", entry.is_regular_file() ? entry.file_size() : 0},
                     });
                 }
 
-                Log::info("Successfully listed files in directory '{}'", directoryPath);
+                Log::info("Successfully listed files in directory '{}'", directoryPath.generic_string());
                 return reply({{"success", true}, {"files", fileList}});
             }
         );

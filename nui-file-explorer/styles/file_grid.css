@@ -71,6 +71,7 @@
     display: flex;
     flex-direction: column;
     overflow-x: auto;
+    position: relative;
 }
 
 .nui-file-grid-side-content {
@@ -539,4 +540,35 @@
     left: calc(50% - 6px);
     width: 12px;
     cursor: col-resize;
+}
+
+.nui-file-explorer-suggestions-overlay {
+    position: absolute;
+    border-top: 1px solid var(--nui-file-grid-border-color);
+    border-right: 1px solid var(--nui-file-grid-border-color);
+    opacity: 95%;
+    background-color: var(--nui-file-grid-table-cell-background, #303030);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    padding: .7rem;
+    width: calc(100% - 17px);
+    overflow-y: auto;
+    max-height: 200px;
+
+    &.top {
+        top: 43px;
+    }
+
+    &.bottom {
+        bottom: 43px;
+    }
+}
+
+.nui-file-explorer-suggestions-item {
+
+    &:hover,
+    &:focus {
+        background-color: #6a5af8;
+    }
 }
