@@ -747,6 +747,13 @@ Nui::ElementRenderer Settings::header()
                 "icon"_prop = "decline",
                 "click"_event = [this]() {
                     impl_->events->settingsOpen = false;
+                    // Warning that most settings currently require a restart:
+                    impl_->confirmDialog->open({
+                        .state = ConfirmDialog::State::Critical,
+                        .headerText = language->get("settings", "settingsClosedHeader"),
+                        .text = language->get("settings", "settingsClosedText"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
                 },
             }()
         );
