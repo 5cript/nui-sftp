@@ -14,6 +14,8 @@ en_US:
     connectionLostTerminalMessage: "\n\e[31mConnection lost\e[0m\n\t- Press \e[35m<return>\e[0m to exit\n\t- Press \e[35mS\e[0m to save terminal output to file"
     connectionLost: "Connection Lost"
   settings:
+    settingsClosedHeader: "Most Settings Require Restart"
+    settingsClosedText: "At current implementation status, most settings changes require a restart to take effect.\nPlease restart the application to apply the changes.\nThis will be improved in the future."
     loadingSettings: "Loading Settings UI"
     deleteSessionButton: "Delete Session"
     deleteSessionConfirmHeader: "Are you sure you want to delete this session?"
@@ -416,9 +418,11 @@ de_DE:
     fileExplorer: "Datei Explorer"
     operationQueue: "Operationswarteschlange"
     sessionOptions: "Sitzungsoptionen"
-    connectionLostTerminalMessage: "\e[31mVerbindung verloren\e[0m\n\t- Drücken Sie \e[35m<return>\e[0m um die Sitzung zu beenden\n\t- Drücken Sie \e[35mR\e[0m um die Sitzung neu zu starten\n\t- Drücken Sie \e[35mS\e[0m um die Terminalausgabe in eine Datei zu speichern"
+    connectionLostTerminalMessage: "\e[31mVerbindung verloren\e[0m\n\t- Drücken Sie \e[35m<return>\e[0m um die Sitzung zu beenden\n\t- Drücken Sie \e[35mS\e[0m um die Terminalausgabe in eine Datei zu speichern"
     connectionLost: "Verbindung verloren"
   settings:
+    settingsClosedHeader: "Die meisten Einstellungen erfordern einen Neustart"
+    settingsClosedText: "Im aktuellen Implementierungsstatus erfordern die meisten Einstellungsänderungen einen Neustart, um wirksam zu werden.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden.\nDies wird in Zukunft verbessert."
     loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
     deleteSessionButton: "Sitzung löschen"
     deleteSessionConfirmHeader: "Sind Sie sicher, dass Sie diese Sitzung löschen möchten?"
