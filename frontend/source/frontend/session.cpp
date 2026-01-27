@@ -186,7 +186,7 @@ auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
                     }
                 )
             },
-            class_ = "session-filegrid-connection-lost-overlay",
+            class_ = "session-connection-lost-overlay",
         }(
             span{}(language->getObserved("sessionFrontend", "connectionLost"))
         ),
@@ -746,7 +746,29 @@ void Session::visible(bool value)
 
 auto Session::makeOperationQueueElement() -> Nui::ElementRenderer
 {
-    return impl_->operationQueue();
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // clang-format off
+    return div{
+        style = "width: 100%; height: auto; display: block",
+    }(
+        div{
+            style = Style {
+                "display"_style = observe(impl_->isInLostConnectionState).generate(
+                    [this]() {
+                        return impl_->isInLostConnectionState.value() ? "flex" : "none";
+                    }
+                )
+            },
+            class_ = "session-connection-lost-overlay",
+        }(
+            span{}(language->getObserved("sessionFrontend", "connectionLost"))
+        ),
+        impl_->operationQueue()
+    );
+    // clang-format on
 }
 
 void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
