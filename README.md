@@ -13,8 +13,8 @@ Still under construction :construction:
 - [ ] Accessible logs.
 - [x] Multi session support.
 - [ ] Unify style of operation queue and rest of the ui.
-- [ ] Fix session being in hanging state when connect fails.
-- [ ] Implement proper handling of connection loss.
+- [x] Fix session being in hanging state when connect fails.
+- [x] Implement proper handling of connection loss.
 - [ ] Bright mode.
 
 ## Settings UI
@@ -37,7 +37,7 @@ Still under construction :construction:
 
 ## Shell
 - [x] SSH shell.
-- [x] Terminal UIs work.
+- [x] Terminal UIs works.
 - [x] Terminal resizing.
 
 ## SFTP
