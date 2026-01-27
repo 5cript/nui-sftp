@@ -71,7 +71,8 @@
     display: flex;
     flex-direction: column;
     overflow-x: auto;
-    position: relative;
+    /*putting this on breaks the context menus*/
+    /*position: relative;*/
 }
 
 .nui-file-grid-side-content {
@@ -552,7 +553,6 @@
     display: flex;
     flex-direction: column;
     padding: .7rem;
-    width: calc(100% - 17px);
     overflow-y: auto;
     max-height: 200px;
 
