@@ -113,6 +113,21 @@ namespace NuiFileExplorer
         virtual void onError(std::string const& error) = 0;
 
         /**
+         * @brief Create a list of suggestions for the path box based on the given path.
+         * This should be fast and expected to be called on every key press. The output should be limited to the given
+         * number of entries only.
+         *
+         * @param path The path to generate suggestions for
+         * @param maxSuggestions The maximum number of suggestions to return (0 = no limit)
+         * @param onResultsAvailable Callback to call when results are available
+         */
+        virtual void generatePathBoxSuggestions(
+            std::filesystem::path const& path,
+            int maxSuggestions,
+            std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+        ) = 0;
+
+        /**
          * @brief Goes back to the previous path, if any.
          */
         virtual void goBack() = 0;

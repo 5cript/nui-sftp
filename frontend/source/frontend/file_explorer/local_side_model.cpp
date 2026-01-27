@@ -5,6 +5,58 @@
 
 LocalSideModel::LocalSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog)
     : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
+    , pathSuggestionCache_{
+          [this](
+              std::filesystem::path const& dirPath,
+              std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+          )
+          {
+              CHECK_COMPLETE();
+
+              Nui::val args = Nui::val::object();
+              args.set("path", dirPath.generic_string());
+              args.set("fileNameOnly", false);
+
+              Nui::RpcClient::callWithBackChannel(
+                  "RpcFilesystem::listFiles",
+                  [onResultsAvailable = std::move(onResultsAvailable)](Nui::val val)
+                  {
+                      if (!val.hasOwnProperty("success"))
+                      {
+                          Log::error("Invalid response from RpcFilesystem::listFiles");
+                          Nui::WebApi::Console::error(val);
+                          onResultsAvailable({});
+                          return;
+                      }
+
+                      const auto success = val["success"].as<bool>();
+                      if (!success)
+                      {
+                          const auto error = val["error"].as<std::string>();
+                          Log::error("Failed to list files: {}", error);
+                          onResultsAvailable({});
+                          return;
+                      }
+
+                      std::vector<std::filesystem::path> listing{};
+                      const auto files = val["files"];
+                      for (const auto& file : files)
+                      {
+                          // Dirs only
+                          if (static_cast<std::filesystem::file_type>(file["type"].as<int>()) ==
+                              std::filesystem::file_type::directory)
+                          {
+                              listing.emplace_back(file["path"].as<std::string>());
+                          }
+                      }
+
+                      onResultsAvailable(listing);
+                  },
+                  args
+              );
+          },
+          0.,
+      }
 {}
 
 void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
@@ -632,4 +684,21 @@ void LocalSideModel::setRemoteModel(SideModel* model)
 bool LocalSideModel::isComplete() const
 {
     return remoteModel_ != nullptr && SideModel::isComplete();
+}
+
+void LocalSideModel::generatePathBoxSuggestions(
+    std::filesystem::path const& path,
+    int maxSuggestions,
+    std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+)
+{
+    CHECK_COMPLETE();
+    pathSuggestionCache_.generateSuggestions(
+        path,
+        maxSuggestions,
+        [onResultsAvailable](std::vector<std::filesystem::path> const& suggestions)
+        {
+            onResultsAvailable(suggestions);
+        }
+    );
 }

@@ -117,10 +117,12 @@ namespace NuiFileExplorer
         Nui::ElementRenderer pathBar();
         Nui::ElementRenderer filter();
         Nui::ElementRenderer contextMenu();
+        Nui::ElementRenderer pathBarSuggestions();
         void onContextMenu(ItemWithInternals* item, Nui::val event);
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
         void search(std::string query);
+        void onPathBoxSuggestionHit(std::filesystem::path const& path);
 
         /**
          * @brief calculates the top left corner disregarding the menu dimension itself and whether opening it would

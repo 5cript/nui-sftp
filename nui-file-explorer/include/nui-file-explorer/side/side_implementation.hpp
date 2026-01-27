@@ -50,6 +50,10 @@ namespace NuiFileExplorer
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};
         std::weak_ptr<Nui::Dom::BasicElement> searchTextBox{};
 
+        Nui::Observed<std::vector<std::filesystem::path>> pathBoxSuggestions{};
+        std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
+        std::weak_ptr<Nui::Dom::BasicElement> pathBoxElement{};
+
         DropdownMenu newItemMenu{
             {
                 "File",

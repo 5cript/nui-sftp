@@ -12,7 +12,7 @@
 
 // This should be an assertion, but assert failures are hard to debug in the frontend,
 // log messages and noop is much easier to deal with.
-#define CHECK_COMPLETE() \
+#define CHECK_COMPLETE_RET(RETX) \
     do \
     { \
         if (!isComplete()) \
@@ -24,9 +24,13 @@
                 loc.line(), \
                 loc.function_name() \
             ); \
-            return; \
+            return RETX; \
         } \
     } while (false)
+
+// This should be an assertion, but assert failures are hard to debug in the frontend,
+// log messages and noop is much easier to deal with.
+#define CHECK_COMPLETE() CHECK_COMPLETE_RET()
 
 // Incomplete class, provides base functionality
 class SideModel : public NuiFileExplorer::ISideModel

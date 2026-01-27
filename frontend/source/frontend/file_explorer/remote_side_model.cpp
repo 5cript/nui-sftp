@@ -2,12 +2,49 @@
 
 #include <log/log.hpp>
 
+#include <algorithm>
+#include <iterator>
+
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
     ConfirmDialog* confirmDialog,
     InputDialog* inputDialog
 )
     : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
+    , pathSuggestionCache_{
+          [this](
+              std::filesystem::path const& dirPath,
+              std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+          )
+          {
+              CHECK_COMPLETE();
+
+              fileEngine_->listDirectory(
+                  dirPath,
+                  [onResultsAvailable =
+                          std::move(onResultsAvailable)](std::optional<std::vector<SharedData::DirectoryEntry>> entries)
+                  {
+                      if (!entries)
+                      {
+                          Log::error("Failed to list files from remote side.");
+                          onResultsAvailable({});
+                          return;
+                      }
+
+                      std::vector<std::filesystem::path> listing{};
+                      listing.reserve(entries->size());
+                      for (auto&& entry : std::move(*entries))
+                      {
+                          if (entry.isDirectory())
+                              listing.emplace_back(std::move(entry).path);
+                      }
+
+                      onResultsAvailable(listing);
+                  }
+              );
+          },
+          0.,
+      }
 {}
 
 void RemoteSideModel::setLocalModel(SideModel* model)
@@ -491,5 +528,24 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
         currentPath_.value(), std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1)
+    );
+}
+
+void RemoteSideModel::generatePathBoxSuggestions(
+    std::filesystem::path const& path,
+    int maxSuggestions,
+    std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+)
+{
+    CHECK_COMPLETE();
+    pathSuggestionCache_.generateSuggestions(
+        path,
+        maxSuggestions,
+        [onResultsAvailable, path](std::vector<std::filesystem::path> suggestions)
+        {
+            for (auto& suggestion : suggestions)
+                suggestion = path.parent_path() / suggestion;
+            onResultsAvailable(suggestions);
+        }
     );
 }

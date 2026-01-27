@@ -7,6 +7,7 @@
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/path_suggestion_cache.hpp>
 
 class RemoteSideModel : public SideModel
 {
@@ -29,6 +30,12 @@ class RemoteSideModel : public SideModel
     void setLocalModel(SideModel* model);
     bool isComplete() const override;
 
+    void generatePathBoxSuggestions(
+        std::filesystem::path const& path,
+        int maxSuggestions,
+        std::function<void(std::vector<std::filesystem::path> const&)> onResultsAvailable
+    ) override;
+
   private:
     void enqueueRefresh(bool otherModel);
 
@@ -48,4 +55,5 @@ class RemoteSideModel : public SideModel
 
   private:
     SideModel* localModel_{nullptr};
+    NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
 };
