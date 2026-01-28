@@ -8,14 +8,13 @@ Still under construction :construction:
 ## General UI
 - [x] Layouting.
 - [x] Load Layout (on session start only, not afterwards).
-- [ ] Custom themes?
-- [ ] Custom top bar with moveability and minimize, maximize, close buttons.
-- [ ] Accessible logs.
-- [x] Multi session support.
-- [ ] Unify style of operation queue and rest of the ui.
 - [x] Fix session being in hanging state when connect fails.
 - [x] Implement proper handling of connection loss.
-- [ ] Bright mode.
+- [x] Multi session support.
+- [ ] Custom top bar with moveability and minimize, maximize, close buttons.
+- [ ] More/Custom themes.
+- [ ] Accessible logs.
+- [ ] Unify style of operation queue and rest of the ui.
 
 ## Settings UI
 - [x] Add UI for settings.
@@ -23,7 +22,6 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [x] Better number boxes.
 - [x] Number box value constraining.
-- [ ] Terminal options: When whole thmee group is off, all setting should show as inherit, even if single ones are checked.
 
 ## SSH
 - [x] Keyboard interactive password auth.
@@ -63,7 +61,6 @@ Still under construction :construction:
 - [ ] Show file properties.
 - [ ] Optimize download speed.
 - [ ] Optimize upload speed.
-- [ ] Better error reporting, not just logs.
 
 ## File View UI
 - [x] Grid view.
