@@ -104,7 +104,13 @@ class NumberSetting : public Setting<Disengageable, ValueType>
             switch (*args_.numberBase)
             {
                 case NumberBase::Decimal:
-                    return static_cast<ValueType>(event["target"]["value"].as<ValueType>());
+                {
+                    const auto valueString = event["target"]["value"].as<std::string>();
+                    ValueType result;
+                    std::stringstream ss(valueString);
+                    ss >> result;
+                    return result;
+                }
                 case NumberBase::Hexadecimal:
                 {
                     const auto valueStr = event["target"]["value"].as<std::string>();
