@@ -43,6 +43,11 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             ),
             onChange,
             nulloptReset(downloadOptions.customPermissions, onChange),
+            {
+                .minValue = 0,
+                .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
+                .numberBase = decltype(SftpOptions::DownloadOptions::customPermissions)::NumberBase::Octal,
+            }
         },
         .reserveSpace{
             language->getObserved(
@@ -95,6 +100,11 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             ),
             onChange,
             nulloptReset(uploadOptions.customPermissions, onChange),
+            {
+                .minValue = 0,
+                .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
+                .numberBase = decltype(SftpOptions::UploadOptions::customPermissions)::NumberBase::Octal,
+            }
         }
     }
     , defaultDirectory{
@@ -107,6 +117,10 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
         language->getObserved("settings", "sftpOptions", "concurrencyHelpText"),
         onChange,
         nulloptReset(concurrency, onChange),
+        {
+            .minValue = 1,
+            .maxValue = 20,
+        }
     }
     , operationTimeoutSeconds{
         language->getObserved("settings", "sftpOptions", "operationTimeoutSecondsHelpText"),
@@ -114,6 +128,10 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
         [this, onChange](){
             operationTimeoutSeconds.value(5);
             onChange();
+        },
+        {
+            .minValue = 1,
+            .maxValue = 600,
         }
     },
     onChange_{onChange}

@@ -1,6 +1,7 @@
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/optional_converters.hpp>
+#include <utility/enum_string_convert.hpp>
 
 #include <nui/frontend/elements.hpp>
 
@@ -33,9 +34,20 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
         nulloptReset(usePasswordAuth, onChange),
     }
     , logVerbosity{
+        std::vector<Persistence::SshLogVerbosity>{
+            Persistence::SshLogVerbosity::Off,
+            Persistence::SshLogVerbosity::Warning,
+            Persistence::SshLogVerbosity::Protocol,
+            Persistence::SshLogVerbosity::Packet,
+            Persistence::SshLogVerbosity::Functions
+        },
         language->getObserved("settings", "sshOptions", "logVerbosityHelpText"),
         onChange,
         nulloptReset(logVerbosity, onChange),
+        [](Persistence::SshLogVerbosity const& v)
+        {
+            return Utility::enumToString(v);
+        }
     }
     , keyExchangeAlgorithms{
         language->getObserved("settings", "sshOptions", "keyExchangeAlgorithmsHelpText"),
@@ -56,6 +68,11 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
         language->getObserved("settings", "sshOptions", "compressionLevelHelpText"),
         onChange,
         nulloptReset(compressionLevel, onChange),
+        {
+            .minValue = 0,
+            .maxValue = 9,
+            .asRangeType = true
+        }
     }
     , strictHostKeyCheck{
         language->getObserved("settings", "sshOptions", "strictHostKeyCheckHelpText"),
@@ -66,6 +83,11 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
         language->getObserved("settings", "sshOptions", "proxyCommandHelpText"),
         onChange,
         nulloptReset(proxyCommand, onChange),
+    }
+    , proxyJump{
+        language->getObserved("settings", "sshOptions", "proxyJumpHelpText"),
+        onChange,
+        nulloptReset(proxyJump, onChange),
     }
     , gssapiServerIdentity{
         language->getObserved("settings", "sshOptions", "gssapiServerIdentityHelpText"),
@@ -102,11 +124,19 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
         language->getObserved("settings", "sshOptions", "connectTimeoutSecondsHelpText"),
         onChange,
         nulloptReset(connectTimeoutSeconds, onChange),
+        {
+            .minValue = 0,
+            .maxValue = 600,
+        }
     }
     , connectTimeoutUSeconds{
         language->getObserved("settings", "sshOptions", "connectTimeoutUSecondsHelpText"),
         onChange,
-        nulloptReset(connectTimeoutUSeconds, onChange)
+        nulloptReset(connectTimeoutUSeconds, onChange),
+        {
+            .minValue = 0,
+            .maxValue = 1'000'000,
+        }
     },
     environment{
         language->getObserved("settings", "sshOptions", "environmentHelpText"),
@@ -135,6 +165,7 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
     state.compressionLevel = compressionLevel.value();
     state.strictHostKeyCheck = strictHostKeyCheck.value();
     state.proxyCommand = proxyCommand.value();
+    state.proxyJump = proxyJump.value();
     state.gssapiServerIdentity = gssapiServerIdentity.value();
     state.gssapiClientIdentity = gssapiClientIdentity.value();
     state.gssapiDelegateCredentials = gssapiDelegateCredentials.value();
@@ -161,6 +192,7 @@ void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
     compressionLevel.value(state.compressionLevel);
     strictHostKeyCheck.value(state.strictHostKeyCheck);
     proxyCommand.value(state.proxyCommand);
+    proxyJump.value(state.proxyJump);
     gssapiServerIdentity.value(state.gssapiServerIdentity);
     gssapiClientIdentity.value(state.gssapiClientIdentity);
     gssapiDelegateCredentials.value(state.gssapiDelegateCredentials);
@@ -187,6 +219,7 @@ void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
     compressionLevel.inherit(state.compressionLevel);
     strictHostKeyCheck.inherit(state.strictHostKeyCheck);
     proxyCommand.inherit(state.proxyCommand);
+    proxyJump.inherit(state.proxyJump);
     gssapiServerIdentity.inherit(state.gssapiServerIdentity);
     gssapiClientIdentity.inherit(state.gssapiClientIdentity);
     gssapiDelegateCredentials.inherit(state.gssapiDelegateCredentials);
@@ -216,6 +249,7 @@ Nui::ElementRenderer SshOptions::render()
         compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
         strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
         proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
+        proxyJump(language->getObserved("settings", "sshOptions", "proxyJump")),
         gssapiServerIdentity(language->getObserved("settings", "sshOptions", "gssapiServerIdentity")),
         gssapiClientIdentity(language->getObserved("settings", "sshOptions", "gssapiClientIdentity")),
         gssapiDelegateCredentials(language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")),

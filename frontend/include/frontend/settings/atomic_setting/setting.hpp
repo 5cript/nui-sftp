@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/classes.hpp>
 #include <utility/language.hpp>
 #include <ids/id.hpp>
 

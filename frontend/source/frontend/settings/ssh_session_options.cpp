@@ -13,7 +13,11 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange)
     , port{
           language->getObserved("settings", "sessionSettings", "port"),
           onChange,
-          nulloptReset(port, onChange)
+          nulloptReset(port, onChange),
+          {
+            .minValue = 1,
+            .maxValue = 65535,
+          }
       }
     , user{
           language->getObserved("settings", "sessionSettings", "user"),

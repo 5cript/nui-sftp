@@ -7,6 +7,18 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
+namespace
+{
+    template <typename NumberSetting>
+    auto makeCharacterValueConstraints()
+    {
+        return typename NumberSetting::ConstructionArgs{
+            .minValue = 0,
+            .maxValue = 255,
+        };
+    }
+}
+
 TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
     : inputFlags{
             .IGNBRK{
@@ -281,6 +293,9 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             {
                 controlFlags.CBAUD.value(Persistence::Termios::ControlFlags::saneDefaults().CBAUD_);
                 onChange();
+            },
+            {
+                .minValue = 0,
             }
         },
         .CBAUDEX{
@@ -540,6 +555,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VDISCARD.value(Persistence::Termios::CC{}.VDISCARD_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VDISCARD)>(),
             &ccEngaged
         },
         .VDSUSP{
@@ -550,6 +566,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VDSUSP.value(Persistence::Termios::CC{}.VDSUSP_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VDSUSP)>(),
             &ccEngaged
         },
         .VEOF{
@@ -560,6 +577,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VEOF.value(Persistence::Termios::CC{}.VEOF_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VEOF)>(),
             &ccEngaged
         },
         .VEOL{
@@ -570,6 +588,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VEOL.value(Persistence::Termios::CC{}.VEOL_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VEOL)>(),
             &ccEngaged
         },
         .VEOL2{
@@ -580,6 +599,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VEOL2.value(Persistence::Termios::CC{}.VEOL2_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VEOL2)>(),
             &ccEngaged
         },
         .VERASE{
@@ -590,6 +610,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VERASE.value(Persistence::Termios::CC{}.VERASE_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VERASE)>(),
             &ccEngaged
         },
         .VINTR{
@@ -600,6 +621,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VINTR.value(Persistence::Termios::CC{}.VINTR_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VINTR)>(),
             &ccEngaged
         },
         .VKILL{
@@ -610,6 +632,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VKILL.value(Persistence::Termios::CC{}.VKILL_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VKILL)>(),
             &ccEngaged
         },
         .VLNEXT{
@@ -620,6 +643,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VLNEXT.value(Persistence::Termios::CC{}.VLNEXT_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VLNEXT)>(),
             &ccEngaged
         },
         .VMIN{
@@ -630,6 +654,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VMIN.value(Persistence::Termios::CC{}.VMIN_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VMIN)>(),
             &ccEngaged
         },
         .VQUIT{
@@ -640,6 +665,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VQUIT.value(Persistence::Termios::CC{}.VQUIT_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VQUIT)>(),
             &ccEngaged
         },
         .VREPRINT{
@@ -650,6 +676,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VREPRINT.value(Persistence::Termios::CC{}.VREPRINT_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VREPRINT)>(),
             &ccEngaged
         },
         .VSTART{
@@ -660,6 +687,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VSTART.value(Persistence::Termios::CC{}.VSTART_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VSTART)>(),
             &ccEngaged
         },
         .VSTATUS{
@@ -670,6 +698,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VSTATUS.value(Persistence::Termios::CC{}.VSTATUS_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VSTATUS)>(),
             &ccEngaged
         },
         .VSTOP{
@@ -680,6 +709,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VSTOP.value(Persistence::Termios::CC{}.VSTOP_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VSTOP)>(),
             &ccEngaged
         },
         .VSUSP{
@@ -690,6 +720,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VSUSP.value(Persistence::Termios::CC{}.VSUSP_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VSUSP)>(),
             &ccEngaged
         },
         .VSWTCH{
@@ -700,6 +731,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VSWTCH.value(Persistence::Termios::CC{}.VSWTCH_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VSWTCH)>(),
             &ccEngaged
         },
         .VTIME{
@@ -710,6 +742,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VTIME.value(Persistence::Termios::CC{}.VTIME_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VTIME)>(),
             &ccEngaged
         },
         .VWERASE{
@@ -720,6 +753,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 cc.VWERASE.value(Persistence::Termios::CC{}.VWERASE_);
                 onChange();
             },
+            makeCharacterValueConstraints<decltype(cc.VWERASE)>(),
             &ccEngaged
         },
     },
@@ -727,11 +761,17 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         language->getObserved("settings", "termios", "iSpeedHelpText"),
         onChange,
         nulloptReset(iSpeed, onChange),
+        {
+            .minValue = 0,
+        }
     },
     oSpeed{
         language->getObserved("settings", "termios", "oSpeedHelpText"),
         onChange,
         nulloptReset(oSpeed, onChange),
+        {
+            .minValue = 0,
+        }
     },
     onChange_{onChange}
 {}
