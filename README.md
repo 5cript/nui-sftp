@@ -32,9 +32,11 @@ Still under construction :construction:
 - [x] Automatic key auth via SSH directory.
 - [x] Password auth.
 - [x] SSH agent support linux.
-- [ ] SSH agent support windows?
-- [ ] GSSAPI auth?
-- [ ] KeypassXc database integration?
+
+### No intention to support for now:
+- Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
+- GSSAPI auth: Will make work when a need arises
+- KeypassXc database integration: lots of work for tiny use cases. Its a cool idea for later.
 
 ## Shell
 - [x] SSH shell.

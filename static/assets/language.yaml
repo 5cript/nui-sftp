@@ -140,7 +140,7 @@ en_US:
       gssapiDelegateCredentialsHelpText: "When enabled, GSSAPI credentials are delegated to the server."
       noDelayHelpText: "When enabled, the Nagle algorithm is disabled for SSH connections."
       bypassConfigHelpText: "When enabled, the default SSH configuration file (~/.ssh/config) is ignored."
-      identityAgentHelpText: "The path to the SSH identity agent socket."
+      identityAgentHelpText: "The path to the SSH identity agent socket. On Windows this should be '\\\\.\\pipe\\openssh-ssh-agent'. To use windows ssh agent run these commands in an admin powershell once: 'Get-Service ssh-agent | Set-Service -StartupType Automatic' and 'Start-Service ssh-agent'."
       connectTimeoutSecondsHelpText: "The connection timeout duration in seconds."
       connectTimeoutUSecondsHelpText: "The connection timeout duration in microseconds."
       environmentHelpText: "Environment variables to set for the SSH session."
