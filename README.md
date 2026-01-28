@@ -23,8 +23,6 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [ ] Better number boxes.
 - [ ] Number box value constraining.
-- [ ] list & map settings proper inheritance display.
-- [ ] Fix list & map settings language keys.
 - [ ] Terminal options: When whole thmee group is off, all setting should show as inherit, even if single ones are checked.
 
 ## SSH

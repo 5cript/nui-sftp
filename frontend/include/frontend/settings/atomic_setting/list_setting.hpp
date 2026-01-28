@@ -10,10 +10,12 @@
 #include <ui5/components/table.hpp>
 #include <ui5/components/dialog.hpp>
 #include <ui5/components/input.hpp>
+#include <ui5/components/button.hpp>
 #include <ui5/components/toolbar.hpp>
 #include <ui5/components/toolbar_button.hpp>
 
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/span.hpp>
 #include <nui/frontend/elements/section.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
@@ -27,10 +29,12 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
     using ListType = std::vector<std::string>;
 
     using SettingBase::state_;
+    using SettingBase::inheritedState_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
     using SettingBase::isEngaged;
+    using SettingBase::engaged_;
     using SettingBase::observeEngagedToBool;
 
     ListSetting(LanguageObservedText helpText, std::invocable auto&& onChange, std::invocable auto&& resetAction)
@@ -47,13 +51,14 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        using Nui::Elements::span;
         using Nui::Elements::section;
 
         // clang-format off
         return div{}(
             ui5::dialog{
                 reference = dialog_,
-                "header-text"_attr = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsAddItemText"),
+                "header-text"_attr = language->getObserved("settings", "listSettings", "addItemText"),
             }(
                 section{
                     class_ = "list-setting-add-entry-container",
@@ -62,11 +67,11 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
                         ui5::label{
                             "for"_attr = elementIdPrefix_ + "-value-input",
                             style = "margin: 10px 0 5px 0;",
-                        }(language->getObserved("settings", "listSetting", "itemValue")),
+                        }(language->getObserved("settings", "listSettings", "itemValue")),
                         ui5::input{
                             "id"_attr = elementIdPrefix_ + "-value-input",
                             reference = valueInput_,
-                            "placeholder"_attr = language->getObserved("settings", "listSetting", "itemValue"),
+                            "placeholder"_attr = language->getObserved("settings", "listSettings", "itemValue"),
                         }()
                     )
                 ),
@@ -75,7 +80,7 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
                 }(
                     ui5::toolbar_button{
                         "design"_prop = "Emphasized",
-                        "text"_prop = language->getObserved("settings", "listSetting", "addItemText"),
+                        "text"_prop = language->getObserved("settings", "listSettings", "addItemText"),
                         "click"_event = [this]() {
                             auto valueInput = valueInput_.lock();
                             auto dialog = dialog_.lock();
@@ -117,52 +122,146 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
             div{
                 class_ = "list-setting-table-container",
             }(
-                ui5::table{
-                    "row-action-count"_attr = 1,
+                observe(engaged_),
+                [this]() -> Nui::ElementRenderer {
+                    if (isEngaged())
+                        return tableContainer();
+                    return inheritedDisplay();
+                }
+            ),
+            reset(),
+            help()
+        );
+        // clang-format on
+    }
+
+  private:
+    Nui::ElementRenderer inheritedDisplay()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+        using Nui::Elements::section;
+
+        if (!*inheritedState_)
+        {
+            // clang-format off
+            return ui5::table{
+                "row-action-count"_attr = 1, class_ = "multi-setting-disabled-table"
+            }(
+                ui5::table_header_row{}(
+                    ui5::table_header_cell{}(language->getObserved("settings", "listSettings", "itemValue"))
+                )
+            );
+            // clang-format on
+        }
+
+        // clang-format off
+        return ui5::table{
+            "row-action-count"_attr = 1,
+            class_ = "multi-setting-disabled-table"
+        }(
+            Nui::range(**inheritedState_).before(
+                ui5::table_header_row{
+                    "slot"_attr = "headerRow"
                 }(
-                    Nui::range(state_).before(
-                        ui5::table_header_row{
-                            "slot"_attr = "headerRow"
-                        }(
-                            ui5::table_header_cell{}(language->getObserved("settings", "listSetting", "itemValue"))
-                        ),
-                        ui5::table_growing{
-                            "mode"_attr = "Button",
-                            "slot"_attr = "features",
-                            "text"_attr = language->getObserved("settings", "listSetting", "addItemText"),
-                            "load-more"_event = [this]() {
+                    ui5::table_header_cell{}(
+                        span{
+                            style = "margin-right: 8px;"
+                        }(language->getObserved("settings", "listSettings", "itemValue")),
+                        ui5::button{
+                            class_ = "multi-setting-key-add-button",
+                            "design"_prop = "Transparent",
+                            "icon"_prop = "add",
+                            "click"_event = [this]() {
                                 if (!isEngaged())
                                     return;
                                 auto dialog = dialog_.lock();
                                 if (dialog)
                                     dialog->val().set("open", true);
-                            },
+                            }
                         }()
-                    ),
-                    [this](long long index, std::string const& element) {
-                        return ui5::table_row{
-                            "row-key"_attr = index
-                        }(
-                            ui5::table_cell{}(element),
-                            ui5::table_row_action{
-                                "design"_prop = "Transparent",
-                                "slot"_attr = "actions",
-                                "icon"_prop = "delete",
-                                "text"_prop = "Delete",
-                                observeEngagedToBool("disabled"_prop),
-                                "tooltip"_prop = language->get("settings", "deleteEntry"),
-                                "click"_event = [this, index]() {
-                                    state_->erase(state_->begin() + static_cast<std::size_t>(index));
-                                    state_.modify();
-                                    onChange_();
-                                },
-                            }()
-                        );
-                    }
+                    )
                 )
             ),
-            reset(),
-            help()
+            [this](long long index, std::string const& element) {
+                return ui5::table_row{
+                    "row-key"_attr = index
+                }(
+                    ui5::table_cell{}(element),
+                    ui5::table_row_action{
+                        "design"_prop = "Transparent",
+                        "slot"_attr = "actions",
+                        "icon"_prop = "delete",
+                        "text"_prop = "Delete",
+                        observeEngagedToBool("disabled"_prop),
+                        "tooltip"_prop = language->get("settings", "deleteEntry"),
+                        "click"_event = [this, index]() {
+                            state_->erase(state_->begin() + static_cast<std::size_t>(index));
+                            state_.modify();
+                            onChange_();
+                        },
+                    }()
+                );
+            }
+        );
+        // clang-format on
+    }
+
+    Nui::ElementRenderer tableContainer()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+        using Nui::Elements::section;
+
+        // clang-format off
+        return ui5::table{
+            "row-action-count"_attr = 1,
+        }(
+            Nui::range(state_).before(
+                ui5::table_header_row{
+                    "slot"_attr = "headerRow"
+                }(
+                    ui5::table_header_cell{}(
+                        span{
+                            style = "margin-right: 8px;"
+                        }(language->getObserved("settings", "listSettings", "itemValue")),
+                        ui5::button{
+                            class_ = "multi-setting-key-add-button",
+                            "design"_prop = "Transparent",
+                            "icon"_prop = "add",
+                            "click"_event = [this]() {
+                                if (!isEngaged())
+                                    return;
+                                auto dialog = dialog_.lock();
+                                if (dialog)
+                                    dialog->val().set("open", true);
+                            }
+                        }()
+                    )
+                )
+            ),
+            [this](long long index, std::string const& element) {
+                return ui5::table_row{
+                    "row-key"_attr = index
+                }(
+                    ui5::table_cell{}(element),
+                    ui5::table_row_action{
+                        "design"_prop = "Transparent",
+                        "slot"_attr = "actions",
+                        "icon"_prop = "delete",
+                        "text"_prop = "Delete",
+                        observeEngagedToBool("disabled"_prop),
+                        "tooltip"_prop = language->get("settings", "deleteEntry"),
+                        "click"_event = [this, index]() {
+                            state_->erase(state_->begin() + static_cast<std::size_t>(index));
+                            state_.modify();
+                            onChange_();
+                        },
+                    }()
+                );
+            }
         );
         // clang-format on
     }
