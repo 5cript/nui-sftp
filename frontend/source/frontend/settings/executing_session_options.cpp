@@ -6,36 +6,40 @@ using namespace std::string_literals;
 
 ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& onChange)
     : isPty{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "isPtyHelpText"),
-          onChange,
-          valueReset(isPty, onChange, Persistence::ExecutingSessionOptions{}.isPty)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "isPtyHelpText"),
+        onChange,
+        valueReset(isPty, onChange, Persistence::ExecutingSessionOptions{}.isPty)
+    }
     , command{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "commandHelpText"),
-          PathSettingType::File,
-          onChange,
-          valueReset(command, onChange, Persistence::ExecutingSessionOptions{}.command)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "commandHelpText"),
+        PathSettingType::File,
+        onChange,
+        valueReset(command, onChange, Persistence::ExecutingSessionOptions{}.command)
+    }
     , arguments{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "argumentsHelpText"),
-          onChange,
-          nulloptReset(arguments, onChange)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "argumentsHelpText"),
+        onChange,
+        nulloptReset(arguments, onChange)
+    }
     , environment{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "environmentHelpText"),
-          onChange,
-            nulloptReset(environment, onChange)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "environmentHelpText"),
+        onChange,
+        nulloptReset(environment, onChange)
+    }
     , exitTimeoutSeconds{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "exitTimeoutSecondsHelpText"),
-          onChange,
-            valueReset(exitTimeoutSeconds, onChange, Persistence::ExecutingSessionOptions{}.exitTimeoutSeconds)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "exitTimeoutSecondsHelpText"),
+        onChange,
+        valueReset(exitTimeoutSeconds, onChange, Persistence::ExecutingSessionOptions{}.exitTimeoutSeconds),
+        {
+            .minValue = 0,
+            .stepValue = 1,
+        }
+    }
     , cleanEnvironment{
-          language->getObserved("settings", "sessionOptions", "executingSessionOptions", "cleanEnvironmentHelpText"),
-          onChange,
-          valueReset(cleanEnvironment, onChange, Persistence::ExecutingSessionOptions{}.cleanEnvironment)
-      }
+        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "cleanEnvironmentHelpText"),
+        onChange,
+        valueReset(cleanEnvironment, onChange, Persistence::ExecutingSessionOptions{}.cleanEnvironment)
+    }
 {}
 
 void ExecutingSessionOptions::applyToState(Persistence::ExecutingSessionOptions& state) const

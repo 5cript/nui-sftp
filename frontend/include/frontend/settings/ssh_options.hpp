@@ -7,6 +7,7 @@
 #include <frontend/settings/atomic_setting/map_setting.hpp>
 #include <frontend/settings/atomic_setting/path_setting.hpp>
 #include <frontend/settings/atomic_setting/list_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
 
 #include <persistence/state/ssh_options.hpp>
 
@@ -17,13 +18,14 @@ struct SshOptions : public GroupKeys
     BoolSetting<true> tryAgentForAuthentication;
     BoolSetting<true> usePublicKeyAutoAuth;
     BoolSetting<true> usePasswordAuth;
-    TextSetting<true> logVerbosity;
+    ComboSetting<Persistence::SshLogVerbosity, std::string, true> logVerbosity;
     TextSetting<true> keyExchangeAlgorithms;
-    TextSetting<true> compressionClientToServer;
-    TextSetting<true> compressionServerToClient;
+    BoolSetting<true> compressionClientToServer;
+    BoolSetting<true> compressionServerToClient;
     NumberSetting<int, true> compressionLevel;
     BoolSetting<true> strictHostKeyCheck;
     TextSetting<true> proxyCommand;
+    TextSetting<true> proxyJump;
     TextSetting<true> gssapiServerIdentity;
     TextSetting<true> gssapiClientIdentity;
     BoolSetting<true> gssapiDelegateCredentials;

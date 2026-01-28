@@ -174,11 +174,20 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             language->getObserved("settings", "terminalOptions", "fontSizeHelpText"),
             onChange,
             valueReset(fontSize, onChange, 14),
+            {
+                .minValue = 6,
+                .maxValue = 1152,
+            }
         }
     , lineHeight{
             language->getObserved("settings", "terminalOptions", "lineHeightHelpText"),
             onChange,
             valueReset(lineHeight, onChange, 1.0),
+            {
+                .minValue = 0.,
+                .maxValue = 20.0,
+                .stepValue = 0.1,
+            }
         }
     , cursorBlink{
             language->getObserved("settings", "terminalOptions", "cursorBlinkHelpText"),
@@ -195,6 +204,11 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             language->getObserved("settings", "terminalOptions", "letterSpacingHelpText"),
             onChange,
             valueReset(letterSpacing, onChange, 0),
+            {
+                .minValue = -1.0,
+                .maxValue = 10.0,
+                .stepValue = 0.1,
+            }
         }
     , theme{onChange, &themeEngaged}
     , onChange_{onChange}

@@ -221,9 +221,11 @@ namespace SecureShell
             {
                 lastAttemptedAppliedOption = "Log Verbosity";
                 if (sshOptions.logVerbosity)
+                {
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_LOG_VERBOSITY_STR, sshOptions.logVerbosity.value().c_str()
+                        SSH_OPTIONS_LOG_VERBOSITY, static_cast<int>(sshOptions.logVerbosity.value())
                     );
+                }
                 return 0;
             },
             [&]
@@ -232,7 +234,7 @@ namespace SecureShell
                 int port = 22;
                 if (sessionOptions.port)
                     port = sessionOptions.port.value();
-                return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_PORT, &port);
+                return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_PORT, port);
             },
             [&]
             {
@@ -324,7 +326,7 @@ namespace SecureShell
                 {
                     lastAttemptedAppliedOption = "Compression Client to Server";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_COMPRESSION_C_S, sshOptions.compressionClientToServer.value().c_str()
+                        SSH_OPTIONS_COMPRESSION_C_S, sshOptions.compressionClientToServer.value() ? "yes" : "no"
                     );
                 }
                 return 0;
@@ -335,7 +337,7 @@ namespace SecureShell
                 {
                     lastAttemptedAppliedOption = "Compression Server to Client";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_COMPRESSION_S_C, sshOptions.compressionServerToClient.value().c_str()
+                        SSH_OPTIONS_COMPRESSION_S_C, sshOptions.compressionServerToClient.value() ? "yes" : "no"
                     );
                 }
                 return 0;
@@ -368,6 +370,17 @@ namespace SecureShell
                     lastAttemptedAppliedOption = "Proxy Command";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_PROXYCOMMAND, sshOptions.proxyCommand.value().c_str()
+                    );
+                }
+                return 0;
+            },
+            [&]
+            {
+                if (sshOptions.proxyJump)
+                {
+                    lastAttemptedAppliedOption = "Proxy Jump";
+                    return static_cast<ssh::Session&>(*session).setOption(
+                        SSH_OPTIONS_PROXYJUMP, sshOptions.proxyJump.value().c_str()
                     );
                 }
                 return 0;

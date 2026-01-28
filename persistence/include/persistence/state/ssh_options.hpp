@@ -4,6 +4,16 @@
 
 namespace Persistence
 {
+    enum class SshLogVerbosity
+    {
+        Off,
+        Warning,
+        Protocol,
+        Packet,
+        Functions
+    };
+    BOOST_DESCRIBE_ENUM(SshLogVerbosity, Off, Warning, Protocol, Packet, Functions)
+
     struct SshOptions : public DefaultMissingMember
     {
         std::optional<std::filesystem::path> sshDirectory{std::nullopt};
@@ -11,13 +21,14 @@ namespace Persistence
         std::optional<bool> tryAgentForAuthentication{std::nullopt};
         std::optional<bool> usePublicKeyAutoAuth{std::nullopt};
         std::optional<bool> usePasswordAuth{std::nullopt};
-        std::optional<std::string> logVerbosity{std::nullopt};
+        std::optional<SshLogVerbosity> logVerbosity{std::nullopt};
         std::optional<std::string> keyExchangeAlgorithms{std::nullopt};
-        std::optional<std::string> compressionClientToServer{std::nullopt};
-        std::optional<std::string> compressionServerToClient{std::nullopt};
+        std::optional<bool> compressionClientToServer{std::nullopt};
+        std::optional<bool> compressionServerToClient{std::nullopt};
         std::optional<int> compressionLevel{std::nullopt};
         std::optional<bool> strictHostKeyCheck{std::nullopt};
         std::optional<std::string> proxyCommand{std::nullopt};
+        std::optional<std::string> proxyJump{std::nullopt};
         std::optional<std::string> gssapiServerIdentity{std::nullopt};
         std::optional<std::string> gssapiClientIdentity{std::nullopt};
         std::optional<bool> gssapiDelegateCredentials{std::nullopt};
@@ -45,6 +56,7 @@ namespace Persistence
             compressionLevel,
             strictHostKeyCheck,
             proxyCommand,
+            proxyJump,
             gssapiServerIdentity,
             gssapiClientIdentity,
             gssapiDelegateCredentials,
