@@ -2,6 +2,7 @@
 #include <ssh/sequential.hpp>
 #include <ssh/sftp_session.hpp>
 #include <ssh/u8_path.hpp>
+#include <ssh/ssh_key.hpp>
 
 #include <fmt/format.h>
 #include <libssh/sftp.h>
@@ -213,9 +214,12 @@ namespace SecureShell
             sshOptions.tryAgentForAuthentication ? sshOptions.tryAgentForAuthentication.value() : false;
 #endif
 
+        std::optional<std::string> lastAttemptedAppliedOption = "";
+
         auto result = Detail::sequential(
             [&]
             {
+                lastAttemptedAppliedOption = "Log Verbosity";
                 if (sshOptions.logVerbosity)
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_LOG_VERBOSITY_STR, sshOptions.logVerbosity.value().c_str()
@@ -224,6 +228,7 @@ namespace SecureShell
             },
             [&]
             {
+                lastAttemptedAppliedOption = "Port";
                 int port = 22;
                 if (sessionOptions.port)
                     port = sessionOptions.port.value();
@@ -231,48 +236,73 @@ namespace SecureShell
             },
             [&]
             {
+                lastAttemptedAppliedOption = "Host";
                 return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_HOST, sessionOptions.host.c_str());
             },
             [&]
             {
                 if (sessionOptions.user.has_value())
+                {
+                    lastAttemptedAppliedOption = "User";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_USER, sessionOptions.user.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.sshDirectory.has_value())
-                    static_cast<ssh::Session&>(*session).setOption(
+                {
+                    lastAttemptedAppliedOption = "SSH Directory";
+                    return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_SSH_DIR, sshOptions.sshDirectory.value().generic_string().c_str()
                     );
+                }
+                return 0;
+            },
+            [&]
+            {
+                if (sshOptions.identities.has_value())
+                {
+                    lastAttemptedAppliedOption = "Identities";
+                    for (const auto& identity : sshOptions.identities.value())
+                    {
+                        auto res =
+                            static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_ADD_IDENTITY, identity.c_str());
+                        if (res != 0)
+                            return res;
+                    }
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.knownHostsFile.has_value())
-                    static_cast<ssh::Session&>(*session).setOption(
+                {
+                    lastAttemptedAppliedOption = "Known Hosts File";
+                    return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_KNOWNHOSTS, sshOptions.knownHostsFile.value().generic_string().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
-                long timeout = 0;
                 if (sshOptions.connectTimeoutSeconds.has_value())
                 {
-                    timeout = sshOptions.connectTimeoutSeconds.value();
+                    lastAttemptedAppliedOption = "Connect Timeout Seconds";
+                    long timeout = sshOptions.connectTimeoutSeconds.value();
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT, &timeout);
                 }
                 return 0;
             },
             [&]
             {
-                long timeout = 0;
                 if (sshOptions.connectTimeoutUSeconds.has_value())
                 {
-                    timeout = sshOptions.connectTimeoutUSeconds.value();
+                    lastAttemptedAppliedOption = "Connect Timeout Microseconds";
+                    long timeout = sshOptions.connectTimeoutUSeconds.value();
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT_USEC, &timeout);
                 }
                 return 0;
@@ -280,39 +310,52 @@ namespace SecureShell
             [&]
             {
                 if (sshOptions.keyExchangeAlgorithms.has_value())
+                {
+                    lastAttemptedAppliedOption = "Key Exchange Algorithms";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_KEY_EXCHANGE, sshOptions.keyExchangeAlgorithms.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.compressionClientToServer.has_value())
+                {
+                    lastAttemptedAppliedOption = "Compression Client to Server";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_COMPRESSION_C_S, sshOptions.compressionClientToServer.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.compressionServerToClient.has_value())
+                {
+                    lastAttemptedAppliedOption = "Compression Server to Client";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_COMPRESSION_S_C, sshOptions.compressionServerToClient.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.compressionLevel.has_value())
+                {
+                    lastAttemptedAppliedOption = "Compression Level";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_COMPRESSION_LEVEL, sshOptions.compressionLevel.value()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.strictHostKeyCheck)
                 {
+                    lastAttemptedAppliedOption = "Strict Host Key Check";
                     int strict = sshOptions.strictHostKeyCheck.value() ? 1 : 0;
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_STRICTHOSTKEYCHECK, &strict);
                 }
@@ -321,23 +364,30 @@ namespace SecureShell
             [&]
             {
                 if (sshOptions.proxyCommand)
+                {
+                    lastAttemptedAppliedOption = "Proxy Command";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_PROXYCOMMAND, sshOptions.proxyCommand.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.gssapiServerIdentity)
+                {
+                    lastAttemptedAppliedOption = "GSSAPI Server Identity";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_GSSAPI_SERVER_IDENTITY, sshOptions.gssapiServerIdentity.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.gssapiDelegateCredentials)
                 {
+                    lastAttemptedAppliedOption = "GSSAPI Delegate Credentials";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS, sshOptions.gssapiDelegateCredentials.value() ? 1 : 0
                     );
@@ -347,15 +397,19 @@ namespace SecureShell
             [&]
             {
                 if (sshOptions.gssapiClientIdentity)
+                {
+                    lastAttemptedAppliedOption = "GSSAPI Client Identity";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_GSSAPI_CLIENT_IDENTITY, sshOptions.gssapiClientIdentity.value().c_str()
                     );
+                }
                 return 0;
             },
             [&]
             {
                 if (sshOptions.noDelay)
                 {
+                    lastAttemptedAppliedOption = "No Delay";
                     int noDelay = sshOptions.noDelay.value() ? 1 : 0;
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_NODELAY, &noDelay);
                 }
@@ -363,8 +417,11 @@ namespace SecureShell
             },
             [&]
             {
-                if (sessionOptions.sshKey)
+                // I dont quite understand this option. "use pubkey auth in auto pubkey auth"???
+                // Also the KBDINT auth and GSSAPI auth options for ssh_userauth_publickey_auto arent implemented.
+                if (sessionOptions.sshOptions->usePublicKeyAutoAuth && *sessionOptions.sshOptions->usePublicKeyAutoAuth)
                 {
+                    lastAttemptedAppliedOption = "Use Public Key Auto Auth";
                     int pubkeyAuth = 1;
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_PUBKEY_AUTH, &pubkeyAuth);
                 }
@@ -374,6 +431,7 @@ namespace SecureShell
             {
                 if (sshOptions.bypassConfig)
                 {
+                    lastAttemptedAppliedOption = "Bypass Config";
                     int processConfig = sshOptions.bypassConfig.value() ? 0 : 1;
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_PROCESS_CONFIG, &processConfig);
                 }
@@ -383,6 +441,7 @@ namespace SecureShell
             {
                 if (sshOptions.identityAgent)
                 {
+                    lastAttemptedAppliedOption = "Identity Agent";
                     return static_cast<ssh::Session&>(*session).setOption(
                         SSH_OPTIONS_IDENTITY_AGENT, u8Path(sshOptions.identityAgent.value()).c_str()
                     );
@@ -391,6 +450,8 @@ namespace SecureShell
             },
             [&]
             {
+                // clear last attempted option, option setting succeeded, so remove it for the error message
+                lastAttemptedAppliedOption = std::nullopt;
                 return static_cast<ssh::Session&>(*session).connect();
             },
 #ifdef _WIN32
@@ -432,7 +493,13 @@ namespace SecureShell
 
         if (result.result == SSH_ERROR)
         {
-            return std::unexpected(fmt::format("Failed to connect: {}", session->getErrorMessage()));
+            return std::unexpected(
+                fmt::format(
+                    "Failed to connect: {}\nLast attempted option to set: {}",
+                    session->getErrorMessage(),
+                    lastAttemptedAppliedOption.value_or("None, all options applied successfully")
+                )
+            );
         }
 
         if (result.result != SSH_AUTH_SUCCESS && sshOptions.usePublicKeyAutoAuth &&
@@ -446,21 +513,49 @@ namespace SecureShell
             );
         }
 
-        if (result.result != SSH_AUTH_SUCCESS && sessionOptions.sshKey)
+        if (result.result != SSH_AUTH_SUCCESS && sessionOptions.sshKeyPrivate)
         {
-            const auto sshKey = sessionOptions.sshKey.value();
+            const auto sshKeyPrivate = sessionOptions.sshKeyPrivate.value();
+            const auto maybeSshKeyPublic = sessionOptions.sshKeyPublic;
 
-            ssh_key key{nullptr};
+            SshKey publicKey{};
+            SshKey privateKey{};
             result = Detail::sequential(
-                [&sshKey, &key, askPass, askPassUserDataKeyPhrase]()
+                [maybeSshKeyPublic, &publicKey]()
+                {
+                    if (maybeSshKeyPublic)
+                    {
+                        return ssh_pki_import_pubkey_file(
+                            u8Path(*maybeSshKeyPublic).c_str(), &publicKey.underlyingReferenced()
+                        );
+                    }
+                    return SSH_OK;
+                },
+                [&publicKey, &session]()
+                {
+                    if (publicKey)
+                    {
+                        return ssh_userauth_try_publickey(
+                            static_cast<ssh::Session&>(*session).getCSession(),
+                            nullptr, // Username. SHOULD BE NULL, most servers dont allow different usernames.
+                            publicKey.underlying()
+                        );
+                    }
+                    return SSH_OK;
+                },
+                [&sshKeyPrivate, &privateKey, askPass, askPassUserDataKeyPhrase]()
                 {
                     return ssh_pki_import_privkey_file(
-                        u8Path(sshKey).c_str(), nullptr, askPass, askPassUserDataKeyPhrase, &key
+                        u8Path(sshKeyPrivate).c_str(),
+                        nullptr,
+                        askPass,
+                        askPassUserDataKeyPhrase,
+                        &privateKey.underlyingReferenced()
                     );
                 },
-                [&key, &session]()
+                [&privateKey, &session]()
                 {
-                    return static_cast<ssh::Session&>(*session).userauthPublickey(key);
+                    return static_cast<ssh::Session&>(*session).userauthPublickey(privateKey.underlying());
                 }
             );
         }

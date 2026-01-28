@@ -41,7 +41,8 @@ class SessionManager
     void joinSessionAdder();
     void addSession(
         Persistence::SshSessionOptions const& sessionOptions,
-        std::function<void(std::optional<Ids::SessionId> const&)> onComplete
+        std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)>
+            onComplete
     );
 
     friend int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);

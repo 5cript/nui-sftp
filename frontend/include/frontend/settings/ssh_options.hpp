@@ -6,6 +6,7 @@
 #include <frontend/settings/atomic_setting/number_setting.hpp>
 #include <frontend/settings/atomic_setting/map_setting.hpp>
 #include <frontend/settings/atomic_setting/path_setting.hpp>
+#include <frontend/settings/atomic_setting/list_setting.hpp>
 
 #include <persistence/state/ssh_options.hpp>
 
@@ -32,6 +33,7 @@ struct SshOptions : public GroupKeys
     NumberSetting<int, true> connectTimeoutSeconds;
     NumberSetting<int, true> connectTimeoutUSeconds;
     MapSetting<true> environment;
+    ListSetting<true> identities;
 
     SshOptions(std::function<void()> const& onChange);
 

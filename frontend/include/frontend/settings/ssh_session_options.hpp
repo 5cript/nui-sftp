@@ -16,7 +16,8 @@ struct SshSessionOptions
     TextSetting<> host;
     NumberSetting<int, true> port;
     TextSetting<true> user;
-    PathSetting<true> sshKey;
+    PathSetting<true> sshKeyPublic;
+    PathSetting<true> sshKeyPrivate;
     BoolSetting<> openSftpByDefault;
 
     SshOptions sshOptions;
