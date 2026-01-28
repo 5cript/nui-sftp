@@ -21,8 +21,8 @@ Still under construction :construction:
 - [x] Add UI for settings.
 - [x] Document settings.
 - [x] Save / Delete Current Layout.
-- [ ] Better number boxes.
-- [ ] Number box value constraining.
+- [x] Better number boxes.
+- [x] Number box value constraining.
 - [ ] Terminal options: When whole thmee group is off, all setting should show as inherit, even if single ones are checked.
 
 ## SSH
