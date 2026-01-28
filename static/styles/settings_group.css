@@ -16,7 +16,7 @@
 
     display: grid;
     grid-template-columns: max-content max-content 1fr max-content max-content;
-    row-gap: 4px;
+    row-gap: 6px;
 
     &>div:not(.settings-group-key-container):not(.settings-subgroup):not(.settings-visibility-box) {
         display: grid;

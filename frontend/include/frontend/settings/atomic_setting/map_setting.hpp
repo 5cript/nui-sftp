@@ -10,10 +10,12 @@
 #include <ui5/components/table.hpp>
 #include <ui5/components/dialog.hpp>
 #include <ui5/components/input.hpp>
+#include <ui5/components/button.hpp>
 #include <ui5/components/toolbar.hpp>
 #include <ui5/components/toolbar_button.hpp>
 
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/span.hpp>
 #include <nui/frontend/elements/section.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
@@ -27,9 +29,12 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
     using MapType = std::map<std::string, std::string>;
 
     using SettingBase::state_;
+    using SettingBase::inheritedState_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
+    using SettingBase::isEngaged;
+    using SettingBase::engaged_;
 
     MapSetting(LanguageObservedText helpText, std::invocable auto&& onChange, std::invocable auto&& resetAction)
         : SettingBase{
@@ -40,18 +45,18 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
         , elementIdPrefix_{Ids::generateId().id()}
     {}
 
-    // TODO: Proper inheritance support for maps
     Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        using Nui::Elements::span;
         using Nui::Elements::section;
 
         // clang-format off
         return div{}(
             ui5::dialog{
                 reference = dialog_,
-                "header-text"_attr = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsAddItemText"),
+                "header-text"_attr = language->getObserved("settings", "mapSettings", "addItemText"),
             }(
                 section{
                     class_ = "map-setting-add-entry-container",
@@ -60,22 +65,22 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
                         ui5::label{
                             "for"_attr = elementIdPrefix_ + "-key-input",
                             style = "margin-bottom: 5px;",
-                        }(language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsKeyName")),
+                        }(language->getObserved("settings", "mapSettings", "keyName")),
                         ui5::input{
                             "id"_attr = elementIdPrefix_ + "-key-input",
                             reference = keyInput_,
-                            "placeholder"_attr = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsKeyName"),
+                            "placeholder"_attr = language->getObserved("settings", "mapSettings", "keyName"),
                         }()
                     ),
                     div{}(
                         ui5::label{
                             "for"_attr = elementIdPrefix_ + "-value-input",
                             style = "margin: 10px 0 5px 0;",
-                        }(language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsValueName")),
+                        }(language->getObserved("settings", "mapSettings", "valueName")),
                         ui5::input{
                             "id"_attr = elementIdPrefix_ + "-value-input",
                             reference = valueInput_,
-                            "placeholder"_attr = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsValueName"),
+                            "placeholder"_attr = language->getObserved("settings", "mapSettings", "valueName"),
                         }()
                     )
                 ),
@@ -84,7 +89,7 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
                 }(
                     ui5::toolbar_button{
                         "design"_prop = "Emphasized",
-                        "text"_prop = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsAddItemText"),
+                        "text"_prop = language->getObserved("settings", "mapSettings", "addItemText"),
                         "click"_event = [this]() {
                             auto keyInput = keyInput_.lock();
                             auto valueInput = valueInput_.lock();
@@ -128,53 +133,153 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
             ),
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
             div{
-                class_ = "map-setting-table-container",
+                class_ = "map-setting-table-container"
             }(
-                ui5::table{
-                    "row-action-count"_attr = 1,
-                }(
-                    Nui::range(state_).before(
-                        ui5::table_header_row{
-                            "slot"_attr = "headerRow"
-                        }(
-                            ui5::table_header_cell{}(language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsKeyName")),
-                            ui5::table_header_cell{}(language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsValueName"))
-                        ),
-                        ui5::table_growing{
-                            "mode"_attr = "Button",
-                            "slot"_attr = "features",
-                            "text"_attr = language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsAddItemText"),
-                            "load-more"_event = [this]() {
-                                auto dialog = dialog_.lock();
-                                if (dialog)
-                                    dialog->val().set("open", true);
-                            },
-                        }()
-                    ),
-                    [this](long long index, std::pair<std::string, std::string> const& element) {
-                        return ui5::table_row{
-                            "row-key"_attr = index
-                        }(
-                            ui5::table_cell{}(element.first),
-                            ui5::table_cell{}(element.second),
-                            ui5::table_row_action{
-                                "design"_prop = "Transparent",
-                                "slot"_attr = "actions",
-                                "icon"_prop = "delete",
-                                "text"_prop = "Delete",
-                                "tooltip"_prop = language->get("settings", "deleteEntry"),
-                                "click"_event = [this, key = element.first]() {
-                                    state_->erase(key);
-                                    state_.modify();
-                                    onChange_();
-                                },
-                            }()
-                        );
-                    }
-                )
+                observe(engaged_),
+                [this]() -> Nui::ElementRenderer {
+                    if (isEngaged())
+                        return tableContainer();
+                    return inheritedDisplay();
+                }
             ),
             reset(),
             help()
+        );
+        // clang-format on
+    }
+
+  private:
+    Nui::ElementRenderer inheritedDisplay()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+        using Nui::Elements::section;
+
+        if (!*inheritedState_)
+        {
+            // clang-format off
+            return ui5::table{
+                "row-action-count"_attr = 1, class_ = "multi-setting-disabled-table"
+            }(
+                ui5::table_header_row{
+                    "slot"_attr = "headerRow"
+                }(
+                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "keyName")),
+                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
+                )
+            );
+            // clang-format on
+        }
+
+        // clang-format off
+        return ui5::table{
+            "row-action-count"_attr = 1,
+            class_ = "multi-setting-disabled-table"
+        }(
+            Nui::range(**inheritedState_).before(
+                ui5::table_header_row{
+                    "slot"_attr = "headerRow"
+                }(
+                    ui5::table_header_cell{}(
+                        span{
+                            style = "margin-right: 8px;"
+                        }(language->getObserved("settings", "mapSettings", "keyName")),
+                        ui5::button{
+                            class_ = "multi-setting-key-add-button",
+                            "design"_prop = "Transparent",
+                            "icon"_prop = "add",
+                            "click"_event = [this]() {
+                                if (!isEngaged())
+                                    return;
+                                auto dialog = dialog_.lock();
+                                if (dialog)
+                                    dialog->val().set("open", true);
+                            }
+                        }()
+                    ),
+                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
+                )
+            ),
+            [this](long long index, std::pair<std::string, std::string> const& element) {
+                return ui5::table_row{
+                    "row-key"_attr = index
+                }(
+                    ui5::table_cell{}(element.first),
+                    ui5::table_cell{}(element.second),
+                    ui5::table_row_action{
+                        "design"_prop = "Transparent",
+                        "slot"_attr = "actions",
+                        "icon"_prop = "delete",
+                        "text"_prop = "Delete",
+                        "tooltip"_prop = language->get("settings", "mapSettings", "deleteEntry"),
+                        "click"_event = [this, key = element.first]() {
+                            state_->erase(key);
+                            state_.modify();
+                            onChange_();
+                        },
+                    }()
+                );
+            }
+        );
+        // clang-format on
+    }
+
+    Nui::ElementRenderer tableContainer()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+        using Nui::Elements::section;
+
+        // clang-format off
+        return ui5::table{
+            "row-action-count"_attr = 1,
+        }(
+            Nui::range(state_).before(
+                ui5::table_header_row{
+                    "slot"_attr = "headerRow"
+                }(
+                    ui5::table_header_cell{}(
+                        span{
+                            style = "margin-right: 8px;"
+                        }(language->getObserved("settings", "mapSettings", "keyName")),
+                        ui5::button{
+                            class_ = "multi-setting-key-add-button",
+                            "design"_prop = "Transparent",
+                            "icon"_prop = "add",
+                            "click"_event = [this]() {
+                                if (!isEngaged())
+                                    return;
+                                auto dialog = dialog_.lock();
+                                if (dialog)
+                                    dialog->val().set("open", true);
+                            }
+                        }()
+                    ),
+                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
+                )
+            ),
+            [this](long long index, std::pair<std::string, std::string> const& element) {
+                return ui5::table_row{
+                    "row-key"_attr = index
+                }(
+                    ui5::table_cell{}(element.first),
+                    ui5::table_cell{}(element.second),
+                    ui5::table_row_action{
+                        "design"_prop = "Transparent",
+                        "slot"_attr = "actions",
+                        "icon"_prop = "delete",
+                        "text"_prop = "Delete",
+                        "tooltip"_prop = language->get("settings", "mapSettings", "deleteEntry"),
+                        "click"_event = [this, key = element.first]() {
+                            state_->erase(key);
+                            state_.modify();
+                            onChange_();
+                        },
+                    }()
+                );
+            }
         );
         // clang-format on
     }
