@@ -101,31 +101,39 @@ class NumberSetting : public Setting<Disengageable, ValueType>
     {
         if (args_.numberBase)
         {
-            switch (*args_.numberBase)
+            try
             {
-                case NumberBase::Decimal:
+                switch (*args_.numberBase)
                 {
-                    const auto valueString = event["target"]["value"].as<std::string>();
-                    ValueType result;
-                    std::stringstream ss(valueString);
-                    ss >> result;
-                    return result;
-                }
-                case NumberBase::Hexadecimal:
-                {
-                    const auto valueStr = event["target"]["value"].as<std::string>();
-                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 16));
-                }
-                case NumberBase::Octal:
-                {
-                    const auto valueStr = event["target"]["value"].as<std::string>();
-                    if (valueStr.starts_with("0o") || valueStr.starts_with("0O"))
-                        return static_cast<ValueType>(std::stoul(valueStr.substr(2), nullptr, 8));
-                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 8));
+                    case NumberBase::Decimal:
+                    {
+                        const auto valueString = event["target"]["value"].as<std::string>();
+                        ValueType result;
+                        std::stringstream ss(valueString);
+                        ss >> result;
+                        return result;
+                    }
+                    case NumberBase::Hexadecimal:
+                    {
+                        const auto valueStr = event["target"]["value"].as<std::string>();
+                        return static_cast<ValueType>(std::stoul(valueStr, nullptr, 16));
+                    }
+                    case NumberBase::Octal:
+                    {
+                        const auto valueStr = event["target"]["value"].as<std::string>();
+                        if (valueStr.starts_with("0o") || valueStr.starts_with("0O"))
+                            return static_cast<ValueType>(std::stoul(valueStr.substr(2), nullptr, 8));
+                        return static_cast<ValueType>(std::stoul(valueStr, nullptr, 8));
+                    }
                 }
             }
+            catch (const std::exception& e)
+            {
+                Log::error("Failed to parse number from input event: {}", e.what());
+                return ValueType{};
+            }
         }
-        return static_cast<ValueType>(event["target"]["value"].as<ValueType>());
+        return {};
     }
 
     std::string valueToString(ValueType value)
