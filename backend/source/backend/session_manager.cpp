@@ -106,7 +106,7 @@ void SessionManager::addPasswordProvider(int priority, PasswordProvider* provide
 
 void SessionManager::addSession(
     Persistence::SshSessionOptions const& sessionOptions,
-    std::function<void(std::optional<Ids::SessionId> const&)> onComplete
+    std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)> onComplete
 )
 {
     within_strand_do(
@@ -160,17 +160,17 @@ void SessionManager::addSession(
                 if (!emplaced.second)
                 {
                     Log::error("Session id collision - This should never happen.");
-                    return onComplete(std::nullopt);
+                    return onComplete(std::nullopt, "Session id collision");
                 }
 
                 Log::info("Created session with id '{}', total is now '{}'.", sessionId.value(), sessions_.size());
                 session->start();
-                onComplete(sessionId);
+                onComplete(sessionId, std::nullopt);
             }
             else
             {
                 Log::error("Failed to create session: {}", maybeSshSession.error());
-                onComplete(std::nullopt);
+                onComplete(std::nullopt, maybeSshSession.error());
             }
         }
     );
@@ -218,12 +218,19 @@ void SessionManager::registerRpcSessionConnect()
 
                 auto onComplete = rpcSafe(
                     std::move(reply),
-                    [](auto const& reply, auto const& maybeId)
+                    [](auto const& reply, auto const& maybeId, auto const& maybeErrorMessage)
                     {
                         if (!maybeId)
                         {
-                            Log::error("Failed to connect to ssh server");
-                            return reply({{"error", "Failed to connect to ssh server"}});
+                            Log::error(
+                                "Failed to connect to ssh server: {}", maybeErrorMessage.value_or("unknown error")
+                            );
+                            return reply(
+                                {{"error",
+                                    maybeErrorMessage.value_or(
+                                        "Failed to connect to ssh server for unspecified reason."
+                                    )}}
+                            );
                         }
 
                         Log::info("Connected to ssh server with id: {}", maybeId->value());

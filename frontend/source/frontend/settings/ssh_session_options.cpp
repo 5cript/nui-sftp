@@ -20,11 +20,17 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange)
           onChange,
           nulloptReset(user, onChange)
       }
-    , sshKey{
-          language->getObserved("settings", "sessionSettings", "sshKey"),
+    , sshKeyPublic{
+          language->getObserved("settings", "sessionSettings", "sshKeyPublic"),
           PathSettingType::File,
           onChange,
-          nulloptReset(sshKey, onChange)
+          nulloptReset(sshKeyPublic, onChange)
+      }
+    , sshKeyPrivate{
+          language->getObserved("settings", "sessionSettings", "sshKeyPrivate"),
+          PathSettingType::File,
+          onChange,
+          nulloptReset(sshKeyPrivate, onChange)
       }
     , openSftpByDefault{
           language->getObserved("settings", "sessionSettings", "openSftpByDefault"),
@@ -40,7 +46,8 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
     state.host = host.value();
     state.port = port.value();
     state.user = user.value();
-    state.sshKey = sshKey.value();
+    state.sshKeyPublic = sshKeyPublic.value();
+    state.sshKeyPrivate = sshKeyPrivate.value();
     state.openSftpByDefault = openSftpByDefault.value();
     sshOptions.applyToState(state.sshOptions.value());
     sftpOptions.applyToState(state.sftpOptions.value());
@@ -54,7 +61,8 @@ void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& stat
     host.value(state.host);
     port.value(state.port);
     user.value(state.user);
-    sshKey.value(state.sshKey);
+    sshKeyPublic.value(state.sshKeyPublic);
+    sshKeyPrivate.value(state.sshKeyPrivate);
     openSftpByDefault.value(state.openSftpByDefault);
     sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
     sftpOptions.loadFromState(state.sftpOptions.value(), loadRefs);

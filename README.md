@@ -29,8 +29,11 @@ Still under construction :construction:
 
 ## SSH
 - [x] Keyboard interactive password auth.
-- [ ] Key auth.
-- [ ] SSH agent support linux.
+- [x] Key auth.
+- [x] Key auth with passphrase.
+- [x] Automatic key auth via SSH directory.
+- [x] Password auth.
+- [x] SSH agent support linux.
 - [ ] SSH agent support windows?
 - [ ] GSSAPI auth?
 - [ ] KeypassXc database integration?

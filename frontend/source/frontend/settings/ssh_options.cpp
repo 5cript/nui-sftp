@@ -6,114 +6,119 @@
 
 SshOptions::SshOptions(std::function<void()> const& onChange)
     : sshDirectory{
-            language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
-            PathSettingType::Directory,
-            onChange,
-            nulloptReset(sshDirectory, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
+        PathSettingType::Directory,
+        onChange,
+        nulloptReset(sshDirectory, onChange),
+    }
     , knownHostsFile{
-            language->getObserved("settings", "sshOptions", "knownHostsFileHelpText"),
-            PathSettingType::File,
-            onChange,
-            nulloptReset(knownHostsFile, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "knownHostsFileHelpText"),
+        PathSettingType::File,
+        onChange,
+        nulloptReset(knownHostsFile, onChange),
+    }
     , tryAgentForAuthentication{
-            language->getObserved("settings", "sshOptions", "tryAgentForAuthenticationHelpText"),
-            onChange,
-            nulloptReset(tryAgentForAuthentication, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "tryAgentForAuthenticationHelpText"),
+        onChange,
+        nulloptReset(tryAgentForAuthentication, onChange),
+    }
     , usePublicKeyAutoAuth{
-            language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuthHelpText"),
-            onChange,
-            nulloptReset(usePublicKeyAutoAuth, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuthHelpText"),
+        onChange,
+        nulloptReset(usePublicKeyAutoAuth, onChange),
+    }
     , usePasswordAuth{
-            language->getObserved("settings", "sshOptions", "usePasswordAuthHelpText"),
-            onChange,
-            nulloptReset(usePasswordAuth, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "usePasswordAuthHelpText"),
+        onChange,
+        nulloptReset(usePasswordAuth, onChange),
+    }
     , logVerbosity{
-            language->getObserved("settings", "sshOptions", "logVerbosityHelpText"),
-            onChange,
-            nulloptReset(logVerbosity, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "logVerbosityHelpText"),
+        onChange,
+        nulloptReset(logVerbosity, onChange),
+    }
     , keyExchangeAlgorithms{
-            language->getObserved("settings", "sshOptions", "keyExchangeAlgorithmsHelpText"),
-            onChange,
-            nulloptReset(keyExchangeAlgorithms, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "keyExchangeAlgorithmsHelpText"),
+        onChange,
+        nulloptReset(keyExchangeAlgorithms, onChange),
+    }
     , compressionClientToServer{
-            language->getObserved("settings", "sshOptions", "compressionClientToServerHelpText"),
-            onChange,
-            nulloptReset(compressionClientToServer, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "compressionClientToServerHelpText"),
+        onChange,
+        nulloptReset(compressionClientToServer, onChange),
+    }
     , compressionServerToClient{
-            language->getObserved("settings", "sshOptions", "compressionServerToClientHelpText"),
-            onChange,
-            nulloptReset(compressionServerToClient, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "compressionServerToClientHelpText"),
+        onChange,
+        nulloptReset(compressionServerToClient, onChange),
+    }
     , compressionLevel{
-            language->getObserved("settings", "sshOptions", "compressionLevelHelpText"),
-            onChange,
-            nulloptReset(compressionLevel, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "compressionLevelHelpText"),
+        onChange,
+        nulloptReset(compressionLevel, onChange),
+    }
     , strictHostKeyCheck{
-            language->getObserved("settings", "sshOptions", "strictHostKeyCheckHelpText"),
-            onChange,
-            nulloptReset(strictHostKeyCheck, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "strictHostKeyCheckHelpText"),
+        onChange,
+        nulloptReset(strictHostKeyCheck, onChange),
+    }
     , proxyCommand{
-            language->getObserved("settings", "sshOptions", "proxyCommandHelpText"),
-            onChange,
-            nulloptReset(proxyCommand, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "proxyCommandHelpText"),
+        onChange,
+        nulloptReset(proxyCommand, onChange),
+    }
     , gssapiServerIdentity{
-            language->getObserved("settings", "sshOptions", "gssapiServerIdentityHelpText"),
-            onChange,
-            nulloptReset(gssapiServerIdentity, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "gssapiServerIdentityHelpText"),
+        onChange,
+        nulloptReset(gssapiServerIdentity, onChange),
+    }
     , gssapiClientIdentity{
-            language->getObserved("settings", "sshOptions", "gssapiClientIdentityHelpText"),
-            onChange,
-            nulloptReset(gssapiClientIdentity, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "gssapiClientIdentityHelpText"),
+        onChange,
+        nulloptReset(gssapiClientIdentity, onChange),
+    }
     , gssapiDelegateCredentials{
-            language->getObserved("settings", "sshOptions", "gssapiDelegateCredentialsHelpText"),
-            onChange,
-            nulloptReset(gssapiDelegateCredentials, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "gssapiDelegateCredentialsHelpText"),
+        onChange,
+        nulloptReset(gssapiDelegateCredentials, onChange),
+    }
     , noDelay{
-            language->getObserved("settings", "sshOptions", "noDelayHelpText"),
-            onChange,
-            nulloptReset(noDelay, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "noDelayHelpText"),
+        onChange,
+        nulloptReset(noDelay, onChange),
+    }
     , bypassConfig{
-            language->getObserved("settings", "sshOptions", "bypassConfigHelpText"),
-            onChange,
-            nulloptReset(bypassConfig, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "bypassConfigHelpText"),
+        onChange,
+        nulloptReset(bypassConfig, onChange),
+    }
     , identityAgent{
-            language->getObserved("settings", "sshOptions", "identityAgentHelpText"),
-            PathSettingType::File,
-            onChange,
-            nulloptReset(identityAgent, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "identityAgentHelpText"),
+        PathSettingType::File,
+        onChange,
+        nulloptReset(identityAgent, onChange),
+    }
     , connectTimeoutSeconds{
-            language->getObserved("settings", "sshOptions", "connectTimeoutSecondsHelpText"),
-            onChange,
-            nulloptReset(connectTimeoutSeconds, onChange),
-        }
+        language->getObserved("settings", "sshOptions", "connectTimeoutSecondsHelpText"),
+        onChange,
+        nulloptReset(connectTimeoutSeconds, onChange),
+    }
     , connectTimeoutUSeconds{
-            language->getObserved("settings", "sshOptions", "connectTimeoutUSecondsHelpText"),
-            onChange,
-            nulloptReset(connectTimeoutUSeconds, onChange)
+        language->getObserved("settings", "sshOptions", "connectTimeoutUSecondsHelpText"),
+        onChange,
+        nulloptReset(connectTimeoutUSeconds, onChange)
     },
     environment{
-            language->getObserved("settings", "sshOptions", "environmentHelpText"),
-            onChange,
-            nulloptReset(environment, onChange)
-     },
-     onChange_{onChange}
+        language->getObserved("settings", "sshOptions", "environmentHelpText"),
+        onChange,
+        nulloptReset(environment, onChange)
+    },
+    identities {
+        language->getObserved("settings", "sshOptions", "identitiesHelpText"),
+        onChange,
+        nulloptReset(identities, onChange)
+    },
+    onChange_{onChange}
 {}
 
 void SshOptions::applyToState(Persistence::SshOptions& state) const
@@ -139,6 +144,7 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
     state.connectTimeoutSeconds = connectTimeoutSeconds.value();
     state.connectTimeoutUSeconds = connectTimeoutUSeconds.value();
     state.environment = environment.value();
+    state.identities = identities.value();
 }
 
 void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
@@ -164,6 +170,7 @@ void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
     connectTimeoutSeconds.value(state.connectTimeoutSeconds);
     connectTimeoutUSeconds.value(state.connectTimeoutUSeconds);
     environment.value(state.environment);
+    identities.value(state.identities);
 }
 
 void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
@@ -189,6 +196,7 @@ void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
     connectTimeoutSeconds.inherit(state.connectTimeoutSeconds);
     connectTimeoutUSeconds.inherit(state.connectTimeoutUSeconds);
     environment.inherit(state.environment);
+    identities.inherit(state.identities);
 }
 
 Nui::ElementRenderer SshOptions::render()
@@ -215,6 +223,8 @@ Nui::ElementRenderer SshOptions::render()
         bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
         identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
         connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
-        connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds"))
+        connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds")),
+        environment(language->getObserved("settings", "sshOptions", "environment")),
+        identities(language->getObserved("settings", "sshOptions", "identities"))
     );
 }

@@ -47,7 +47,8 @@ namespace Persistence
         std::optional<std::string> user{std::nullopt};
         // TODO: Remove again. This was only for testing!
         std::optional<std::string> passwordUnsafe{std::nullopt};
-        std::optional<std::filesystem::path> sshKey{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
         bool openSftpByDefault{true};
 
         // Referenceables:
@@ -57,7 +58,7 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         SshSessionOptions,
         (),
-        (sshOptions, sftpOptions, host, port, user, passwordUnsafe, sshKey, openSftpByDefault)
+        (sshOptions, sftpOptions, host, port, user, passwordUnsafe, sshKeyPrivate, sshKeyPublic, openSftpByDefault)
     )
 
     struct SessionOptions : public DefaultMissingMember
