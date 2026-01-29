@@ -106,10 +106,14 @@ namespace SharedData
         }
 
         template <typename ObjT, typename T>
-        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::optional<T>& value)
+        void from_json_impl(ObjT& obj, nlohmann::json const& outerJ, nlohmann::json const& j, std::optional<T>& value)
         {
             if (!j.is_null())
-                value = j.get<T>();
+            {
+                T val;
+                from_json_impl(obj, outerJ, j, val);
+                value = std::move(val);
+            }
             else
                 value = std::nullopt;
         }

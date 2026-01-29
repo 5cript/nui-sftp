@@ -53,22 +53,29 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 if (ec)
                 {
                     Log::error(
-                        "BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message());
+                        "BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message()
+                    );
                     return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
                         .type = ErrorType::CannotCreateDirectory,
-                        .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())});
+                        .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())
+                    });
                 }
+                auto result = applyPermsToDirectory(path, entry);
+                if (!result.has_value())
+                    return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
             }
             else
             {
                 Log::error("BulkDownloadOperation: First entry is not a directory: {}.", entry.path.string());
                 return enterErrorState<BulkDownloadOperation::WorkStatus>(
-                    Error{.type = ErrorType::ImplementationError, .extraInfo = "First entry must be a directory."});
+                    Error{.type = ErrorType::ImplementationError, .extraInfo = "First entry must be a directory."}
+                );
             }
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_);
+                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_
+            );
             return WorkStatus::MoreWork;
         }
         case (Preparing):
@@ -88,7 +95,8 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 Log::error("BulkDownloadOperation: Current index out of range.");
                 return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
                     .type = ErrorType::ImplementationError,
-                    .extraInfo = "Bulk download index is beyond the item count, which should never occur."});
+                    .extraInfo = "Bulk download index is beyond the item count, which should never occur."
+                });
             }
 
             auto const& entry = entries_[currentIndex_];
@@ -101,14 +109,20 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 if (ec)
                 {
                     Log::error(
-                        "BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message());
+                        "BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message()
+                    );
                     return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
                         .type = ErrorType::CannotCreateDirectory,
-                        .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())});
+                        .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())
+                    });
                 }
+                auto result = applyPermsToDirectory(path, entry);
+                if (!result.has_value())
+                    return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
                 ++currentIndex_;
                 options_.overallProgressCallback(
-                    path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_);
+                    path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_
+                );
             }
             else if (entry.isRegularFile())
             {
@@ -117,25 +131,29 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     const auto remoteFullPath = SharedData::fullPath(entries_, entry);
 
                     auto fut = sftp_->openFile(
-                        remoteFullPath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown);
+                        remoteFullPath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
+                    );
 
                     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
                     {
                         Log::error("BulkDownloadOperation: Failed to open remote sftp file: timeout.");
                         return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
                             .type = ErrorType::FutureTimeout,
-                            .extraInfo = fmt::format("Timeout opening remote file: {}", entry.path.string())});
+                            .extraInfo = fmt::format("Timeout opening remote file: {}", entry.path.string())
+                        });
                     }
 
                     const auto openResult = fut.get();
                     if (!openResult.has_value())
                     {
                         Log::error(
-                            "BulkDownloadOperation: Failed to open remote sftp file: {}.", openResult.error().message);
+                            "BulkDownloadOperation: Failed to open remote sftp file: {}.", openResult.error().message
+                        );
                         return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
                             .type = ErrorType::SftpError,
                             .sftpError = openResult.error(),
-                            .extraInfo = fmt::format("Opening remote file: {}", entry.path.string())});
+                            .extraInfo = fmt::format("Opening remote file: {}", entry.path.string())
+                        });
                     }
 
                     auto downloadOptions = options_.individualOptions;
@@ -143,20 +161,16 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     downloadOptions.localPath = fullLocalPath(entry);
 
                     downloadOptions.progressCallback =
-                        [this, operationId = this->id(), remoteFullPath](auto min, auto max, auto current) {
-                            // Update current bytes
-                            currentBytes_ += (current - min);
+                        [this, operationId = this->id(), remoteFullPath](auto min, auto max, auto current)
+                    {
+                        // Update current bytes
+                        currentBytes_ += (current - min);
 
-                            // Call overall progress callback
-                            options_.overallProgressCallback(
-                                remoteFullPath,
-                                currentIndex_,
-                                entries_.size() - 1,
-                                current,
-                                max,
-                                currentBytes_,
-                                totalBytes_);
-                        };
+                        // Call overall progress callback
+                        options_.overallProgressCallback(
+                            remoteFullPath, currentIndex_, entries_.size() - 1, current, max, currentBytes_, totalBytes_
+                        );
+                    };
 
                     currentDownload_ =
                         std::make_unique<DownloadOperation>(std::move(openResult).value(), downloadOptions);
@@ -171,7 +185,8 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 // TODO: handle symlink
                 Log::warn(
                     "BulkDownloadOperation: Symlinks are not yet supported for entry: {}.",
-                    fullLocalPath(entry).string());
+                    fullLocalPath(entry).string()
+                );
 
                 // Under linux:
                 // - symlinks that are within the downloaded structure shall be downloaded
@@ -187,7 +202,8 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
             {
                 Log::warn(
                     "BulkDownloadOperation: Skipping unsupported file type for entry: {}.",
-                    fullLocalPath(entry).string());
+                    fullLocalPath(entry).string()
+                );
                 ++currentIndex_;
             }
             return WorkStatus::MoreWork;
@@ -217,6 +233,44 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
     }
 }
 
+std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPermsToDirectory(
+    std::filesystem::path const& path,
+    SharedData::DirectoryEntry const& entryToInheritFrom
+)
+{
+    std::optional<std::filesystem::perms> toApplyPerms{std::nullopt};
+    if (options_.individualOptions.inheritPermissions)
+    {
+        toApplyPerms = entryToInheritFrom.permissions;
+    }
+    else if (options_.individualOptions.directoryPermissions)
+    {
+        toApplyPerms = options_.individualOptions.directoryPermissions;
+    }
+
+    if (toApplyPerms)
+    {
+        std::error_code ec;
+        std::filesystem::permissions(path, *toApplyPerms, ec);
+        if (ec)
+        {
+            Log::error(
+                "BulkDownloadOperation: Failed to set permissions on local directory: {}: {}",
+                path.string(),
+                ec.message()
+            );
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::CannotSetFilePermissions,
+                    .extraInfo =
+                        fmt::format("Setting permissions on local directory: {}: {}", path.string(), ec.message())
+                }
+            );
+        }
+    }
+    return {};
+}
+
 std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> BulkDownloadOperation::workCurrentFile()
 {
     auto result = currentDownload_->work();
@@ -226,7 +280,8 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
         Log::error(
             "BulkDownloadOperation: Download failed for file: {}: {}",
             fullLocalPath(entry).string(),
-            result.error().toString());
+            result.error().toString()
+        );
         return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
     }
     else if (result.value() == WorkStatus::Complete)

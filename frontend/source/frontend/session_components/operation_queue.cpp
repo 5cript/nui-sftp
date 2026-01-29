@@ -7,7 +7,9 @@
 #include <frontend/session_components/operation_queue/displayed_download_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_upload_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_scan_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_local_scan_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_bulk_download_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_bulk_upload_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_custom_action.hpp>
 
@@ -228,6 +230,16 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onUploadProgress", impl_->sessionId.value()),
+            [this](SharedData::UploadProgress const& progress)
+            {
+                onUploadProgress(progress);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onBulkDownloadProgress", impl_->sessionId.value()),
             [this](SharedData::BulkDownloadProgress const& progress)
             {
@@ -238,7 +250,27 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onBulkUploadProgress", impl_->sessionId.value()),
+            [this](SharedData::BulkUploadProgress const& progress)
+            {
+                onBulkUploadProgress(progress);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onScanProgress", impl_->sessionId.value()),
+            [this](SharedData::ScanProgress const& progress)
+            {
+                onScanProgress(progress);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onLocalScanProgress", impl_->sessionId.value()),
             [this](SharedData::ScanProgress const& progress)
             {
                 onScanProgress(progress);
@@ -332,12 +364,42 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean
             );
         }
+        else if (added.type == SharedData::OperationType::LocalScan)
+        {
+            if (!added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for operation id: {} without remotePath", added.operationId.value()
+                );
+                return {};
+            }
+            return std::make_unique<DisplayedLocalScanOperation>(
+                added.operationId,
+                [this](OperationCard<DisplayedLocalScanOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean
+            );
+        }
         else if (added.type == SharedData::OperationType::BulkDownload)
         {
             Log::info("Creating bulk download operation card for operation id: {}", added.operationId.value());
             return std::make_unique<DisplayedBulkDownloadOperation>(
                 added.operationId,
                 [this](OperationCard<DisplayedBulkDownloadOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean
+            );
+        }
+        else if (added.type == SharedData::OperationType::BulkUpload)
+        {
+            Log::info("Creating bulk upload operation card for operation id: {}", added.operationId.value());
+            return std::make_unique<DisplayedBulkUploadOperation>(
+                added.operationId,
+                [this](OperationCard<DisplayedBulkUploadOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -364,7 +426,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         impl_->operations.insert(added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)});
         if (added.insertRefresh)
         {
-            if (added.type == SharedData::OperationType::Download)
+            if (added.type == SharedData::OperationType::Download ||
+                added.type == SharedData::OperationType::BulkDownload)
             {
                 addCustomActionOperation(
                     [this]()
@@ -373,7 +436,9 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     }
                 );
             }
-            else if (added.type == SharedData::OperationType::Upload)
+            else if (
+                added.type == SharedData::OperationType::Upload || added.type == SharedData::OperationType::BulkUpload
+            )
             {
                 addCustomActionOperation(
                     [this]()
@@ -419,12 +484,12 @@ void OperationQueue::addCustomActionOperation(std::function<void()> action)
 
 void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& progress)
 {
-    Log::debug(
-        "Received download progress for operation id: {} - {}/{}",
-        progress.operationId.value(),
-        progress.current - progress.min,
-        progress.max - progress.min
-    );
+    // Log::debug(
+    //     "Received download progress for operation id: {} - {}/{}",
+    //     progress.operationId.value(),
+    //     progress.current - progress.min,
+    //     progress.max - progress.min
+    // );
 
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -453,14 +518,13 @@ void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& prog
 
 void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
 {
-
-    Log::debug(
-        "Received scan progress for operation id: {} - totalBytes: {}, currentIndex: {}, totalItems: {}",
-        progress.operationId.value(),
-        progress.totalBytes,
-        progress.currentIndex,
-        progress.totalScanned
-    );
+    // Log::debug(
+    //     "Received scan progress for operation id: {} - totalBytes: {}, currentIndex: {}, totalItems: {}",
+    //     progress.operationId.value(),
+    //     progress.totalBytes,
+    //     progress.currentIndex,
+    //     progress.totalScanned
+    // );
 
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -468,25 +532,41 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
         Log::error("Received scan progress for unknown operation id: {}", progress.operationId.value());
         return;
     }
-    if (operation->type() != SharedData::OperationType::Scan)
+    if (operation->type() == SharedData::OperationType::Scan)
+    {
+        auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
+        if (!renderer)
+        {
+            Log::error(
+                "Received scan progress for operation id: {} which has no scan renderer", progress.operationId.value()
+            );
+            return;
+        }
+        renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+        return;
+    }
+    else if (operation->type() == SharedData::OperationType::LocalScan)
+    {
+        auto* renderer = operation->getCardSpecifically<DisplayedLocalScanOperation>();
+        if (!renderer)
+        {
+            Log::error(
+                "Received scan progress for operation id: {} which has no scan renderer", progress.operationId.value()
+            );
+            return;
+        }
+        renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+    }
+    else
     {
         Log::error("Received scan progress for operation id: {} which is not a scan", progress.operationId.value());
         return;
     }
-    auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
-    if (!renderer)
-    {
-        Log::error(
-            "Received scan progress for operation id: {} which has no scan renderer", progress.operationId.value()
-        );
-        return;
-    }
-    renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
 }
 
 void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress const& progress)
 {
-    Log::debug("Received bulk download progress for operation id: {}.", progress.operationId.value());
+    // Log::debug("Received bulk download progress for operation id: {}.", progress.operationId.value());
 
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -507,6 +587,69 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress con
     {
         Log::error(
             "Received bulk download progress for operation id: {} which has no bulk download renderer",
+            progress.operationId.value()
+        );
+        return;
+    }
+    renderer->setProgress(progress);
+}
+
+void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress)
+{
+    Log::debug(
+        "Received upload progress for operation id: {} - {}/{}",
+        progress.operationId.value(),
+        progress.current - progress.min,
+        progress.max - progress.min
+    );
+
+    auto* operation = impl_->operations.at(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received upload progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::Upload)
+    {
+        Log::error(
+            "Received upload progress for operation id: {} which is not an upload", progress.operationId.value()
+        );
+        return;
+    }
+    auto* renderer = operation->getCardSpecifically<DisplayedUploadOperation>();
+    if (!renderer)
+    {
+        Log::error(
+            "Received upload progress for operation id: {} which has no upload renderer", progress.operationId.value()
+        );
+        return;
+    }
+    renderer->setProgress(progress.current - progress.min);
+}
+
+void OperationQueue::onBulkUploadProgress(SharedData::BulkUploadProgress const& progress)
+{
+    // Log::debug("Received bulk upload progress for operation id: {}.", progress.operationId.value());
+
+    auto* operation = impl_->operations.at(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received bulk upload progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::BulkUpload)
+    {
+        Log::error(
+            "Received bulk upload progress for operation id: {} which is not a bulk upload",
+            progress.operationId.value()
+        );
+        return;
+    }
+    auto* renderer = operation->getCardSpecifically<DisplayedBulkUploadOperation>();
+    if (!renderer)
+    {
+        Log::error(
+            "Received bulk upload progress for operation id: {} which has no bulk upload renderer",
             progress.operationId.value()
         );
         return;

@@ -52,15 +52,20 @@ Still under construction :construction:
 - [x] Create directory.
 - [x] Pause/Continue operations.
 - [x] Cancel operations.
+- [x] Bulk uploads.
 - [ ] Implement handling of symlinks in bulk downloads.
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
 - [ ] Implement bulk download to archives.
-- [ ] Bulk uploads.
 - [ ] Show file properties.
 - [ ] Optimize download speed.
 - [ ] Optimize upload speed.
+- [ ] Recursive folder delete.
+- [ ] Error message on delete fail.
+- [ ] Delete confirm focus default "ok".
+- [ ] Fix progress bars of Upload & Bulk Upload
+- [ ] Fix (local) scan reported file amount.
 
 ## File View UI
 - [x] Grid view.

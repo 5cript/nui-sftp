@@ -34,19 +34,34 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             onChange,
             nulloptReset(downloadOptions.inheritPermissions, onChange),
         },
-        .customPermissions{
+        .customFilePermissions{
             language->getObserved(
                 "settings",
                 "sftpOptions",
                 "downloadOptions",
-                "customPermissionsHelpText"
+                "customFilePermissionsHelpText"
             ),
             onChange,
-            nulloptReset(downloadOptions.customPermissions, onChange),
+            nulloptReset(downloadOptions.customFilePermissions, onChange),
             {
                 .minValue = 0,
                 .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
-                .numberBase = decltype(SftpOptions::DownloadOptions::customPermissions)::NumberBase::Octal,
+                .numberBase = decltype(SftpOptions::DownloadOptions::customFilePermissions)::NumberBase::Octal,
+            }
+        },
+        .customDirectoryPermissions{
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "downloadOptions",
+                "customDirectoryPermissionsHelpText"
+            ),
+            onChange,
+            nulloptReset(downloadOptions.customDirectoryPermissions, onChange),
+            {
+                .minValue = 0,
+                .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
+                .numberBase = decltype(SftpOptions::DownloadOptions::customDirectoryPermissions)::NumberBase::Octal,
             }
         },
         .reserveSpace{
@@ -91,19 +106,34 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             onChange,
             nulloptReset(uploadOptions.inheritPermissions, onChange),
         },
-        .customPermissions{
+        .customFilePermissions{
             language->getObserved(
                 "settings",
                 "sftpOptions",
                 "uploadOptions",
-                "customPermissionsHelpText"
+                "customFilePermissionsHelpText"
             ),
             onChange,
-            nulloptReset(uploadOptions.customPermissions, onChange),
+            nulloptReset(uploadOptions.customFilePermissions, onChange),
             {
                 .minValue = 0,
                 .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
-                .numberBase = decltype(SftpOptions::UploadOptions::customPermissions)::NumberBase::Octal,
+                .numberBase = decltype(SftpOptions::UploadOptions::customFilePermissions)::NumberBase::Octal,
+            }
+        },
+        .customDirectoryPermissions{
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "uploadOptions",
+                "customDirectoryPermissionsHelpText"
+            ),
+            onChange,
+            nulloptReset(uploadOptions.customDirectoryPermissions, onChange),
+            {
+                .minValue = 0,
+                .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
+                .numberBase = decltype(SftpOptions::UploadOptions::customDirectoryPermissions)::NumberBase::Octal,
             }
         }
     }
@@ -131,7 +161,7 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
         },
         {
             .minValue = 1,
-            .maxValue = 600,
+            .maxValue = 60000,
         }
     },
     onChange_{onChange}
@@ -149,7 +179,10 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                 .mayOverwrite = downloadOptions.mayOverwrite.value(),
                 .tryContinue = downloadOptions.tryContinue.value(),
                 .inheritPermissions = downloadOptions.inheritPermissions.value(),
-                .customPermissions = uShortOptionalToFilesystemPermsOptional(downloadOptions.customPermissions.value()),
+                .customFilePermissions =
+                    uShortOptionalToFilesystemPermsOptional(downloadOptions.customFilePermissions.value()),
+                .customDirectoryPermissions =
+                    uShortOptionalToFilesystemPermsOptional(downloadOptions.customDirectoryPermissions.value()),
             },
             .reserveSpace = downloadOptions.reserveSpace.value(),
             .doCleanup = downloadOptions.doCleanup.value(),
@@ -164,12 +197,17 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
             .mayOverwrite = uploadOptions.mayOverwrite.value(),
             .tryContinue = uploadOptions.tryContinue.value(),
             .inheritPermissions = uploadOptions.inheritPermissions.value(),
-            .customPermissions = uShortOptionalToFilesystemPermsOptional(uploadOptions.customPermissions.value()),
+            .customFilePermissions =
+                uShortOptionalToFilesystemPermsOptional(uploadOptions.customFilePermissions.value()),
+            .customDirectoryPermissions =
+                uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value()),
         }};
     }
 
     state.concurrency = concurrency.value();
-    state.operationTimeout = std::chrono::seconds{operationTimeoutSeconds.value()};
+    auto timeout = operationTimeoutSeconds.value();
+    state.operationTimeout =
+        timeout.has_value() ? std::chrono::seconds{timeout.value()} : std::optional<std::chrono::seconds>{std::nullopt};
     state.defaultDirectory = defaultDirectory.value();
 }
 
@@ -182,8 +220,11 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         downloadOptions.mayOverwrite.value(state.downloadOptions->mayOverwrite);
         downloadOptions.tryContinue.value(state.downloadOptions->tryContinue);
         downloadOptions.inheritPermissions.value(state.downloadOptions->inheritPermissions);
-        downloadOptions.customPermissions.value(
-            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customPermissions)
+        downloadOptions.customFilePermissions.value(
+            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customFilePermissions)
+        );
+        downloadOptions.customDirectoryPermissions.value(
+            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customDirectoryPermissions)
         );
         downloadOptions.reserveSpace.value(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.value(state.downloadOptions->doCleanup);
@@ -196,7 +237,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         downloadOptions.mayOverwrite.value(std::nullopt);
         downloadOptions.tryContinue.value(std::nullopt);
         downloadOptions.inheritPermissions.value(std::nullopt);
-        downloadOptions.customPermissions.value(std::nullopt);
+        downloadOptions.customFilePermissions.value(std::nullopt);
+        downloadOptions.customDirectoryPermissions.value(std::nullopt);
         downloadOptions.reserveSpace.value(std::nullopt);
         downloadOptions.doCleanup.value(std::nullopt);
     }
@@ -209,7 +251,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.mayOverwrite.value(std::nullopt);
         uploadOptions.tryContinue.value(std::nullopt);
         uploadOptions.inheritPermissions.value(std::nullopt);
-        uploadOptions.customPermissions.value(std::nullopt);
+        uploadOptions.customFilePermissions.value(std::nullopt);
+        uploadOptions.customDirectoryPermissions.value(std::nullopt);
     }
     else
     {
@@ -218,13 +261,18 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.mayOverwrite.value(state.uploadOptions->mayOverwrite);
         uploadOptions.tryContinue.value(state.uploadOptions->tryContinue);
         uploadOptions.inheritPermissions.value(state.uploadOptions->inheritPermissions);
-        uploadOptions.customPermissions.value(
-            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customPermissions)
+        uploadOptions.customFilePermissions.value(
+            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customFilePermissions)
+        );
+        uploadOptions.customDirectoryPermissions.value(
+            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
     }
 
     concurrency.value(state.concurrency);
-    operationTimeoutSeconds.value(state.operationTimeout.count());
+    operationTimeoutSeconds.value(
+        state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
+    );
     defaultDirectory.value(state.defaultDirectory);
 }
 
@@ -236,8 +284,11 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         downloadOptions.mayOverwrite.inherit(state.downloadOptions->mayOverwrite);
         downloadOptions.tryContinue.inherit(state.downloadOptions->tryContinue);
         downloadOptions.inheritPermissions.inherit(state.downloadOptions->inheritPermissions);
-        downloadOptions.customPermissions.inherit(
-            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customPermissions)
+        downloadOptions.customFilePermissions.inherit(
+            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customFilePermissions)
+        );
+        downloadOptions.customDirectoryPermissions.inherit(
+            filesystemPermsOptionalToUShortOptional(state.downloadOptions->customDirectoryPermissions)
         );
         downloadOptions.reserveSpace.inherit(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.inherit(state.downloadOptions->doCleanup);
@@ -248,7 +299,8 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         downloadOptions.mayOverwrite.inherit(std::nullopt);
         downloadOptions.tryContinue.inherit(std::nullopt);
         downloadOptions.inheritPermissions.inherit(std::nullopt);
-        downloadOptions.customPermissions.inherit(std::nullopt);
+        downloadOptions.customFilePermissions.inherit(std::nullopt);
+        downloadOptions.customDirectoryPermissions.inherit(std::nullopt);
         downloadOptions.reserveSpace.inherit(std::nullopt);
         downloadOptions.doCleanup.inherit(std::nullopt);
     }
@@ -259,8 +311,11 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.mayOverwrite.inherit(state.uploadOptions->mayOverwrite);
         uploadOptions.tryContinue.inherit(state.uploadOptions->tryContinue);
         uploadOptions.inheritPermissions.inherit(state.uploadOptions->inheritPermissions);
-        uploadOptions.customPermissions.inherit(
-            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customPermissions)
+        uploadOptions.customFilePermissions.inherit(
+            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customFilePermissions)
+        );
+        uploadOptions.customDirectoryPermissions.inherit(
+            filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
     }
     else
@@ -269,11 +324,15 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.mayOverwrite.inherit(std::nullopt);
         uploadOptions.tryContinue.inherit(std::nullopt);
         uploadOptions.inheritPermissions.inherit(std::nullopt);
-        uploadOptions.customPermissions.inherit(std::nullopt);
+        uploadOptions.customFilePermissions.inherit(std::nullopt);
+        uploadOptions.customDirectoryPermissions.inherit(std::nullopt);
     }
 
     concurrency.inherit(state.concurrency);
     defaultDirectory.inherit(state.defaultDirectory);
+    operationTimeoutSeconds.inherit(
+        state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
+    );
 }
 
 Nui::ElementRenderer SftpOptions::render()
@@ -298,8 +357,11 @@ Nui::ElementRenderer SftpOptions::render()
                 downloadOptions.inheritPermissions(
                     language->getObserved("settings", "sftpOptions", "downloadOptions", "inheritPermissions")
                 ),
-                downloadOptions.customPermissions(
-                    language->getObserved("settings", "sftpOptions", "downloadOptions", "customPermissions")
+                downloadOptions.customFilePermissions(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "customFilePermissions")
+                ),
+                downloadOptions.customDirectoryPermissions(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "customDirectoryPermissions")
                 ),
                 downloadOptions.reserveSpace(
                     language->getObserved("settings", "sftpOptions", "downloadOptions", "reserveSpace")
@@ -326,8 +388,11 @@ Nui::ElementRenderer SftpOptions::render()
                 uploadOptions.inheritPermissions(
                     language->getObserved("settings", "sftpOptions", "uploadOptions", "inheritPermissions")
                 ),
-                uploadOptions.customPermissions(
-                    language->getObserved("settings", "sftpOptions", "uploadOptions", "customPermissions")
+                uploadOptions.customFilePermissions(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "customFilePermissions")
+                ),
+                uploadOptions.customDirectoryPermissions(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "customDirectoryPermissions")
                 )
             )
         ),

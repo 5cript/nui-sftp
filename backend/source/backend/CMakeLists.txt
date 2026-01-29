@@ -13,7 +13,9 @@ add_library(
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
         sftp/scan_operation.cpp
+        sftp/local_scan_operation.cpp
         sftp/bulk_download_operation.cpp
+        sftp/bulk_upload_operation.cpp
 )
 
 if (WIN32)

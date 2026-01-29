@@ -25,8 +25,6 @@
 #include <utility/visit_overloaded.hpp>
 #include <utility/format_bytes.hpp>
 
-#include <variant>
-#include <map>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -114,11 +112,11 @@ class OperationCard : public OperationCardInterface
                 }(
                     observe(state_),
                     [this]() -> Nui::ElementRenderer {
-                        if (type_ == SharedData::OperationType::Download)
+                        if (type_ == SharedData::OperationType::Download || type_ == SharedData::OperationType::BulkDownload)
                             return Svgs::download();
-                        else if (type_ == SharedData::OperationType::Upload)
+                        else if (type_ == SharedData::OperationType::Upload || type_ == SharedData::OperationType::BulkUpload)
                             return Svgs::upload();
-                        else if (type_ == SharedData::OperationType::Scan)
+                        else if (type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan)
                         {
                             if (isCompletedState())
                                 return Svgs::scan();
