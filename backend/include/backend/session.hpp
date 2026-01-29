@@ -42,7 +42,7 @@ class Session
     Session& operator=(const Session&) = delete;
     Session(Session&&) = delete;
     Session& operator=(Session&&) = delete;
-    ~Session() = default;
+    ~Session();
 
     void start();
     void stop();
@@ -233,8 +233,8 @@ class Session
     bool queueThrottleTimerIsRunning_{false};
     int unthrottledLimitCounter_{0};
     std::unique_ptr<SecureShell::Session> session_{};
+    std::shared_ptr<OperationQueue> operationQueue_;
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
-    std::shared_ptr<OperationQueue> operationQueue_;
     std::function<void()> onSelfDestruct_;
 };

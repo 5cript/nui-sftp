@@ -25,6 +25,11 @@ Session::Session(
     , onSelfDestruct_{std::move(onSelfDestruct)}
 {}
 
+Session::~Session()
+{
+    stop();
+}
+
 void Session::start()
 {
     within_strand_do(
@@ -89,6 +94,9 @@ void Session::stop()
             }
 
             Log::info("Stopping session '{}'", self->id_.value());
+
+            self->operationQueue_->cancelAll();
+            self->operationQueue_.reset();
 
             // Close all channels
             for (auto& [channelId, weakChannel] : self->channels_)

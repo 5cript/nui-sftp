@@ -550,9 +550,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                         }
                     );
 
-                    Log::debug(
-                        "Uploaded {} / {} bytes ({}%)", current - min, max - min, (current - min) * 100 / (max - min)
-                    );
+                    // Log::debug(
+                    //     "Uploaded {} / {} bytes ({}%)", current - min, max - min, (current - min) * 100 / (max - min)
+                    // );
                 },
                 .remotePath = remotePath,
                 .localPath = localPath,

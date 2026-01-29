@@ -55,12 +55,10 @@ struct DisplayedBulkUploadOperation : public OperationCard<DisplayedBulkUploadOp
             currentFile = progress.currentFile;
 
         fileProgressBar_.setProgress(progress.currentFileBytes);
-        if (fileProgressBar_.max() != static_cast<long long>(progress.currentFileTotalBytes))
-            fileProgressBar_.max(static_cast<long long>(progress.currentFileTotalBytes));
+        fileProgressBar_.max(static_cast<long long>(progress.currentFileTotalBytes));
 
         totalProgressBar_.setProgress(progress.bytesCurrent);
-        if (totalProgressBar_.max() != static_cast<long long>(progress.bytesTotal))
-            totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
+        totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
 
         fileCurrentIndex = progress.fileCurrentIndex;
         fileCount = progress.fileCount;

@@ -108,6 +108,18 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     auto individualOpts = options_.individualOptions;
                     individualOpts.remotePath = fullRemotePath(entry);
                     individualOpts.localPath = fullLocalPath(entry);
+                    individualOpts.progressCallback = [this](auto, auto max, auto current)
+                    {
+                        options_.overallProgressCallback(
+                            fullRemotePath(entries_[currentIndex_]),
+                            currentIndex_,
+                            entries_.size() - 1,
+                            current,
+                            max,
+                            currentBytes_ + current,
+                            totalBytes_
+                        );
+                    };
                     currentUpload_ = std::make_unique<UploadOperation>(*sftp_, individualOpts);
                 }
                 else
@@ -246,6 +258,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
     else if (result.value() == WorkStatus::Complete)
     {
         // Upload finished
+        currentBytes_ += currentUpload_->totalSize();
         currentUpload_.reset();
         ++currentIndex_;
     }

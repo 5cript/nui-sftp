@@ -150,20 +150,22 @@ namespace Components
 
     void ProgressBar::updateText()
     {
-        impl_->text = [this,
-                       percent = percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value())]() {
+        impl_->text =
+            [this, percent = percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value())]()
+        {
             if (impl_->showMinMax)
             {
                 if (impl_->byteMode)
                 {
                     return fmt::format(
-                        "{} - {} ({})",
+                        "{} - {} ({}%)",
                         Utility::formatBytes(impl_->progress.value(), impl_->magnitude),
                         Utility::formatBytes(impl_->maxObserved.value(), impl_->magnitude),
-                        percent);
+                        percent
+                    );
                 }
                 else
-                    return fmt::format("{} / {} ({})", impl_->progress.value(), impl_->maxObserved.value(), percent);
+                    return fmt::format("{} / {} ({}%)", impl_->progress.value(), impl_->maxObserved.value(), percent);
             }
             else
                 return fmt::format("{}%", percent);
@@ -189,7 +191,11 @@ namespace Components
 
     void ProgressBar::max(long long max)
     {
-        impl_->maxObserved = max;
-        updateText();
+        if (max != impl_->maxObserved.value())
+        {
+            impl_->magnitude = Utility::determineOrderOfMagnitude(max);
+            impl_->maxObserved = max;
+            updateText();
+        }
     }
 }

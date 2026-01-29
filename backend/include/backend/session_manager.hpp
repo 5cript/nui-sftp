@@ -73,13 +73,13 @@ class SessionManager
     void removeSession(Ids::SessionId sessionId);
 
   private:
+    std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
     std::unordered_map<Ids::SessionId, std::shared_ptr<Session>, Ids::IdHash> sessions_{};
 
     std::map<int, PasswordProvider*> passwordProviders_{};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
-    std::atomic_bool updateDispatchRunning_{false};
 };
 
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);

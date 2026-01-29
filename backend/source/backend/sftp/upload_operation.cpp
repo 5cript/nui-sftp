@@ -169,6 +169,9 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
         Log::error("UploadOperation: Failed to read from remote file: {}", result.error().message);
         return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
     }
+
+    progressCallback_(0, totalSize_, totalSize_ - leftToUpload_);
+
     return leftToUpload_ > 0;
 }
 
@@ -329,6 +332,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
     localFile_.seekg(0, std::ios::end);
     leftToUpload_ = static_cast<std::size_t>(localFile_.tellg());
+    totalSize_ = leftToUpload_;
     localFile_.seekg(0, std::ios::beg);
 
     if (!localFile_.good())
@@ -345,7 +349,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     }
 
     Log::debug(
-        "UploadOperation: Prepared upload of '{}' to '{}'.", remotePath_.generic_string(), localPath_.generic_string()
+        "UploadOperation: Prepared upload of '{}' to '{}'.", localPath_.generic_string(), remotePath_.generic_string()
     );
 
     return {};
