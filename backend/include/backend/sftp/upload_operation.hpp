@@ -68,6 +68,11 @@ class UploadOperation : public Operation
         return localPath_;
     }
 
+    std::size_t totalSize() const
+    {
+        return totalSize_;
+    }
+
     std::expected<void, UploadOperation::Error> cancel(bool adoptCancelState) override;
 
     std::expected<void, Error> prepare();
@@ -97,6 +102,7 @@ class UploadOperation : public Operation
     std::optional<std::filesystem::perms> directoryPermissions_;
     std::ifstream localFile_;
     std::chrono::seconds futureTimeout_;
-    std::size_t leftToUpload_;
-    std::array<char, 8192> buffer_;
+    std::size_t leftToUpload_{0};
+    std::size_t totalSize_{0};
+    std::array<char, 8192> buffer_{};
 };

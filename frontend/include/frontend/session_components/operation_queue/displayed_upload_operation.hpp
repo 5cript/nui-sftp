@@ -2,11 +2,12 @@
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
+#include <shared_data/file_operations/upload_progress.hpp>
+
 class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
 {
   public:
     DisplayedUploadOperation(
-        long long max,
         Ids::OperationId operationId,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
@@ -22,7 +23,7 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
         , progressBar_{{
               .height = std::string{progressHeight},
               .min = 0,
-              .max = max,
+              .max = 0,
               .showMinMax = true,
               .byteMode = true,
           }}
@@ -46,9 +47,10 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
         // clang-format on
     }
 
-    void setProgress(long long current)
+    void setProgress(SharedData::UploadProgress progress)
     {
-        progressBar_.setProgress(current);
+        progressBar_.max(progress.max);
+        progressBar_.setProgress(progress.current - progress.min);
     }
 
     std::string title() const override

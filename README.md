@@ -64,8 +64,6 @@ Still under construction :construction:
 - [ ] Recursive folder delete.
 - [ ] Error message on delete fail.
 - [ ] Delete confirm focus default "ok".
-- [ ] Fix progress bars of Upload & Bulk Upload
-- [ ] Fix (local) scan reported file amount.
 
 ## File View UI
 - [x] Grid view.

@@ -335,7 +335,6 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 return {};
             }
             return std::make_unique<DisplayedUploadOperation>(
-                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
                 added.operationId,
                 *added.localPath,
                 *added.remotePath,
@@ -596,12 +595,12 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress con
 
 void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress)
 {
-    Log::debug(
-        "Received upload progress for operation id: {} - {}/{}",
-        progress.operationId.value(),
-        progress.current - progress.min,
-        progress.max - progress.min
-    );
+    // Log::debug(
+    //     "Received upload progress for operation id: {} - {}/{}",
+    //     progress.operationId.value(),
+    //     progress.current - progress.min,
+    //     progress.max - progress.min
+    // );
 
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -624,7 +623,7 @@ void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress
         );
         return;
     }
-    renderer->setProgress(progress.current - progress.min);
+    renderer->setProgress(progress);
 }
 
 void OperationQueue::onBulkUploadProgress(SharedData::BulkUploadProgress const& progress)
