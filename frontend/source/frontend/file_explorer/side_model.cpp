@@ -64,8 +64,8 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
         [this](auto const& entry)
         {
             return NuiFileExplorer::Item{
-                .path = entry.path,
-                .icon = [&entry, this]() -> std::string
+                entry,
+                [&entry, this]() -> std::string
                 {
                     const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
                     if (type == NuiFileExplorer::Item::Type::Directory)
@@ -80,15 +80,7 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
                     }
 
                     return "nui://app.example/icons/file.png";
-                }(),
-                .type = static_cast<NuiFileExplorer::Item::Type>(entry.type),
-                .permissions = entry.permissions,
-                .ownerId = entry.uid,
-                .groupId = entry.gid,
-                .owner = entry.owner,
-                .group = entry.group,
-                .atime = entry.atime,
-                .size = entry.size,
+                }()
             };
         }
     );

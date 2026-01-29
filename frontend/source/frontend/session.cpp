@@ -101,6 +101,7 @@ struct Session::Implementation
         std::optional<std::string> layoutName,
         InputDialog* inputDialog,
         ConfirmDialog* confirmDialog,
+        FilePropertyDialog* filePropertyDialog,
         std::function<void(Session const*)> closeSelf,
         std::function<std::string(std::string const&)> disambiguateTitle,
         bool visible)
@@ -119,8 +120,8 @@ struct Session::Implementation
         , fileGrid{{
               .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
          },
-            std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog),
-            std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog),
+            std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
+            std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
         }
         , fileExplorerElement{}
         , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(&fileGrid.rightModel())}
@@ -204,6 +205,7 @@ Session::Session(
     std::optional<std::string> layoutName,
     InputDialog* inputDialog,
     ConfirmDialog* confirmDialog,
+    FilePropertyDialog* filePropertyDialog,
     std::function<void(Session const*)> closeSelf,
     std::function<std::string(std::string const&)> disambiguateTitle,
     bool visible
@@ -217,6 +219,7 @@ Session::Session(
           std::move(layoutName),
           inputDialog,
           confirmDialog,
+          filePropertyDialog,
           std::move(closeSelf),
           std::move(disambiguateTitle),
           visible

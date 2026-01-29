@@ -2,6 +2,7 @@
 
 #include <frontend/file_explorer/side_model.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/terminal/file_engine.hpp>
 #include <persistence/state_holder.hpp>
@@ -12,7 +13,12 @@
 class RemoteSideModel : public SideModel
 {
   public:
-    RemoteSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog);
+    RemoteSideModel(
+        Persistence::UiOptions uiOptions,
+        ConfirmDialog* confirmDialog,
+        InputDialog* inputDialog,
+        FilePropertyDialog* filePropertyDialog
+    );
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;

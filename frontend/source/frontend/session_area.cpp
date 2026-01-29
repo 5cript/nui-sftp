@@ -21,6 +21,7 @@ struct SessionArea::Implementation
     FrontendEvents* events;
     InputDialog* newItemAskDialog;
     ConfirmDialog* confirmDialog;
+    FilePropertyDialog* filePropertyDialog;
     Toolbar* toolbar;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::Observed<std::optional<int>> selected;
@@ -30,12 +31,14 @@ struct SessionArea::Implementation
         FrontendEvents* events,
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
+        FilePropertyDialog* filePropertyDialog,
         Toolbar* toolbar
     )
         : stateHolder{stateHolder}
         , events{events}
         , newItemAskDialog{newItemAskDialog}
         , confirmDialog{confirmDialog}
+        , filePropertyDialog{filePropertyDialog}
         , toolbar{toolbar}
         , sessions{}
         , selected{std::nullopt}
@@ -58,9 +61,11 @@ SessionArea::SessionArea(
     FrontendEvents* events,
     InputDialog* newItemAskDialog,
     ConfirmDialog* confirmDialog,
+    FilePropertyDialog* filePropertyDialog,
     Toolbar* toolbar
 )
-    : impl_{std::make_unique<Implementation>(stateHolder, events, newItemAskDialog, confirmDialog, toolbar)}
+    : impl_{std::make_unique<
+          Implementation>(stateHolder, events, newItemAskDialog, confirmDialog, filePropertyDialog, toolbar)}
 {
     listen(
         events->onNewSession,
@@ -202,6 +207,7 @@ void SessionArea::addSession(std::string const& name)
                     impl_->toolbar->selectedLayout(),
                     impl_->newItemAskDialog,
                     impl_->confirmDialog,
+                    impl_->filePropertyDialog,
                     [this](Session const* ptr)
                     {
                         auto const index = std::distance(

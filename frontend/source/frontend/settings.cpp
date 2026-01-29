@@ -1011,8 +1011,8 @@ Nui::ElementRenderer Settings::generalSettings()
         );
 
         auto localization = fragment(
-            impl_->generalSettings.localization.language(language->getObserved("language")),
-            impl_->generalSettings.localization.dateTimeFormat(language->getObserved("settings", "general", "localization", "dateTimeFormatString"))
+            impl_->generalSettings.localization.language(language->getObserved("language"))//,
+            //impl_->generalSettings.localization.dateTimeFormat(language->getObserved("settings", "general", "localization", "dateTimeFormatString"))
         );
 
         auto userInterface = fragment(

@@ -20,6 +20,7 @@ struct MainPage::Implementation
     FrontendEvents* events;
     ConfirmDialog confirmDialog;
     InputDialog newItemAskDialog;
+    FilePropertyDialog filePropertyDialog;
     PasswordPrompter prompter;
     Sidebar sidebar;
     Toolbar toolbar;
@@ -33,10 +34,11 @@ struct MainPage::Implementation
         , events{events}
         , confirmDialog{"ConfirmDialog"}
         , newItemAskDialog{"AskDialog"}
+        , filePropertyDialog{"FilePropertyDialog"}
         , prompter{}
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events, &confirmDialog}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &toolbar}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         },&newItemAskDialog, &confirmDialog}
@@ -107,6 +109,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->newItemAskDialog(),
         impl_->prompter.dialog(),
         impl_->confirmDialog(),
+        impl_->filePropertyDialog(),
         impl_->settings(),
         div{
             style = "background-color: var(--sapBackgroundColor); color: var(--sapTextColor);",

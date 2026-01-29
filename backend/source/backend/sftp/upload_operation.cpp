@@ -464,11 +464,9 @@ std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms lo
             if (filePermissions_)
                 return filePermissions_.value();
             // inherit execute permissions anyway:
-            const auto ownerExecute = localPerms & std::filesystem::perms::owner_exec;
-            const auto groupExecute = localPerms & std::filesystem::perms::group_exec;
             return (
-                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | ownerExecute |
-                std::filesystem::perms::group_read | std::filesystem::perms::group_write | groupExecute
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+                std::filesystem::perms::group_read | std::filesystem::perms::group_write
             );
         }
     }();

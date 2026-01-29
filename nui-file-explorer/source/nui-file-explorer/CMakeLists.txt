@@ -25,6 +25,7 @@ target_link_libraries(
     PRIVATE
         nui-frontend
         utility
+        shared-data
         rapidfuzz::rapidfuzz
 )
 

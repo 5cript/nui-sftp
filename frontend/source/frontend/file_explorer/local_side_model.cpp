@@ -3,8 +3,13 @@
 
 #include <nui/rpc.hpp>
 
-LocalSideModel::LocalSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog)
-    : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
+LocalSideModel::LocalSideModel(
+    Persistence::UiOptions uiOptions,
+    ConfirmDialog* confirmDialog,
+    InputDialog* inputDialog,
+    FilePropertyDialog* filePropertyDialog
+)
+    : SideModel{std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog}
     , pathSuggestionCache_{
           [this](
               std::filesystem::path const& dirPath,
@@ -393,57 +398,7 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 }
 void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
-    Nui::val args = Nui::val::object();
-    args.set("path", *currentPath_ / item.path.generic_string());
-
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::properties",
-        [this](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-            {
-                Log::error("Invalid response from RpcFilesystem::properties");
-                confirmDialog_->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Create Directory Failed",
-                    .text = "Invalid response from backend",
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-
-            const auto success = val["success"].as<bool>();
-            if (!success)
-            {
-                const auto error = val["error"].as<std::string>();
-                Log::error("Failed to get file properties: {}", error);
-                confirmDialog_->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = "Get File Properties Failed",
-                    .text = error,
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-
-            const auto type = static_cast<std::filesystem::file_type>(val["type"].as<int>());
-            const auto size = val["size"].as<std::uint64_t>();
-
-            std::string propertiesText = fmt::format(
-                "Type: {}\nSize: {} bytes",
-                SharedData::fileTypeToString(SharedData::fileTypeFromStdFilesystemType(type)),
-                size
-            );
-
-            confirmDialog_->open({
-                .state = ConfirmDialog::State::Information,
-                .headerText = "File Properties",
-                .text = propertiesText,
-                .buttons = ConfirmDialog::Button::Ok,
-            });
-        },
-        args
-    );
+    filePropertyDialog_->open(static_cast<SharedData::DirectoryEntry const&>(item));
 }
 void LocalSideModel::onError(std::string const& error)
 {
