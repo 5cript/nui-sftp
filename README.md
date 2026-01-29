@@ -62,7 +62,7 @@ Still under construction :construction:
 - [ ] Optimize download speed!!!
 - [ ] Optimize upload speed!!!
 - [ ] Recursive folder delete.
-- [ ] Error message on delete fail.
+- [x] Error message on delete fail.
 - [ ] Delete confirm focus default "ok".
 
 ## File View UI

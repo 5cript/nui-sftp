@@ -230,6 +230,12 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                         if (!success)
                         {
                             Log::error("Failed to delete files");
+                            confirmDialog_->open({
+                                .state = ConfirmDialog::State::Negative,
+                                .headerText = "Delete Failed",
+                                .text = "Failed to delete one or more files / directories.",
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
                             return;
                         }
                         // Refresh list from server:
