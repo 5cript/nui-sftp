@@ -4,6 +4,7 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/file_property_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -17,6 +18,7 @@ class SessionArea
         FrontendEvents* events,
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
+        FilePropertyDialog* filePropertyDialog,
         Toolbar* toolbar
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SessionArea);

@@ -9,6 +9,7 @@
 @import "./icon_panel.css";
 @import "./settings.css";
 @import "./new_session_dialog.css";
+@import "./file_property_dialog.css";
 @import "../../../../../nui-file-explorer/styles/file_grid.css";
 @import "../../../../../nui-file-explorer/styles/dropdown_menu.css";
 

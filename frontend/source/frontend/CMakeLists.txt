@@ -15,6 +15,7 @@ target_sources(
         dialog/password_prompter.cpp
         dialog/confirm_dialog.cpp
         dialog/new_session_dialog.cpp
+        dialog/file_property_dialog.cpp
         settings/general_settings.cpp
         settings/optional_converters.cpp
         settings/sftp_options.cpp

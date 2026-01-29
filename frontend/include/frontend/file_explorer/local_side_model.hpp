@@ -3,6 +3,7 @@
 #include <frontend/file_explorer/side_model.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <frontend/dialog/file_property_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
@@ -11,7 +12,12 @@
 class LocalSideModel : public SideModel
 {
   public:
-    LocalSideModel(Persistence::UiOptions uiOptions, ConfirmDialog* confirmDialog, InputDialog* inputDialog);
+    LocalSideModel(
+        Persistence::UiOptions uiOptions,
+        ConfirmDialog* confirmDialog,
+        InputDialog* inputDialog,
+        FilePropertyDialog* filePropertyDialog
+    );
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;

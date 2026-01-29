@@ -24,7 +24,7 @@ namespace NuiFileExplorer
         Name,
         Size,
         Info,
-        Atime
+        Mtime
     };
 
     struct SideImplementation
@@ -106,9 +106,9 @@ namespace NuiFileExplorer
                 else if (item == "Info Descending")
                     sorting = {SortCriterion::Info, false};
                 else if (item == "Modification Time Ascending")
-                    sorting = {SortCriterion::Atime, true};
+                    sorting = {SortCriterion::Mtime, true};
                 else if (item == "Modification Time Descending")
-                    sorting = {SortCriterion::Atime, false};
+                    sorting = {SortCriterion::Mtime, false};
 
                 sortItems();
                 items.modifyNow();
@@ -156,8 +156,8 @@ namespace NuiFileExplorer
                 case SortCriterion::Info:
                     sortByInfo(ascending);
                     break;
-                case SortCriterion::Atime:
-                    sortByAtime(ascending);
+                case SortCriterion::Mtime:
+                    sortByMtime(ascending);
                     break;
             }
         }
@@ -247,14 +247,14 @@ namespace NuiFileExplorer
                 );
             }
         }
-        void sortByAtime(bool ascending)
+        void sortByMtime(bool ascending)
         {
             if (ascending)
             {
                 sortByPredicate(
                     [](auto const& lhs, auto const& rhs)
                     {
-                        return lhs.item.atime < rhs.item.atime;
+                        return lhs.item.mtime < rhs.item.mtime;
                     }
                 );
             }
@@ -263,7 +263,7 @@ namespace NuiFileExplorer
                 sortByPredicate(
                     [](auto const& lhs, auto const& rhs)
                     {
-                        return lhs.item.atime > rhs.item.atime;
+                        return lhs.item.mtime > rhs.item.mtime;
                     }
                 );
             }

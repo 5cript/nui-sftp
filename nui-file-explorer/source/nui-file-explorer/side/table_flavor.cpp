@@ -140,7 +140,7 @@ namespace NuiFileExplorer
                 makeHeaderCell(SortCriterion::Name, "Name", 0),
                 makeHeaderCell(SortCriterion::Size, "Size", 1),
                 makeHeaderCell(SortCriterion::Info, "Info", 2),
-                makeHeaderCell(SortCriterion::Atime, "Last Modified", 3)
+                makeHeaderCell(SortCriterion::Mtime, "Last Modified", 3)
             ),
             div{
                 class_ = "nui-file-grid-table-rows"
@@ -232,7 +232,7 @@ namespace NuiFileExplorer
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
                         }(
-                            span{}(item.item.readableATime())
+                            span{}(item.item.readableMTime())
                         )
                     );
                 })

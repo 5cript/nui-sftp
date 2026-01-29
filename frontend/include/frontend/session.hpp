@@ -9,6 +9,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -31,6 +32,7 @@ class Session
         std::optional<std::string> layoutName,
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
+        FilePropertyDialog* filePropertyDialog,
         std::function<void(Session const*)> closeSelf,
         std::function<std::string(std::string const&)> disambiguateTitle,
         bool visible

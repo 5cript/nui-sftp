@@ -1,7 +1,10 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <fmt/format.h>
+#include <fmt/chrono.h>
 
+#include <chrono>
 #include <filesystem>
 #include <string>
 
@@ -133,6 +136,67 @@ namespace SharedData
 
         // Used for directory traversal. Avoids pointer instability in vector and unique_ptr
         std::optional<std::size_t> parent{std::nullopt};
+
+        std::string readableATime() const
+        {
+            using namespace std::chrono;
+            auto tp = system_clock::time_point{seconds{atime}};
+            return fmt::format("{:%Y-%m-%d %H:%M:%S}", floor<seconds>(tp));
+        }
+
+        std::string readableMTime() const
+        {
+            using namespace std::chrono;
+            auto tp = system_clock::time_point{seconds{mtime}};
+            return fmt::format("{:%Y-%m-%d %H:%M:%S}", floor<seconds>(tp));
+        }
+
+        std::string readableCreateTime() const
+        {
+            using namespace std::chrono;
+            auto tp = system_clock::time_point{seconds{createTime}};
+            return fmt::format("{:%Y-%m-%d %H:%M:%S}", floor<seconds>(tp));
+        }
+
+        std::string lsStyleTypePermsUserGroup() const
+        {
+            using std::filesystem::perms;
+            std::string cryptics = {
+                [this]()
+                {
+                    switch (type)
+                    {
+                        case FileType::Regular:
+                            return '-';
+                        case FileType::Directory:
+                            return 'd';
+                        case FileType::Symlink:
+                            return 'l';
+                        case FileType::Socket:
+                            return 's';
+                        case FileType::CharDevice:
+                            return 'c';
+                        case FileType::BlockDevice:
+                            return 'b';
+                        case FileType::Fifo:
+                            return 'p';
+                        default:
+                            return '?';
+                    }
+                }(),
+                perms::none == (permissions & perms::owner_read) ? '-' : 'r',
+                perms::none == (permissions & perms::owner_write) ? '-' : 'w',
+                perms::none == (permissions & perms::owner_exec) ? '-' : 'x',
+                perms::none == (permissions & perms::group_read) ? '-' : 'r',
+                perms::none == (permissions & perms::group_write) ? '-' : 'w',
+                perms::none == (permissions & perms::group_exec) ? '-' : 'x',
+                perms::none == (permissions & perms::others_read) ? '-' : 'r',
+                perms::none == (permissions & perms::others_write) ? '-' : 'w',
+                perms::none == (permissions & perms::others_exec) ? '-' : 'x',
+            };
+
+            return fmt::format("{} {} {}", cryptics, owner, group);
+        }
     };
 
     inline std::filesystem::path fullPath(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)

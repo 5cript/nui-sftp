@@ -8,9 +8,10 @@
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
     ConfirmDialog* confirmDialog,
-    InputDialog* inputDialog
+    InputDialog* inputDialog,
+    FilePropertyDialog* filePropertyDialog
 )
-    : SideModel{std::move(uiOptions), confirmDialog, inputDialog}
+    : SideModel{std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog}
     , pathSuggestionCache_{
           [this](
               std::filesystem::path const& dirPath,
@@ -515,7 +516,7 @@ void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
 
     Log::info("Properties requested: {}", item.path.generic_string());
 
-    // TODO: ...
+    filePropertyDialog_->open(static_cast<SharedData::DirectoryEntry const&>(item));
 }
 
 void RemoteSideModel::navigateTo(std::filesystem::path const& path)

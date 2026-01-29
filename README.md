@@ -53,14 +53,14 @@ Still under construction :construction:
 - [x] Pause/Continue operations.
 - [x] Cancel operations.
 - [x] Bulk uploads.
+- [x] Show file properties.
 - [ ] Implement handling of symlinks in bulk downloads.
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
 - [ ] Implement bulk download to archives.
-- [ ] Show file properties.
-- [ ] Optimize download speed.
-- [ ] Optimize upload speed.
+- [ ] Optimize download speed!!!
+- [ ] Optimize upload speed!!!
 - [ ] Recursive folder delete.
 - [ ] Error message on delete fail.
 - [ ] Delete confirm focus default "ok".
@@ -86,11 +86,13 @@ Still under construction :construction:
 - [ ] Better indication that on drag drop, all selected items are being dragged.
 - [ ] Improve arrow navigation with shift and control.
 - [ ] Same side drag and drop for moving files locally or remotely.
+- [ ] Drag and drop from system.
 - [x] Persist mode as part of layout.
-- [ ] Delete remote files deep (non empty dirs) -> operation queue.
-- [ ] Open files with associated application.
-- [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
 - [ ] File previews:
   - [ ] Image preview (image as icon?)
   - [ ] Text preview
 - [ ] Scroll into view of recently selected item when using keyboard controls.
+
+## Open Files & Monitoring
+- [ ] Open files with associated application.
+- [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
