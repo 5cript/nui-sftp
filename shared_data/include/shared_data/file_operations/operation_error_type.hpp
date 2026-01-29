@@ -35,5 +35,7 @@ namespace SharedData
         CannotCreateDirectory,
         UnknownWorkState,
         InvalidOperationState,
-        OperationNotPossibleOnFileType);
+        OperationNotPossibleOnFileType,
+        FilesystemError
+    );
 }

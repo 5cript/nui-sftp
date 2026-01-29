@@ -18,7 +18,8 @@ struct SftpOptions : public GroupKeys
         BoolSetting<true> mayOverwrite;
         BoolSetting<true> tryContinue;
         BoolSetting<true> inheritPermissions;
-        NumberSetting<unsigned short, true> customPermissions;
+        NumberSetting<unsigned short, true> customFilePermissions;
+        NumberSetting<unsigned short, true> customDirectoryPermissions;
         BoolSetting<true> reserveSpace;
         BoolSetting<true> doCleanup;
     };
@@ -28,7 +29,8 @@ struct SftpOptions : public GroupKeys
         BoolSetting<true> mayOverwrite;
         BoolSetting<true> tryContinue;
         BoolSetting<true> inheritPermissions;
-        NumberSetting<unsigned short, true> customPermissions;
+        NumberSetting<unsigned short, true> customFilePermissions;
+        NumberSetting<unsigned short, true> customDirectoryPermissions;
     };
     DownloadOptions downloadOptions;
     UploadOptions uploadOptions;
@@ -38,7 +40,7 @@ struct SftpOptions : public GroupKeys
     Nui::Observed<bool> uploadOptionsEngaged{false};
 
     NumberSetting<int, true> concurrency; // How many parallel transfers are allowed?
-    NumberSetting<int> operationTimeoutSeconds;
+    NumberSetting<int, true> operationTimeoutSeconds;
 
     SftpOptions(std::function<void()> const& onChange);
 

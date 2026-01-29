@@ -15,7 +15,8 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
     , mayOverwrite_{options.mayOverwrite}
     , tryContinue_{options.tryContinue}
     , inheritPermissions_{options.inheritPermissions}
-    , permissions_{options.permissions}
+    , filePermissions_{options.filePermissions}
+    , directoryPermissions_{options.directoryPermissions}
     , localFile_{}
     , futureTimeout_{options.futureTimeout}
 {
@@ -199,7 +200,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
         {
             Log::warn(
                 "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                remotePath_.generic_string());
+                remotePath_.generic_string()
+            );
             return std::unexpected(Error{.type = ErrorType::FileExists});
         }
     }
@@ -215,10 +217,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
     }
 
     // local file perms
-    auto perms = permissions_.value_or(
-        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::group_read);
-    if (inheritPermissions_)
-        perms = std::filesystem::status(tempPath).permissions();
+    const auto perms = determinePerms(std::filesystem::status(localPath_).permissions());
 
     // Adoption mechanic for temp file parts:
     const auto tempResult = tempFuture.get();
@@ -286,7 +285,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
         tempPath,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
             SecureShell::SftpSession::OpenType::Truncate,
-        perms);
+        perms
+    );
     const auto openStatus = openFut.wait_for(futureTimeout_);
     if (openStatus != std::future_status::ready)
     {
@@ -345,7 +345,8 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     }
 
     Log::debug(
-        "UploadOperation: Prepared upload of '{}' to '{}'.", remotePath_.generic_string(), localPath_.generic_string());
+        "UploadOperation: Prepared upload of '{}' to '{}'.", remotePath_.generic_string(), localPath_.generic_string()
+    );
 
     return {};
 }
@@ -357,7 +358,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
         Log::info(
             "UploadOperation: Upload of '{}' to '{}' canceled.",
             remotePath_.generic_string(),
-            localPath_.generic_string());
+            localPath_.generic_string()
+        );
         state_ = OperationState::Canceled;
     }
 
@@ -414,7 +416,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
             {
                 Log::warn(
                     "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                    remotePath_.generic_string());
+                    remotePath_.generic_string()
+                );
                 return std::unexpected(Error{.type = ErrorType::FileExists});
             }
             else
@@ -439,8 +442,33 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
     }
 
     Log::debug(
-        "UploadOperation: Finalized upload of '{}' to '{}'.",
-        remotePath_.generic_string(),
-        localPath_.generic_string());
+        "UploadOperation: Finalized upload of '{}' to '{}'.", remotePath_.generic_string(), localPath_.generic_string()
+    );
     return {};
+}
+
+std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms localPerms) const
+{
+    const auto raw = [this, localPerms]()
+    {
+        if (inheritPermissions_)
+        {
+            return localPerms;
+        }
+        else
+        {
+            if (filePermissions_)
+                return filePermissions_.value();
+            // inherit execute permissions anyway:
+            const auto ownerExecute = localPerms & std::filesystem::perms::owner_exec;
+            const auto groupExecute = localPerms & std::filesystem::perms::group_exec;
+            return (
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | ownerExecute |
+                std::filesystem::perms::group_read | std::filesystem::perms::group_write | groupExecute
+            );
+        }
+    }();
+
+    // Owner has to write obviously for the upload:
+    return raw | std::filesystem::perms::owner_write;
 }

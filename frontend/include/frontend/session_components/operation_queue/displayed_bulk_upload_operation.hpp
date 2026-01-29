@@ -2,18 +2,18 @@
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
-#include <shared_data/file_operations/bulk_download_progress.hpp>
+#include <shared_data/file_operations/bulk_upload_progress.hpp>
 
-struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownloadOperation>
+struct DisplayedBulkUploadOperation : public OperationCard<DisplayedBulkUploadOperation>
 {
   public:
-    DisplayedBulkDownloadOperation(
+    DisplayedBulkUploadOperation(
         Ids::OperationId operationId,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
     )
         : OperationCard{
-              SharedData::OperationType::BulkDownload,
+              SharedData::OperationType::BulkUpload,
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown)
@@ -46,10 +46,10 @@ struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownlo
 
     std::string title() const override
     {
-        return "Bulk Download";
+        return "Bulk Upload";
     }
 
-    void setProgress(SharedData::BulkDownloadProgress const& progress)
+    void setProgress(SharedData::BulkUploadProgress const& progress)
     {
         if (currentFile.value() != progress.currentFile)
             currentFile = progress.currentFile;

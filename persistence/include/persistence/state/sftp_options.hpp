@@ -14,12 +14,18 @@ namespace Persistence
         std::optional<bool> mayOverwrite{std::nullopt};
         std::optional<bool> tryContinue{std::nullopt};
         std::optional<bool> inheritPermissions{std::nullopt};
-        std::optional<std::filesystem::perms> customPermissions{std::nullopt};
+        std::optional<std::filesystem::perms> customFilePermissions{std::nullopt};
+        std::optional<std::filesystem::perms> customDirectoryPermissions{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         CommonTransferOptions,
         (),
-        (tempFileSuffix, mayOverwrite, tryContinue, inheritPermissions, customPermissions)
+        (tempFileSuffix,
+            mayOverwrite,
+            tryContinue,
+            inheritPermissions,
+            customFilePermissions,
+            customDirectoryPermissions)
     )
 
     struct DownloadOptions : public CommonTransferOptions
@@ -39,7 +45,7 @@ namespace Persistence
         std::optional<UploadOptions> uploadOptions{};
         std::optional<std::filesystem::path> defaultDirectory{std::nullopt};
         std::optional<int> concurrency{std::nullopt}; // How many parallel transfers are allowed?
-        std::chrono::seconds operationTimeout{5};
+        std::optional<std::chrono::seconds> operationTimeout{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         SftpOptions,

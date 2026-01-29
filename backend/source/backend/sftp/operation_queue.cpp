@@ -2,6 +2,7 @@
 #include <shared_data/file_operations/download_progress.hpp>
 #include <shared_data/file_operations/upload_progress.hpp>
 #include <shared_data/file_operations/bulk_download_progress.hpp>
+#include <shared_data/file_operations/bulk_upload_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
@@ -10,6 +11,8 @@
 
 #include <log/log.hpp>
 #include <utility/overloaded.hpp>
+
+using namespace std::chrono_literals;
 
 namespace
 {
@@ -43,6 +46,16 @@ namespace
                         .error = error,
                     };
                 },
+                [reason, operationId, error](LocalScanOperation const& op)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .localPath = op.localPath(),
+                        .error = error,
+                    };
+                },
                 [reason, operationId, error](BulkDownloadOperation const&)
                 {
                     return OperationQueue::OperationCompleted{
@@ -58,6 +71,15 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
+                    };
+                },
+                [reason, operationId, error](BulkUploadOperation const&)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .error = error,
                     };
                 },
                 [reason, operationId](std::nullopt_t)
@@ -197,18 +219,26 @@ bool OperationQueue::work()
         if (workStatus == Operation::WorkStatus::Complete)
         {
             Log::info("Operation completed successfully: {}", id.value());
+            auto* next = (i + 1 < operations_.size()) ? operations_[i + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {
-                auto* next = (i + 1 < operations_.size()) ? operations_[i + 1].second.get() : nullptr;
                 if (next && next->type() == SharedData::OperationType::BulkDownload)
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
                     static_cast<BulkDownloadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
                 else
-                {
                     Log::error("Scan operation completed but no following BulkOperation to set results to.");
+            }
+            else if (operation->type() == SharedData::OperationType::LocalScan)
+            {
+                if (next && next->type() == SharedData::OperationType::BulkUpload)
+                {
+                    auto* scan = static_cast<LocalScanOperation*>(operation.get());
+                    static_cast<BulkUploadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
+                else
+                    Log::error("Scan operation completed but no following BulkOperation to set results to.");
             }
 
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
@@ -255,7 +285,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     // Assumed in strand
 
     auto fut = sftp.stat(remotePath);
-    if (fut.wait_for(sftpOpts_.operationTimeout) != std::future_status::ready)
+    if (fut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
     {
         Log::error("Failed to stat remote sftp file: timeout");
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
@@ -326,8 +356,12 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
                 .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
                 .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
-                .permissions =
-                    transferOptions.customPermissions ? transferOptions.customPermissions : defaultOptions.permissions,
+                .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                         : defaultOptions.filePermissions,
+                .directoryPermissions = transferOptions.customDirectoryPermissions
+                    ? transferOptions.customDirectoryPermissions
+                    : defaultOptions.directoryPermissions,
+                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
             }
         );
 
@@ -428,8 +462,12 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                     .inheritPermissions =
                         transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
                     .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
-                    .permissions = transferOptions.customPermissions ? transferOptions.customPermissions
-                                                                     : defaultOptions.permissions,
+                    .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                             : defaultOptions.filePermissions,
+                    .directoryPermissions = transferOptions.customDirectoryPermissions
+                        ? transferOptions.customDirectoryPermissions
+                        : defaultOptions.directoryPermissions,
+                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
                 },
             }
         );
@@ -522,9 +560,12 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
                 .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
                 .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                .permissions =
-                    transferOptions.customPermissions ? transferOptions.customPermissions : defaultOptions.permissions,
-                .futureTimeout = sftpOpts_.operationTimeout,
+                .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                         : defaultOptions.filePermissions,
+                .directoryPermissions = transferOptions.customDirectoryPermissions
+                    ? transferOptions.customDirectoryPermissions
+                    : defaultOptions.directoryPermissions,
+                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
             }
         );
 
@@ -545,9 +586,110 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
     else if (stat.type() == std::filesystem::file_type::directory)
     {
-        // TODO: Bulk upload!
-        Log::error("Bulk upload is not implemented yet.");
-        return std::unexpected(Operation::Error{.type = Operation::ErrorType::NotImplemented});
+        auto scan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
+            .progressCallback =
+                [weak = weak_from_this(), operationId](auto totalBytes, auto currentIndex, auto totalScanned)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+
+                self->hub_->callRemote(
+                    fmt::format("OperationQueue::{}::onLocalScanProgress", self->sessionId_.value()),
+                    SharedData::ScanProgress{
+                        .operationId = operationId,
+                        .totalBytes = totalBytes,
+                        .currentIndex = currentIndex,
+                        .totalScanned = totalScanned,
+                    }
+                );
+            },
+            .localPath = localPath,
+        });
+
+        // Cant use same ID for scan and bulk upload
+        const auto bulkId = Ids::generateOperationId();
+        auto bulk = std::make_unique<BulkUploadOperation>(
+            sftp,
+            BulkUploadOperation::BulkUploadOperationOptions{
+                .overallProgressCallback =
+                    [weak = weak_from_this(), bulkId](
+                        auto const& currentFile,
+                        std::uint64_t fileCurrentIndex,
+                        std::uint64_t fileCount,
+                        std::uint64_t currentFileBytes,
+                        std::uint64_t currentFileTotalBytes,
+                        std::uint64_t bytesCurrent,
+                        std::uint64_t bytesTotal
+                    )
+                {
+                    auto self = weak.lock();
+                    if (!self)
+                        return;
+
+                    // Log::debug(
+                    //     "BulkDownloadOperation: Download progress for file: {} - {}/{} bytes - totaling {}/{} "
+                    //     "bytes",
+                    //     currentFile.string(),
+                    //     currentFileBytes,
+                    //     currentFileTotalBytes,
+                    //     bytesCurrent,
+                    //     bytesTotal);
+
+                    self->hub_->callRemote(
+                        fmt::format("OperationQueue::{}::onBulkUploadProgress", self->sessionId_.value()),
+                        SharedData::BulkUploadProgress{
+                            .operationId = bulkId,
+                            .currentFile = currentFile.string(),
+                            .fileCurrentIndex = fileCurrentIndex,
+                            .fileCount = fileCount,
+                            .currentFileBytes = currentFileBytes,
+                            .currentFileTotalBytes = currentFileTotalBytes,
+                            .bytesCurrent = bytesCurrent,
+                            .bytesTotal = bytesTotal,
+                        }
+                    );
+                },
+                .remotePath = remotePath,
+                .localPath = localPath,
+                .individualOptions = UploadOperation::UploadOperationOptions{
+                    .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
+                    .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
+                    .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
+                    .inheritPermissions =
+                        transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                    .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                             : defaultOptions.filePermissions,
+                    .directoryPermissions = transferOptions.customDirectoryPermissions
+                        ? transferOptions.customDirectoryPermissions
+                        : defaultOptions.directoryPermissions,
+                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                },
+            }
+        );
+
+        operations_.emplace_back(operationId, std::move(scan));
+        operations_.emplace_back(bulkId, std::move(bulk));
+
+        hub_->callRemote(
+            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            SharedData::OperationAdded{
+                .operationId = operationId,
+                .type = SharedData::OperationType::LocalScan,
+                .remotePath = remotePath,
+            }
+        );
+        hub_->callRemote(
+            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            SharedData::OperationAdded{
+                .operationId = bulkId,
+                .type = SharedData::OperationType::BulkUpload,
+                .localPath = localPath,
+                .remotePath = remotePath,
+            }
+        );
+
+        return {};
     }
     else
     {

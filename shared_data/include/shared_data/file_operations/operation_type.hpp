@@ -9,6 +9,7 @@ namespace SharedData
     BOOST_DEFINE_ENUM_CLASS(
         OperationType,
         Scan,
+        LocalScan,
         Download,
         BulkDownload,
         Upload,

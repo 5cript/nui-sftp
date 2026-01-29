@@ -19,6 +19,8 @@ class OperationQueue
     , public std::enable_shared_from_this<OperationQueue>
 {
   public:
+    constexpr static std::chrono::seconds defaultFutureTimeout{5};
+
     using Error = SharedData::OperationErrorType;
     using OperationCompleted = SharedData::OperationCompleted;
     using CompletionReason = SharedData::OperationCompletionReason;

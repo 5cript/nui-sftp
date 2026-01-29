@@ -23,7 +23,8 @@ class DownloadOperation : public Operation
         bool tryContinue{false};
         bool inheritPermissions{false};
         bool doCleanup{true};
-        std::optional<std::filesystem::perms> permissions{std::nullopt};
+        std::optional<std::filesystem::perms> filePermissions{std::nullopt};
+        std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
     };
 
@@ -98,7 +99,8 @@ class DownloadOperation : public Operation
     bool tryContinue_;
     bool inheritPermissions_;
     bool doCleanup_;
-    std::optional<std::filesystem::perms> permissions_;
+    std::optional<std::filesystem::perms> filePermissions_;
+    std::optional<std::filesystem::perms> directoryPermissions_;
     std::ofstream localFile_;
     std::uint64_t fileSize_;
     std::chrono::seconds futureTimeout_;

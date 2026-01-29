@@ -3,16 +3,20 @@
 #include <backend/sftp/operation.hpp>
 #include <ssh/file_stream.hpp>
 #include <nui/utility/move_detector.hpp>
-#include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/upload_operation.hpp>
 
 #include <filesystem>
-#include <string>
+#include <expected>
+#include <vector>
+#include <memory>
+#include <chrono>
+#include <cstdint>
 
-// TODO: concurrent downloads!
-class BulkDownloadOperation : public Operation
+// TODO: concurrent uploads!
+class BulkUploadOperation : public Operation
 {
   public:
-    struct BulkDownloadOperationOptions
+    struct BulkUploadOperationOptions
     {
         std::function<void(
             std::filesystem::path const& currentFile,
@@ -27,19 +31,15 @@ class BulkDownloadOperation : public Operation
 
         std::filesystem::path remotePath{};
         std::filesystem::path localPath{};
-        DownloadOperation::DownloadOperationOptions individualOptions = {};
-        bool asArchive{false};
-        std::string archiveFormat{"tar"};
-        std::string compressionMethod{"gz"};
-        int compressionLevel{5};
+        UploadOperation::UploadOperationOptions individualOptions = {};
     };
 
-    BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options);
-    ~BulkDownloadOperation() override;
-    BulkDownloadOperation(BulkDownloadOperation const&) = delete;
-    BulkDownloadOperation(BulkDownloadOperation&&) = delete;
-    BulkDownloadOperation& operator=(BulkDownloadOperation const&) = delete;
-    BulkDownloadOperation& operator=(BulkDownloadOperation&&) = delete;
+    BulkUploadOperation(SecureShell::SftpSession& sftp, BulkUploadOperationOptions options);
+    ~BulkUploadOperation() override;
+    BulkUploadOperation(BulkUploadOperation const&) = delete;
+    BulkUploadOperation(BulkUploadOperation&&) = delete;
+    BulkUploadOperation& operator=(BulkUploadOperation const&) = delete;
+    BulkUploadOperation& operator=(BulkUploadOperation&&) = delete;
 
     std::expected<WorkStatus, Error> work() override;
     SharedData::OperationType type() const override;
@@ -62,16 +62,17 @@ class BulkDownloadOperation : public Operation
 
   private:
     std::expected<WorkStatus, Error> workNormal();
-    std::expected<WorkStatus, Error> workAsArchive();
     std::expected<WorkStatus, Error> workCurrentFile();
     std::filesystem::path fullLocalPath(SharedData::DirectoryEntry const& entry) const;
+    std::filesystem::path fullRemotePath(SharedData::DirectoryEntry const& entry) const;
+    std::filesystem::perms determinePerms(SharedData::DirectoryEntry const& entry) const;
     std::expected<void, Error>
-    applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
+    createDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entry);
 
   private:
     SecureShell::SftpSession* sftp_;
-    BulkDownloadOperationOptions options_;
-    std::unique_ptr<DownloadOperation> currentDownload_;
+    BulkUploadOperationOptions options_;
+    std::unique_ptr<UploadOperation> currentUpload_;
     std::vector<SharedData::DirectoryEntry> entries_;
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};

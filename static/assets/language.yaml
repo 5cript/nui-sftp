@@ -185,8 +185,10 @@ en_US:
         inheritPermissions: "Inherit Permissions"
         inheritPermissionsHelpText: "Inherit file permissions from the source file for downloads."
 
-        customPermissions: "Custom Permissions"
-        customPermissionsHelpText: "Set custom file permissions for downloads."
+        customFilePermissions: "Custom File Permissions"
+        customFilePermissionsHelpText: "Set custom file permissions for downloads."
+        customDirectoryPermissions: "Custom Directory Permissions"
+        customDirectoryPermissionsHelpText: "Set custom directory permissions for downloads."
 
         reserveSpace: "Reserve Space"
         reserveSpaceHelpText: "Reserve space on disk first for downloads."
@@ -205,8 +207,10 @@ en_US:
         inheritPermissions: "Inherit Permissions"
         inheritPermissionsHelpText: "Inherit file permissions from the source file for uploads."
 
-        customPermissions: "Custom Permissions"
-        customPermissionsHelpText: "Set custom file permissions for uploads."
+        customFilePermissions: "Custom File Permissions"
+        customFilePermissionsHelpText: "Set custom file permissions for uploads."
+        customDirectoryPermissions: "Custom Directory Permissions"
+        customDirectoryPermissionsHelpText: "Set custom directory permissions for uploads."
       concurrency: "Concurrency"
       concurrencyHelpText: "Number of concurrent transfers."
 
@@ -604,8 +608,10 @@ de_DE:
         inheritPermissions: "Berechtigungen übernehmen"
         inheritPermissionsHelpText: "Berechtigungen der Quelldatei für Downloads übernehmen."
 
-        customPermissions: "Benutzerdefinierte Berechtigungen"
-        customPermissionsHelpText: "Benutzerdefinierte Berechtigungen für heruntergeladene Dateien festlegen."
+        customFilePermissions: "Benutzerdefinierte Dateiberechtigungen"
+        customFilePermissionsHelpText: "Benutzerdefinierte Berechtigungen für heruntergeladene Dateien festlegen."
+        customDirectoryPermissions: "Benutzerdefinierte Verzeichnisberechtigungen"
+        customDirectoryPermissionsHelpText: "Benutzerdefinierte Berechtigungen für heruntergeladene Verzeichnisse festlegen."
 
         reserveSpace: "Platz reservieren"
         reserveSpaceHelpText: "Platz auf dem Zielsystem für Downloads reservieren."
@@ -625,8 +631,10 @@ de_DE:
         inheritPermissions: "Berechtigungen übernehmen"
         inheritPermissionsHelpText: "Berechtigungen der Quelldatei für Uploads übernehmen."
 
-        customPermissions: "Benutzerdefinierte Berechtigungen"
-        customPermissionsHelpText: "Benutzerdefinierte Berechtigungen für hochgeladene Dateien festlegen."
+        customFilePermissions: "Benutzerdefinierte Dateiberechtigungen"
+        customFilePermissionsHelpText: "Benutzerdefinierte Berechtigungen für hochgeladene Dateien festlegen."
+        customDirectoryPermissions: "Benutzerdefinierte Verzeichnisberechtigungen"
+        customDirectoryPermissionsHelpText: "Benutzerdefinierte Berechtigungen für hochgeladene Verzeichnisse festlegen."
       concurrency: "Nebenläufigkeit"
       concurrencyHelpText: "Anzahl der gleichzeitigen SFTP Operationen."
 

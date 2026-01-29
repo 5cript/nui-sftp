@@ -3,6 +3,8 @@
 #include <backend/sftp/upload_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/bulk_download_operation.hpp>
+#include <backend/sftp/bulk_upload_operation.hpp>
+#include <backend/sftp/local_scan_operation.hpp>
 
 template <typename FunctionT>
 auto Operation::visit(FunctionT&& func) const
@@ -22,9 +24,17 @@ auto Operation::visit(FunctionT&& func) const
         {
             return func(static_cast<ScanOperation const&>(*this));
         }
+        case LocalScan:
+        {
+            return func(static_cast<LocalScanOperation const&>(*this));
+        }
         case BulkDownload:
         {
             return func(static_cast<BulkDownloadOperation const&>(*this));
+        }
+        case BulkUpload:
+        {
+            return func(static_cast<BulkUploadOperation const&>(*this));
         }
         default:
         {

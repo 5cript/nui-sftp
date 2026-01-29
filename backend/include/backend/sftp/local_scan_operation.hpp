@@ -5,36 +5,40 @@
 #include <nui/utility/move_detector.hpp>
 #include <utility/directory_traversal.hpp>
 
-#include <filesystem>
-#include <fstream>
-#include <string>
 #include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <functional>
+#include <vector>
+#include <memory>
 
-class ScanOperation : public Operation
+class LocalScanOperation : public Operation
 {
   public:
     struct ScanOperationOptions
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
             progressCallback = [](auto, auto, auto) {};
-        std::filesystem::path remotePath{};
-        std::chrono::seconds futureTimeout{5};
+        std::filesystem::path localPath{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override;
+    LocalScanOperation(ScanOperationOptions options);
+    ~LocalScanOperation() override;
+    LocalScanOperation(LocalScanOperation const&) = delete;
+    LocalScanOperation(LocalScanOperation&&) = delete;
+    LocalScanOperation& operator=(LocalScanOperation const&) = delete;
+    LocalScanOperation& operator=(LocalScanOperation&&) = delete;
 
-    ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options);
-    ~ScanOperation() override;
-    ScanOperation(ScanOperation const&) = delete;
-    ScanOperation(ScanOperation&&) = delete;
-    ScanOperation& operator=(ScanOperation const&) = delete;
-    ScanOperation& operator=(ScanOperation&&) = delete;
+    SecureShell::ProcessingStrand* strand() const override
+    {
+        return nullptr;
+    }
 
     std::expected<WorkStatus, Error> work() override;
 
     SharedData::OperationType type() const override
     {
-        return SharedData::OperationType::Scan;
+        return SharedData::OperationType::LocalScan;
     }
 
     bool isBarrier() const noexcept override
@@ -47,9 +51,9 @@ class ScanOperation : public Operation
         return 1;
     }
 
-    std::filesystem::path remotePath() const
+    std::filesystem::path localPath() const
     {
-        return remotePath_;
+        return localPath_;
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
@@ -62,7 +66,7 @@ class ScanOperation : public Operation
         };
         using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(remotePath_, std::move(scan));
+            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan));
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -86,13 +90,11 @@ class ScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
 
   private:
-    std::expected<void, ScanOperation::Error> scanOnce(std::filesystem::path const& path);
+    std::expected<void, LocalScanOperation::Error> scanOnce(std::filesystem::path const& path);
 
   private:
-    SecureShell::SftpSession* sftp_;
-    std::filesystem::path remotePath_;
+    std::filesystem::path localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
-    std::chrono::seconds futureTimeout_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
 };

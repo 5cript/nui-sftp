@@ -18,7 +18,8 @@ DownloadOperation::DownloadOperation(
     , tryContinue_{options.tryContinue}
     , inheritPermissions_{options.inheritPermissions}
     , doCleanup_{options.doCleanup}
-    , permissions_{options.permissions}
+    , filePermissions_{options.filePermissions}
+    , directoryPermissions_{options.directoryPermissions}
     , localFile_{}
     , fileSize_{0}
     , futureTimeout_{options.futureTimeout}
@@ -393,17 +394,18 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
             return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
         }
     }
-    else if (permissions_)
+    else if (filePermissions_)
     {
         Log::info("DownloadOperation: Setting permissions.");
         std::error_code permissionsError{};
-        std::filesystem::permissions(localPath_, *permissions_, permissionsError);
+        std::filesystem::permissions(localPath_, *filePermissions_, permissionsError);
         if (permissionsError)
         {
             Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
             return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
         }
     }
+    /* else keep default */
 
     Log::info(
         "DownloadOperation: Finalized download of '{}' to '{}'.",

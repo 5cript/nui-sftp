@@ -21,7 +21,8 @@ class UploadOperation : public Operation
         bool mayOverwrite{false};
         bool tryContinue{false};
         bool inheritPermissions{false};
-        std::optional<std::filesystem::perms> permissions{std::nullopt};
+        std::optional<std::filesystem::perms> filePermissions{std::nullopt};
+        std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
     };
 
@@ -78,6 +79,8 @@ class UploadOperation : public Operation
 
     std::expected<void, Error> openOrAdoptFile();
 
+    std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
+
     void cleanup();
 
   private:
@@ -90,7 +93,8 @@ class UploadOperation : public Operation
     bool mayOverwrite_;
     bool tryContinue_;
     bool inheritPermissions_;
-    std::optional<std::filesystem::perms> permissions_;
+    std::optional<std::filesystem::perms> filePermissions_;
+    std::optional<std::filesystem::perms> directoryPermissions_;
     std::ifstream localFile_;
     std::chrono::seconds futureTimeout_;
     std::size_t leftToUpload_;
