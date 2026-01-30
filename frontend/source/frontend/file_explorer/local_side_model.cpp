@@ -209,6 +209,7 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
             .headerText = "Delete Items?",
             .text = "Are you sure you want to delete the selected items?",
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
             .onClose = [this, items](ConfirmDialog::Button button)
             {
@@ -306,6 +307,7 @@ void LocalSideModel::onTransfer(
             .headerText = "Upload Items?",
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
             .onClose = [this, items, destinationDir, sourceDir](ConfirmDialog::Button button)
             {
@@ -547,6 +549,7 @@ void LocalSideModel::uploadItemsConfirmed(
                                 "multiple files to be overwritten.",
                         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                             ConfirmDialog::Button::None,
+                        .focusButton = ConfirmDialog::Button::No,
                         .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
                         .onClose = [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
                                        ConfirmDialog::Button button

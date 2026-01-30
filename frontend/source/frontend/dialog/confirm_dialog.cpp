@@ -12,6 +12,8 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
 
+using namespace std::string_literals;
+
 namespace
 {
     std::string stateToString(ConfirmDialog::State state)
@@ -42,7 +44,9 @@ struct ConfirmDialog::Implementation
     // Nui::Observed<std::vector<std::string>> textLines;
     Nui::Observed<std::string> text;
     Nui::Observed<Button> buttons;
+    Nui::Observed<std::optional<Button>> focusButton;
     Nui::Observed<std::vector<OpenOptions::ListElement>> listItems;
+    std::weak_ptr<Nui::Dom::BasicElement> footer{};
 
     Implementation(std::string id)
         : id{std::move(id)}
@@ -52,6 +56,7 @@ struct ConfirmDialog::Implementation
         , headerText{}
         , text{}
         , buttons{}
+        , focusButton{}
         , listItems{}
     {}
 };
@@ -66,24 +71,9 @@ void ConfirmDialog::open(OpenOptions const& options)
     impl_->state = options.state;
     impl_->headerText = options.headerText;
     impl_->text = options.text;
-    // {
-    //     // split text by \n and store in textLines
-    //     std::vector<std::string> lines;
-    //     std::string::size_type start = 0;
-    //     std::string::size_type end = options.text.find('\n');
-    //     while (end != std::string::npos)
-    //     {
-    //         lines.push_back(options.text.substr(start, end - start));
-    //         start = end + 1;
-    //         if (start >= options.text.size())
-    //             break;
-    //         end = options.text.find('\n', start);
-    //     }
-    //     lines.push_back(options.text.substr(start));
-    //     impl_->textLines = lines;
-    // }
     impl_->buttons = options.buttons;
     impl_->listItems = options.listItems;
+    impl_->focusButton = options.focusButton;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     if (auto diag = impl_->dialog.lock(); diag)
@@ -119,6 +109,28 @@ Nui::ElementRenderer ConfirmDialog::operator()()
             return stateToString(impl_->state.value());
         }),
         "headerText"_prop = impl_->headerText,
+        "initialFocus"_prop = observe(impl_->focusButton).generate([this]() -> std::string {
+            if (!impl_->focusButton.value())
+                return "";
+            const auto button = impl_->focusButton->value_or(Button::Ok);
+            switch (button)
+            {
+                case Button::Ok:
+                    return impl_->id + "_ok";
+                case Button::Cancel:
+                    return impl_->id + "_cancel";
+                case Button::Yes:
+                    return impl_->id + "_yes";
+                case Button::No:
+                    return impl_->id + "_no";
+                case Button::All:
+                    return impl_->id + "_all";
+                case Button::None:
+                    return impl_->id + "_none";
+                default:
+                    return impl_->id + "_ok";
+            }
+        }),
         reference = impl_->dialog,
     }(
         section{}(
@@ -154,7 +166,11 @@ Nui::ElementRenderer ConfirmDialog::operator()()
         ),
         div{
             "slot"_attr = "footer",
-            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px; padding: 10px;"
+            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px; padding: 10px;",
+            tabIndex = 0,
+            reference = [this](std::weak_ptr<Nui::Dom::BasicElement> footer) {
+                impl_->footer = std::move(footer);
+            }
         }(
             div{style = "flex: 1;"}(),
             fragment(
@@ -163,6 +179,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Cancel))
                     {
                         return ui5::button{
+                            id = impl_->id + "_cancel",
                             "click"_event = [this](Nui::val) {
                                 close(Button::Cancel);
                             }
@@ -177,6 +194,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Ok))
                     {
                         return ui5::button{
+                            id = impl_->id + "_ok",
                             "click"_event = [this](Nui::val) {
                                 close(Button::Ok);
                             }
@@ -191,6 +209,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Yes))
                     {
                         return ui5::button{
+                            id = impl_->id + "_yes",
                             "click"_event = [this](Nui::val) {
                                 close(Button::Yes);
                             }
@@ -205,6 +224,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::No))
                     {
                         return ui5::button{
+                            id = impl_->id + "_no",
                             "click"_event = [this](Nui::val) {
                                 close(Button::No);
                             }
@@ -219,6 +239,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::All))
                     {
                         return ui5::button{
+                            id = impl_->id + "_all",
                             "click"_event = [this](Nui::val) {
                                 close(Button::All);
                             }
@@ -233,6 +254,7 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::None))
                     {
                         return ui5::button{
+                            id = impl_->id + "_none",
                             "click"_event = [this](Nui::val) {
                                 close(Button::None);
                             }

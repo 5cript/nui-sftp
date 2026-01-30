@@ -44,6 +44,7 @@ class ConfirmDialog
         std::string headerText = "";
         std::string text = "";
         Button buttons = Button::Ok;
+        std::optional<Button> focusButton = std::nullopt;
         struct ListElement
         {
             std::string text;

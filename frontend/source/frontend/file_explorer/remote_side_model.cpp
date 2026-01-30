@@ -202,6 +202,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
             .headerText = "Delete Items?",
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
             .onClose = [this, items](ConfirmDialog::Button button)
             {
@@ -347,6 +348,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                             "multiple files to be overwritten.",
                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                         ConfirmDialog::Button::None,
+                    .focusButton = ConfirmDialog::Button::No,
                     .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
                     .onClose = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
                                    ConfirmDialog::Button button
@@ -449,6 +451,7 @@ void RemoteSideModel::onTransfer(
             .headerText = "Download Items?",
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
             .onClose = [this, items, destinationDir](ConfirmDialog::Button button)
             {
