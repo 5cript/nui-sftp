@@ -25,6 +25,7 @@ struct SessionArea::Implementation
     Toolbar* toolbar;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::Observed<std::optional<int>> selected;
+    Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -42,6 +43,7 @@ struct SessionArea::Implementation
         , toolbar{toolbar}
         , sessions{}
         , selected{std::nullopt}
+        , dropHandlerUnregister_{}
     {}
 };
 
@@ -122,6 +124,33 @@ void SessionArea::registerRpc()
             {
                 Log::error("Process with id '{}' not found in any session.", processId);
             }
+        }
+    );
+
+    impl_->dropHandlerUnregister_ = Nui::RpcClient::autoRegisterFunction(
+        "SessionArea::onFilesDropped",
+        [this](Nui::val val)
+        {
+            const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
+            const auto dropMetadata = json.value("dropMetadata", "");
+            const auto isLeft = json.value("isLeft", false);
+
+            Session* session = getSessionByLayoutId(dropMetadata);
+            if (!session)
+            {
+                Log::error("No session found for dropMetadata '{}'", dropMetadata);
+                return;
+            }
+
+            std::optional<std::string> subdir{std::nullopt};
+            if (json.contains("subdir"))
+                subdir = json["subdir"].get<std::string>();
+
+            session->onDrop(
+                isLeft,
+                json.value("entries", nlohmann::json::array()).get<std::vector<SharedData::DirectoryEntry>>(),
+                subdir
+            );
         }
     );
 }
@@ -269,6 +298,16 @@ Session* SessionArea::getActiveSession()
     if (impl_->selected.value() && *impl_->selected.value() >= 0 &&
         *impl_->selected.value() < static_cast<int>(impl_->sessions.size()))
         return impl_->sessions.value()[*impl_->selected.value()].get();
+    return nullptr;
+}
+
+Session* SessionArea::getSessionByLayoutId(std::string const& layoutId)
+{
+    for (auto const& session : impl_->sessions.value())
+    {
+        if (session->layoutId() == layoutId)
+            return session.get();
+    }
     return nullptr;
 }
 

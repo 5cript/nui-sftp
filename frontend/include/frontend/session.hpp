@@ -50,6 +50,7 @@ class Session
     void shutdown(std::function<void()> onShutdown);
 
     std::string name() const;
+    std::string layoutId() const;
     std::weak_ptr<Nui::Observed<std::string>> tabTitle() const;
     void visible(bool value);
     bool visible() const;
@@ -60,6 +61,16 @@ class Session
     auto makeOperationQueueElement() -> Nui::ElementRenderer;
 
     std::optional<nlohmann::json> getLayout() const;
+
+    /**
+     * @brief Used on windows to handle files dropped onto the session area.
+     *
+     * @param isLocalSide
+     * @param entries
+     * @param subdir
+     */
+    void
+    onDrop(bool isLocalSide, std::vector<SharedData::DirectoryEntry> entries, std::optional<std::string> const& subdir);
 
   private:
     void onOpenSession(bool success, std::string const& info);

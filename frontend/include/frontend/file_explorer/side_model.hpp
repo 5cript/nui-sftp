@@ -82,6 +82,16 @@ class SideModel : public NuiFileExplorer::ISideModel
         navigateTo(preNavigatePath_);
     }
 
+    std::string dropMetadata() const override
+    {
+        return dropMetadata_;
+    }
+
+    void dropMetadata(std::string const& value) override
+    {
+        dropMetadata_ = value;
+    }
+
   protected:
     // Design smell:
     virtual bool isComplete() const;
@@ -100,4 +110,5 @@ class SideModel : public NuiFileExplorer::ISideModel
     std::filesystem::path preNavigatePath_{};
     std::function<void(bool, bool)> refreshCallback_{nullptr};
     bool reapplySelectionOnce_{false};
+    std::string dropMetadata_{};
 };

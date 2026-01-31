@@ -133,8 +133,50 @@ struct Session::Implementation
         , sessionOptionsElement{}
         , sessionOptions{stateHolder, events, this->initialName, this->sessionLayoutId, confirmDialog}
         , disambiguateTitle{std::move(disambiguateTitle)}
-    {}
+    {
+        fileGrid.leftModel().dropMetadata(sessionLayoutId);
+        fileGrid.rightModel().dropMetadata(sessionLayoutId);
+    }
 };
+
+std::string Session::layoutId() const
+{
+    return impl_->sessionLayoutId;
+}
+
+void Session::onDrop(
+    bool isLocalSide,
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::optional<std::string> const& subdir
+)
+{
+    if (isLocalSide)
+    {
+        // confirm dialog: not implemented
+        Log::warn("Dropping files on local side is not implemented.");
+        impl_->confirmDialog->open({
+            .state = ConfirmDialog::State::Negative,
+            .headerText = language->get("sessionFrontend", "dropNotImplementedTitle"),
+            .text = language->get("sessionFrontend", "dropNotImplementedText"),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
+        return;
+    }
+
+    std::vector<NuiFileExplorer::Item> items;
+    items.reserve(entries.size());
+    std::transform(
+        std::make_move_iterator(begin(entries)),
+        std::make_move_iterator(end(entries)),
+        std::back_inserter(items),
+        [](SharedData::DirectoryEntry const& entry)
+        {
+            return NuiFileExplorer::Item{entry};
+        }
+    );
+
+    localSideModel().onTransfer(items, subdir);
+}
 
 auto Session::makeChannelElement() -> Nui::ElementRenderer
 {

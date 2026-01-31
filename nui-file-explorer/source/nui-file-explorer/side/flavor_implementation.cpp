@@ -1,7 +1,10 @@
 #include <nui-file-explorer/side/flavor_implementation.hpp>
 #include <nui-file-explorer/side.hpp>
+#include <nui-file-explorer/preprocessor.hpp>
 
 #include <nui/frontend/api/json.hpp>
+
+#include <nlohmann/json.hpp>
 
 namespace NuiFileExplorer
 {
@@ -29,21 +32,55 @@ namespace NuiFileExplorer
             return;
         }
 
+        const auto types = dataTransferOpt->types();
+        for (auto const& type : types)
+        {
+            Nui::WebApi::Console::log("Data transfer type: " + type);
+        }
+
         std::optional<std::string> subdir = std::nullopt;
 
         if (droppedOnItem && droppedOnItem->type == Item::Type::Directory)
             subdir = droppedOnItem->path.filename().string();
 
-        auto info = Nui::JSON::parse(dataTransferOpt->getData("application/json"s));
-        if (side_->model().isLeft() != info["isLeft"].as<bool>())
+        const auto files = dataTransferOpt->files();
+        if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)
         {
-            // its a transfer!
-            otherSide_->model().onTransfer(otherImpl().selectionManager.selectedItems(), subdir);
+            nlohmann::json msg = {
+                {"type", "filedrop"},
+                {"isLeft", side_->model().isLeft()},
+                {"dropMetadata", side_->model().dropMetadata()},
+            };
+            if (subdir)
+                msg["subdir"] = *subdir;
+
+            Nui::val::global("chrome")["webview"].call<void>(
+                "postMessageWithAdditionalObjects", msg.dump(), files.val()
+            );
+            return;
         }
-        else
+
+        auto data = dataTransferOpt->getData("application/json"s);
+        if (data.empty())
+            return;
+
+        try
         {
-            // TODO: else its a move within the same side.
-            side_->model().onError("drag and drop on the same side is not implemented");
+            auto info = Nui::JSON::parse(dataTransferOpt->getData("application/json"s));
+            if (side_->model().isLeft() != info["isLeft"].as<bool>())
+            {
+                // its a transfer!
+                otherSide_->model().onTransfer(otherImpl().selectionManager.selectedItems(), subdir);
+            }
+            else
+            {
+                // TODO: else its a move within the same side.
+                side_->model().onError("drag and drop on the same side is not implemented");
+            }
+        }
+        catch (std::exception const& e)
+        {
+            side_->model().onError(std::string{"Failed to parse drag and drop data: "} + e.what());
         }
     }
 }

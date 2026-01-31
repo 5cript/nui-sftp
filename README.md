@@ -63,7 +63,7 @@ Still under construction :construction:
 - [ ] Optimize upload speed!!!
 - [ ] Recursive folder delete.
 - [x] Error message on delete fail.
-- [ ] Delete confirm focus default "ok".
+- [x] Delete confirm focus default "ok".
 
 ## File View UI
 - [x] Grid view.
@@ -86,7 +86,8 @@ Still under construction :construction:
 - [ ] Better indication that on drag drop, all selected items are being dragged.
 - [ ] Improve arrow navigation with shift and control.
 - [ ] Same side drag and drop for moving files locally or remotely.
-- [ ] Drag and drop from system.
+- [x] Drag and drop from system on Windows.
+- [ ] Drag and drop from system on Linux.
 - [x] Persist mode as part of layout.
 - [ ] File previews:
   - [ ] Image preview (image as icon?)

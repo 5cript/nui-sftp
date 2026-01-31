@@ -62,6 +62,8 @@ target_link_libraries(
         ids
 )
 
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
+
 function(set_memory64_flags)
     cmake_parse_arguments(
         MEM64

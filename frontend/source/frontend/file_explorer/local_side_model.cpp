@@ -325,7 +325,14 @@ void LocalSideModel::onTransfer(
                     std::back_inserter(uploadItems),
                     [destinationDir, sourceDir](auto const& item)
                     {
-                        return std::make_pair(destinationDir / item.path.filename(), sourceDir / item.path.filename());
+                        auto fullSourcePath = [&]()
+                        {
+                            // if the item has a slash in it, assume its a full path:
+                            if (item.path.has_parent_path())
+                                return item.path;
+                            return sourceDir / item.path;
+                        };
+                        return std::make_pair(destinationDir / item.path.filename(), fullSourcePath());
                     }
                 );
 

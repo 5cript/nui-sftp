@@ -39,3 +39,5 @@ if (NUI_FILE_EXPLORER_MEMORY64)
     target_compile_options(nui-file-explorer PRIVATE -sMEMORY64=1)
     target_link_options(nui-file-explorer PRIVATE -sMEMORY64=1)
 endif()
+
+target_compile_definitions(nui-file-explorer PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})

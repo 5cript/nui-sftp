@@ -24,12 +24,15 @@ if (WIN32)
         PRIVATE
             pty/windows/conpty.cpp
             pty/windows/pipe.cpp
+            windows/windows_drag_drop.cpp
+            windows/main_windows.cpp
     )
 else()
     target_sources(
         backend
         PRIVATE
             pty/linux/pty.cpp
+            linux/main_linux.cpp
     )
 endif()
 
@@ -79,6 +82,15 @@ nui_set_target_output_directories(${PROJECT_NAME})
 
 add_dependencies(backend scp-resource-copy)
 
+set(BROWSER_ENGINE "")
+if (WIN32)
+    set(BROWSER_ENGINE "webview2")
+elseif(APPLE)
+    set(BROWSER_ENGINE "webkit")
+else()
+    set(BROWSER_ENGINE "webkitgtk")
+endif()
+
 # Creates a target that is compiled through emscripten. This target becomes the frontend part.
 nui_add_emscripten_target(
     TARGET
@@ -93,4 +105,5 @@ nui_add_emscripten_target(
         #-DCMAKE_BUILD_TYPE=Debug
         -DCMAKE_BUILD_TYPE=Release
         -DNUI_FETCH_TRAITS=Off
+        -DBROWSER_ENGINE=${BROWSER_ENGINE}
 )

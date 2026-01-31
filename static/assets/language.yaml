@@ -13,6 +13,8 @@ en_US:
     sessionOptions: "Session Options"
     connectionLostTerminalMessage: "\n\e[31mConnection lost\e[0m\n\t- Press \e[35m<return>\e[0m to exit\n\t- Press \e[35mS\e[0m to save terminal output to file"
     connectionLost: "Connection Lost"
+    dropNotImplementedTitle: "Drop Not Implemented"
+    dropNotImplementedText: "Dropping files onto the local side of the file explorer is not implemented."
   settings:
     settingsClosedHeader: "Most Settings Require Restart"
     settingsClosedText: "At current implementation status, most settings changes require a restart to take effect.\nPlease restart the application to apply the changes.\nThis will be improved in the future."
@@ -440,6 +442,8 @@ de_DE:
     sessionOptions: "Sitzungsoptionen"
     connectionLostTerminalMessage: "\e[31mVerbindung verloren\e[0m\n\t- Drücken Sie \e[35m<return>\e[0m um die Sitzung zu beenden\n\t- Drücken Sie \e[35mS\e[0m um die Terminalausgabe in eine Datei zu speichern"
     connectionLost: "Verbindung verloren"
+    dropNotImplementedTitle: "Nicht implementiert"
+    dropNotImplementedText: "Das Ablegen von Dateien auf der lokalen Seite des Datei-Explorers ist nicht implementiert."
   settings:
     settingsClosedHeader: "Die meisten Einstellungen erfordern einen Neustart"
     settingsClosedText: "Im aktuellen Implementierungsstatus erfordern die meisten Einstellungsänderungen einen Neustart, um wirksam zu werden.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden.\nDies wird in Zukunft verbessert."
