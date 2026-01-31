@@ -43,6 +43,13 @@ class SftpFileEngine : public FileEngine
             std::vector<std::filesystem::path> /* non empties */
         )> onNonEmptyDirectoriesFound
     ) override;
+
+    void removeOnQueueUnchecked(
+        std::vector<std::filesystem::path> const& paths,
+        bool recursive,
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+    ) override;
+
     void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,

@@ -50,6 +50,20 @@ class FileEngine
             std::vector<std::filesystem::path> /* non empties */
         )> onNonEmptyDirectoriesFound
     ) = 0;
+
+    /**
+     * @brief Use remove first and if it calls onNonEmptyDirectoriesFound, call this.
+     *
+     * @param paths
+     * @param recursive
+     * @param onComplete
+     */
+    virtual void removeOnQueueUnchecked(
+        std::vector<std::filesystem::path> const& paths,
+        bool recursive,
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+    ) = 0;
+
     virtual void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,

@@ -3,6 +3,7 @@
 #include <shared_data/file_operations/upload_progress.hpp>
 #include <shared_data/file_operations/bulk_download_progress.hpp>
 #include <shared_data/file_operations/bulk_upload_progress.hpp>
+#include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
@@ -79,6 +80,16 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
+                        .error = error,
+                    };
+                },
+                [reason, operationId, error](DeleteOperation const& op)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .remotePath = op.remotePath(),
                         .error = error,
                     };
                 },
@@ -226,6 +237,11 @@ bool OperationQueue::work()
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
                     static_cast<BulkDownloadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
+                }
+                if (next && next->type() == SharedData::OperationType::Delete)
+                {
+                    auto* scan = static_cast<ScanOperation*>(operation.get());
+                    static_cast<DeleteOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
                 else
                     Log::error("Scan operation completed but no following BulkOperation to set results to.");
@@ -429,15 +445,6 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                     if (!self)
                         return;
 
-                    // Log::debug(
-                    //     "BulkDownloadOperation: Download progress for file: {} - {}/{} bytes - totaling {}/{} "
-                    //     "bytes",
-                    //     currentFile.string(),
-                    //     currentFileBytes,
-                    //     currentFileTotalBytes,
-                    //     bytesCurrent,
-                    //     bytesTotal);
-
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onBulkDownloadProgress", self->sessionId_.value()),
                         SharedData::BulkDownloadProgress{
@@ -549,10 +556,6 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                             .current = current,
                         }
                     );
-
-                    // Log::debug(
-                    //     "Uploaded {} / {} bytes ({}%)", current - min, max - min, (current - min) * 100 / (max - min)
-                    // );
                 },
                 .remotePath = remotePath,
                 .localPath = localPath,
@@ -627,15 +630,6 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                     if (!self)
                         return;
 
-                    // Log::debug(
-                    //     "BulkDownloadOperation: Download progress for file: {} - {}/{} bytes - totaling {}/{} "
-                    //     "bytes",
-                    //     currentFile.string(),
-                    //     currentFileBytes,
-                    //     currentFileTotalBytes,
-                    //     bytesCurrent,
-                    //     bytesTotal);
-
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onBulkUploadProgress", self->sessionId_.value()),
                         SharedData::BulkUploadProgress{
@@ -696,6 +690,103 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         Log::error("Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type()));
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
     }
+}
+
+std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    std::filesystem::path const& remotePath,
+    bool recursive
+)
+{
+    // Assumed in strand
+    if (recursive)
+    {
+        const auto scanId = Ids::generateOperationId();
+
+        auto scan = std::make_unique<ScanOperation>(
+            sftp,
+            ScanOperation::ScanOperationOptions{
+                .progressCallback =
+                    [weak = weak_from_this(), scanId](auto totalBytes, auto currentIndex, auto totalScanned)
+                {
+                    auto self = weak.lock();
+                    if (!self)
+                        return;
+
+                    self->hub_->callRemote(
+                        fmt::format("OperationQueue::{}::onScanProgress", self->sessionId_.value()),
+                        SharedData::ScanProgress{
+                            .operationId = scanId,
+                            .totalBytes = totalBytes,
+                            .currentIndex = currentIndex,
+                            .totalScanned = totalScanned,
+                        }
+                    );
+                },
+                .remotePath = remotePath,
+                .futureTimeout = std::chrono::seconds{5},
+            }
+        );
+
+        operations_.emplace_back(scanId, std::move(scan));
+
+        hub_->callRemote(
+            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            SharedData::OperationAdded{
+                .operationId = scanId,
+                .type = SharedData::OperationType::Scan,
+                .remotePath = remotePath,
+            }
+        );
+    }
+
+    auto operation = std::make_unique<DeleteOperation>(
+        sftp,
+        DeleteOperation::DeleteOperationOptions{
+            .filesRemovedProgress =
+                [weak = weak_from_this(),
+                    operationId](auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+
+                self->hub_->callRemote(
+                    fmt::format("OperationQueue::{}::onDeleteProgress", self->sessionId_.value()),
+                    SharedData::BulkDeleteProgress{
+                        .operationId = operationId,
+                        .currentFile = path,
+                        .filesDeleted = filesDeleted,
+                        .totalFiles = totalFiles,
+                    }
+                );
+            },
+            .remotePath = remotePath,
+            .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+            .recursive = recursive
+        }
+    );
+
+    operations_.emplace_back(operationId, std::move(operation));
+
+    hub_->callRemote(
+        fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = operationId,
+            .type = SharedData::OperationType::Delete,
+            .remotePath = remotePath,
+        }
+    );
+
+    hub_->callRemote(
+        fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+        SharedData::OperationAdded{
+            .operationId = operationId, .type = SharedData::OperationType::Delete, .remotePath = remotePath
+        }
+    );
+
+    return {};
 }
 
 void OperationQueue::registerRpc()

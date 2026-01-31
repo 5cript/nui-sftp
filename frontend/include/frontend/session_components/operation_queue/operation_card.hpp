@@ -20,6 +20,7 @@
 #include <frontend/components/svg/scan_animated.hpp>
 #include <frontend/components/svg/scan.hpp>
 #include <frontend/components/svg/upload.hpp>
+#include <frontend/components/svg/delete.hpp>
 
 #include <utility/convert_naming_convention.hpp>
 #include <utility/visit_overloaded.hpp>
@@ -122,6 +123,10 @@ class OperationCard : public OperationCardInterface
                                 return Svgs::scan();
                             else
                                 return Svgs::scanAnimated();
+                        }
+                        else if (type_ == SharedData::OperationType::Delete)
+                        {
+                            return Svgs::deleteIcon();
                         }
                         else if (type_ == SharedData::OperationType::CustomAction)
                         {

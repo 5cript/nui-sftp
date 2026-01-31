@@ -248,15 +248,14 @@ void RemoteSideModel::enqueueDeletes(
     if (!filesAndEmptyDirs.empty())
     {
         operationQueue_->enqueueDelete(
-            filesAndEmptyDirs.back(),
-            true,
+            filesAndEmptyDirs,
+            false,
             [this,
-                nonEmpties = std::move(nonEmpties),
-                filesAndEmptyDirs = std::move(filesAndEmptyDirs)](std::optional<Ids::OperationId> const& opId) mutable
+                nonEmpties = std::move(nonEmpties)](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
             {
-                if (!opId)
+                if (!opIds)
                 {
-                    Log::error("Failed to create delete operation");
+                    Log::error("Failed to create delete operations");
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
@@ -265,23 +264,43 @@ void RemoteSideModel::enqueueDeletes(
                     });
                     return;
                 }
-                filesAndEmptyDirs.pop_back();
-                enqueueDeletes(std::move(nonEmpties), std::move(filesAndEmptyDirs));
+
+                if (!nonEmpties.empty())
+                {
+                    operationQueue_->enqueueDelete(
+                        nonEmpties,
+                        true,
+                        [this](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
+                        {
+                            if (!opIds)
+                            {
+                                Log::error("Failed to create delete operations");
+                                confirmDialog_->open({
+                                    .state = ConfirmDialog::State::Negative,
+                                    .headerText = language->get("remoteSideModel", "deleteFailed"),
+                                    .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                                return;
+                            }
+                        }
+                    );
+                    return;
+                }
             }
         );
         return;
     }
-
-    if (!nonEmpties.empty())
+    else if (!nonEmpties.empty())
     {
         operationQueue_->enqueueDelete(
-            nonEmpties.back(),
+            nonEmpties,
             true,
-            [this, nonEmpties = std::move(nonEmpties)](std::optional<Ids::OperationId> const& opId) mutable
+            [this](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
             {
-                if (!opId)
+                if (!opIds)
                 {
-                    Log::error("Failed to create delete operation");
+                    Log::error("Failed to create delete operations");
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
@@ -290,9 +309,6 @@ void RemoteSideModel::enqueueDeletes(
                     });
                     return;
                 }
-                auto nonEmptiesCopy = nonEmpties;
-                nonEmptiesCopy.pop_back();
-                enqueueDeletes(std::move(nonEmptiesCopy), {});
             }
         );
         return;

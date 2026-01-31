@@ -10,6 +10,7 @@
 #include <frontend/session_components/operation_queue/displayed_local_scan_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_bulk_download_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_bulk_upload_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_delete_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_custom_action.hpp>
 
@@ -280,6 +281,16 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onDeleteProgress", impl_->sessionId.value()),
+            [this](SharedData::BulkDeleteProgress const& result)
+            {
+                onDeleteProgress(result);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onOperationCompleted", impl_->sessionId.value()),
             [this](Nui::val val)
             {
@@ -381,6 +392,19 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean
             );
         }
+        else if (added.type == SharedData::OperationType::Delete)
+        {
+            Log::info("Creating delete operation card for operation id: {}", added.operationId.value());
+            return std::make_unique<DisplayedDeleteOperation>(
+                added.operationId,
+                added.remotePath ? *added.remotePath : std::filesystem::path{},
+                [this](OperationCard<DisplayedDeleteOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean
+            );
+        }
         else if (added.type == SharedData::OperationType::BulkDownload)
         {
             Log::info("Creating bulk download operation card for operation id: {}", added.operationId.value());
@@ -436,7 +460,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
             }
             else if (
-                added.type == SharedData::OperationType::Upload || added.type == SharedData::OperationType::BulkUpload
+                added.type == SharedData::OperationType::Upload ||
+                added.type == SharedData::OperationType::BulkUpload || added.type == SharedData::OperationType::Delete
             )
             {
                 addCustomActionOperation(
@@ -479,6 +504,32 @@ void OperationQueue::addCustomActionOperation(std::function<void()> action)
             ),
         }
     );
+}
+
+void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& progress)
+{
+    // Log::debug("Received delete progress for operation id: {}.", progress.operationId.value());
+
+    auto* operation = impl_->operations.at(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received delete progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::Delete)
+    {
+        Log::error("Received delete progress for operation id: {} which is not a delete", progress.operationId.value());
+        return;
+    }
+    auto* renderer = operation->getCardSpecifically<DisplayedDeleteOperation>();
+    if (!renderer)
+    {
+        Log::error(
+            "Received delete progress for operation id: {} which has no delete renderer", progress.operationId.value()
+        );
+        return;
+    }
+    renderer->setProgress(progress);
 }
 
 void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& progress)
@@ -898,23 +949,23 @@ void OperationQueue::enqueueRename(
 {
     if (!impl_->fileEngine)
     {
-        Log::error("No file engine set for operation queue, cannot enqueue download");
+        Log::error("No file engine set for operation queue, cannot enqueue rename");
         onComplete(std::nullopt);
         return;
     }
     // TODO: Implement
 }
 void OperationQueue::enqueueDelete(
-    std::filesystem::path const& path,
+    std::vector<std::filesystem::path> const& paths,
     bool recursive,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
 )
 {
     if (!impl_->fileEngine)
     {
-        Log::error("No file engine set for operation queue, cannot enqueue download");
+        Log::error("No file engine set for operation queue, cannot enqueue delete");
         onComplete(std::nullopt);
         return;
     }
-    // TODO: Implement
+    impl_->fileEngine->removeOnQueueUnchecked(paths, recursive, std::move(onComplete));
 }
