@@ -1,5 +1,6 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 
+#include <utility/language.hpp>
 #include <log/log.hpp>
 
 #include <algorithm>
@@ -83,9 +84,9 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
     if (type == NuiFileExplorer::Item::Type::Directory)
     {
         inputDialog_->open({
-            .whatFor = "New directory",
-            .prompt = "Enter the name of the new directory",
-            .headerText = "Create a new directory",
+            .whatFor = language->get("remoteSideModel", "newDirectory"),
+            .prompt = language->get("remoteSideModel", "enterNewDirectoryName"),
+            .headerText = language->get("remoteSideModel", "createNewDirectory"),
             .isPassword = false,
             .onConfirm = [this](std::optional<std::string> const& name)
             {
@@ -117,9 +118,9 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
     else if (type == NuiFileExplorer::Item::Type::Regular)
     {
         inputDialog_->open({
-            .whatFor = "New file",
-            .prompt = "Enter the name of the new file",
-            .headerText = "Create a new file",
+            .whatFor = language->get("remoteSideModel", "newFile"),
+            .prompt = language->get("remoteSideModel", "enterNewFileName"),
+            .headerText = language->get("remoteSideModel", "createNewFile"),
             .isPassword = false,
             .onConfirm = [this](std::optional<std::string> const& name)
             {
@@ -159,10 +160,143 @@ void RemoteSideModel::onError(std::string const& error)
     Log::error("File grid error (remote side): {}", error);
     confirmDialog_->open({
         .state = ConfirmDialog::State::Negative,
-        .headerText = "File Grid Error (Remote Side)",
+        .headerText = language->get("remoteSideModel", "fileGridError"),
         .text = error,
         .buttons = ConfirmDialog::Button::Ok,
     });
+}
+
+void RemoteSideModel::askNonEmptyDirectoryDeletions(
+    std::vector<std::filesystem::path> confirmedToDelete,
+    std::vector<std::filesystem::path> nonEmpties,
+    std::vector<std::filesystem::path> filesAndEmptyDirs,
+    std::size_t currentNonEmpty
+)
+{
+    if (currentNonEmpty >= nonEmpties.size())
+    {
+        enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
+        return;
+    }
+
+    const auto dir = nonEmpties[currentNonEmpty];
+
+    confirmDialog_->open(
+        {.state = ConfirmDialog::State::Critical,
+            .headerText = language->get("remoteSideModel", "nonEmptyDirectoriesFound"),
+            .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.string()),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::None |
+                ConfirmDialog::Button::All | ConfirmDialog::Button::Cancel,
+            .focusButton = ConfirmDialog::Button::No,
+            .onClose = [this,
+                           confirmedToDelete = std::move(confirmedToDelete),
+                           nonEmpties = std::move(nonEmpties),
+                           filesAndEmptyDirs = std::move(filesAndEmptyDirs),
+                           currentNonEmpty,
+                           dir](ConfirmDialog::Button button) mutable
+            {
+                if (button == ConfirmDialog::Button::Yes)
+                {
+                    confirmedToDelete.push_back(dir);
+                    askNonEmptyDirectoryDeletions(
+                        std::move(confirmedToDelete),
+                        std::move(nonEmpties),
+                        std::move(filesAndEmptyDirs),
+                        currentNonEmpty + 1
+                    );
+                    return;
+                }
+
+                if (button == ConfirmDialog::Button::All)
+                {
+                    confirmedToDelete.push_back(dir);
+                    for (; currentNonEmpty + 1 < nonEmpties.size(); ++currentNonEmpty)
+                    {
+                        confirmedToDelete.push_back(nonEmpties[currentNonEmpty + 1]);
+                    }
+                    enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
+                    return;
+                }
+
+                if (button == ConfirmDialog::Button::No)
+                {
+                    askNonEmptyDirectoryDeletions(
+                        std::move(confirmedToDelete),
+                        std::move(nonEmpties),
+                        std::move(filesAndEmptyDirs),
+                        currentNonEmpty + 1
+                    );
+                    return;
+                }
+
+                if (button == ConfirmDialog::Button::None)
+                {
+                    enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
+                    return;
+                }
+
+                Log::info("User cancelled deletion of non-empty directories.");
+            }}
+    );
+}
+
+void RemoteSideModel::enqueueDeletes(
+    std::vector<std::filesystem::path> nonEmpties,
+    std::vector<std::filesystem::path> filesAndEmptyDirs
+)
+{
+    if (!filesAndEmptyDirs.empty())
+    {
+        operationQueue_->enqueueDelete(
+            filesAndEmptyDirs.back(),
+            true,
+            [this,
+                nonEmpties = std::move(nonEmpties),
+                filesAndEmptyDirs = std::move(filesAndEmptyDirs)](std::optional<Ids::OperationId> const& opId) mutable
+            {
+                if (!opId)
+                {
+                    Log::error("Failed to create delete operation");
+                    confirmDialog_->open({
+                        .state = ConfirmDialog::State::Negative,
+                        .headerText = language->get("remoteSideModel", "deleteFailed"),
+                        .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
+                filesAndEmptyDirs.pop_back();
+                enqueueDeletes(std::move(nonEmpties), std::move(filesAndEmptyDirs));
+            }
+        );
+        return;
+    }
+
+    if (!nonEmpties.empty())
+    {
+        operationQueue_->enqueueDelete(
+            nonEmpties.back(),
+            true,
+            [this, nonEmpties = std::move(nonEmpties)](std::optional<Ids::OperationId> const& opId) mutable
+            {
+                if (!opId)
+                {
+                    Log::error("Failed to create delete operation");
+                    confirmDialog_->open({
+                        .state = ConfirmDialog::State::Negative,
+                        .headerText = language->get("remoteSideModel", "deleteFailed"),
+                        .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
+                auto nonEmptiesCopy = nonEmpties;
+                nonEmptiesCopy.pop_back();
+                enqueueDeletes(std::move(nonEmptiesCopy), {});
+            }
+        );
+        return;
+    }
 }
 
 void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
@@ -184,12 +318,13 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     }
 
     const auto itemSize = items.size();
-    std::string confirmText = fmt::format(
-        "Are you sure you want to delete {} {} {}?:",
-        itemSize > 1 ? "the following" : items.front().path.generic_string(),
-        itemSize == 1 ? ""s : std::to_string(itemSize),
-        itemSize == 1 ? "" : "items"
-    );
+    std::string confirmText;
+    if (itemSize > 1)
+        confirmText = fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteMultipleConfirm")), itemSize);
+    else
+        confirmText = fmt::format(
+            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().path.generic_string()
+        );
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
@@ -199,7 +334,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 
     confirmDialog_->open(
         {.state = ConfirmDialog::State::Information,
-            .headerText = "Delete Items?",
+            .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
@@ -212,20 +347,21 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                     return;
                 }
 
-                std::vector<std::filesystem::path> fullPaths;
-                std::transform(
-                    items.begin(),
-                    items.end(),
-                    std::back_inserter(fullPaths),
-                    [this](auto const& item)
-                    {
-                        return (currentPath_.value() / item.path).generic_string();
-                    }
-                );
+                std::vector<NuiFileExplorer::Item> directories;
+                std::vector<NuiFileExplorer::Item> files;
+                for (auto item : items)
+                {
+                    item.path = currentPath_.value() / item.path;
+                    if (item.type == NuiFileExplorer::Item::Type::Directory)
+                        directories.push_back(item);
+                    else
+                        files.push_back(item);
+                }
 
                 Log::info("Deleting items");
                 fileEngine_->remove(
-                    fullPaths,
+                    files,
+                    directories,
                     [this](bool success)
                     {
                         if (!success)
@@ -233,14 +369,21 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                             Log::error("Failed to delete files");
                             confirmDialog_->open({
                                 .state = ConfirmDialog::State::Negative,
-                                .headerText = "Delete Failed",
-                                .text = "Failed to delete one or more files / directories.",
+                                .headerText = language->get("remoteSideModel", "deleteFailed"),
+                                .text = language->get("remoteSideModel", "failedToDeleteItems"),
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
                             return;
                         }
                         // Refresh list from server:
                         onRefresh();
+                    },
+                    [this](
+                        std::vector<std::filesystem::path> filesAndEmptyDirs,
+                        std::vector<std::filesystem::path> nonEmpties
+                    )
+                    {
+                        askNonEmptyDirectoryDeletions({}, std::move(nonEmpties), std::move(filesAndEmptyDirs), 0);
                     }
                 );
             }}
@@ -264,8 +407,8 @@ void RemoteSideModel::enqueueSingleDownload(
                 Log::error("Failed to create download operation");
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
-                    .headerText = "Download Failed",
-                    .text = "Failed to create download operation",
+                    .headerText = language->get("remoteSideModel", "downloadFailed"),
+                    .text = language->get("remoteSideModel", "failedToCreateDownloadOperation"),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;
@@ -313,8 +456,8 @@ void RemoteSideModel::downloadItemsConfirmed(
             Log::error("Invalid response from RpcFilesystem::exists");
             confirmDialog_->open({
                 .state = ConfirmDialog::State::Negative,
-                .headerText = "Check File Existence Failed",
-                .text = "Invalid response from backend",
+                .headerText = language->get("remoteSideModel", "checkFileExistenceFailed"),
+                .text = language->get("remoteSideModel", "invalidResponseFromBackend"),
                 .buttons = ConfirmDialog::Button::Ok,
             });
             return;
@@ -343,9 +486,8 @@ void RemoteSideModel::downloadItemsConfirmed(
             Log::info("File already exists: {}", item.second.generic_string());
             confirmDialog_->open(
                 {.state = ConfirmDialog::State::Information,
-                    .headerText = "File already exists, overwrite?",
-                    .text = "Allow overwriting this file?  Do note that bulk downloads in subdirectories might cause "
-                            "multiple files to be overwritten.",
+                    .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
+                    .text = language->get("remoteSideModel", "allowOverwritingFile"),
                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                         ConfirmDialog::Button::None,
                     .focusButton = ConfirmDialog::Button::No,
@@ -432,13 +574,23 @@ void RemoteSideModel::onTransfer(
     if (subDir)
         destinationDir /= *subDir;
 
-    std::string confirmText = fmt::format(
-        "Are you sure you want to download {} {} {} to {}?:",
-        itemsSize > 1 ? "the following" : items.front().path.generic_string(),
-        itemsSize == 1 ? "" : std::to_string(itemsSize),
-        itemsSize == 1 ? "" : "items",
-        destinationDir.generic_string()
-    );
+    std::string confirmText;
+    if (itemsSize > 1)
+    {
+        confirmText = fmt::format(
+            fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfMultiple")),
+            itemsSize,
+            destinationDir.generic_string()
+        );
+    }
+    else
+    {
+        confirmText = fmt::format(
+            fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfSingle")),
+            items.front().path.generic_string(),
+            destinationDir.generic_string()
+        );
+    }
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
@@ -485,9 +637,12 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
     Log::info("Rename item requested: {}", item.path.generic_string());
 
     inputDialog_->open({
-        .whatFor = "Rename",
-        .prompt = "Enter the new name for " + item.path.filename().string(),
-        .headerText = "Rename " + item.path.filename().string(),
+        .whatFor = language->get("remoteSideModel", "rename"),
+        .prompt =
+            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.path.filename().string()),
+        .headerText = fmt::format(
+            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()
+        ),
         .isPassword = false,
         .onConfirm = [this, item](std::optional<std::string> const& name)
         {

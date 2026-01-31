@@ -133,6 +133,15 @@ class Session
     void registerRpcSftpDeleteFiles();
 
     /**
+     * Checks if non empty directories are involved before deletion with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     directories: vector<string>
+     * }
+     */
+    void registerRpcSftpPreDeleteChecks();
+
+    /**
      * Handles calls from the frontend to rename a file over sftp with the following payload:
      * {
      *     sftpChannelId: string,

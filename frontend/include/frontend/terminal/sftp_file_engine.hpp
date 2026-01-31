@@ -34,7 +34,15 @@ class SftpFileEngine : public FileEngine
         bool insertRefresh
     ) override;
 
-    void remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete) override;
+    void remove(
+        std::vector<NuiFileExplorer::Item> const& files,
+        std::vector<NuiFileExplorer::Item> const& directories,
+        std::function<void(bool)> onComplete,
+        std::function<void(
+            std::vector<std::filesystem::path>, /* regular files & empty */
+            std::vector<std::filesystem::path> /* non empties */
+        )> onNonEmptyDirectoriesFound
+    ) override;
     void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
@@ -48,6 +56,11 @@ class SftpFileEngine : public FileEngine
 
   private:
     void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&)> const& onOpen);
+    void performDelete(
+        std::vector<NuiFileExplorer::Item> files,
+        std::vector<std::filesystem::path> directoriesEmpty,
+        std::function<void(bool)> onComplete
+    );
 
   private:
     struct Implementation;

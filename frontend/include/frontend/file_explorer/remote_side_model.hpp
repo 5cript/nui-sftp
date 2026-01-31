@@ -59,6 +59,18 @@ class RemoteSideModel : public SideModel
         bool insertRefresh
     );
 
+    void askNonEmptyDirectoryDeletions(
+        std::vector<std::filesystem::path> confirmedToDelete,
+        std::vector<std::filesystem::path> nonEmpties,
+        std::vector<std::filesystem::path> filesAndEmptyDirs,
+        std::size_t currentNonEmpty
+    );
+
+    void
+    enqueueDeletes(std::vector<std::filesystem::path> nonEmpties, std::vector<std::filesystem::path> filesAndEmptyDirs);
+
+    void continueDeletion();
+
   private:
     SideModel* localModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;

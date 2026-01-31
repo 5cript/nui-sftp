@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/directory_entry.hpp>
+#include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
 
 #include <filesystem>
@@ -40,7 +41,15 @@ class FileEngine
         bool insertRefresh
     ) = 0;
 
-    virtual void remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete) = 0;
+    virtual void remove(
+        std::vector<NuiFileExplorer::Item> const& files,
+        std::vector<NuiFileExplorer::Item> const& directories,
+        std::function<void(bool)> onComplete,
+        std::function<void(
+            std::vector<std::filesystem::path>, /* regular files & empty */
+            std::vector<std::filesystem::path> /* non empties */
+        )> onNonEmptyDirectoriesFound
+    ) = 0;
     virtual void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,

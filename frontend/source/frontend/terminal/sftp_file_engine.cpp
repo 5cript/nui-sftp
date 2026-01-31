@@ -287,26 +287,24 @@ void SftpFileEngine::addUpload(
     );
 }
 
-void SftpFileEngine::remove(std::vector<std::filesystem::path> const& paths, std::function<void(bool)> onComplete)
+void SftpFileEngine::remove(
+    std::vector<NuiFileExplorer::Item> const& files,
+    std::vector<NuiFileExplorer::Item> const& directories,
+    std::function<void(bool)> onComplete,
+    std::function<void(
+        std::vector<std::filesystem::path>, /* regular files & empty */
+        std::vector<std::filesystem::path> /* non empties */
+    )> onNonEmptyDirectoriesFound
+)
 {
-    Log::info("Requesting to remove {} items", paths.size());
-
-    std::vector<std::string> transformedPaths;
-    transformedPaths.resize(paths.size());
-    std::transform(
-        paths.begin(),
-        paths.end(),
-        transformedPaths.begin(),
-        [](std::filesystem::path const& p)
-        {
-            return p.generic_string();
-        }
-    );
+    Log::info("Requesting to remove {} items", files.size() + directories.size());
 
     lazyOpen(
         [this,
             onComplete = std::move(onComplete),
-            transformedPaths = std::move(transformedPaths)](auto const& channelId)
+            files,
+            directories,
+            onNonEmptyDirectoriesFound = std::move(onNonEmptyDirectoriesFound)](auto const& channelId) mutable
         {
             if (!channelId)
             {
@@ -314,6 +312,121 @@ void SftpFileEngine::remove(std::vector<std::filesystem::path> const& paths, std
                 onComplete(false);
                 return;
             }
+
+            std::vector<std::string> transformedDirectories;
+            transformedDirectories.resize(directories.size());
+            std::transform(
+                directories.begin(),
+                directories.end(),
+                transformedDirectories.begin(),
+                [](auto const& item)
+                {
+                    return item.path.generic_string();
+                }
+            );
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::preDeleteChecks", impl_->engine->sshSessionId().value()),
+                [this,
+                    onComplete = std::move(onComplete),
+                    files = std::move(files),
+                    directories = std::move(directories),
+                    onNonEmptyDirectoriesFound = std::move(onNonEmptyDirectoriesFound)](Nui::val val) mutable
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error(
+                            "(Frontend) Failed to perform pre-delete checks: {}", val["error"].as<std::string>()
+                        );
+                        onComplete(false);
+                        return;
+                    }
+                    if (!val.hasOwnProperty("nonEmptyDirectories"))
+                    {
+                        Log::error("(Frontend) Failed to perform pre-delete checks: no nonEmptyDirectories");
+                        onComplete(false);
+                        return;
+                    }
+                    std::vector<std::filesystem::path> nonEmpties;
+                    Nui::convertFromVal(val["nonEmptyDirectories"], nonEmpties);
+
+                    if (nonEmpties.empty())
+                    {
+                        std::vector<std::filesystem::path> transformedDirectories;
+                        transformedDirectories.resize(directories.size());
+                        std::transform(
+                            directories.begin(),
+                            directories.end(),
+                            transformedDirectories.begin(),
+                            [](auto const& item)
+                            {
+                                return item.path;
+                            }
+                        );
+                        performDelete(std::move(files), std::move(transformedDirectories), std::move(onComplete));
+                    }
+                    else
+                    {
+                        std::vector<std::filesystem::path> filesAndEmptyDirs;
+                        filesAndEmptyDirs.reserve(files.size() + (directories.size() - nonEmpties.size()));
+                        for (const auto& file : files)
+                            filesAndEmptyDirs.push_back(file.path);
+                        for (const auto& dir : directories)
+                        {
+                            if (std::find(nonEmpties.begin(), nonEmpties.end(), dir.path) == nonEmpties.end())
+                                filesAndEmptyDirs.push_back(dir.path);
+                        }
+
+                        // Dont actually perform delete here immediately, this is something for the queue!
+                        onNonEmptyDirectoriesFound(std::move(filesAndEmptyDirs), std::move(nonEmpties));
+                    }
+                },
+                channelId.value().value(),
+                transformedDirectories
+            );
+        }
+    );
+}
+
+void SftpFileEngine::performDelete(
+    std::vector<NuiFileExplorer::Item> files,
+    std::vector<std::filesystem::path> directoriesEmpty,
+    std::function<void(bool)> onComplete
+)
+{
+    lazyOpen(
+        [this,
+            onComplete = std::move(onComplete),
+            files = std::move(files),
+            directoriesEmpty = std::move(directoriesEmpty)](auto const& channelId) mutable
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add upload, no channel");
+                onComplete(false);
+                return;
+            }
+
+            std::vector<std::string> transformedPaths;
+            transformedPaths.reserve(files.size() + directoriesEmpty.size());
+            std::transform(
+                files.begin(),
+                files.end(),
+                std::back_inserter(transformedPaths),
+                [](auto const& item)
+                {
+                    return item.path.generic_string();
+                }
+            );
+            std::transform(
+                directoriesEmpty.begin(),
+                directoriesEmpty.end(),
+                std::back_inserter(transformedPaths),
+                [](auto const& path)
+                {
+                    return path.generic_string();
+                }
+            );
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::deleteFiles", impl_->engine->sshSessionId().value()),
@@ -335,6 +448,7 @@ void SftpFileEngine::remove(std::vector<std::filesystem::path> const& paths, std
         }
     );
 }
+
 void SftpFileEngine::rename(
     std::filesystem::path const& oldPath,
     std::filesystem::path const& newPath,
