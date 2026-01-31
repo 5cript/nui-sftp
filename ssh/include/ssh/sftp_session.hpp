@@ -118,6 +118,15 @@ namespace SecureShell
         std::future<std::expected<void, Error>> removeAll(std::vector<std::filesystem::path> paths);
 
         /**
+         * @brief Checks a list of directories for non-emptiness.
+         *
+         * @param path
+         * @return std::future<std::expected<void, Error>>
+         */
+        std::future<std::expected<std::vector<std::filesystem::path>, Error>>
+        filterOutEmptyDirectories(std::vector<std::filesystem::path> directories);
+
+        /**
          * @brief Gets the attributes of a file or directory.
          *
          * @param path

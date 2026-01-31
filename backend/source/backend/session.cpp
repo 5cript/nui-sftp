@@ -60,6 +60,7 @@ void Session::start()
             self->registerRpcSftpDeleteFiles();
             self->registerRpcSftpRename();
             self->registerRpcSftpStat();
+            self->registerRpcSftpPreDeleteChecks();
             self->operationQueue_->registerRpc();
 
             Log::info("Session '{}' connected", self->id_.value());
@@ -723,6 +724,42 @@ void Session::registerOperationQueuePauseUnpause()
                 self->operationQueue_->paused(pause);
                 self->resetQueueThrottle();
                 return reply(SharedData::success());
+            }
+        );
+}
+void Session::registerRpcSftpPreDeleteChecks()
+{
+    on(fmt::format("Session::{}::sftp::preDeleteChecks", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::filesystem::path> const& directories
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(), directories](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply.error("Session no longer exists");
+
+                        auto fut = channel->filterOutEmptyDirectories(directories);
+                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            return reply.error("Failed to perform pre-delete checks: timeout");
+
+                        const auto result = fut.get();
+                        if (!result.has_value())
+                            return reply.error("Failed to perform pre-delete checks: " + result.error().toString());
+                        reply({{"success", true}, {"nonEmptyDirectories", *result}});
+                    },
+                    std::move(reply)
+                );
             }
         );
 }

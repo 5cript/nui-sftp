@@ -203,6 +203,89 @@ namespace SecureShell
         );
     }
 
+    std::future<std::expected<std::vector<std::filesystem::path>, SftpSession::Error>>
+    SftpSession::filterOutEmptyDirectories(std::vector<std::filesystem::path> directories)
+    {
+        return performPromise(
+            [this, directories = std::move(directories)]() -> std::expected<std::vector<std::filesystem::path>, Error>
+            {
+                int closeResult = 0;
+                std::vector<std::filesystem::path> nonEmpties;
+                for (const auto& path : directories)
+                {
+                    std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+                        sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                    };
+
+                    if (attributes == nullptr)
+                        return std::unexpected(lastError());
+
+                    if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
+                    {
+                        std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
+                            sftp_opendir(session_, path.generic_string().c_str()),
+                            [&](sftp_dir_struct* dir)
+                            {
+                                if (dir != nullptr)
+                                {
+                                    closeResult = sftp_closedir(dir);
+                                }
+                            }
+                        };
+                        if (dir == nullptr)
+                        {
+                            return std::unexpected(
+                                SftpSession::Error{
+                                    .message = ssh_get_error(session_),
+                                    .sshError = ssh_get_error_code(session_),
+                                    .sftpError = sftp_get_error(session_),
+                                }
+                            );
+                        }
+
+                        std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> entry{
+                            sftp_readdir(session_, dir.get()), sftp_attributes_free
+                        };
+                        using namespace std::string_literals;
+
+                        auto findNonDotEntry = [this, &entry, &dir]()
+                        {
+                            if (entry == nullptr)
+                                return false;
+                            if (entry->name == ".."s || entry->name == "."s)
+                            {
+                                entry.reset(sftp_readdir(session_, dir.get()));
+                                return false;
+                            }
+                            else
+                                return true;
+                        };
+
+                        auto result = findNonDotEntry();
+                        if (!result)
+                            result = findNonDotEntry();
+                        if (!result)
+                            result = findNonDotEntry();
+
+                        if (result)
+                            nonEmpties.push_back(path);
+                    }
+                }
+                if (closeResult != SSH_OK)
+                {
+                    return std::unexpected(
+                        SftpSession::Error{
+                            .message = ssh_get_error(session_),
+                            .sshError = closeResult,
+                            .sftpError = sftp_get_error(session_),
+                        }
+                    );
+                }
+                return nonEmpties;
+            }
+        );
+    }
+
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::removeAll(std::vector<std::filesystem::path> paths)
     {

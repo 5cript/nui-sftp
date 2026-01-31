@@ -905,7 +905,8 @@ void OperationQueue::enqueueRename(
     // TODO: Implement
 }
 void OperationQueue::enqueueDelete(
-    std::filesystem::path const&,
+    std::filesystem::path const& path,
+    bool recursive,
     std::function<void(std::optional<Ids::OperationId> const&)> onComplete
 )
 {

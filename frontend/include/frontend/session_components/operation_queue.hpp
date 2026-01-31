@@ -75,6 +75,7 @@ class OperationQueue
     );
     void enqueueDelete(
         std::filesystem::path const& path,
+        bool recursive,
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete
     );
 
