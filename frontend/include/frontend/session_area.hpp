@@ -33,6 +33,7 @@ class SessionArea
 
     Session* getActiveSession();
     std::optional<nlohmann::json> getActiveSessionLayout();
+    Session* getSessionByLayoutId(std::string const& layoutId);
 
   private:
     struct Implementation;

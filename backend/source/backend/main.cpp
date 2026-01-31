@@ -1,5 +1,11 @@
 #include <backend/main.hpp>
 
+#ifdef _WIN32
+#    include <backend/windows/main_windows.hpp>
+#else
+#    include <backend/linux/main_linux.hpp>
+#endif
+
 #include <backend/process/process_store.hpp>
 
 #include <nui/core.hpp>
@@ -167,6 +173,7 @@ Main::Main(int const, char const* const* argv)
     , prompter_{hub_}
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
     , childSignalTimer_{window_.getExecutor()}
+    , platformSpecifics_{std::make_unique<PlatformSpecifics>(window_, hub_)}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
 

@@ -128,6 +128,22 @@ namespace NuiFileExplorer
         ) = 0;
 
         /**
+         * @brief Store some metadata that is to be attached to file drops from the desktop for
+         * postMessageWithAdditionalObjects in webview2.
+         *
+         * @param data
+         */
+        virtual void dropMetadata(std::string const& data) = 0;
+
+        /**
+         * @brief Retrieve the metadata that is to be attached to file drops from the desktop for
+         * postMessageWithAdditionalObjects in webview2.
+         *
+         * @return std::string
+         */
+        virtual std::string dropMetadata() const = 0;
+
+        /**
          * @brief Goes back to the previous path, if any.
          */
         virtual void goBack() = 0;

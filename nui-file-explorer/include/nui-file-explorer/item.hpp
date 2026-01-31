@@ -18,7 +18,7 @@ namespace NuiFileExplorer
         using Type = SharedData::DirectoryEntry::FileType;
         std::string icon; // url or base64 url etc.
 
-        Item(SharedData::DirectoryEntry const& entry, std::string icon = {})
+        explicit Item(SharedData::DirectoryEntry const& entry, std::string icon = {})
             : SharedData::DirectoryEntry{entry}
             , icon{std::move(icon)}
         {}

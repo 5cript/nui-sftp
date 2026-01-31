@@ -50,4 +50,7 @@ class Main
     boost::asio::steady_timer childSignalTimer_;
     // for display later in UI
     std::string initialPersistenceLoadWarning_;
+
+    struct PlatformSpecifics;
+    std::unique_ptr<PlatformSpecifics> platformSpecifics_;
 };
