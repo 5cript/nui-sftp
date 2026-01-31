@@ -1,6 +1,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/download_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
+#include <backend/sftp/delete_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <backend/sftp/bulk_upload_operation.hpp>
@@ -35,6 +36,10 @@ auto Operation::visit(FunctionT&& func) const
         case BulkUpload:
         {
             return func(static_cast<BulkUploadOperation const&>(*this));
+        }
+        case Delete:
+        {
+            return func(static_cast<DeleteOperation const&>(*this));
         }
         default:
         {

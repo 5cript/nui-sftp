@@ -61,6 +61,7 @@ void Session::start()
             self->registerRpcSftpRename();
             self->registerRpcSftpStat();
             self->registerRpcSftpPreDeleteChecks();
+            self->registerRpcQueuedRemoves();
             self->operationQueue_->registerRpc();
 
             Log::info("Session '{}' connected", self->id_.value());
@@ -495,6 +496,48 @@ void Session::registerRpcSftpListDirectory()
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
                         reply({{"entries", *result}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcQueuedRemoves()
+{
+    on(fmt::format("Session::{}::sftp::queuedRemove", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::filesystem::path> paths,
+                bool recursive
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        paths = std::move(paths),
+                        recursive](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply.error("Session no longer exists");
+
+                        std::vector<std::string> operationIds;
+                        for (auto const& path : paths)
+                        {
+                            const auto newOperationId = Ids::generateOperationId();
+                            const auto result =
+                                self->operationQueue_->addDeleteOperation(*channel, newOperationId, path, recursive);
+                            operationIds.push_back(newOperationId.value());
+                        }
+
+                        reply({{"operationIds", operationIds}, {"success", true}});
                     },
                     std::move(reply)
                 );

@@ -487,6 +487,48 @@ void SftpFileEngine::rename(
     );
 }
 
+void SftpFileEngine::removeOnQueueUnchecked(
+    std::vector<std::filesystem::path> const& paths,
+    bool recursive,
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+)
+{
+    lazyOpen(
+        [this, paths, recursive, onComplete = std::move(onComplete)](auto const& channelId) mutable
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add upload, no channel");
+                onComplete(std::nullopt);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::queuedRemove", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val) mutable
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to delete files: {}", val["error"].as<std::string>());
+                        onComplete(std::nullopt);
+                        return;
+                    }
+
+                    std::vector<Ids::OperationId> operationIds;
+                    const auto ids = val["operationIds"];
+                    for (const auto& idVal : ids)
+                        operationIds.push_back(Ids::makeOperationId(idVal.as<std::string>()));
+
+                    onComplete(operationIds);
+                },
+                channelId.value().value(),
+                paths,
+                recursive
+            );
+        }
+    );
+}
+
 void SftpFileEngine::stat(
     std::filesystem::path const& path,
     std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete

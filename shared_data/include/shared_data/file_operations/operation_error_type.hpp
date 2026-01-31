@@ -36,6 +36,7 @@ namespace SharedData
         UnknownWorkState,
         InvalidOperationState,
         OperationNotPossibleOnFileType,
-        FilesystemError
+        FilesystemError,
+        DeleteFailed
     );
 }

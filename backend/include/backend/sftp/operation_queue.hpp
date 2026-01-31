@@ -65,6 +65,13 @@ class OperationQueue
         bool insertRefresh = true
     );
 
+    std::expected<void, Operation::Error> addDeleteOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        std::filesystem::path const& remotePath,
+        bool recursive
+    );
+
     void registerRpc();
 
     bool paused() const;

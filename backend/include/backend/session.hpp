@@ -160,6 +160,16 @@ class Session
      */
     void registerRpcSftpStat();
 
+    /**
+     * Handles calls from the frontend to stat a file over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     paths: vector<path>
+     *     recursive: bool
+     * }
+     */
+    void registerRpcQueuedRemoves();
+
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
     void registerOperationQueuePauseUnpause();

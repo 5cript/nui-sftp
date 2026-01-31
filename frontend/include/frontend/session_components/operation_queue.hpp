@@ -9,6 +9,7 @@
 #include <shared_data/file_operations/upload_progress.hpp>
 #include <shared_data/file_operations/bulk_download_progress.hpp>
 #include <shared_data/file_operations/bulk_upload_progress.hpp>
+#include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
@@ -74,9 +75,9 @@ class OperationQueue
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete
     );
     void enqueueDelete(
-        std::filesystem::path const& path,
+        std::vector<std::filesystem::path> const& paths,
         bool recursive,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
     );
 
     Nui::ElementRenderer operator()();
@@ -90,6 +91,7 @@ class OperationQueue
     void onUploadProgress(SharedData::UploadProgress const& progress);
     void onBulkDownloadProgress(SharedData::BulkDownloadProgress const& progress);
     void onBulkUploadProgress(SharedData::BulkUploadProgress const& progress);
+    void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);

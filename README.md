@@ -15,6 +15,7 @@ Still under construction :construction:
 - [ ] More/Custom themes.
 - [ ] Accessible logs.
 - [ ] Unify style of operation queue and rest of the ui.
+- [ ] Scroll operations into view when they complete.
 
 ## Settings UI
 - [x] Add UI for settings.
@@ -22,6 +23,7 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [x] Better number boxes.
 - [x] Number box value constraining.
+- [ ] Option to disable some warning boxes.
 
 ## SSH
 - [x] Keyboard interactive password auth.
@@ -54,16 +56,17 @@ Still under construction :construction:
 - [x] Cancel operations.
 - [x] Bulk uploads.
 - [x] Show file properties.
+- [x] Recursive folder delete.
+- [x] Error message on delete fail.
+- [x] Delete confirm focus default "ok".
 - [ ] Implement handling of symlinks in bulk downloads.
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
-- [ ] Implement bulk download to archives.
 - [ ] Optimize download speed!!!
 - [ ] Optimize upload speed!!!
-- [ ] Recursive folder delete.
-- [x] Error message on delete fail.
-- [x] Delete confirm focus default "ok".
+- [ ] Implement bulk download to archives.
+- [ ] Synchronize directories.
 
 ## File View UI
 - [x] Grid view.
