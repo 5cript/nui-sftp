@@ -407,15 +407,15 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 }
 
 void RemoteSideModel::enqueueSingleDownload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remoteItem,
+    NuiFileExplorer::Item const& localItem,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
     operationQueue_->enqueueDownload(
-        remotePath,
-        localPath,
+        remoteItem,
+        localItem,
         [this](std::optional<Ids::OperationId> const& opId)
         {
             if (!opId)
@@ -437,7 +437,7 @@ void RemoteSideModel::enqueueSingleDownload(
 }
 
 void RemoteSideModel::downloadItemsConfirmed(
-    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems,
+    std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems,
     std::size_t index,
     bool overwriteNever,
     bool overwriteAlways
@@ -458,7 +458,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         return;
     }
 
-    const auto fileToCheckFor = downloadItems[index].second.generic_string();
+    const auto fileToCheckFor = downloadItems[index].second.path.generic_string();
     auto onExistsResponse = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
                                 Nui::val response
                             ) mutable
@@ -496,10 +496,10 @@ void RemoteSideModel::downloadItemsConfirmed(
 
         const auto exists = response["exists"].as<bool>();
 
-        Log::info("Downloading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
+        Log::info("Downloading '{}' to '{}'.", item.first.path.generic_string(), item.second.path.generic_string());
         if (exists && !overwriteNever)
         {
-            Log::info("File already exists: {}", item.second.generic_string());
+            Log::info("File already exists: {}", item.second.path.generic_string());
             confirmDialog_->open(
                 {.state = ConfirmDialog::State::Information,
                     .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
@@ -507,7 +507,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                         ConfirmDialog::Button::None,
                     .focusButton = ConfirmDialog::Button::No,
-                    .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
+                    .listItems = {{.text = item.second.path.generic_string(), .description = "File already exists"}},
                     .onClose = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
                                    ConfirmDialog::Button button
                                ) mutable
@@ -527,7 +527,8 @@ void RemoteSideModel::downloadItemsConfirmed(
                         else if (button == ConfirmDialog::Button::No)
                         {
                             Log::info(
-                                "Skipping download of existing file: {}", downloadItems[index].second.generic_string()
+                                "Skipping download of existing file: {}",
+                                downloadItems[index].second.path.generic_string()
                             );
                             downloadItemsConfirmed(
                                 std::move(downloadItems), index + 1, overwriteNever, overwriteAlways
@@ -629,14 +630,18 @@ void RemoteSideModel::onTransfer(
                     return;
                 }
 
-                std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems;
+                std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems;
                 std::transform(
                     items.begin(),
                     items.end(),
                     std::back_inserter(downloadItems),
                     [this, destinationDir](auto const& item)
                     {
-                        return std::make_pair(currentPath_.value() / item.path, destinationDir / item.path.filename());
+                        NuiFileExplorer::Item localItem = item;
+                        NuiFileExplorer::Item remoteItem = item;
+                        localItem.path = destinationDir / item.path.filename();
+                        remoteItem.path = currentPath_.value() / item.path;
+                        return std::make_pair(remoteItem, localItem);
                     }
                 );
 

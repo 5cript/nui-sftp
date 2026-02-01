@@ -147,6 +147,7 @@ namespace SecureShell
             [this]()
             {
                 readTask();
+                return true;
             }
         );
         if (!success)

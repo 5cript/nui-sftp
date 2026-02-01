@@ -46,15 +46,15 @@ class RemoteSideModel : public SideModel
     void enqueueRefresh(bool otherModel);
 
     void downloadItemsConfirmed(
-        std::vector<std::pair<std::filesystem::path, std::filesystem::path>> downloadItems,
+        std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems,
         std::size_t index = 0,
         bool overwriteNever = false,
         bool overwriteAlways = false
     );
 
     void enqueueSingleDownload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remoteItem,
+        NuiFileExplorer::Item const& localItem,
         bool allowOverwrite,
         bool insertRefresh
     );

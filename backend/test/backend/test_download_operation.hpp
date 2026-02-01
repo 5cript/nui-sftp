@@ -39,16 +39,21 @@ namespace Test
         {
             auto mock = std::make_shared<::testing::NiceMock<SecureShell::Test::FileStreamMock>>();
 
-            ON_CALL(*mock, strand()).WillByDefault([this]() -> SecureShell::ProcessingStrand* {
-                return strand_.get();
-            });
+            ON_CALL(*mock, strand())
+                .WillByDefault(
+                    [this]() -> SecureShell::ProcessingStrand*
+                    {
+                        return strand_.get();
+                    }
+                );
 
             return mock;
         }
 
         void giveMockDefaultStat(
             std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> const& mock,
-            std::optional<std::size_t> size = std::nullopt)
+            std::optional<std::size_t> size = std::nullopt
+        )
         {
             if (!size)
                 size = fakeFileContent_.size();
@@ -56,23 +61,28 @@ namespace Test
             ON_CALL(*mock, stat())
                 .WillByDefault(
                     [size = size.value()]()
-                        -> std::future<std::expected<SecureShell::FileInformation, SecureShell::SftpError>> {
+                        -> std::future<std::expected<SecureShell::FileInformation, SecureShell::SftpError>>
+                    {
                         std::promise<std::expected<SecureShell::FileInformation, SecureShell::SftpError>> promise;
                         promise.set_value(
                             SecureShell::FileInformation{
                                 .size = size,
                                 .permissions = std::filesystem::perms::owner_all,
-                            });
+                            }
+                        );
                         return promise.get_future();
-                    });
+                    }
+                );
         }
 
         void giveMockExpectedRead(std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> const& mock)
         {
             EXPECT_CALL(*mock, readSome(testing::_, testing::_))
                 .WillRepeatedly(
-                    [this](char const* buffer, std::size_t size)
-                        -> std::future<std::expected<std::size_t, SecureShell::SftpError>> {
+                    [this](
+                        char const* buffer, std::size_t size
+                    ) -> std::future<std::expected<std::size_t, SecureShell::SftpError>>
+                    {
                         readPromise_ = {};
                         if (!readCycleQueue_.empty())
                         {
@@ -82,7 +92,8 @@ namespace Test
                             readPromise_.set_value(data.size());
                         }
                         return readPromise_.get_future();
-                    });
+                    }
+                );
         }
 
         void enqueueFakeReadCycle(std::optional<std::size_t> chunkSizeOpt = std::nullopt)
@@ -167,15 +178,21 @@ namespace Test
 
         auto fileStream = makeFileStreamMock();
 
-        EXPECT_CALL(*fileStream, stat()).WillOnce([]() -> std::future<std::expected<FileInformation, SftpError>> {
-            std::promise<std::expected<FileInformation, SftpError>> promise;
-            promise.set_value(
-                std::unexpected(
-                    SftpError{
-                        .message = "Stat failed",
-                    }));
-            return promise.get_future();
-        });
+        EXPECT_CALL(*fileStream, stat())
+            .WillOnce(
+                []() -> std::future<std::expected<FileInformation, SftpError>>
+                {
+                    std::promise<std::expected<FileInformation, SftpError>> promise;
+                    promise.set_value(
+                        std::unexpected(
+                            SftpError{
+                                .message = "Stat failed",
+                            }
+                        )
+                    );
+                    return promise.get_future();
+                }
+            );
 
         auto options = DownloadOperation::DownloadOperationOptions{
             .localPath = isolateDirectory_.path() / "file.txt",
@@ -196,14 +213,18 @@ namespace Test
         auto fileStream = makeFileStreamMock();
 
         EXPECT_CALL(*fileStream, stat())
-            .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                promise.set_value(
-                    FileInformation{
-                        .size = 0,
-                    });
-                return promise.get_future();
-            });
+            .WillOnce(
+                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                {
+                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                    promise.set_value(
+                        FileInformation{
+                            .size = 0,
+                        }
+                    );
+                    return promise.get_future();
+                }
+            );
 
         auto options = DownloadOperation::DownloadOperationOptions{
             .localPath = isolateDirectory_.path() / "file.txt",
@@ -221,14 +242,18 @@ namespace Test
         auto fileStream = makeFileStreamMock();
 
         EXPECT_CALL(*fileStream, stat())
-            .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                promise.set_value(
-                    FileInformation{
-                        .size = 42,
-                    });
-                return promise.get_future();
-            });
+            .WillOnce(
+                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                {
+                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                    promise.set_value(
+                        FileInformation{
+                            .size = 42,
+                        }
+                    );
+                    return promise.get_future();
+                }
+            );
 
         auto options = DownloadOperation::DownloadOperationOptions{
             .localPath = isolateDirectory_.path() / "file.txt",
@@ -246,14 +271,18 @@ namespace Test
         auto fileStream = makeFileStreamMock();
 
         EXPECT_CALL(*fileStream, stat())
-            .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                promise.set_value(
-                    FileInformation{
-                        .size = 42,
-                    });
-                return promise.get_future();
-            });
+            .WillOnce(
+                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                {
+                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                    promise.set_value(
+                        FileInformation{
+                            .size = 42,
+                        }
+                    );
+                    return promise.get_future();
+                }
+            );
 
         auto options = DownloadOperation::DownloadOperationOptions{
             .localPath = isolateDirectory_.path() / "file.txt",
@@ -278,14 +307,18 @@ namespace Test
             auto fileStream = makeFileStreamMock();
 
             EXPECT_CALL(*fileStream, stat())
-                .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 42,
-                        });
-                    return promise.get_future();
-                });
+                .WillOnce(
+                    []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                    {
+                        std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                        promise.set_value(
+                            FileInformation{
+                                .size = 42,
+                            }
+                        );
+                        return promise.get_future();
+                    }
+                );
 
             DownloadOperation operation{fileStream, options};
 
@@ -310,14 +343,18 @@ namespace Test
             auto fileStream = makeFileStreamMock();
 
             EXPECT_CALL(*fileStream, stat())
-                .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 42,
-                        });
-                    return promise.get_future();
-                });
+                .WillOnce(
+                    []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                    {
+                        std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                        promise.set_value(
+                            FileInformation{
+                                .size = 42,
+                            }
+                        );
+                        return promise.get_future();
+                    }
+                );
 
             DownloadOperation operation{fileStream, options};
 
@@ -364,14 +401,18 @@ namespace Test
         auto fileStream = makeFileStreamMock();
 
         EXPECT_CALL(*fileStream, stat())
-            .WillOnce([]() -> std::future<std::expected<FileInformation, SecureShell::SftpError>> {
-                std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                promise.set_value(
-                    FileInformation{
-                        .size = 42,
-                    });
-                return promise.get_future();
-            });
+            .WillOnce(
+                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
+                {
+                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
+                    promise.set_value(
+                        FileInformation{
+                            .size = 42,
+                        }
+                    );
+                    return promise.get_future();
+                }
+            );
 
         DownloadOperation operation{fileStream, options};
 
@@ -462,7 +503,8 @@ namespace Test
         EXPECT_TRUE(operation.cancel(true).has_value());
 
         EXPECT_EQ(
-            std::filesystem::file_size(options.localPath.generic_string() + ".filepart"), fakeFileContent_.size());
+            std::filesystem::file_size(options.localPath.generic_string() + ".filepart"), fakeFileContent_.size()
+        );
     }
 
     TEST_F(DownloadOperationTests, ReadCycleWritesDataToFile)
@@ -551,13 +593,17 @@ namespace Test
         giveMockDefaultStat(fileStream, fakeFileContent_.size());
         giveMockExpectedRead(fileStream);
 
-        std::vector<std::tuple<std::int64_t, std::int64_t, std::int64_t>> progressCalls;
+        std::vector<std::tuple<std::int64_t, std::int64_t, std::int64_t, std::make_signed_t<std::size_t>>>
+            progressCalls;
 
         auto options = DownloadOperation::DownloadOperationOptions{
             .progressCallback =
-                [&progressCalls](std::int64_t min, std::int64_t max, std::int64_t current) {
-                    progressCalls.emplace_back(min, max, current);
-                },
+                [&progressCalls](
+                    std::int64_t min, std::int64_t max, std::int64_t current, std::make_signed_t<std::size_t> bps
+                )
+            {
+                progressCalls.emplace_back(min, max, current, bps);
+            },
             .localPath = isolateDirectory_.path() / "file.txt",
             .doCleanup = false,
         };

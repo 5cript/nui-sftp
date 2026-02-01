@@ -3,6 +3,7 @@
 #include <ssh/async/processing_strand.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/file_information.hpp>
+#include <ssh/async/transfer_context.hpp>
 
 #include <libssh/sftp.h>
 
@@ -18,6 +19,8 @@ namespace SecureShell
     class IFileStream
     {
       public:
+        using SignedSizeType = std::make_signed_t<std::size_t>;
+
         IFileStream() = default;
         virtual ~IFileStream() = default;
         IFileStream(IFileStream const&) = default;
@@ -69,6 +72,36 @@ namespace SecureShell
          */
         virtual std::future<std::expected<std::size_t, SftpError>>
         readAll(std::function<bool(std::string_view data)> onRead) = 0;
+
+        /**
+         * @brief Returns an AsyncTransferContext that can be used to monitor the asynchronou transfer.
+         *
+         * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
+         * @param bufferSize The size of the buffer.
+         * @param onRead Called when data is read. Return false to stop reading.
+         * @return std::shared_ptr<AsyncTransferContext>
+         */
+        virtual std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> readAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<bool(SignedSizeType)> onRead
+        ) = 0;
+
+        /**
+         * @brief Returns an AsyncTransferContext that can be used to monitor the asynchronou transfer.
+         *
+         * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
+         * @param bufferSize The size of the buffer.
+         * @param doRead Called to read from the file into buffer. Should return the number of bytes read.
+         * @return std::shared_ptr<AsyncTransferContext>
+         */
+        virtual std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<SignedSizeType(SignedSizeType)> doRead
+        ) = 0;
 
         /**
          * @brief Writes some bytes to the file.

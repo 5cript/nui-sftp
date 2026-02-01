@@ -62,9 +62,12 @@ namespace SecureShell::Test
         Awaiter awaiter{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        EXPECT_TRUE(processingThread.pushTask([&awaiter] {
-            awaiter.arrive();
-        }));
+        EXPECT_TRUE(processingThread.pushTask(
+            [&awaiter]
+            {
+                awaiter.arrive();
+            }
+        ));
         ASSERT_TRUE(awaiter.waitFor());
     }
 
@@ -77,11 +80,14 @@ namespace SecureShell::Test
             processingThread.start(std::chrono::milliseconds{1});
             for (unsigned int i = 0; i < ProcessingThread::maximumTasksProcessableAtOnce * 3; ++i)
             {
-                EXPECT_TRUE(processingThread.pushTask([&counter, &awaiter] {
-                    if (counter.load() == 0)
-                        awaiter.arrive();
-                    ++counter;
-                }));
+                EXPECT_TRUE(processingThread.pushTask(
+                    [&counter, &awaiter]
+                    {
+                        if (counter.load() == 0)
+                            awaiter.arrive();
+                        ++counter;
+                    }
+                ));
             }
             // wait for at least one task to be executed, otherwise it runs into shutdown immediately and the adds
             // are not processed
@@ -102,13 +108,17 @@ namespace SecureShell::Test
     {
         Awaiter awaiter{};
         ProcessingThread processingThread;
-        processingThread.pushTask([&] {
-            awaiter.arrive();
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        });
-        std::thread asyncStopper{[&] {
-            processingThread.stop();
-        }};
+        processingThread.pushTask(
+            [&]
+            {
+                awaiter.arrive();
+                std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            }
+        );
+        std::thread asyncStopper{[&]
+            {
+                processingThread.stop();
+            }};
         awaiter.wait();
         EXPECT_FALSE(processingThread.pushTask([] {}));
         asyncStopper.join();
@@ -118,9 +128,12 @@ namespace SecureShell::Test
     {
         Awaiter awaiter{};
         ProcessingThread processingThread;
-        processingThread.pushTask([&] {
-            awaiter.arrive();
-        });
+        processingThread.pushTask(
+            [&]
+            {
+                awaiter.arrive();
+            }
+        );
         processingThread.stop();
         EXPECT_TRUE(awaiter.waitFor());
     }
@@ -129,7 +142,12 @@ namespace SecureShell::Test
     {
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([] {});
+        auto result = processingThread.pushPermanentTask(
+            [](auto)
+            {
+                return true;
+            }
+        );
         EXPECT_TRUE(result.first);
     }
 
@@ -138,9 +156,13 @@ namespace SecureShell::Test
         Awaiter awaiter{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([&awaiter] {
-            awaiter.arrive();
-        });
+        auto result = processingThread.pushPermanentTask(
+            [&awaiter](auto)
+            {
+                awaiter.arrive();
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
         EXPECT_TRUE(awaiter.waitFor());
     }
@@ -151,12 +173,16 @@ namespace SecureShell::Test
         processingThread.start(std::chrono::milliseconds{1});
         std::latch latch{5};
         std::atomic_int counter = 5;
-        auto result = processingThread.pushPermanentTask([&] {
-            if (counter.load() == 0)
-                return;
-            latch.count_down();
-            --counter;
-        });
+        auto result = processingThread.pushPermanentTask(
+            [&](auto)
+            {
+                if (counter.load() == 0)
+                    return true;
+                latch.count_down();
+                --counter;
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
         bool waitResult = false;
         for (int tryWaitCount = 0; tryWaitCount < 5; ++tryWaitCount)
@@ -173,13 +199,20 @@ namespace SecureShell::Test
         Awaiter awaiter{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([] {
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
-        });
+        auto result = processingThread.pushPermanentTask(
+            [](auto)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
-        processingThread.pushTask([&awaiter] {
-            awaiter.arrive();
-        });
+        processingThread.pushTask(
+            [&awaiter]
+            {
+                awaiter.arrive();
+            }
+        );
         EXPECT_TRUE(awaiter.waitFor());
     }
 
@@ -189,18 +222,25 @@ namespace SecureShell::Test
         Awaiter awaiter{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([&counter, &awaiter] {
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
-            ++counter;
-            if (counter.load() == 5)
-                awaiter.arrive();
-        });
+        auto result = processingThread.pushPermanentTask(
+            [&counter, &awaiter](auto)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+                ++counter;
+                if (counter.load() == 5)
+                    awaiter.arrive();
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
 
         std::atomic_int taskCounter = 0;
-        processingThread.pushTask([&taskCounter] {
-            ++taskCounter;
-        });
+        processingThread.pushTask(
+            [&taskCounter]
+            {
+                ++taskCounter;
+            }
+        );
 
         ASSERT_TRUE(awaiter.waitFor());
         EXPECT_EQ(1, taskCounter.load());
@@ -210,7 +250,12 @@ namespace SecureShell::Test
     {
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([] {});
+        auto result = processingThread.pushPermanentTask(
+            [](auto)
+            {
+                return true;
+            }
+        );
         processingThread.removePermanentTask(result.second);
     }
 
@@ -219,9 +264,13 @@ namespace SecureShell::Test
         Awaiter awaiter{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([&awaiter] {
-            awaiter.arrive();
-        });
+        auto result = processingThread.pushPermanentTask(
+            [&awaiter](auto)
+            {
+                awaiter.arrive();
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
         ASSERT_TRUE(awaiter.waitFor());
         ASSERT_NO_FATAL_FAILURE(processingThread.removePermanentTask(result.second));
@@ -233,16 +282,23 @@ namespace SecureShell::Test
         Awaiter awaiter2{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([&awaiter] {
-            awaiter.arrive();
-        });
+        auto result = processingThread.pushPermanentTask(
+            [&awaiter](auto)
+            {
+                awaiter.arrive();
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
         ASSERT_TRUE(awaiter.waitFor());
         std::atomic_bool removeResult = false;
-        processingThread.pushTask([&processingThread, result, &removeResult, &awaiter2] {
-            removeResult = processingThread.removePermanentTask(result.second);
-            awaiter2.arrive();
-        });
+        processingThread.pushTask(
+            [&processingThread, result, &removeResult, &awaiter2]
+            {
+                removeResult = processingThread.removePermanentTask(result.second);
+                awaiter2.arrive();
+            }
+        );
         ASSERT_TRUE(awaiter2.waitFor());
         EXPECT_TRUE(removeResult);
         processingThread.stop();
@@ -257,13 +313,20 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         std::atomic_bool pushResult = false;
-        processingThread.pushTask([&processingThread, &awaiter, &pushResult] {
-            pushResult = processingThread
-                             .pushPermanentTask([&awaiter] {
-                                 awaiter.arrive();
-                             })
-                             .first;
-        });
+        processingThread.pushTask(
+            [&processingThread, &awaiter, &pushResult]
+            {
+                pushResult = processingThread
+                                 .pushPermanentTask(
+                                     [&awaiter](auto)
+                                     {
+                                         awaiter.arrive();
+                                         return true;
+                                     }
+                                 )
+                                 .first;
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
         EXPECT_TRUE(pushResult);
     }
@@ -274,11 +337,17 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         std::atomic_bool pushResult = false;
-        processingThread.pushTask([&processingThread, &awaiter, &pushResult] {
-            pushResult = processingThread.pushTask([&awaiter] {
-                awaiter.arrive();
-            });
-        });
+        processingThread.pushTask(
+            [&processingThread, &awaiter, &pushResult]
+            {
+                pushResult = processingThread.pushTask(
+                    [&awaiter]
+                    {
+                        awaiter.arrive();
+                    }
+                );
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
         EXPECT_TRUE(pushResult);
     }
@@ -290,13 +359,17 @@ namespace SecureShell::Test
         processingThread.start(std::chrono::milliseconds{1});
         std::shared_ptr<std::pair<bool, ProcessingThread::PermanentTaskId>> result =
             std::make_shared<std::pair<bool, ProcessingThread::PermanentTaskId>>();
-        *result = processingThread.pushPermanentTask([&processingThread, result, &awaiter] {
-            processingThread.removePermanentTask(result->second);
-            awaiter.arrive();
-            /*
-             * DONT DO ANYTHING HERE WITH CAPTURES, AS THEY ARE DESTROYED
-             */
-        });
+        *result = processingThread.pushPermanentTask(
+            [&processingThread, result, &awaiter](auto)
+            {
+                processingThread.removePermanentTask(result->second);
+                awaiter.arrive();
+                /*
+                 * DONT DO ANYTHING HERE WITH CAPTURES, AS THEY ARE DESTROYED
+                 */
+                return true;
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
         processingThread.stop();
         EXPECT_EQ(0, processingThread.permanentTaskCount());
@@ -310,11 +383,15 @@ namespace SecureShell::Test
         processingThread.start(std::chrono::milliseconds{1});
         std::shared_ptr<std::pair<bool, ProcessingThread::PermanentTaskId>> result =
             std::make_shared<std::pair<bool, ProcessingThread::PermanentTaskId>>();
-        *result = processingThread.pushPermanentTask([&]() {
-            awaiter.arrive();
-            ++counter;
-            processingThread.removePermanentTask(result->second);
-        });
+        *result = processingThread.pushPermanentTask(
+            [&](auto)
+            {
+                awaiter.arrive();
+                ++counter;
+                processingThread.removePermanentTask(result->second);
+                return true;
+            }
+        );
 
         ASSERT_TRUE(awaiter.waitFor());
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
@@ -326,7 +403,12 @@ namespace SecureShell::Test
     {
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        auto result = processingThread.pushPermanentTask([] {});
+        auto result = processingThread.pushPermanentTask(
+            [](auto)
+            {
+                return true;
+            }
+        );
         EXPECT_TRUE(processingThread.removePermanentTask(result.second));
         EXPECT_FALSE(processingThread.removePermanentTask(result.second));
     }
@@ -335,7 +417,12 @@ namespace SecureShell::Test
     {
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
-        processingThread.pushPermanentTask([] {});
+        processingThread.pushPermanentTask(
+            [](auto)
+            {
+                return true;
+            }
+        );
         processingThread.clearPermanentTasks();
         EXPECT_EQ(0, processingThread.permanentTaskCount());
     }
@@ -371,7 +458,12 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushPermanentTask([] {});
+        strand->pushPermanentTask(
+            []()
+            {
+                return true;
+            }
+        );
         processingThread.stop();
     }
 
@@ -381,9 +473,12 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushTask([&awaiter] {
-            awaiter.arrive();
-        });
+        strand->pushTask(
+            [&awaiter]
+            {
+                awaiter.arrive();
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
     }
 
@@ -393,9 +488,13 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        auto result = strand->pushPermanentTask([&awaiter] {
-            awaiter.arrive();
-        });
+        auto result = strand->pushPermanentTask(
+            [&awaiter]()
+            {
+                awaiter.arrive();
+                return true;
+            }
+        );
         ASSERT_TRUE(result.first);
         ASSERT_TRUE(awaiter.waitFor());
     }
@@ -415,7 +514,14 @@ namespace SecureShell::Test
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
         strand->pushFinalTask([] {});
-        EXPECT_FALSE(strand->pushPermanentTask([] {}).first);
+        EXPECT_FALSE(strand
+                ->pushPermanentTask(
+                    []
+                    {
+                        return true;
+                    }
+                )
+                .first);
     }
 
     TEST_F(ProcessingThreadTest, CanPushFinalTaskAfterFinalTask)
@@ -432,9 +538,24 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushPermanentTask([] {});
-        strand->pushPermanentTask([] {});
-        strand->pushPermanentTask([] {});
+        strand->pushPermanentTask(
+            []
+            {
+                return true;
+            }
+        );
+        strand->pushPermanentTask(
+            []
+            {
+                return true;
+            }
+        );
+        strand->pushPermanentTask(
+            []
+            {
+                return true;
+            }
+        );
         strand->pushFinalTask([] {});
         EXPECT_EQ(0, processingThread.permanentTaskCount());
     }
@@ -445,11 +566,17 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushTask([&strand, &awaiter] {
-            strand->pushFinalTask([&awaiter] {
-                awaiter.arrive();
-            });
-        });
+        strand->pushTask(
+            [&strand, &awaiter]
+            {
+                strand->pushFinalTask(
+                    [&awaiter]
+                    {
+                        awaiter.arrive();
+                    }
+                );
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
     }
 
@@ -459,11 +586,18 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushPermanentTask([&strand, &awaiter] {
-            strand->pushFinalTask([&awaiter] {
-                awaiter.arrive();
-            });
-        });
+        strand->pushPermanentTask(
+            [&strand, &awaiter]
+            {
+                strand->pushFinalTask(
+                    [&awaiter]
+                    {
+                        awaiter.arrive();
+                    }
+                );
+                return true;
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
     }
 
@@ -473,13 +607,46 @@ namespace SecureShell::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        strand->pushPermanentTask([&strand, &awaiter] {
-            strand->pushTask([&strand, &awaiter] {
-                strand->pushFinalTask([&awaiter] {
-                    awaiter.arrive();
-                });
-            });
-        });
+        strand->pushPermanentTask(
+            [&strand, &awaiter]
+            {
+                strand->pushTask(
+                    [&strand, &awaiter]
+                    {
+                        strand->pushFinalTask(
+                            [&awaiter]
+                            {
+                                awaiter.arrive();
+                            }
+                        );
+                    }
+                );
+                return true;
+            }
+        );
         ASSERT_TRUE(awaiter.waitFor());
+    }
+
+    TEST_F(ProcessingThreadTest, PermanentTaskReturningFalseIsRemoved)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        auto result = strand->pushPermanentTask(
+            []
+            {
+                return false;
+            }
+        );
+        ASSERT_TRUE(result.first);
+        Awaiter awaiter{};
+        strand->pushTask(
+            [&awaiter]
+            {
+                awaiter.arrive();
+            }
+        );
+        awaiter.wait();
+        EXPECT_EQ(0, processingThread.permanentTaskCount());
     }
 }

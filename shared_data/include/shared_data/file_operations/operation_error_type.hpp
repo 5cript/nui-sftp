@@ -29,6 +29,7 @@ namespace SharedData
         CannotFinalizeDuringRead,
         InvalidOptionsKey,
         TargetFileNotGood,
+        SourceFileNotGood,
         CannotWorkCompletedOperation,
         CannotWorkFailedOperation,
         CannotWorkCanceledOperation,

@@ -1,5 +1,6 @@
 #include <frontend/terminal/sftp_file_engine.hpp>
 #include <log/log.hpp>
+#include <constants/sftp.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/api/json.hpp>
@@ -172,14 +173,16 @@ void SftpFileEngine::createFile(std::filesystem::path const& path, std::function
 }
 
 void SftpFileEngine::addDownload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remotePath,
+    NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
-    Log::info("Requesting to add download: {} -> {}", remotePath.generic_string(), localPath.generic_string());
+    Log::info(
+        "Requesting to add download: {} -> {}", remotePath.path.generic_string(), localPath.path.generic_string()
+    );
     lazyOpen(
         [this,
             remotePath,
@@ -200,8 +203,8 @@ void SftpFileEngine::addDownload(
             Log::info(
                 "Adding download (with ID '{}'): {} -> {}",
                 operationId.value(),
-                remotePath.generic_string(),
-                localPath.generic_string()
+                remotePath.path.generic_string(),
+                localPath.path.generic_string()
             );
 
             Nui::RpcClient::callWithBackChannel(
@@ -220,9 +223,10 @@ void SftpFileEngine::addDownload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                remotePath.generic_string(),
-                localPath.generic_string(),
+                remotePath.path.generic_string(),
+                localPath.path.generic_string(),
                 allowOverwrite,
+                remotePath.size > Constants::bigFileCutOff,
                 insertRefresh
             );
         }
@@ -230,14 +234,14 @@ void SftpFileEngine::addDownload(
 }
 
 void SftpFileEngine::addUpload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remotePath,
+    NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
-    Log::info("Requesting to add upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
+    Log::info("Requesting to add upload: {} -> {}", localPath.path.generic_string(), remotePath.path.generic_string());
     lazyOpen(
         [this,
             remotePath,
@@ -258,8 +262,8 @@ void SftpFileEngine::addUpload(
             Log::info(
                 "Adding upload (with ID '{}'): {} -> {}",
                 operationId.value(),
-                localPath.generic_string(),
-                remotePath.generic_string()
+                localPath.path.generic_string(),
+                remotePath.path.generic_string()
             );
 
             Nui::RpcClient::callWithBackChannel(
@@ -278,9 +282,10 @@ void SftpFileEngine::addUpload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                localPath.generic_string(),
-                remotePath.generic_string(),
+                localPath.path.generic_string(),
+                remotePath.path.generic_string(),
                 allowOverwrite,
+                remotePath.size > Constants::bigFileCutOff,
                 insertRefresh
             );
         }

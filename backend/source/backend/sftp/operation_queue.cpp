@@ -193,6 +193,25 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
     );
 }
 
+void OperationQueue::deepPause(bool pause)
+{
+    const auto updateCount = std::min(operations_.size(), static_cast<std::size_t>(parallelism_));
+
+    if (updateCount == 0)
+        return;
+
+    bool previousWasBarrier = false;
+    for (std::size_t i = 0; i < updateCount; ++i)
+    {
+        if (previousWasBarrier)
+            break;
+
+        auto& [id, operation] = operations_[i];
+        previousWasBarrier = operation->isBarrier();
+        operation->pause(pause);
+    }
+}
+
 bool OperationQueue::work()
 {
     // Assumed in strand
@@ -285,6 +304,7 @@ void OperationQueue::paused(bool pause)
                 return;
 
             self->paused_ = pause;
+            self->deepPause(pause);
         }
     );
 }
@@ -295,6 +315,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     std::filesystem::path const& localPath,
     std::filesystem::path const& remotePath,
     bool allowOverwrite,
+    bool isBigFile,
     bool insertRefresh
 )
 {
@@ -344,7 +365,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             std::move(openResult).value(),
             DownloadOperation::DownloadOperationOptions{
                 .progressCallback =
-                    [weak = weak_from_this(), operationId](auto min, auto max, auto current)
+                    [weak = weak_from_this(), operationId](auto min, auto max, auto current, auto bytesPerSecond)
                 {
                     auto self = weak.lock();
                     if (!self)
@@ -357,11 +378,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                             .min = min,
                             .max = max,
                             .current = current,
+                            .bytesPerSecond = bytesPerSecond,
                         }
-                    );
-
-                    Log::debug(
-                        "Downloaded {} / {} bytes ({}%)", current - min, max - min, (current - min) * 100 / (max - min)
                     );
                 },
                 .remotePath = remotePath,
@@ -372,6 +390,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
                 .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
                 .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
+                .bigFileOptimized = isBigFile,
                 .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
                                                                          : defaultOptions.filePermissions,
                 .directoryPermissions = transferOptions.customDirectoryPermissions
@@ -438,7 +457,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                         std::uint64_t currentFileBytes,
                         std::uint64_t currentFileTotalBytes,
                         std::uint64_t bytesCurrent,
-                        std::uint64_t bytesTotal
+                        std::uint64_t bytesTotal,
+                        std::make_signed_t<std::size_t> bytesPerSecond
                     )
                 {
                     auto self = weak.lock();
@@ -456,6 +476,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                             .currentFileTotalBytes = currentFileTotalBytes,
                             .bytesCurrent = bytesCurrent,
                             .bytesTotal = bytesTotal,
+                            .bytesPerSecond = bytesPerSecond,
                         }
                     );
                 },
@@ -515,6 +536,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     std::filesystem::path const& localPath,
     std::filesystem::path const& remotePath,
     bool allowOverwrite,
+    bool isBigFile,
     bool insertRefresh
 )
 {
@@ -541,7 +563,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             sftp,
             UploadOperation::UploadOperationOptions{
                 .progressCallback =
-                    [weak = weak_from_this(), operationId](auto min, auto max, auto current)
+                    [weak = weak_from_this(), operationId](auto min, auto max, auto current, auto bytesPerSecond)
                 {
                     auto self = weak.lock();
                     if (!self)
@@ -554,6 +576,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                             .min = min,
                             .max = max,
                             .current = current,
+                            .bytesPerSecond = bytesPerSecond
                         }
                     );
                 },
@@ -563,6 +586,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
                 .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
                 .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                .bigFileOptimized = isBigFile,
                 .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
                                                                          : defaultOptions.filePermissions,
                 .directoryPermissions = transferOptions.customDirectoryPermissions
@@ -623,7 +647,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                         std::uint64_t currentFileBytes,
                         std::uint64_t currentFileTotalBytes,
                         std::uint64_t bytesCurrent,
-                        std::uint64_t bytesTotal
+                        std::uint64_t bytesTotal,
+                        std::make_signed_t<std::size_t> bytesPerSecond
                     )
                 {
                     auto self = weak.lock();
@@ -641,6 +666,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                             .currentFileTotalBytes = currentFileTotalBytes,
                             .bytesCurrent = bytesCurrent,
                             .bytesTotal = bytesTotal,
+                            .bytesPerSecond = bytesPerSecond,
                         }
                     );
                 },

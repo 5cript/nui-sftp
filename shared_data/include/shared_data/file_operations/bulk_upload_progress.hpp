@@ -20,6 +20,7 @@ namespace SharedData
         std::uint64_t currentFileTotalBytes;
         std::uint64_t bytesCurrent;
         std::uint64_t bytesTotal;
+        std::make_signed_t<std::size_t> bytesPerSecond;
     };
     BOOST_DESCRIBE_STRUCT(
         BulkUploadProgress,
@@ -31,6 +32,7 @@ namespace SharedData
             currentFileBytes,
             currentFileTotalBytes,
             bytesCurrent,
-            bytesTotal)
+            bytesTotal,
+            bytesPerSecond)
     )
 }

@@ -123,7 +123,9 @@ header.opq-controls {
     border-top: 1px dashed rgba(255, 255, 255, 0.03);
     overflow: hidden;
     transition: max-height .35s cubic-bezier(.2, .9, .2, 1), opacity .25s ease;
-    padding-bottom: 12px
+    padding-bottom: 12px;
+    display: flex;
+    gap: 8px;
 }
 
 .opq-body.opq-collapsed {

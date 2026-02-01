@@ -318,7 +318,7 @@ void LocalSideModel::onTransfer(
                 }
 
                 // pair <remote, local>
-                std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems;
+                std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems;
                 std::transform(
                     items.begin(),
                     items.end(),
@@ -332,7 +332,11 @@ void LocalSideModel::onTransfer(
                                 return item.path;
                             return sourceDir / item.path;
                         };
-                        return std::make_pair(destinationDir / item.path.filename(), fullSourcePath());
+                        auto localItem = item;
+                        auto remoteItem = item;
+                        localItem.path = fullSourcePath();
+                        remoteItem.path = destinationDir / item.path.filename();
+                        return std::make_pair(remoteItem, localItem);
                     }
                 );
 
@@ -500,7 +504,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
 }
 
 void LocalSideModel::uploadItemsConfirmed(
-    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems,
+    std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems,
     std::size_t index,
     bool overwriteNever,
     bool overwriteAlways
@@ -519,18 +523,18 @@ void LocalSideModel::uploadItemsConfirmed(
     }
 
     fileEngine_->stat(
-        uploadItems[index].first,
+        uploadItems[index].first.path,
         [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
             std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& entry
         ) mutable
         {
             if (!entry)
             {
-                Log::error("Failed to stat file: {}", uploadItems[index].first.generic_string());
+                Log::error("Failed to stat file: {}", uploadItems[index].first.path.generic_string());
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
                     .headerText = "Upload Failed",
-                    .text = "Failed to get file information: " + uploadItems[index].first.generic_string(),
+                    .text = "Failed to get file information: " + uploadItems[index].first.path.generic_string(),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;
@@ -540,7 +544,7 @@ void LocalSideModel::uploadItemsConfirmed(
 
             Log::debug(
                 "File '{}' {} exist on remote side. OverwriteNever: {}, OverwriteAlways: {}",
-                item.second.generic_string(),
+                item.second.path.generic_string(),
                 entry->first ? "does" : "does not",
                 overwriteNever,
                 overwriteAlways
@@ -548,7 +552,9 @@ void LocalSideModel::uploadItemsConfirmed(
 
             if (entry->first && !overwriteNever)
             {
-                Log::info("Uploading '{}' to '{}'.", item.first.generic_string(), item.second.generic_string());
+                Log::info(
+                    "Uploading '{}' to '{}'.", item.first.path.generic_string(), item.second.path.generic_string()
+                );
                 confirmDialog_->open(
                     {.state = ConfirmDialog::State::Information,
                         .headerText = "File already exists, overwrite?",
@@ -557,7 +563,8 @@ void LocalSideModel::uploadItemsConfirmed(
                         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                             ConfirmDialog::Button::None,
                         .focusButton = ConfirmDialog::Button::No,
-                        .listItems = {{.text = item.second.generic_string(), .description = "File already exists"}},
+                        .listItems =
+                            {{.text = item.second.path.generic_string(), .description = "File already exists"}},
                         .onClose = [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
                                        ConfirmDialog::Button button
                                    ) mutable
@@ -577,7 +584,8 @@ void LocalSideModel::uploadItemsConfirmed(
                             else if (button == ConfirmDialog::Button::No)
                             {
                                 Log::info(
-                                    "Skipping upload of existing file: {}", uploadItems[index].second.generic_string()
+                                    "Skipping upload of existing file: {}",
+                                    uploadItems[index].second.path.generic_string()
                                 );
                                 uploadItemsConfirmed(
                                     std::move(uploadItems), index + 1, overwriteNever, overwriteAlways
@@ -612,15 +620,15 @@ void LocalSideModel::uploadItemsConfirmed(
 }
 
 void LocalSideModel::enqueueSingleUpload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remoteItem,
+    NuiFileExplorer::Item const& localItem,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
     operationQueue_->enqueueUpload(
-        remotePath,
-        localPath,
+        remoteItem,
+        localItem,
         [this](std::optional<Ids::OperationId> const& opId)
         {
             if (!opId)

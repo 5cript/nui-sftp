@@ -74,7 +74,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_
+                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, 0 /*TODO: proper bps*/
             );
             return WorkStatus::MoreWork;
         }
@@ -121,7 +121,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
                 ++currentIndex_;
                 options_.overallProgressCallback(
-                    path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_
+                    path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0 /*TODO: proper bps*/
                 );
             }
             else if (entry.isRegularFile())
@@ -160,15 +160,23 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     downloadOptions.remotePath = remoteFullPath;
                     downloadOptions.localPath = fullLocalPath(entry);
 
-                    downloadOptions.progressCallback =
-                        [this, operationId = this->id(), remoteFullPath](auto min, auto max, auto current)
+                    downloadOptions.progressCallback = [this, operationId = this->id(), remoteFullPath](
+                                                           auto min, auto max, auto current, auto bytesPerSecond
+                                                       )
                     {
                         // Update current bytes
                         currentBytes_ += (current - min);
 
                         // Call overall progress callback
                         options_.overallProgressCallback(
-                            remoteFullPath, currentIndex_, entries_.size() - 1, current, max, currentBytes_, totalBytes_
+                            remoteFullPath,
+                            currentIndex_,
+                            entries_.size() - 1,
+                            current,
+                            max,
+                            currentBytes_,
+                            totalBytes_,
+                            bytesPerSecond
                         );
                     };
 

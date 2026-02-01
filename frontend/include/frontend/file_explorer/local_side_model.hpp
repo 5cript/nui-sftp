@@ -46,15 +46,15 @@ class LocalSideModel : public SideModel
     void enqueueRefresh(bool otherModel);
 
     void uploadItemsConfirmed(
-        std::vector<std::pair<std::filesystem::path, std::filesystem::path>> uploadItems,
+        std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems,
         std::size_t index = 0,
         bool overwriteNever = false,
         bool overwriteAlways = false
     );
 
     void enqueueSingleUpload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remoteItem,
+        NuiFileExplorer::Item const& localItem,
         bool allowOverwrite,
         bool insertRefresh
     );

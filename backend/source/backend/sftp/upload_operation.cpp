@@ -15,6 +15,7 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
     , mayOverwrite_{options.mayOverwrite}
     , tryContinue_{options.tryContinue}
     , inheritPermissions_{options.inheritPermissions}
+    , bigFileOptimized_{options.bigFileOptimized}
     , filePermissions_{options.filePermissions}
     , directoryPermissions_{options.directoryPermissions}
     , localFile_{}
@@ -38,6 +39,12 @@ SecureShell::ProcessingStrand* UploadOperation::strand() const
     if (!sftp_)
         return nullptr;
     return sftp_->strand();
+}
+
+void UploadOperation::pause(bool doPause)
+{
+    if (asyncTransferContext_)
+        asyncTransferContext_->pause(doPause);
 }
 
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::work()
@@ -65,26 +72,81 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         case (Prepared):
         {
             state_ = Running;
+            if (bigFileOptimized_)
+            {
+                auto stream = fileStream_.lock();
+                if (!stream)
+                {
+                    Log::error("DownloadOperation: File stream expired.");
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
+                }
+                auto contextFut = stream->writeAsync(
+                    totalSize_,
+                    buffer_.data(),
+                    buffer_.size(),
+                    [this](SecureShell::IFileStream::SignedSizeType bytesRead)
+                    {
+                        return commitFileToBuffer(bytesRead);
+                    }
+                );
+                const auto futureStatus = contextFut.wait_for(futureTimeout_);
+                if (futureStatus != std::future_status::ready)
+                {
+                    Log::error("DownloadOperation: Future timed out while starting async read.");
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
+                }
+                const auto contextResult = contextFut.get();
+                if (!contextResult.has_value())
+                {
+                    Log::error("DownloadOperation: Failed to start async read: {}", contextResult.error().toString());
+                    return enterErrorState<WorkStatus>(
+                        {.type = ErrorType::SftpError, .sftpError = contextResult.error()}
+                    );
+                }
+                asyncTransferContext_ = contextResult.value();
+            }
             [[fallthrough]];
         }
         case (Running):
         {
-            const auto result = writeOnce();
-            if (!result.has_value())
+            if (!bigFileOptimized_)
             {
-                Log::error("UploadOperation: Failed to write file: {}", result.error().toString());
-                return enterErrorState<WorkStatus>(result.error());
+                const auto result = writeOnce();
+                if (!result.has_value())
+                {
+                    Log::error("UploadOperation: Failed to write file: {}", result.error().toString());
+                    return enterErrorState<WorkStatus>(result.error());
+                }
+                if (result.value())
+                {
+                    return WorkStatus::MoreWork;
+                }
+                // No More to write?
+                else
+                {
+                    Log::debug("UploadOperation: Data writing completed.");
+                    state_ = Finalizing;
+                    [[fallthrough]];
+                }
             }
-            if (result.value())
-            {
-                return WorkStatus::MoreWork;
-            }
-            // No More to write?
             else
             {
-                Log::debug("UploadOperation: Data writing completed.");
-                state_ = Finalizing;
-                [[fallthrough]];
+                if (asyncTransferContext_->hasEnded())
+                {
+                    Log::info("UploadOperation: Data reading completed.");
+                    state_ = Finalizing;
+                    [[fallthrough]];
+                }
+                else
+                {
+                    progressCallback_(
+                        0ull,
+                        totalSize_,
+                        asyncTransferContext_->bytesTransferred(),
+                        asyncTransferContext_->bytesPerSecond()
+                    );
+                    return WorkStatus::MoreWork;
+                }
             }
         }
         case (Finalizing):
@@ -120,6 +182,23 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
     }
     Log::error("UploadOperation: Unknown operation state: {}", static_cast<int>(state_));
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
+}
+
+SecureShell::IFileStream::SignedSizeType
+UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes)
+{
+    localFile_.read(
+        buffer_.data(), std::min(static_cast<std::streamsize>(buffer_.size()), static_cast<std::streamsize>(bytes))
+    );
+    if (!localFile_.good())
+    {
+        Log::error("UploadOperation write cycle stopped: localFile_.good() == false");
+        std::ignore = enterErrorState({
+            .type = SharedData::OperationErrorType::SourceFileNotGood,
+        });
+        return -1;
+    }
+    return localFile_.gcount();
 }
 
 std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
@@ -170,7 +249,7 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
         return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
-    progressCallback_(0, totalSize_, totalSize_ - leftToUpload_);
+    progressCallback_(0, totalSize_, totalSize_ - leftToUpload_, 0);
 
     return leftToUpload_ > 0;
 }

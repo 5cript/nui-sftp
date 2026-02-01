@@ -2,6 +2,7 @@
 #include <ssh/sftp_session.hpp>
 
 #include <utility>
+#include <chrono>
 
 namespace SecureShell
 {
@@ -29,7 +30,9 @@ namespace SecureShell
                 SftpError{
                     .message = "Owner is null",
                     .wrapperError = WrapperErrors::OwnerNull,
-                }));
+                }
+            )
+        );
         return promise.get_future();
     }
 
@@ -50,12 +53,14 @@ namespace SecureShell
         {
             if (!sftp->strand_->withinProcessingThread())
             {
-                sftp->performPromise([this, isBackElement, sftp]() -> bool {
-                        file_.reset();
-                        sftp->fileStreamRemoveItself(this, isBackElement);
-                        return true;
-                    })
-                    .get();
+                sftp->performPromise(
+                        [this, isBackElement, sftp]() -> bool
+                        {
+                            file_.reset();
+                            sftp->fileStreamRemoveItself(this, isBackElement);
+                            return true;
+                        }
+                ).get();
             }
             else
             {
@@ -66,13 +71,17 @@ namespace SecureShell
     }
     std::function<void(sftp_file)> FileStream::makeFileDeleter()
     {
-        return [this](sftp_file file) {
+        return [this](sftp_file file)
+        {
             if (auto sftp = this->sftp_.lock(); sftp)
             {
                 // This is safe because file is just a pointer, even if 'this' is deleted by this point.
-                sftp->perform([file]() {
-                    sftp_close(file);
-                });
+                sftp->perform(
+                    [file]()
+                    {
+                        sftp_close(file);
+                    }
+                );
             }
         };
     }
@@ -82,43 +91,57 @@ namespace SecureShell
         {
             sftp_ = std::move(other.sftp_);
             file_ = std::unique_ptr<sftp_file_struct, std::function<void(sftp_file)>>{
-                other.file_.release(), makeFileDeleter()};
+                other.file_.release(), makeFileDeleter()
+            };
         }
         return *this;
     }
     std::future<std::expected<void, SftpError>> FileStream::seek(std::size_t pos)
     {
-        return performPromise([this, pos]() -> std::expected<void, SftpError> {
-            VERIFY_FILE_STREAM();
-            sftp_seek64(file_.get(), pos);
-            return {};
-        });
+        return performPromise(
+            [this, pos]() -> std::expected<void, SftpError>
+            {
+                VERIFY_FILE_STREAM();
+                sftp_seek64(file_.get(), pos);
+                return {};
+            }
+        );
     }
     std::future<std::expected<FileInformation, SftpError>> FileStream::stat()
     {
-        return performPromise([this]() -> std::expected<FileInformation, SftpError> {
-            VERIFY_FILE_STREAM();
-            std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                sftp_fstat(file_.get()), sftp_attributes_free};
-            if (attributes == nullptr)
-                return std::unexpected(lastError());
-            return fromSftpAttributes(attributes.get());
-        });
+        return performPromise(
+            [this]() -> std::expected<FileInformation, SftpError>
+            {
+                VERIFY_FILE_STREAM();
+                std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+                    sftp_fstat(file_.get()), sftp_attributes_free
+                };
+                if (attributes == nullptr)
+                    return std::unexpected(lastError());
+                return fromSftpAttributes(attributes.get());
+            }
+        );
     }
     std::future<std::expected<std::size_t, SftpError>> FileStream::tell()
     {
-        return performPromise([this]() -> std::expected<std::size_t, SftpError> {
-            VERIFY_FILE_STREAM();
-            return static_cast<std::size_t>(sftp_tell64(file_.get()));
-        });
+        return performPromise(
+            [this]() -> std::expected<std::size_t, SftpError>
+            {
+                VERIFY_FILE_STREAM();
+                return static_cast<std::size_t>(sftp_tell64(file_.get()));
+            }
+        );
     }
     std::future<std::expected<void, SftpError>> FileStream::rewind()
     {
-        return performPromise([this]() -> std::expected<void, SftpError> {
-            VERIFY_FILE_STREAM();
-            sftp_rewind(file_.get());
-            return {};
-        });
+        return performPromise(
+            [this]() -> std::expected<void, SftpError>
+            {
+                VERIFY_FILE_STREAM();
+                sftp_rewind(file_.get());
+                return {};
+            }
+        );
     }
     SftpError FileStream::lastError() const
     {
@@ -136,13 +159,16 @@ namespace SecureShell
     }
     std::future<std::expected<std::size_t, SftpError>> FileStream::readSome(char* buffer, std::size_t bufferSize)
     {
-        return performPromise([this, buffer, bufferSize]() -> std::expected<std::size_t, SftpError> {
-            VERIFY_FILE_STREAM();
-            const auto result = sftp_read(file_.get(), buffer, bufferSize);
-            if (result < 0)
-                return std::unexpected(lastError());
-            return static_cast<std::size_t>(result);
-        });
+        return performPromise(
+            [this, buffer, bufferSize]() -> std::expected<std::size_t, SftpError>
+            {
+                VERIFY_FILE_STREAM();
+                const auto result = sftp_read(file_.get(), buffer, bufferSize);
+                if (result < 0)
+                    return std::unexpected(lastError());
+                return static_cast<std::size_t>(result);
+            }
+        );
     }
 
     std::future<std::expected<std::size_t, SftpError>>
@@ -193,19 +219,24 @@ namespace SecureShell
 
             void doRead()
             {
-                stream.perform([state = shared_from_this()]() {
-                    if (!state->stream.file_)
+                stream.perform(
+                    [state = shared_from_this()]()
                     {
-                        state->promise.set_value(
-                            std::unexpected(
-                                SftpError{
-                                    .message = "File is null",
-                                    .wrapperError = WrapperErrors::FileNull,
-                                }));
-                        return;
+                        if (!state->stream.file_)
+                        {
+                            state->promise.set_value(
+                                std::unexpected(
+                                    SftpError{
+                                        .message = "File is null",
+                                        .wrapperError = WrapperErrors::FileNull,
+                                    }
+                                )
+                            );
+                            return;
+                        }
+                        state->onRead(sftp_read(state->stream.file_.get(), state->buffer.data(), state->buffer.size()));
                     }
-                    state->onRead(sftp_read(state->stream.file_.get(), state->buffer.data(), state->buffer.size()));
-                });
+                );
             }
         };
 
@@ -223,32 +254,39 @@ namespace SecureShell
     }
     void FileStream::writePart(
         std::string_view toWrite,
-        std::function<void(std::expected<void, SftpError>&&)> onWriteComplete)
+        std::function<void(std::expected<void, SftpError>&&)> onWriteComplete
+    )
     {
-        perform([this, toWrite, onWriteComplete = std::move(onWriteComplete)]() {
-            if (!file_)
-                return;
-
-            const auto written = sftp_write(file_.get(), toWrite.data(), std::min(toWrite.size(), writeLengthLimit()));
-
-            if (written < 0)
-                return onWriteComplete(std::unexpected(lastError()));
-
-            if (static_cast<std::size_t>(written) == toWrite.size())
-                return onWriteComplete({});
-
-            if (written == 0 && !toWrite.empty())
+        perform(
+            [this, toWrite, onWriteComplete = std::move(onWriteComplete)]()
             {
-                return onWriteComplete(
-                    std::unexpected(
-                        SftpError{
-                            .message = "Failed to write any data",
-                            .wrapperError = WrapperErrors::ShortWrite,
-                        }));
-            }
+                if (!file_)
+                    return;
 
-            writePart(toWrite.substr(written), std::move(onWriteComplete));
-        });
+                const auto written =
+                    sftp_write(file_.get(), toWrite.data(), std::min(toWrite.size(), writeLengthLimit()));
+
+                if (written < 0)
+                    return onWriteComplete(std::unexpected(lastError()));
+
+                if (static_cast<std::size_t>(written) == toWrite.size())
+                    return onWriteComplete({});
+
+                if (written == 0 && !toWrite.empty())
+                {
+                    return onWriteComplete(
+                        std::unexpected(
+                            SftpError{
+                                .message = "Failed to write any data",
+                                .wrapperError = WrapperErrors::ShortWrite,
+                            }
+                        )
+                    );
+                }
+
+                writePart(toWrite.substr(written), std::move(onWriteComplete));
+            }
+        );
     }
     ProcessingStrand* FileStream::strand() const
     {
@@ -260,20 +298,27 @@ namespace SecureShell
         // Short easy path:
         if (data.size() <= writeLengthLimit())
         {
-            return performPromise([this, data]() -> std::expected<void, SftpError> {
-                VERIFY_FILE_STREAM();
-                const auto written = sftp_write(file_.get(), data.data(), data.size());
-                if (written < 0)
-                    return std::unexpected(lastError());
-                return {};
-            });
+            return performPromise(
+                [this, data]() -> std::expected<void, SftpError>
+                {
+                    VERIFY_FILE_STREAM();
+                    const auto written = sftp_write(file_.get(), data.data(), data.size());
+                    if (written < 0)
+                        return std::unexpected(lastError());
+                    return {};
+                }
+            );
         }
 
         // Write in chunks for large data:
         auto promise = std::make_shared<std::promise<std::expected<void, SftpError>>>();
-        writePart(data, [promise](std::expected<void, SftpError>&& result) {
-            promise->set_value(std::move(result));
-        });
+        writePart(
+            data,
+            [promise](std::expected<void, SftpError>&& result)
+            {
+                promise->set_value(std::move(result));
+            }
+        );
         return promise->get_future();
     }
     sftp_file FileStream::release()
@@ -281,5 +326,160 @@ namespace SecureShell
         sftp_.reset();
         limits_ = {};
         return file_.release();
+    }
+    std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::readAsync(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<bool(SignedSizeType)> onRead
+    )
+    {
+        auto fut = performPromise(
+            [this, totalFileSize, buffer, bufferSize, onRead = std::move(onRead)]() mutable
+                -> std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>
+            {
+                auto context = std::make_shared<AsyncTransferContext>();
+                const auto [success, id] = strand()->pushPermanentTask(
+                    [weakStream = weak_from_this(),
+                        buffer,
+                        bufferSize,
+                        onRead = std::move(onRead),
+                        context,
+                        totalFileSize]()
+                    {
+                        if (context->hasEnded())
+                            return false;
+                        if (context->paused())
+                            return true;
+
+                        auto stream = weakStream.lock();
+                        if (!stream)
+                        {
+                            context->cancel();
+                            return false;
+                        }
+
+                        auto remainingRead = totalFileSize - context->bytesTransferred_.load();
+                        const auto readCycles =
+                            std::min(SignedSizeType{10}, (remainingRead / bufferSize) + SignedSizeType{1});
+
+                        for (SignedSizeType i = 0; i != readCycles; ++i)
+                        {
+                            const auto result =
+                                sftp_read(stream->file_.get(), buffer, std::min(remainingRead, bufferSize));
+                            if (result < 0)
+                            {
+                                context->cancel();
+                                return false;
+                            }
+                            remainingRead -= result;
+                            if (!onRead(result))
+                            {
+                                context->cancel();
+                                return false;
+                            }
+                            context->bytesTransferred_ += result;
+                        }
+
+                        context->calculateBytesPerSecond();
+                        if (remainingRead == 0)
+                        {
+                            context->ended_ = true;
+                            return false;
+                        }
+                        return true;
+                    }
+                );
+                if (!success)
+                    return std::unexpected(
+                        SftpError{
+                            .message = "Failed to push permanent task",
+                            .wrapperError = WrapperErrors::TaskPushFailed,
+                        }
+                    );
+                context->permanentTaskId_ = id;
+                return context;
+            }
+        );
+
+        return fut;
+    }
+    std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::writeAsync(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<SignedSizeType(SignedSizeType)> doRead
+    )
+    {
+        auto fut = performPromise(
+            [this, totalFileSize, buffer, bufferSize, doRead = std::move(doRead)]() mutable
+                -> std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>
+            {
+                auto context = std::make_shared<AsyncTransferContext>();
+                const auto [success, id] = strand()->pushPermanentTask(
+                    [weakStream = weak_from_this(),
+                        buffer,
+                        bufferSize,
+                        doRead = std::move(doRead),
+                        context,
+                        totalFileSize]()
+                    {
+                        if (context->hasEnded())
+                            return false;
+                        if (context->paused())
+                            return true;
+
+                        auto stream = weakStream.lock();
+                        if (!stream)
+                        {
+                            context->cancel();
+                            return false;
+                        }
+
+                        auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
+                        const auto writeCycles =
+                            std::min(SignedSizeType{10}, (remainingWrite / bufferSize) + SignedSizeType{1});
+
+                        for (SignedSizeType i = 0; i != writeCycles; ++i)
+                        {
+                            const auto amountRead = doRead(remainingWrite);
+                            if (amountRead <= 0)
+                            {
+                                context->cancel();
+                                return false;
+                            }
+                            const auto result =
+                                sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
+                            if (result < 0)
+                            {
+                                context->cancel();
+                                return false;
+                            }
+                            remainingWrite -= result;
+                            context->bytesTransferred_ += result;
+                        }
+
+                        context->calculateBytesPerSecond();
+                        if (remainingWrite == 0)
+                        {
+                            context->ended_ = true;
+                            return false;
+                        }
+                        return true;
+                    }
+                );
+                if (!success)
+                    return std::unexpected(
+                        SftpError{
+                            .message = "Failed to push permanent task",
+                            .wrapperError = WrapperErrors::TaskPushFailed,
+                        }
+                    );
+                context->permanentTaskId_ = id;
+                return context;
+            }
+        );
+
+        return fut;
     }
 }

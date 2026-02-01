@@ -53,7 +53,8 @@ class OperationQueue
         std::filesystem::path const& localPath,
         std::filesystem::path const& remotePath,
         bool allowOverwrite,
-        bool insertRefresh = true
+        bool isBigFile,
+        bool insertRefresh
     );
 
     std::expected<void, Operation::Error> addUploadOperation(
@@ -62,7 +63,8 @@ class OperationQueue
         std::filesystem::path const& localPath,
         std::filesystem::path const& remotePath,
         bool allowOverwrite,
-        bool insertRefresh = true
+        bool isBigFile,
+        bool insertRefresh
     );
 
     std::expected<void, Operation::Error> addDeleteOperation(
@@ -79,6 +81,7 @@ class OperationQueue
 
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
+    void deepPause(bool pause);
 
   private:
     Persistence::SftpOptions sftpOpts_{};

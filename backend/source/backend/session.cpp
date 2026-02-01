@@ -622,6 +622,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                 std::string const& remotePath,
                 std::string const& localPath,
                 bool allowOverwrite,
+                bool bigFile,
                 bool insertRefresh
             )
             {
@@ -636,6 +637,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                         localPath,
                         remotePath,
                         allowOverwrite,
+                        bigFile,
                         insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
@@ -648,6 +650,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                             localPath,
                             remotePath,
                             allowOverwrite,
+                            bigFile,
                             insertRefresh
                         );
 
@@ -689,6 +692,7 @@ void Session::registerRpcSftpAddUploadOperation()
                 std::string const& localPath,
                 std::string const& remotePath,
                 bool allowOverwrite,
+                bool bigFile,
                 bool insertRefresh
             )
             {
@@ -703,6 +707,7 @@ void Session::registerRpcSftpAddUploadOperation()
                         localPath,
                         remotePath,
                         allowOverwrite,
+                        bigFile,
                         insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
@@ -715,6 +720,7 @@ void Session::registerRpcSftpAddUploadOperation()
                             localPath,
                             remotePath,
                             allowOverwrite,
+                            bigFile,
                             insertRefresh
                         );
 

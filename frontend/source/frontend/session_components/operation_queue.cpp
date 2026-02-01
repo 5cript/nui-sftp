@@ -534,13 +534,6 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
 
 void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& progress)
 {
-    // Log::debug(
-    //     "Received download progress for operation id: {} - {}/{}",
-    //     progress.operationId.value(),
-    //     progress.current - progress.min,
-    //     progress.max - progress.min
-    // );
-
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
     {
@@ -554,8 +547,8 @@ void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& prog
         );
         return;
     }
-    auto* renderer = operation->getCardSpecifically<DisplayedDownloadOperation>();
-    if (!renderer)
+    auto* card = operation->getCardSpecifically<DisplayedDownloadOperation>();
+    if (!card)
     {
         Log::error(
             "Received download progress for operation id: {} which has no download renderer",
@@ -563,7 +556,7 @@ void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& prog
         );
         return;
     }
-    renderer->setProgress(progress.current - progress.min);
+    card->setProgress(progress.current - progress.min, progress.bytesPerSecond);
 }
 
 void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
@@ -632,8 +625,8 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress con
         );
         return;
     }
-    auto* renderer = operation->getCardSpecifically<DisplayedBulkDownloadOperation>();
-    if (!renderer)
+    auto* card = operation->getCardSpecifically<DisplayedBulkDownloadOperation>();
+    if (!card)
     {
         Log::error(
             "Received bulk download progress for operation id: {} which has no bulk download renderer",
@@ -641,18 +634,11 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress con
         );
         return;
     }
-    renderer->setProgress(progress);
+    card->setProgress(progress);
 }
 
 void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress)
 {
-    // Log::debug(
-    //     "Received upload progress for operation id: {} - {}/{}",
-    //     progress.operationId.value(),
-    //     progress.current - progress.min,
-    //     progress.max - progress.min
-    // );
-
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
     {
@@ -906,8 +892,8 @@ Nui::ElementRenderer OperationQueue::operator()()
 }
 
 void OperationQueue::enqueueDownload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remoteItem,
+    NuiFileExplorer::Item const& localItem,
     std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
     bool allowOverwrite,
     bool insertRefresh
@@ -920,12 +906,14 @@ void OperationQueue::enqueueDownload(
         return;
     }
 
-    Log::info("Frontend Operation Queue download: {} -> {}", remotePath.generic_string(), localPath.generic_string());
-    impl_->fileEngine->addDownload(remotePath, localPath, std::move(onComplete), allowOverwrite, insertRefresh);
+    Log::info(
+        "Frontend Operation Queue download: {} -> {}", remoteItem.path.generic_string(), localItem.path.generic_string()
+    );
+    impl_->fileEngine->addDownload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh);
 }
 void OperationQueue::enqueueUpload(
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    NuiFileExplorer::Item const& remoteItem,
+    NuiFileExplorer::Item const& localItem,
     std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
     bool allowOverwrite,
     bool insertRefresh
@@ -938,8 +926,10 @@ void OperationQueue::enqueueUpload(
         return;
     }
 
-    Log::info("Frontend Operation Queue upload: {} -> {}", localPath.generic_string(), remotePath.generic_string());
-    impl_->fileEngine->addUpload(remotePath, localPath, std::move(onComplete), allowOverwrite, insertRefresh);
+    Log::info(
+        "Frontend Operation Queue upload: {} -> {}", localItem.path.generic_string(), remoteItem.path.generic_string()
+    );
+    impl_->fileEngine->addUpload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh);
 }
 void OperationQueue::enqueueRename(
     std::filesystem::path const&,

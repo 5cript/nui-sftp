@@ -14,8 +14,17 @@ Still under construction :construction:
 - [ ] Custom top bar with moveability and minimize, maximize, close buttons.
 - [ ] More/Custom themes.
 - [ ] Accessible logs.
-- [ ] Unify style of operation queue and rest of the ui.
+
+## Operation Queue (UI)
+- [ ] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
+- [ ] Better header footer borders
+- [ ] MUCH smaller list items.
+- [ ] MUCH smaller icons.
 - [ ] Scroll operations into view when they complete.
+- [ ] "Remove" to an X button
+- [ ] Hover for more info (Download from to)
+- [ ] Error message im hover.
+- [ ] Sometimes refreshes on remote side are not added to queue. (Bulk delete for example)
 
 ## Settings UI
 - [x] Add UI for settings.
@@ -24,6 +33,8 @@ Still under construction :construction:
 - [x] Better number boxes.
 - [x] Number box value constraining.
 - [ ] Option to disable some warning boxes.
+- [ ] Number inputs have terrible user feel, input validation should not insert valid numbers, but only indicate problems and then not save if its invalid.
+- [ ] Number boxes lack :hover/:focus effect and border.
 
 ## SSH
 - [x] Keyboard interactive password auth.
@@ -63,8 +74,6 @@ Still under construction :construction:
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
-- [ ] Optimize download speed!!!
-- [ ] Optimize upload speed!!!
 - [ ] Implement bulk download to archives.
 - [ ] Synchronize directories.
 
@@ -96,6 +105,7 @@ Still under construction :construction:
   - [ ] Image preview (image as icon?)
   - [ ] Text preview
 - [ ] Scroll into view of recently selected item when using keyboard controls.
+- [ ] Table header is too thick and text too bold.
 
 ## Open Files & Monitoring
 - [ ] Open files with associated application.

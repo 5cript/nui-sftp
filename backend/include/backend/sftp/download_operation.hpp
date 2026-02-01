@@ -13,8 +13,13 @@ class DownloadOperation : public Operation
   public:
     struct DownloadOperationOptions
     {
-        std::function<void(std::uint64_t min, std::uint64_t max, std::uint64_t current)> progressCallback =
-            [](auto, auto, auto) {};
+        std::function<void(
+            std::uint64_t min,
+            std::uint64_t max,
+            std::uint64_t current,
+            std::make_signed_t<std::size_t> bytesPerSecond
+        )>
+            progressCallback = [](auto, auto, auto, auto) {};
         std::filesystem::path remotePath{};
         std::filesystem::path localPath{};
         std::string tempFileSuffix{".filepart"};
@@ -23,6 +28,7 @@ class DownloadOperation : public Operation
         bool tryContinue{false};
         bool inheritPermissions{false};
         bool doCleanup{true};
+        bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
@@ -77,12 +83,16 @@ class DownloadOperation : public Operation
 
     std::expected<void, DownloadOperation::Error> cancel(bool adoptCancelState) override;
 
+    void pause(bool doPause) override;
+
     std::expected<void, Error> prepare();
     std::expected<void, Error> finalize();
 
   private:
     /// Returns true if there is more data to read, false if the operation is complete.
     std::expected<bool, Error> readOnce();
+
+    bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 
     std::expected<void, Error> openOrAdoptFile(SecureShell::IFileStream& stream);
 
@@ -93,16 +103,24 @@ class DownloadOperation : public Operation
     std::filesystem::path remotePath_;
     std::filesystem::path localPath_;
     std::string tempFileSuffix_;
-    std::function<void(std::uint64_t min, std::uint64_t max, std::uint64_t current)> progressCallback_;
+    std::function<void(
+        std::uint64_t min,
+        std::uint64_t max,
+        std::uint64_t current,
+        std::make_signed_t<std::size_t> bytesPerSecond
+    )>
+        progressCallback_;
     bool mayOverwrite_;
     bool reserveSpace_;
     bool tryContinue_;
     bool inheritPermissions_;
     bool doCleanup_;
+    bool bigFileOptimized_;
     std::optional<std::filesystem::perms> filePermissions_;
     std::optional<std::filesystem::perms> directoryPermissions_;
     std::ofstream localFile_;
     std::uint64_t fileSize_;
     std::chrono::seconds futureTimeout_;
-    std::array<char, 8192> buffer_;
+    std::array<char, 16384> buffer_;
+    std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
 };

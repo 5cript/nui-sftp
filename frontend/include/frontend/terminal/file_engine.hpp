@@ -27,15 +27,15 @@ class FileEngine
     virtual void createFile(std::filesystem::path const& path, std::function<void(bool)> onComplete) = 0;
 
     virtual void addDownload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remotePath,
+        NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
     ) = 0;
     virtual void addUpload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remotePath,
+        NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh

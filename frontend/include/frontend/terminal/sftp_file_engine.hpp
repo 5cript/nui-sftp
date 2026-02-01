@@ -20,15 +20,15 @@ class SftpFileEngine : public FileEngine
     std::optional<Ids::ChannelId> release();
 
     void addDownload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remotePath,
+        NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
     ) override;
     void addUpload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remotePath,
+        NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
