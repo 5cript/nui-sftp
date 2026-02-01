@@ -37,6 +37,11 @@ class Operation
 
     virtual SecureShell::ProcessingStrand* strand() const = 0;
 
+    virtual void pause(bool)
+    {
+        /* noop */
+    }
+
     template <typename FunctionT>
     bool perform(FunctionT&& func)
     {

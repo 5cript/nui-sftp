@@ -56,15 +56,15 @@ class OperationQueue
     void deactivate();
 
     void enqueueDownload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remoteItem,
+        NuiFileExplorer::Item const& localItem,
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
         bool allowOverwrite,
         bool insertRefresh
     );
     void enqueueUpload(
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        NuiFileExplorer::Item const& remoteItem,
+        NuiFileExplorer::Item const& localItem,
         std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
         bool allowOverwrite,
         bool insertRefresh

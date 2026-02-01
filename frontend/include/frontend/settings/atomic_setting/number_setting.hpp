@@ -99,41 +99,39 @@ class NumberSetting : public Setting<Disengageable, ValueType>
   private:
     ValueType retrieveValueFromEvent(Nui::val event)
     {
-        if (args_.numberBase)
+        try
         {
-            try
+            switch (args_.numberBase.value_or(NumberBase::Decimal))
             {
-                switch (*args_.numberBase)
+                default:
+                    [[fallthrough]];
+                case NumberBase::Decimal:
                 {
-                    case NumberBase::Decimal:
-                    {
-                        const auto valueString = event["target"]["value"].as<std::string>();
-                        ValueType result;
-                        std::stringstream ss(valueString);
-                        ss >> result;
-                        return result;
-                    }
-                    case NumberBase::Hexadecimal:
-                    {
-                        const auto valueStr = event["target"]["value"].as<std::string>();
-                        return static_cast<ValueType>(std::stoul(valueStr, nullptr, 16));
-                    }
-                    case NumberBase::Octal:
-                    {
-                        const auto valueStr = event["target"]["value"].as<std::string>();
-                        if (valueStr.starts_with("0o") || valueStr.starts_with("0O"))
-                            return static_cast<ValueType>(std::stoul(valueStr.substr(2), nullptr, 8));
-                        return static_cast<ValueType>(std::stoul(valueStr, nullptr, 8));
-                    }
+                    const auto valueString = event["target"]["value"].as<std::string>();
+                    ValueType result;
+                    std::stringstream ss(valueString);
+                    ss >> result;
+                    return result;
+                }
+                case NumberBase::Hexadecimal:
+                {
+                    const auto valueStr = event["target"]["value"].as<std::string>();
+                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 16));
+                }
+                case NumberBase::Octal:
+                {
+                    const auto valueStr = event["target"]["value"].as<std::string>();
+                    if (valueStr.starts_with("0o") || valueStr.starts_with("0O"))
+                        return static_cast<ValueType>(std::stoul(valueStr.substr(2), nullptr, 8));
+                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 8));
                 }
             }
-            catch (const std::exception& e)
-            {
-                Log::error("Failed to parse number from input event: {}", e.what());
-                return ValueType{};
-            }
         }
-        return {};
+        catch (const std::exception& e)
+        {
+            Log::error("Failed to parse number from input event: {}", e.what());
+            return ValueType{};
+        }
     }
 
     std::string valueToString(ValueType value)
@@ -219,7 +217,16 @@ class NumberSetting : public Setting<Disengageable, ValueType>
                     args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
                     args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
                 );
-                event.target().set("value", valueToString(sanitized));
+                Log::debug(
+                    "clamping value input '{}' of type '{}' to range [{}, {}] = '{}'",
+                    valueUnsanitized,
+                    type,
+                    args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
+                    args_.maxValue.value_or(std::numeric_limits<ValueType>::max()),
+                    sanitized
+                );
+                if (valueUnsanitized != sanitized)
+                    event.target().set("value", valueToString(sanitized));
             },
             "change"_event =
                 [this](Nui::val event)

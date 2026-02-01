@@ -16,6 +16,7 @@ namespace SharedData
         std::uint64_t min;
         std::uint64_t max;
         std::uint64_t current;
+        std::make_signed_t<std::size_t> bytesPerSecond;
     };
-    BOOST_DESCRIBE_STRUCT(UploadProgress, (), (operationId, min, max, current))
+    BOOST_DESCRIBE_STRUCT(UploadProgress, (), (operationId, min, max, current, bytesPerSecond))
 }

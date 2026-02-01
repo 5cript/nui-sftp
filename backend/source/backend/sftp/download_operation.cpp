@@ -3,6 +3,8 @@
 #include <log/log.hpp>
 #include <tuple>
 
+using namespace std::chrono_literals;
+
 DownloadOperation::DownloadOperation(
     std::weak_ptr<SecureShell::IFileStream> fileStream,
     DownloadOperationOptions options
@@ -18,6 +20,7 @@ DownloadOperation::DownloadOperation(
     , tryContinue_{options.tryContinue}
     , inheritPermissions_{options.inheritPermissions}
     , doCleanup_{options.doCleanup}
+    , bigFileOptimized_{options.bigFileOptimized}
     , filePermissions_{options.filePermissions}
     , directoryPermissions_{options.directoryPermissions}
     , localFile_{}
@@ -66,26 +69,81 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         case (Prepared):
         {
             state_ = Running;
+            if (bigFileOptimized_)
+            {
+                auto stream = fileStream_.lock();
+                if (!stream)
+                {
+                    Log::error("DownloadOperation: File stream expired.");
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
+                }
+                auto contextFut = stream->readAsync(
+                    fileSize_,
+                    buffer_.data(),
+                    buffer_.size(),
+                    [this](SecureShell::IFileStream::SignedSizeType bytesRead)
+                    {
+                        return commitBufferToFile(bytesRead);
+                    }
+                );
+                const auto futureStatus = contextFut.wait_for(futureTimeout_);
+                if (futureStatus != std::future_status::ready)
+                {
+                    Log::error("DownloadOperation: Future timed out while starting async read.");
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
+                }
+                const auto contextResult = contextFut.get();
+                if (!contextResult.has_value())
+                {
+                    Log::error("DownloadOperation: Failed to start async read: {}", contextResult.error().toString());
+                    return enterErrorState<WorkStatus>(
+                        {.type = ErrorType::SftpError, .sftpError = contextResult.error()}
+                    );
+                }
+                asyncTransferContext_ = contextResult.value();
+            }
             [[fallthrough]];
         }
         case (Running):
         {
-            const auto result = readOnce();
-            if (!result.has_value())
+            if (!bigFileOptimized_)
             {
-                Log::error("DownloadOperation: Failed to read file: {}", result.error().toString());
-                return enterErrorState<WorkStatus>(result.error());
+                const auto result = readOnce();
+                if (!result.has_value())
+                {
+                    Log::error("DownloadOperation: Failed to read file: {}", result.error().toString());
+                    return enterErrorState<WorkStatus>(result.error());
+                }
+                if (result.value())
+                {
+                    return WorkStatus::MoreWork;
+                }
+                // No More to read?
+                else
+                {
+                    Log::info("DownloadOperation: Data reading completed.");
+                    state_ = Finalizing;
+                    [[fallthrough]];
+                }
             }
-            if (result.value())
-            {
-                return WorkStatus::MoreWork;
-            }
-            // No More to read?
             else
             {
-                Log::info("DownloadOperation: Data reading completed.");
-                state_ = Finalizing;
-                [[fallthrough]];
+                if (asyncTransferContext_->hasEnded())
+                {
+                    Log::info("DownloadOperation: Data reading completed.");
+                    state_ = Finalizing;
+                    [[fallthrough]];
+                }
+                else
+                {
+                    progressCallback_(
+                        0ull,
+                        fileSize_,
+                        asyncTransferContext_->bytesTransferred(),
+                        asyncTransferContext_->bytesPerSecond()
+                    );
+                    return WorkStatus::MoreWork;
+                }
             }
         }
         case (Finalizing):
@@ -184,7 +242,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
         tellp = static_cast<uint64_t>(localFile_.tellp());
         fileSize = fileSize_;
         good = localFile_.good();
-        progressCallback_(0ull, fileSize, tellp);
+        progressCallback_(0ull, fileSize, tellp, 0);
     }
     if (!good)
     {
@@ -195,6 +253,20 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
         return false;
     }
     return good && tellp < fileSize;
+}
+
+bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead)
+{
+    localFile_.write(buffer_.data(), static_cast<std::streamsize>(bytesRead));
+    if (!localFile_.good())
+    {
+        Log::error("DownloadOperation read cycle stopped: localFile_.good() == false");
+        std::ignore = enterErrorState({
+            .type = SharedData::OperationErrorType::TargetFileNotGood,
+        });
+        return false;
+    }
+    return true;
 }
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile(SecureShell::IFileStream& stream)
@@ -334,13 +406,24 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::cancel(bool ado
 
 void DownloadOperation::cleanup()
 {
+    if (asyncTransferContext_)
+    {
+        asyncTransferContext_->cancel();
+    }
+
+    if (auto stream = fileStream_.lock(); stream)
+        stream->close(false);
+
     localFile_.close();
 
     if (doCleanup_ && std::filesystem::exists(localPath_.generic_string() + tempFileSuffix_))
         std::filesystem::remove(localPath_.generic_string() + tempFileSuffix_);
+}
 
-    if (auto stream = fileStream_.lock(); stream)
-        stream->close(false);
+void DownloadOperation::pause(bool doPause)
+{
+    if (asyncTransferContext_)
+        asyncTransferContext_->pause(doPause);
 }
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()

@@ -15,6 +15,7 @@ namespace SecureShell
         // See: https://api.libssh.org/stable/structsftp__limits__struct.html
         ShortWrite,
         FileNull,
+        TaskPushFailed,
     };
 
     struct SftpError
@@ -32,7 +33,8 @@ namespace SecureShell
                 message,
                 sshError,
                 sftpError,
-                static_cast<int>(wrapperError));
+                static_cast<int>(wrapperError)
+            );
         }
     };
 }

@@ -48,14 +48,34 @@ namespace SecureShell
          * @param task The task to push.
          * @return std::pair<bool, ProcessingThread::PermanentTaskId> If the task was pushed and the id of the task.
          */
-        std::pair<bool, ProcessingThread::PermanentTaskId> pushPermanentTask(std::function<void()> task)
+        std::pair<bool, ProcessingThread::PermanentTaskId> pushPermanentTask(std::function<bool()> task)
         {
             std::scoped_lock lock(mutex_);
             if (finalized_)
                 return {false, ProcessingThread::PermanentTaskId{-1}};
-            auto result = processingThread_->pushPermanentTask(std::move(task));
+            auto result = processingThread_->pushPermanentTask(
+                [task = std::move(task), this](ProcessingThread::PermanentTaskId id)
+                {
+                    const auto result = task();
+                    if (!result)
+                        permanentTasks_.erase(id);
+                    return result;
+                }
+            );
             this->permanentTasks_.insert(result.second);
             return result;
+        }
+
+        /**
+         * @brief Removes a permanent task.
+         *
+         * @param id The id of the task to remove.
+         */
+        void removePermanentTask(ProcessingThread::PermanentTaskId const& id)
+        {
+            std::scoped_lock lock(mutex_);
+            if (permanentTasks_.erase(id) > 0)
+                processingThread_->removePermanentTask(id);
         }
 
         /**
@@ -89,7 +109,8 @@ namespace SecureShell
             {
                 std::promise<std::invoke_result_t<std::decay_t<FunctionT>>> promise{};
                 promise.set_exception(
-                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand.")));
+                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand."))
+                );
                 return promise.get_future();
             }
             finalized_ = true;
@@ -134,7 +155,8 @@ namespace SecureShell
             {
                 std::promise<std::invoke_result_t<std::decay_t<Func>>> promise{};
                 promise.set_exception(
-                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand.")));
+                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand."))
+                );
                 return promise.get_future();
             }
             return processingThread_->pushPromiseTask(std::forward<Func>(func));

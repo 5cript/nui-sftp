@@ -24,12 +24,35 @@ namespace SecureShell::Test
             (std::future<std::expected<std::size_t, SftpError>>),
             readSome,
             (char* buffer, std::size_t bufferSize),
-            (override));
+            (override)
+        );
         MOCK_METHOD(
             (std::future<std::expected<std::size_t, SftpError>>),
             readAll,
             (std::function<bool(std::string_view data)> onRead),
-            (override));
+            (override)
+        );
+        using OnReadFuncT = std::function<bool(SecureShell::IFileStream::SignedSizeType)>;
+        MOCK_METHOD(
+            (std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>>),
+            readAsync,
+            (SecureShell::IFileStream::SignedSizeType totalFileSize,
+                char* buffer,
+                SecureShell::IFileStream::SignedSizeType bufferSize,
+                OnReadFuncT onRead),
+            (override)
+        );
+        using DoReadFuncT =
+            std::function<SecureShell::IFileStream::SignedSizeType(SecureShell::IFileStream::SignedSizeType)>;
+        MOCK_METHOD(
+            (std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>>),
+            writeAsync,
+            (SecureShell::IFileStream::SignedSizeType totalFileSize,
+                char* buffer,
+                SecureShell::IFileStream::SignedSizeType bufferSize,
+                DoReadFuncT doRead),
+            (override)
+        );
         MOCK_METHOD((std::future<std::expected<void, SftpError>>), write, (std::string_view data), (override));
         MOCK_METHOD(std::size_t, writeLengthLimit, (), (const, override));
         MOCK_METHOD(std::size_t, readLengthLimit, (), (const, override));
@@ -37,5 +60,4 @@ namespace SecureShell::Test
         MOCK_METHOD(void, close, (bool isBackElement), (override));
         MOCK_METHOD(ProcessingStrand*, strand, (), (const, override));
     };
-    ;
 }

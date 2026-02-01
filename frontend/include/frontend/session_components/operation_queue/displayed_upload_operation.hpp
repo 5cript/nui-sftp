@@ -42,7 +42,19 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
             return div{
                 bodyClass()
             }(
-                progressBar_()
+                div{
+                    style = "flex-grow: 1"
+                }(
+                    progressBar_()
+                ),
+                div{}(
+                    observe(bytesPerSecond_).generate(
+                        [](std::make_signed_t<std::size_t> bytesPerSecond)
+                        {
+                            return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                        }
+                    )
+                )
             );
         // clang-format on
     }
@@ -51,6 +63,7 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
     {
         progressBar_.max(progress.max);
         progressBar_.setProgress(progress.current - progress.min);
+        bytesPerSecond_ = progress.bytesPerSecond;
     }
 
     std::string title() const override
@@ -65,6 +78,7 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
 
   private:
     Components::ProgressBar progressBar_;
+    Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;
 };

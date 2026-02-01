@@ -63,7 +63,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.remotePath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_
+                options_.remotePath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, 0
             );
             return WorkStatus::MoreWork;
         }
@@ -98,7 +98,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
 
                 ++currentIndex_;
                 options_.overallProgressCallback(
-                    fullRemotePath(entry), currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_
+                    fullRemotePath(entry), currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0
                 );
             }
             else if (entry.isRegularFile())
@@ -108,7 +108,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     auto individualOpts = options_.individualOptions;
                     individualOpts.remotePath = fullRemotePath(entry);
                     individualOpts.localPath = fullLocalPath(entry);
-                    individualOpts.progressCallback = [this](auto, auto max, auto current)
+                    individualOpts.progressCallback = [this](auto, auto max, auto current, auto bytesPerSecond)
                     {
                         options_.overallProgressCallback(
                             fullRemotePath(entries_[currentIndex_]),
@@ -117,7 +117,8 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                             current,
                             max,
                             currentBytes_ + current,
-                            totalBytes_
+                            totalBytes_,
+                            bytesPerSecond
                         );
                     };
                     currentUpload_ = std::make_unique<UploadOperation>(*sftp_, individualOpts);

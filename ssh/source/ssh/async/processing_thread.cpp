@@ -24,11 +24,14 @@ namespace SecureShell
         }
         shuttingDown_ = false;
         std::promise<void> awaitThreadStart{};
-        thread_ = std::thread([this, &awaitThreadStart, minimumCycleWait] {
-            awaitThreadStart.set_value();
-            processingThreadId_.store(std::this_thread::get_id());
-            run(minimumCycleWait);
-        });
+        thread_ = std::thread(
+            [this, &awaitThreadStart, minimumCycleWait]
+            {
+                awaitThreadStart.set_value();
+                processingThreadId_.store(std::this_thread::get_id());
+                run(minimumCycleWait);
+            }
+        );
         awaitThreadStart.get_future().wait();
     }
     void ProcessingThread::stop()
@@ -72,7 +75,8 @@ namespace SecureShell
     {
         return std::make_unique<ProcessingStrand>(this);
     }
-    std::pair<bool, ProcessingThread::PermanentTaskId> ProcessingThread::pushPermanentTask(std::function<void()> task)
+    std::pair<bool, ProcessingThread::PermanentTaskId>
+    ProcessingThread::pushPermanentTask(std::function<bool(ProcessingThread::PermanentTaskId id)> task)
     {
         if (!task)
         {
@@ -99,11 +103,14 @@ namespace SecureShell
         std::lock_guard lock{taskMutex_};
         if (processingPermanents_)
         {
-            deferredTaskModification_.push_back([this]() {
-                /* taskMutex_ is held here */
-                permanentTasks_.clear();
-                permanentTasksAvailable_ = false;
-            });
+            deferredTaskModification_.push_back(
+                [this]()
+                {
+                    /* taskMutex_ is held here */
+                    permanentTasks_.clear();
+                    permanentTasksAvailable_ = false;
+                }
+            );
             return;
         }
 
@@ -117,22 +124,28 @@ namespace SecureShell
         {
             if (withinProcessingThread())
             {
-                deferredTaskModification_.push_back([this, id]() {
-                    /* taskMutex_ is held here */
-                    permanentTasks_.erase(id);
-                    permanentTasksAvailable_ = !permanentTasks_.empty();
-                });
+                deferredTaskModification_.push_back(
+                    [this, id]()
+                    {
+                        /* taskMutex_ is held here */
+                        permanentTasks_.erase(id);
+                        permanentTasksAvailable_ = !permanentTasks_.empty();
+                    }
+                );
                 return true;
             }
             else
             {
                 auto promise = std::make_shared<std::promise<bool>>();
-                deferredTaskModification_.push_back([this, id, promise]() {
-                    /* taskMutex_ is held here */
-                    const bool result = permanentTasks_.erase(id) > 0;
-                    permanentTasksAvailable_ = !permanentTasks_.empty();
-                    promise->set_value(result);
-                });
+                deferredTaskModification_.push_back(
+                    [this, id, promise]()
+                    {
+                        /* taskMutex_ is held here */
+                        const bool result = permanentTasks_.erase(id) > 0;
+                        permanentTasksAvailable_ = !permanentTasks_.empty();
+                        promise->set_value(result);
+                    }
+                );
                 lock.unlock();
                 return promise->get_future().wait_for(std::chrono::seconds{5}) == std::future_status::ready;
             }
@@ -148,6 +161,7 @@ namespace SecureShell
 
         try
         {
+            std::vector<PermanentTaskId> toRemove{};
             while (running_)
             {
                 timePoint = std::chrono::steady_clock::now();
@@ -155,19 +169,26 @@ namespace SecureShell
                 if (permanentTasksAvailable_)
                 {
                     std::unique_lock lock(taskMutex_);
-                    const auto permaTasksMoved = std::move(permanentTasks_);
+                    auto permaTasksMoved = std::move(permanentTasks_);
                     permanentTasks_ = {};
                     processingPermanents_ = true;
                     lock.unlock();
 
-                    for (auto const& [_, task] : permaTasksMoved)
+                    for (auto const& [id, task] : permaTasksMoved)
                     {
                         // Task is checked before adding, shouldnt possibly be empty:
-                        task();
+                        if (!task(id))
+                            toRemove.push_back(id);
 
                         // Stop running if shutdown was requested:
                         if (!running_ || shuttingDown_)
                             break;
+                    }
+                    if (!toRemove.empty())
+                    {
+                        for (auto const& id : toRemove)
+                            permaTasksMoved.erase(id);
+                        toRemove.clear();
                     }
 
                     lock.lock();
@@ -197,15 +218,17 @@ namespace SecureShell
                         std::move(
                             tasks_.begin(),
                             tasks_.begin() + std::min(tasks_.size(), maximumTasksProcessableAtOnce),
-                            std::back_inserter(tasks));
+                            std::back_inserter(tasks)
+                        );
                         tasks_.erase(
-                            tasks_.begin(), tasks_.begin() + std::min(tasks_.size(), maximumTasksProcessableAtOnce));
+                            tasks_.begin(), tasks_.begin() + std::min(tasks_.size(), maximumTasksProcessableAtOnce)
+                        );
                     }
 
                     for (auto const& task : tasks)
                     {
                         // Task is checked before adding, shouldnt possibly be empty:
-#ifndef N_DEBUG
+#ifndef NDEBUG
                         if (!task)
                         {
                             throw std::runtime_error("Task must not be empty.");
@@ -246,9 +269,12 @@ namespace SecureShell
         }
         if (!withinProcessingThread() && running)
         {
-            return pushPromiseTask([]() {
-                       return true;
-                   }).wait_for(maxWait) == std::future_status::ready;
+            return pushPromiseTask(
+                       []()
+                       {
+                           return true;
+                       }
+                   ).wait_for(maxWait) == std::future_status::ready;
         }
         return false;
     }

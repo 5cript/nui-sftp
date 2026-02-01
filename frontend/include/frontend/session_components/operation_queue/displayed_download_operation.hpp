@@ -3,6 +3,8 @@
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
+#include <utility/format_bytes.hpp>
+
 class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperation>
 {
   public:
@@ -39,17 +41,30 @@ class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperati
         using Nui::Elements::span;
 
         // clang-format off
-            return div{
-                bodyClass()
+        return div{
+            bodyClass()
+        }(
+            div{
+                style = "flex-grow: 1"
             }(
                 progressBar_()
-            );
+            ),
+            div{}(
+                observe(bytesPerSecond_).generate(
+                    [](std::make_signed_t<std::size_t> bytesPerSecond)
+                    {
+                        return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                    }
+                )
+            )
+        );
         // clang-format on
     }
 
-    void setProgress(long long current)
+    void setProgress(long long current, std::make_signed_t<std::size_t> bytesPerSecond)
     {
         progressBar_.setProgress(current);
+        bytesPerSecond_ = bytesPerSecond;
     }
 
     std::string title() const override
@@ -64,6 +79,7 @@ class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperati
 
   private:
     Components::ProgressBar progressBar_;
+    Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;
 };

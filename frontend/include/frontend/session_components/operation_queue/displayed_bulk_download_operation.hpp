@@ -41,7 +41,9 @@ struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownlo
 
     std::string statusText() const override
     {
-        return fmt::format("Total Progress - File {}/{}", fileCurrentIndex.value(), fileCount.value());
+        return fmt::format(
+            "Total Progress - File {}/{} - {}/s", fileCurrentIndex.value(), fileCount.value(), bytesPerSecond.value()
+        );
     }
 
     std::string title() const override
@@ -61,6 +63,9 @@ struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownlo
         totalProgressBar_.setProgress(progress.bytesCurrent);
         if (totalProgressBar_.max() != static_cast<long long>(progress.bytesTotal))
             totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
+
+        if (bytesPerSecond.value() != progress.bytesPerSecond)
+            bytesPerSecond = progress.bytesPerSecond;
 
         fileCurrentIndex = progress.fileCurrentIndex;
         fileCount = progress.fileCount;
@@ -92,7 +97,7 @@ struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownlo
                     ),
                     fileProgressBar_(),
                     span{}(
-                        observe(fileCurrentIndex, fileCount),
+                        observe(fileCurrentIndex, fileCount, bytesPerSecond),
                         [this](){
                             return statusText();
                         }
@@ -107,6 +112,7 @@ struct DisplayedBulkDownloadOperation : public OperationCard<DisplayedBulkDownlo
     Nui::Observed<std::string> currentFile{""};
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
+    Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};
 
     Components::ProgressBar fileProgressBar_;
     Components::ProgressBar totalProgressBar_;

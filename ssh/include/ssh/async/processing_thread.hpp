@@ -86,17 +86,20 @@ namespace SecureShell
         {
             using ReturnType = std::invoke_result_t<std::decay_t<Func>>;
             auto promise = std::make_shared<std::promise<ReturnType>>();
-            pushTask([promise, func = std::forward<Func>(func)]() mutable {
-                if constexpr (std::is_void_v<ReturnType>)
+            pushTask(
+                [promise, func = std::forward<Func>(func)]() mutable
                 {
-                    func();
-                    promise->set_value();
+                    if constexpr (std::is_void_v<ReturnType>)
+                    {
+                        func();
+                        promise->set_value();
+                    }
+                    else
+                    {
+                        promise->set_value(func());
+                    }
                 }
-                else
-                {
-                    promise->set_value(func());
-                }
-            });
+            );
             return promise->get_future();
         }
 
@@ -106,7 +109,7 @@ namespace SecureShell
          * @param task The task to push.
          * @return std::pair<bool, PermanentTaskId> If the task was pushed and the id of the task.
          */
-        std::pair<bool, PermanentTaskId> pushPermanentTask(std::function<void()> task);
+        std::pair<bool, PermanentTaskId> pushPermanentTask(std::function<bool(ProcessingThread::PermanentTaskId)> task);
 
         /**
          * @brief Removes a permanent task.
@@ -171,6 +174,6 @@ namespace SecureShell
         std::vector<std::function<void()>> deferredTaskModification_{};
 
         std::deque<std::function<void()>> tasks_{};
-        std::map<PermanentTaskId, std::function<void()>> permanentTasks_{};
+        std::map<PermanentTaskId, std::function<bool(ProcessingThread::PermanentTaskId)>> permanentTasks_{};
     };
 }

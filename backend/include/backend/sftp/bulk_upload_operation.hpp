@@ -25,9 +25,10 @@ class BulkUploadOperation : public Operation
             std::uint64_t currentFileBytes,
             std::uint64_t currentFileTotalBytes,
             std::uint64_t bytesCurrent,
-            std::uint64_t bytesTotal
+            std::uint64_t bytesTotal,
+            std::make_signed_t<std::size_t> bytesPerSecond
         )>
-            overallProgressCallback = [](auto const&, auto, auto, auto, auto, auto, auto) {};
+            overallProgressCallback = [](auto const&, auto, auto, auto, auto, auto, auto, auto) {};
 
         std::filesystem::path remotePath{};
         std::filesystem::path localPath{};

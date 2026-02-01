@@ -100,6 +100,28 @@ namespace SecureShell
         std::size_t readLengthLimit() const override;
 
         /**
+         * @brief Returns an AsyncTransferContext that can be used to monitor the asynchronou transfer.
+         *
+         * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
+         * @param bufferSize The size of the buffer.
+         * @param onRead Called when data is read. Return false to stop reading.
+         * @return std::shared_ptr<AsyncTransferContext>
+         */
+        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> readAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<bool(SignedSizeType)> onRead
+        ) override;
+
+        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<SignedSizeType(SignedSizeType)> doRead
+        ) override;
+
+        /**
          * @brief Brings this class into an invalid state and returns the sftp_file. The ownership of the file is
          * transferred to the caller.
          *
