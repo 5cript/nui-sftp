@@ -31,17 +31,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
 
     bool warrantsCancelConfirm() const override
     {
-        return true;
-    }
-
-    std::string statusText() const override
-    {
-        return fmt::format("Deleting - {}", removePath_.generic_string());
-    }
-
-    std::string title() const override
-    {
-        return "Delete";
+        return false;
     }
 
     void setProgress(SharedData::BulkDeleteProgress const& progress)
@@ -66,19 +56,15 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
 
         // clang-format off
             return div{
-                bodyClass()
+                class_ = "opq-body"
             }(
-                div {
-                    style = "margin-top: 8px; font-size: 13px; color: var(--muted);"
-                }(
-                    span{}(
-                        observe(currentFile),
-                        [this](){
-                            return fmt::format("Current File: '{}'", currentFile.value());
-                        }
-                    ),
-                    progressBar_()
-                )
+                span{}(
+                    observe(currentFile),
+                    [this](){
+                        return fmt::format("Deleting: '{}'", currentFile.value());
+                    }
+                ),
+                progressBar_()
             );
         // clang-format on
     }

@@ -42,10 +42,13 @@ class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperati
 
         // clang-format off
         return div{
-            bodyClass()
+            class_ = "opq-body"
         }(
+            span{}(
+                fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
+            ),
             div{
-                style = "flex-grow: 1"
+                class_ = "opq-progress-grow"
             }(
                 progressBar_()
             ),
@@ -65,11 +68,6 @@ class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperati
     {
         progressBar_.setProgress(current);
         bytesPerSecond_ = bytesPerSecond;
-    }
-
-    std::string title() const override
-    {
-        return fmt::format("Download '{}' to '{}'", remotePath_.generic_string(), localPath_.generic_string());
     }
 
     bool warrantsCancelConfirm() const override

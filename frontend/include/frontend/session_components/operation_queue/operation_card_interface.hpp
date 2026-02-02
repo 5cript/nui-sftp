@@ -1,7 +1,7 @@
 #pragma once
 
 #include <shared_data/file_operations/download_progress.hpp>
-#include <shared_data/file_operations/bulk_download_progress.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
@@ -14,7 +14,6 @@
 
 #include <nui/frontend/element_renderer.hpp>
 
-#include <string>
 #include <chrono>
 
 class OperationCardInterface
@@ -22,8 +21,6 @@ class OperationCardInterface
   public:
     virtual ~OperationCardInterface() = default;
 
-    virtual std::string statusText() const = 0;
-    virtual std::string title() const = 0;
     virtual bool warrantsCancelConfirm() const = 0;
     virtual Nui::ElementRenderer body() const = 0;
     virtual void state(SharedData::OperationState newState) = 0;

@@ -34,10 +34,9 @@
 .progress-bar > div:nth-child(2) {
     position: relative;
     z-index: 1;
-    font-size: 16px;
     font-weight: bold;
     color: #303030;
-    text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
 }
 
 .progress-bar > div:nth-child(3) {

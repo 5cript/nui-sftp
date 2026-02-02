@@ -10,7 +10,7 @@
 
 namespace SharedData
 {
-    struct BulkUploadProgress
+    struct BulkProgress
     {
         Ids::OperationId operationId;
         std::string currentFile;
@@ -23,7 +23,7 @@ namespace SharedData
         std::make_signed_t<std::size_t> bytesPerSecond;
     };
     BOOST_DESCRIBE_STRUCT(
-        BulkUploadProgress,
+        BulkProgress,
         (),
         (operationId,
             currentFile,

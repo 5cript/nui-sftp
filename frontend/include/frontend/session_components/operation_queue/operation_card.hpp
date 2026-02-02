@@ -32,7 +32,7 @@
 #include <string>
 #include <string_view>
 
-constexpr static std::string_view progressHeight{"15px"};
+constexpr static std::string_view progressHeight{"12px"};
 
 namespace Svgs = Components::Svg;
 
@@ -69,11 +69,6 @@ class OperationCard : public OperationCardInterface
         return state_.value();
     }
 
-    virtual std::string statusText() const override
-    {
-        return fmt::format("status: {}", formattedState());
-    }
-
     SharedData::OperationType type() const override
     {
         return type_;
@@ -92,115 +87,99 @@ class OperationCard : public OperationCardInterface
             return Nui::nil();
 
         // clang-format off
-        return section{
+        return div{
             class_ = observe(state_).generate([this](){
                 const auto state = state_.value();
                 if (state == SharedData::OperationState::Completed)
-                    return "opq-card opq-completed opq-folded";
+                    return "opq-card opq-completed";
                 else if (state == SharedData::OperationState::Failed)
-                    return "opq-card opq-failed opq-folded";
+                    return "opq-card opq-failed";
                 else if (state == SharedData::OperationState::Canceled)
-                    return "opq-card opq-canceled opq-folded";
+                    return "opq-card opq-canceled";
                 else
                     return "opq-card";
             }),
         }(
-            div {
-                class_ = "opq-header",
-            }(
-                div {
-                    class_ = "opq-type"
-                }(
-                    observe(state_),
-                    [this]() -> Nui::ElementRenderer {
-                        if (type_ == SharedData::OperationType::Download || type_ == SharedData::OperationType::BulkDownload)
-                            return Svgs::download();
-                        else if (type_ == SharedData::OperationType::Upload || type_ == SharedData::OperationType::BulkUpload)
-                            return Svgs::upload();
-                        else if (type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan)
-                        {
-                            if (isCompletedState())
-                                return Svgs::scan();
-                            else
-                                return Svgs::scanAnimated();
-                        }
-                        else if (type_ == SharedData::OperationType::Delete)
-                        {
-                            return Svgs::deleteIcon();
-                        }
-                        else if (type_ == SharedData::OperationType::CustomAction)
-                        {
-                            return Svgs::refresh();
-                        }
-                        else
-                            return div{}("UnknownType");
-                    }
-                ),
-                div {
-                    class_ = "opq-title"
-                }(
-                    div{}(static_cast<Derived const*>(this)->title()),
-                    div {
-                        class_ = "opq-muted",
-                        Nui::Attributes::title = fmt::format("id: {}", operationId_.value())
-                    }(
-                        Nui::observe(state_),
-                        [this]() -> std::string {
-                            return static_cast<Derived const*>(this)->statusText();
-                        }
-                    )
-                ),
-                div{
-                    class_ = "opq-clock"
-                }(
-                    observe(completionTime_, doDeletionCountdown_).generate([this]() -> Nui::ElementRenderer {
-                        if (isCompletedState() && *doDeletionCountdown_)
-                        {
-                            constexpr auto radius = 10;
-                            constexpr auto circumference = 2 * 3.14159 * radius;
-                            return svg::svg{
-                                svga::viewBox = "0 0 24 24",
-                                svga::fill = "none",
-                                svga::width = "24",
-                                svga::height = "24",
-                            }(
-                                svg::circle{
-                                    svga::r = "10",
-                                    svga::cx = "12",
-                                    svga::cy = "12",
-                                    svga::fill = "none",
-                                    svga::stroke = "white",
-                                    svga::strokeWidth = "2",
-                                    svga::strokeDasharray = std::to_string(circumference),
-                                    svga::strokeLinecap = "round",
-                                    svga::transform = "rotate(-90 12 12)",
-                                }(
-                                    svg::animate{
-                                        svga::attributeName = "stroke-dashoffset",
-                                        svga::values = fmt::format("{};0", circumference),
-                                        svga::dur = fmt::format("{}s", OperationQueue::autoRemoveTime.count()),
-                                        svga::repeatCount = "1",
-                                    }()
-                                )
-                            );
-                        }
-                        return Nui::nil();
-                    })
-                ),
-                button {
-                    class_ = "opq-btn opq-cancel-btn",
-                    onClick = [this](){
-                        cancel();
-                    }
-                }(
-                    observe(state_).generate([this]() -> std::string {
+            // Icon
+            div{}(
+                observe(state_),
+                [this]() -> Nui::ElementRenderer {
+                    if (type_ == SharedData::OperationType::Download || type_ == SharedData::OperationType::BulkDownload)
+                        return Svgs::download();
+                    else if (type_ == SharedData::OperationType::Upload || type_ == SharedData::OperationType::BulkUpload)
+                        return Svgs::upload();
+                    else if (type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan)
+                    {
                         if (isCompletedState())
-                            return "Remove";
-                        return "Cancel";
-                    })
-                )
+                            return Svgs::scan();
+                        else
+                            return Svgs::scanAnimated();
+                    }
+                    else if (type_ == SharedData::OperationType::Delete)
+                    {
+                        return Svgs::deleteIcon();
+                    }
+                    else if (type_ == SharedData::OperationType::CustomAction)
+                    {
+                        return Svgs::refresh();
+                    }
+                    else
+                        return div{}("UnknownType");
+                }
             ),
-            static_cast<Derived const*>(this)->body()
+            // Body
+            static_cast<Derived const*>(this)->body(),
+            // Clock
+            div{
+                class_ = "opq-clock"
+            }(
+                observe(completionTime_, doDeletionCountdown_).generate([this]() -> Nui::ElementRenderer {
+                    if (isCompletedState() && *doDeletionCountdown_)
+                    {
+                        constexpr auto radius = 10;
+                        constexpr auto circumference = 2 * 3.14159 * radius;
+                        return svg::svg{
+                            svga::viewBox = "0 0 24 24",
+                            svga::fill = "none",
+                            svga::width = "24",
+                            svga::height = "24",
+                        }(
+                            svg::circle{
+                                svga::r = "10",
+                                svga::cx = "12",
+                                svga::cy = "12",
+                                svga::fill = "none",
+                                svga::stroke = "white",
+                                svga::strokeWidth = "2",
+                                svga::strokeDasharray = std::to_string(circumference),
+                                svga::strokeLinecap = "round",
+                                svga::transform = "rotate(-90 12 12)",
+                            }(
+                                svg::animate{
+                                    svga::attributeName = "stroke-dashoffset",
+                                    svga::values = fmt::format("{};0", circumference),
+                                    svga::dur = fmt::format("{}s", OperationQueue::autoRemoveTime.count()),
+                                    svga::repeatCount = "1",
+                                }()
+                            )
+                        );
+                    }
+                    return Nui::nil();
+                })
+            ),
+            // Cancel / Remove
+            button {
+                class_ = "opq-btn opq-cancel-btn",
+                onClick = [this](){
+                    cancel();
+                }
+            }(
+                observe(state_).generate([this]() -> std::string {
+                    if (isCompletedState())
+                        return "X";
+                    return "X";
+                })
+            )
         );
         // clang-format on
     }
@@ -248,19 +227,6 @@ class OperationCard : public OperationCardInterface
     std::chrono::steady_clock::time_point startTime() const
     {
         return startTime_;
-    }
-
-    auto bodyClass() const
-    {
-        using namespace Nui::Attributes;
-        return class_ = observe(state_).generate(
-                   [this]()
-                   {
-                       if (isCompletedState())
-                           return "opq-body opq-collapsed";
-                       return "opq-body";
-                   }
-               );
     }
 
   protected:
