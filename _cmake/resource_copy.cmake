@@ -4,7 +4,7 @@ include(FetchContent)
 
 FetchContent_Declare(
     base-icons
-    URL "https://mega.nz/file/d6wnESCB#lt_MKiLff7nQ65XKhFZe9pf5uYqbOXJtGiiQs4xfiAc"
+    URL "https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/icons.tar.gz"
     URL_HASH MD5=38d01d8769dda2a006495c7a3caa11b4
 )
 
