@@ -130,16 +130,20 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             }
             else
             {
-                progressCallback_(
-                    0ull, totalSize_, asyncTransferContext_->bytesTransferred(), asyncTransferContext_->bytesPerSecond()
-                );
                 if (asyncTransferContext_->hasEnded())
                 {
+                    progressCallback_(0ull, totalSize_, totalSize(), asyncTransferContext_->bytesPerSecond());
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
                 else
                 {
+                    progressCallback_(
+                        0ull,
+                        totalSize_,
+                        asyncTransferContext_->bytesTransferred(),
+                        asyncTransferContext_->bytesPerSecond()
+                    );
                     return WorkStatus::MoreWork;
                 }
             }

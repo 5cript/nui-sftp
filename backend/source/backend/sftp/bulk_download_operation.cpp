@@ -166,9 +166,6 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                                                            auto min, auto max, auto current, auto bytesPerSecond
                                                        )
                     {
-                        // Update current bytes
-                        currentBytes_ += (current - min);
-
                         // Call overall progress callback
                         options_.overallProgressCallback(
                             remoteFullPath,
@@ -176,7 +173,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                             entries_.size() - 1,
                             current,
                             max,
-                            currentBytes_,
+                            currentBytes_ + current,
                             totalBytes_,
                             bytesPerSecond
                         );
@@ -297,6 +294,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
     else if (result.value() == WorkStatus::Complete)
     {
         // Download finished
+        currentBytes_ += currentDownload_->totalSize();
         currentDownload_.reset();
         ++currentIndex_;
     }

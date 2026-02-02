@@ -127,16 +127,20 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             }
             else
             {
-                progressCallback_(
-                    0ull, fileSize_, asyncTransferContext_->bytesTransferred(), asyncTransferContext_->bytesPerSecond()
-                );
                 if (asyncTransferContext_->hasEnded())
                 {
+                    progressCallback_(0ull, fileSize_, totalSize(), asyncTransferContext_->bytesPerSecond());
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
                 else
                 {
+                    progressCallback_(
+                        0ull,
+                        fileSize_,
+                        asyncTransferContext_->bytesTransferred(),
+                        asyncTransferContext_->bytesPerSecond()
+                    );
                     return WorkStatus::MoreWork;
                 }
             }
