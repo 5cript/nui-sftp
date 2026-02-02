@@ -1,5 +1,6 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
 #include <ssh/sftp_session.hpp>
+#include <constants/sftp.hpp>
 #include <log/log.hpp>
 
 BulkUploadOperation::BulkUploadOperation(SecureShell::SftpSession& sftp, BulkUploadOperationOptions options)
@@ -108,6 +109,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     auto individualOpts = options_.individualOptions;
                     individualOpts.remotePath = fullRemotePath(entry);
                     individualOpts.localPath = fullLocalPath(entry);
+                    individualOpts.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
                     individualOpts.progressCallback = [this](auto, auto max, auto current, auto bytesPerSecond)
                     {
                         options_.overallProgressCallback(

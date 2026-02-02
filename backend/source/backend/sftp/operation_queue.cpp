@@ -1,8 +1,7 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <shared_data/file_operations/download_progress.hpp>
 #include <shared_data/file_operations/upload_progress.hpp>
-#include <shared_data/file_operations/bulk_download_progress.hpp>
-#include <shared_data/file_operations/bulk_upload_progress.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
@@ -467,7 +466,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
 
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onBulkDownloadProgress", self->sessionId_.value()),
-                        SharedData::BulkDownloadProgress{
+                        SharedData::BulkProgress{
                             .operationId = bulkId,
                             .currentFile = currentFile.string(),
                             .fileCurrentIndex = fileCurrentIndex,
@@ -657,7 +656,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onBulkUploadProgress", self->sessionId_.value()),
-                        SharedData::BulkUploadProgress{
+                        SharedData::BulkProgress{
                             .operationId = bulkId,
                             .currentFile = currentFile.string(),
                             .fileCurrentIndex = fileCurrentIndex,
@@ -696,7 +695,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             SharedData::OperationAdded{
                 .operationId = operationId,
                 .type = SharedData::OperationType::LocalScan,
-                .remotePath = remotePath,
+                .localPath = localPath,
             }
         );
         hub_->callRemote(

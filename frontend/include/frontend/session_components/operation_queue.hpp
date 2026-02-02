@@ -7,8 +7,7 @@
 
 #include <shared_data/file_operations/download_progress.hpp>
 #include <shared_data/file_operations/upload_progress.hpp>
-#include <shared_data/file_operations/bulk_download_progress.hpp>
-#include <shared_data/file_operations/bulk_upload_progress.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
@@ -89,8 +88,8 @@ class OperationQueue
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onDownloadProgress(SharedData::DownloadProgress const& progress);
     void onUploadProgress(SharedData::UploadProgress const& progress);
-    void onBulkDownloadProgress(SharedData::BulkDownloadProgress const& progress);
-    void onBulkUploadProgress(SharedData::BulkUploadProgress const& progress);
+    void onBulkDownloadProgress(SharedData::BulkProgress const& progress);
+    void onBulkUploadProgress(SharedData::BulkProgress const& progress);
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);

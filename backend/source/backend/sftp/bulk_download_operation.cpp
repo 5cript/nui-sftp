@@ -1,5 +1,6 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <ssh/sftp_session.hpp>
+#include <constants/sftp.hpp>
 #include <log/log.hpp>
 
 BulkDownloadOperation::BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options)
@@ -159,6 +160,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     auto downloadOptions = options_.individualOptions;
                     downloadOptions.remotePath = remoteFullPath;
                     downloadOptions.localPath = fullLocalPath(entry);
+                    downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
 
                     downloadOptions.progressCallback = [this, operationId = this->id(), remoteFullPath](
                                                            auto min, auto max, auto current, auto bytesPerSecond

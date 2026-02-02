@@ -7,9 +7,7 @@
 #include <frontend/session_components/operation_queue/displayed_download_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_upload_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_scan_operation.hpp>
-#include <frontend/session_components/operation_queue/displayed_local_scan_operation.hpp>
-#include <frontend/session_components/operation_queue/displayed_bulk_download_operation.hpp>
-#include <frontend/session_components/operation_queue/displayed_bulk_upload_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_bulk_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_delete_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_custom_action.hpp>
@@ -242,7 +240,7 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onBulkDownloadProgress", impl_->sessionId.value()),
-            [this](SharedData::BulkDownloadProgress const& progress)
+            [this](SharedData::BulkProgress const& progress)
             {
                 onBulkDownloadProgress(progress);
             }
@@ -252,7 +250,7 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onBulkUploadProgress", impl_->sessionId.value()),
-            [this](SharedData::BulkUploadProgress const& progress)
+            [this](SharedData::BulkProgress const& progress)
             {
                 onBulkUploadProgress(progress);
             }
@@ -367,6 +365,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             }
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
+                *added.remotePath,
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -376,16 +375,15 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         }
         else if (added.type == SharedData::OperationType::LocalScan)
         {
-            if (!added.remotePath)
+            if (!added.localPath)
             {
-                Log::error(
-                    "Received OperationAdded for operation id: {} without remotePath", added.operationId.value()
-                );
+                Log::error("Received OperationAdded for operation id: {} without localPath", added.operationId.value());
                 return {};
             }
-            return std::make_unique<DisplayedLocalScanOperation>(
+            return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
-                [this](OperationCard<DisplayedLocalScanOperation> const& operation)
+                *added.localPath,
+                [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -407,10 +405,25 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
         {
+            if (!added.localPath)
+            {
+                Log::error("Received OperationAdded for operation id: {} without localPath", added.operationId.value());
+                return {};
+            }
+            if (!added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for operation id: {} without remotePath", added.operationId.value()
+                );
+                return {};
+            }
             Log::info("Creating bulk download operation card for operation id: {}", added.operationId.value());
-            return std::make_unique<DisplayedBulkDownloadOperation>(
+            return std::make_unique<DisplayedBulkOperation>(
                 added.operationId,
-                [this](OperationCard<DisplayedBulkDownloadOperation> const& operation)
+                SharedData::OperationType::BulkDownload,
+                *added.localPath,
+                *added.remotePath,
+                [this](OperationCard<DisplayedBulkOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -419,10 +432,25 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         }
         else if (added.type == SharedData::OperationType::BulkUpload)
         {
+            if (!added.localPath)
+            {
+                Log::error("Received OperationAdded for operation id: {} without localPath", added.operationId.value());
+                return {};
+            }
+            if (!added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for operation id: {} without remotePath", added.operationId.value()
+                );
+                return {};
+            }
             Log::info("Creating bulk upload operation card for operation id: {}", added.operationId.value());
-            return std::make_unique<DisplayedBulkUploadOperation>(
+            return std::make_unique<DisplayedBulkOperation>(
                 added.operationId,
-                [this](OperationCard<DisplayedBulkUploadOperation> const& operation)
+                SharedData::OperationType::BulkUpload,
+                *added.localPath,
+                *added.remotePath,
+                [this](OperationCard<DisplayedBulkOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -590,7 +618,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
     }
     else if (operation->type() == SharedData::OperationType::LocalScan)
     {
-        auto* renderer = operation->getCardSpecifically<DisplayedLocalScanOperation>();
+        auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
         if (!renderer)
         {
             Log::error(
@@ -607,7 +635,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
     }
 }
 
-void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress const& progress)
+void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& progress)
 {
     // Log::debug("Received bulk download progress for operation id: {}.", progress.operationId.value());
 
@@ -625,7 +653,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkDownloadProgress con
         );
         return;
     }
-    auto* card = operation->getCardSpecifically<DisplayedBulkDownloadOperation>();
+    auto* card = operation->getCardSpecifically<DisplayedBulkOperation>();
     if (!card)
     {
         Log::error(
@@ -663,7 +691,7 @@ void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress
     renderer->setProgress(progress);
 }
 
-void OperationQueue::onBulkUploadProgress(SharedData::BulkUploadProgress const& progress)
+void OperationQueue::onBulkUploadProgress(SharedData::BulkProgress const& progress)
 {
     // Log::debug("Received bulk upload progress for operation id: {}.", progress.operationId.value());
 
@@ -681,7 +709,7 @@ void OperationQueue::onBulkUploadProgress(SharedData::BulkUploadProgress const& 
         );
         return;
     }
-    auto* renderer = operation->getCardSpecifically<DisplayedBulkUploadOperation>();
+    auto* renderer = operation->getCardSpecifically<DisplayedBulkOperation>();
     if (!renderer)
     {
         Log::error(
@@ -779,12 +807,6 @@ Nui::ElementRenderer OperationQueue::operator()()
     using Nui::Elements::div;
     using Nui::Elements::span;
 
-    auto operationsMapper = [](auto, auto const& element)
-    {
-        std::cout << "Mapping operation element" << std::endl;
-        return div{}((*element)());
-    };
-
     auto makeSummaryText = [this]() -> std::string
     {
         return fmt::format("{} total operations", static_cast<int>(impl_->operations.observedValues().value().size()));
@@ -847,7 +869,10 @@ Nui::ElementRenderer OperationQueue::operator()()
         div{
             class_ = "opq-list"
         }(
-            impl_->operations.observedValues().map(operationsMapper)
+            impl_->operations.observedValues().map([](auto, auto const& element)
+            {
+                return (*element)();
+            })
         ),
         // Footer
         div{

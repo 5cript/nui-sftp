@@ -33,16 +33,6 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
         return false;
     }
 
-    std::string statusText() const override
-    {
-        return "Refresh File Explorer";
-    }
-
-    std::string title() const override
-    {
-        return "Refresh File Explorer";
-    }
-
     void state(SharedData::OperationState state) override
     {
         OperationCard::state(state);
@@ -59,13 +49,9 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
 
         // clang-format off
         return div{
-            bodyClass()
+            class_ = "opq-body"
         }(
-            div {
-                style = "margin-top: 8px; font-size: 13px; color: var(--muted);"
-            }(
-                "Refreshing the file explorer to show the latest changes."
-            )
+            "Refreshing the file explorer to show the latest changes."
         );
         // clang-format on
     }

@@ -2,22 +2,22 @@
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
-#include <shared_data/file_operations/bulk_upload_progress.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 
-struct DisplayedBulkUploadOperation : public OperationCard<DisplayedBulkUploadOperation>
+struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
 {
   public:
-    DisplayedBulkUploadOperation(
+    DisplayedBulkOperation(
         Ids::OperationId operationId,
+        SharedData::OperationType type,
+        std::filesystem::path localPath,
+        std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
     )
-        : OperationCard{
-              SharedData::OperationType::BulkUpload,
-              std::move(operationId),
-              std::move(doRemoveSelf),
-              std::move(doDeletionCountdown)
-          }
+        : OperationCard{type, std::move(operationId), std::move(doRemoveSelf), std::move(doDeletionCountdown)}
+        , localPath_{std::move(localPath)}
+        , remotePath_{std::move(remotePath)}
         , fileProgressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -39,19 +39,12 @@ struct DisplayedBulkUploadOperation : public OperationCard<DisplayedBulkUploadOp
         return true;
     }
 
-    std::string statusText() const override
+    std::string statusText() const
     {
-        return fmt::format(
-            "Total Progress - File {}/{} - {}/s", fileCurrentIndex.value(), fileCount.value(), bytesPerSecond.value()
-        );
+        return fmt::format("{}/{} - {}/s", fileCurrentIndex.value(), fileCount.value(), bytesPerSecond.value());
     }
 
-    std::string title() const override
-    {
-        return "Bulk Upload";
-    }
-
-    void setProgress(SharedData::BulkUploadProgress const& progress)
+    void setProgress(SharedData::BulkProgress const& progress)
     {
         if (currentFile.value() != progress.currentFile)
             currentFile = progress.currentFile;
@@ -77,35 +70,39 @@ struct DisplayedBulkUploadOperation : public OperationCard<DisplayedBulkUploadOp
         using Nui::Elements::div;
         using Nui::Elements::span;
 
-        Log::info("Rendering bulk download operation body");
-
         // clang-format off
-            return div{
-                bodyClass()
-            }(
-                div {
-                    style = "margin-top: 8px; font-size: 13px; color: var(--muted);"
+        return div{
+            class_ = "opq-body opq-bulk"
+        }(
+            div{}(
+                span{
+                    style = "flex-grow: 1"
                 }(
-                    span{}(
-                        observe(currentFile),
-                        [this](){
-                            return fmt::format("Current File: '{}'", currentFile.value());
-                        }
-                    ),
-                    fileProgressBar_(),
-                    span{}(
-                        observe(fileCurrentIndex, fileCount, bytesPerSecond),
-                        [this](){
-                            return statusText();
-                        }
-                    ),
-                    totalProgressBar_()
+                    observe(currentFile),
+                    [this](){
+                        if (currentFile.empty())
+                            return fmt::format("{} {} {}", localPath_.generic_string(), type_ == SharedData::OperationType::BulkUpload ? "->" : "<-", remotePath_.generic_string());
+                        return fmt::format("{}:", currentFile.value());
+                    }
+                ),
+                span{}(
+                    observe(fileCurrentIndex, fileCount, bytesPerSecond),
+                    [this](){
+                        return statusText();
+                    }
                 )
-            );
+            ),
+            div{}(
+                fileProgressBar_(),
+                totalProgressBar_()
+            )
+        );
         // clang-format on
     }
 
   private:
+    std::filesystem::path localPath_;
+    std::filesystem::path remotePath_;
     Nui::Observed<std::string> currentFile{""};
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};

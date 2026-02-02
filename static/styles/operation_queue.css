@@ -12,7 +12,6 @@ header.opq-controls {
     display: flex;
     gap: 8px;
     align-items: center;
-    margin-bottom: 8px
 }
 
 .opq-play-toggle {
@@ -48,7 +47,8 @@ header.opq-controls {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    gap: 5px
+    gap: 1px;
+    min-height: 0;
 }
 
 .opq-footer {
@@ -57,25 +57,34 @@ header.opq-controls {
     display: flex;
     align-items: center;
     gap: 12px;
+
+    &>ui5-switch::part(root) {
+        height: 24px;
+    }
 }
 
 .opq-card {
     border: 1px solid var(--opq-border);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
-    border-radius: 12px;
+    padding: 0 8px;
     overflow: hidden;
-    transition: box-shadow .18s ease
+    transition: box-shadow .18s ease;
+    display: flex;
+    font-size: 0.75rem;
+    align-items: center;
+    flex-shrink: 0;
+    height: 36px;
+
+    /* first child */
+    &>div:first-child {
+        width: 20px;
+        height: 20px;
+        margin-right: 8px;
+    }
 }
 
 .opq-card:hover {
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45)
-}
-
-.opq-header {
-    display: flex;
-    gap: 8px;
-    padding: 8px 10px;
-    align-items: center
 }
 
 .opq-type {
@@ -114,53 +123,62 @@ header.opq-controls {
 }
 
 .opq-cancel-btn {
-    color: #ffb3b3
+    color: #ffb3b3;
+    margin-left: 8px;
 }
 
 /* dynamic content area */
 .opq-body {
-    padding: 10px 14px;
-    border-top: 1px dashed rgba(255, 255, 255, 0.03);
     overflow: hidden;
     transition: max-height .35s cubic-bezier(.2, .9, .2, 1), opacity .25s ease;
-    padding-bottom: 12px;
     display: flex;
     gap: 8px;
+    align-items: center;
+    flex-grow: 1;
 }
 
-.opq-body.opq-collapsed {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    opacity: 0
+.opq-bulk {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    column-gap: 12px;
+    row-gap: 2px;
+
+    &>div {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+
+        &>.progress-bar {
+            flex-grow: 1;
+            border-radius: 0;
+        }
+    }
+}
+
+.opq-progress-grow {
+    flex-grow: 1;
+
+    &>.progress-bar {
+        width: 100%;
+        border-radius: 0;
+    }
 }
 
 /* states */
-.opq-completed .opq-header {
-    background: linear-gradient(90deg, rgba(126, 231, 135, 0.06), transparent)
-}
-
-.opq-completed .opq-type {
+.opq-completed .opq-card {
     background: rgba(126, 231, 135, 0.07);
     border-color: rgba(126, 231, 135, 0.12);
     color: var(--opq-lime)
 }
 
-.opq-failed .opq-header {
-    background: linear-gradient(90deg, rgba(255, 107, 107, 0.06), transparent)
-}
-
-.opq-failed .opq-type {
+.opq-failed .opq-card {
     background: rgba(255, 107, 107, 0.06);
     border-color: rgba(255, 107, 107, 0.12);
     color: var(--opq-red)
 }
 
-.opq-canceled .opq-header {
-    background: linear-gradient(90deg, rgba(153, 153, 153, 0.04), transparent)
-}
-
-.opq-canceled .opq-type {
+.opq-canceled .opq-card {
     background: rgba(153, 153, 153, 0.04);
     border-color: rgba(153, 153, 153, 0.12);
     color: var(--opq-gray)
@@ -169,12 +187,6 @@ header.opq-controls {
 /* pending state (default) */
 .opq-pending .opq-header {
     background: transparent
-}
-
-/* collapse animation for header when finishing: shrink padding and reduce height subtly */
-.opq-card.opq-folded .opq-header {
-    padding-top: 8px;
-    padding-bottom: 8px
 }
 
 /* small helper */

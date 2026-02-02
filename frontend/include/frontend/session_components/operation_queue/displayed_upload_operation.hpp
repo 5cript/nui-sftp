@@ -39,23 +39,26 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
         using Nui::Elements::span;
 
         // clang-format off
-            return div{
-                bodyClass()
+        return div{
+            class_ = "opq-body"
+        }(
+            span{}(
+                fmt::format("{} -> {}", localPath_.generic_string(), remotePath_.generic_string())
+            ),
+            div{
+                style = "flex-grow: 1"
             }(
-                div{
-                    style = "flex-grow: 1"
-                }(
-                    progressBar_()
-                ),
-                div{}(
-                    observe(bytesPerSecond_).generate(
-                        [](std::make_signed_t<std::size_t> bytesPerSecond)
-                        {
-                            return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
-                        }
-                    )
+                progressBar_()
+            ),
+            div{}(
+                observe(bytesPerSecond_).generate(
+                    [](std::make_signed_t<std::size_t> bytesPerSecond)
+                    {
+                        return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                    }
                 )
-            );
+            )
+        );
         // clang-format on
     }
 
@@ -64,11 +67,6 @@ class DisplayedUploadOperation : public OperationCard<DisplayedUploadOperation>
         progressBar_.max(progress.max);
         progressBar_.setProgress(progress.current - progress.min);
         bytesPerSecond_ = progress.bytesPerSecond;
-    }
-
-    std::string title() const override
-    {
-        return fmt::format("Upload '{}' to '{}'", localPath_.generic_string(), remotePath_.generic_string());
     }
 
     bool warrantsCancelConfirm() const override
