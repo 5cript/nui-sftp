@@ -81,6 +81,11 @@ class DownloadOperation : public Operation
         return localPath_;
     }
 
+    std::uint64_t totalSize() const
+    {
+        return fileSize_;
+    }
+
     std::expected<void, DownloadOperation::Error> cancel(bool adoptCancelState) override;
 
     void pause(bool doPause) override;
