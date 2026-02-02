@@ -3,6 +3,7 @@
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
 #include <shared_data/file_operations/bulk_progress.hpp>
+#include <utility/format_bytes.hpp>
 
 struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
 {
@@ -41,7 +42,12 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
 
     std::string statusText() const
     {
-        return fmt::format("{}/{} - {}/s", fileCurrentIndex.value(), fileCount.value(), bytesPerSecond.value());
+        return fmt::format(
+            "{}/{} - {}/s",
+            fileCurrentIndex.value(),
+            fileCount.value(),
+            Utility::formatBytes(bytesPerSecond.value(), Utility::determineOrderOfMagnitude(bytesPerSecond.value()))
+        );
     }
 
     void setProgress(SharedData::BulkProgress const& progress)
