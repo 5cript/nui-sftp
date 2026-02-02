@@ -121,27 +121,22 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 // No More to read?
                 else
                 {
-                    Log::info("DownloadOperation: Data reading completed.");
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
             }
             else
             {
+                progressCallback_(
+                    0ull, fileSize_, asyncTransferContext_->bytesTransferred(), asyncTransferContext_->bytesPerSecond()
+                );
                 if (asyncTransferContext_->hasEnded())
                 {
-                    Log::info("DownloadOperation: Data reading completed.");
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
                 else
                 {
-                    progressCallback_(
-                        0ull,
-                        fileSize_,
-                        asyncTransferContext_->bytesTransferred(),
-                        asyncTransferContext_->bytesPerSecond()
-                    );
                     return WorkStatus::MoreWork;
                 }
             }
