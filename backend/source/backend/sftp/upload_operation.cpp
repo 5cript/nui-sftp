@@ -124,27 +124,22 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 // No More to write?
                 else
                 {
-                    Log::debug("UploadOperation: Data writing completed.");
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
             }
             else
             {
+                progressCallback_(
+                    0ull, totalSize_, asyncTransferContext_->bytesTransferred(), asyncTransferContext_->bytesPerSecond()
+                );
                 if (asyncTransferContext_->hasEnded())
                 {
-                    Log::info("UploadOperation: Data reading completed.");
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
                 else
                 {
-                    progressCallback_(
-                        0ull,
-                        totalSize_,
-                        asyncTransferContext_->bytesTransferred(),
-                        asyncTransferContext_->bytesPerSecond()
-                    );
                     return WorkStatus::MoreWork;
                 }
             }
