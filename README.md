@@ -11,9 +11,8 @@ Still under construction :construction:
 - [x] Fix session being in hanging state when connect fails.
 - [x] Implement proper handling of connection loss.
 - [x] Multi session support.
-- [ ] Custom top bar with moveability and minimize, maximize, close buttons.
-- [ ] More/Custom themes.
 - [ ] Accessible logs.
+- [ ] ConfirmDialog List items are broken
 
 ## Operation Queue (UI)
 - [ ] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
@@ -23,7 +22,7 @@ Still under construction :construction:
 - [ ] Scroll operations into view when they complete.
 - [ ] "Remove" to an X button
 - [ ] Hover for more info (Download from to)
-- [ ] Error message im hover.
+- [ ] Error message in hover.
 - [ ] Sometimes refreshes on remote side are not added to queue. (Bulk delete for example)
 
 ## Settings UI
@@ -43,11 +42,6 @@ Still under construction :construction:
 - [x] Automatic key auth via SSH directory.
 - [x] Password auth.
 - [x] SSH agent support linux.
-
-### No intention to support for now:
-- Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
-- GSSAPI auth: Will make work when a need arises
-- KeypassXc database integration: lots of work for tiny use cases. Its a cool idea for later.
 
 ## Shell
 - [x] SSH shell.
@@ -74,8 +68,6 @@ Still under construction :construction:
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
-- [ ] Implement bulk download to archives.
-- [ ] Synchronize directories.
 
 ## File View UI
 - [x] Grid view.
@@ -95,17 +87,37 @@ Still under construction :construction:
 - [x] Delete remote files (empty dirs and files).
 - [x] Rename remote file.
 - [x] Ask user to overwrite files on upload/download.
-- [ ] Better indication that on drag drop, all selected items are being dragged.
 - [ ] Improve arrow navigation with shift and control.
-- [ ] Same side drag and drop for moving files locally or remotely.
 - [x] Drag and drop from system on Windows.
 - [ ] Drag and drop from system on Linux.
 - [x] Persist mode as part of layout.
+- [ ] Scroll into view of recently selected item when using keyboard controls.
+- [ ] Table header is too thick and text too bold.
+- [ ]
+
+# No intention to support for now:
+- Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
+- GSSAPI auth: Will make work when a need arises
+- KeypassXc database integration: lots of work for tiny use cases. Its a cool idea for later.
+
+# Not Release 1 Features
+
+## General UI
+- [ ] Custom top bar with moveability and minimize, maximize, close buttons.
+- [ ] More/Custom themes.
+
+## Synchronization
+- [ ] Synchronize directories.
+
+## SFTP
+- [ ] Implement bulk download to archives.
+
+## File View UI
+- [ ] Same side drag and drop for moving files locally or remotely.
+- [ ] Better indication that on drag drop, all selected items are being dragged.
 - [ ] File previews:
   - [ ] Image preview (image as icon?)
   - [ ] Text preview
-- [ ] Scroll into view of recently selected item when using keyboard controls.
-- [ ] Table header is too thick and text too bold.
 
 ## Open Files & Monitoring
 - [ ] Open files with associated application.

@@ -1,0 +1,46 @@
+{
+    "sources": [
+        {
+            "url": "https://github.com/5cript/work-dependency-cloner.git",
+            "rev": "3e5e3524c2bcd7747c2cf18e0eed561d79c912f4",
+            "branch": "main",
+            "name": "work-dependency-cloner"
+        },
+        {
+            "url": "https://github.com/NuiCpp/Nui.git",
+            "rev": "b4d5b05f6f7d0ef982763642ed4e407dba109d55",
+            "branch": "main",
+            "name": "Nui"
+        },
+        {
+            "url": "https://github.com/5cript/roar.git",
+            "rev": "230e4b92f3212f0d77d1b77b50d0efa85d257be8",
+            "branch": "main",
+            "name": "roar"
+        },
+        {
+            "url": "https://github.com/DNKpp/gimo.git",
+            "rev": "16377a6d496b31a9272f9a079c060fba15258bcc",
+            "branch": "main",
+            "name": "gimo"
+        },
+        {
+            "url": "https://github.com/5cript/process.git",
+            "rev": "2125a779b0e4d3b91684a917d3814296853691d1",
+            "branch": "import-boost",
+            "name": "process"
+        },
+        {
+            "url": "https://github.com/NuiCpp/traits.git",
+            "rev": "6c9caa21c48c9e1f7f039a7bdf8805a0940fce0a",
+            "branch": "main",
+            "name": "traits"
+        },
+        {
+            "url": "https://github.com/NuiCpp/ui5.git",
+            "rev": "a514318f9110f7e77574abd283ef0c5ecf634f40",
+            "branch": "feat/modernization",
+            "name": "ui5"
+        }
+    ]
+}
