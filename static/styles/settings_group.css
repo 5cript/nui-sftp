@@ -109,7 +109,7 @@
 }
 
 .settings-group-key-container {
-    grid-column: span 99;
+    grid-column: span 5;
     margin-bottom: 4px;
     padding: 4px 8px;
     background-color: var(--sapBackgroundColor);

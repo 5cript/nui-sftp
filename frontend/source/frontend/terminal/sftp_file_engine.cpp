@@ -528,7 +528,8 @@ void SftpFileEngine::removeOnQueueUnchecked(
                 },
                 channelId.value().value(),
                 paths,
-                recursive
+                recursive,
+                true
             );
         }
     );

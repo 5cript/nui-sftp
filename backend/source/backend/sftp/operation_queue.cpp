@@ -1,6 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
-#include <shared_data/file_operations/download_progress.hpp>
-#include <shared_data/file_operations/upload_progress.hpp>
+#include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
@@ -372,7 +371,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
 
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onDownloadProgress", self->sessionId_.value()),
-                        SharedData::DownloadProgress{
+                        SharedData::TransferProgress{
                             .operationId = operationId,
                             .min = min,
                             .max = max,
@@ -515,6 +514,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             SharedData::OperationAdded{
                 .operationId = bulkId,
                 .type = SharedData::OperationType::BulkDownload,
+                .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
             }
@@ -570,7 +570,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
                     self->hub_->callRemote(
                         fmt::format("OperationQueue::{}::onUploadProgress", self->sessionId_.value()),
-                        SharedData::UploadProgress{
+                        SharedData::TransferProgress{
                             .operationId = operationId,
                             .min = min,
                             .max = max,
@@ -703,6 +703,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             SharedData::OperationAdded{
                 .operationId = bulkId,
                 .type = SharedData::OperationType::BulkUpload,
+                .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
             }
@@ -721,7 +722,8 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
     std::filesystem::path const& remotePath,
-    bool recursive
+    bool recursive,
+    bool insertRefresh
 )
 {
     // Assumed in strand
@@ -757,7 +759,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         operations_.emplace_back(scanId, std::move(scan));
 
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
             SharedData::OperationAdded{
                 .operationId = scanId,
                 .type = SharedData::OperationType::Scan,
@@ -796,18 +798,12 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     operations_.emplace_back(operationId, std::move(operation));
 
     hub_->callRemote(
-        fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+        fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
         SharedData::OperationAdded{
             .operationId = operationId,
             .type = SharedData::OperationType::Delete,
-            .remotePath = remotePath,
-        }
-    );
-
-    hub_->callRemote(
-        fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
-        SharedData::OperationAdded{
-            .operationId = operationId, .type = SharedData::OperationType::Delete, .remotePath = remotePath
+            .insertRefresh = insertRefresh,
+            .remotePath = remotePath
         }
     );
 

@@ -32,7 +32,7 @@
 #include <string>
 #include <string_view>
 
-constexpr static std::string_view progressHeight{"12px"};
+constexpr static std::string_view progressHeight{"8px"};
 
 namespace Svgs = Components::Svg;
 
@@ -74,6 +74,16 @@ class OperationCard : public OperationCardInterface
         return type_;
     }
 
+    void setError(SharedData::OperationError const& error) override
+    {
+        error_ = error;
+    }
+
+    bool isInvisible() const
+    {
+        return invisible_;
+    }
+
     Nui::ElementRenderer operator()() const override
     {
         using namespace Nui::Elements;
@@ -88,16 +98,24 @@ class OperationCard : public OperationCardInterface
 
         // clang-format off
         return div{
+            Nui::Attributes::alt = observe(error_).generate([this]() -> std::optional<std::string> {
+                if (error_.value().has_value())
+                    return error_.value()->toString();
+                return std::nullopt;
+            }),
             class_ = observe(state_).generate([this](){
                 const auto state = state_.value();
-                if (state == SharedData::OperationState::Completed)
-                    return "opq-card opq-completed";
-                else if (state == SharedData::OperationState::Failed)
-                    return "opq-card opq-failed";
-                else if (state == SharedData::OperationState::Canceled)
-                    return "opq-card opq-canceled";
-                else
-                    return "opq-card";
+                const auto isSubgridOperation = type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan || type_ == SharedData::OperationType::Delete;
+                return fmt::format("opq-card {} {}", [&state]() -> std::string {
+                    if (state == SharedData::OperationState::Completed)
+                        return "opq-completed";
+                    else if (state == SharedData::OperationState::Failed)
+                        return "opq-failed";
+                    else if (state == SharedData::OperationState::Canceled)
+                        return "opq-canceled";
+                    else
+                        return "";
+                }(), !isSubgridOperation ? "opq-card-gridspan": "opq-card-subgrid");
             }),
         }(
             // Icon
@@ -233,6 +251,7 @@ class OperationCard : public OperationCardInterface
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
     Nui::Observed<std::chrono::steady_clock::time_point> completionTime_{};
     Nui::Observed<SharedData::OperationState> state_{SharedData::OperationState::NotStarted};
+    Nui::Observed<std::optional<SharedData::OperationError>> error_{std::nullopt};
     SharedData::OperationType type_;
     Ids::OperationId operationId_;
     std::function<void(OperationCard const& operation)> doRemoveSelf_;

@@ -55,6 +55,11 @@ struct DisplayedOperation
         return type_;
     }
 
+    void setError(SharedData::OperationError const& error)
+    {
+        card_->setError(error);
+    }
+
     template <typename T>
     T* getCardSpecifically()
     {

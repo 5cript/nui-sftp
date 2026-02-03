@@ -81,6 +81,18 @@ namespace SecureShell
         );
 
         /**
+         * @brief Create a directory if it does not already exist.
+         *
+         * @param path
+         * @param permissions
+         * @return std::future<std::expected<void, Error>>
+         */
+        std::future<std::expected<void, Error>> createDirectoryIfItDoesntExist(
+            std::filesystem::path const& path,
+            std::filesystem::perms permissions = std::filesystem::perms::owner_all
+        );
+
+        /**
          * @brief Opens a file, creating it if it does not exist, then closes it.
          *
          * @param path
