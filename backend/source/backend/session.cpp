@@ -511,7 +511,8 @@ void Session::registerRpcQueuedRemoves()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::vector<std::filesystem::path> paths,
-                bool recursive
+                bool recursive,
+                bool insertRefresh
             )
             {
                 auto self = weak.lock();
@@ -520,9 +521,9 @@ void Session::registerRpcQueuedRemoves()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        paths = std::move(paths),
-                        recursive](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                    [weak = self->weak_from_this(), paths = std::move(paths), recursive, insertRefresh](
+                        RpcHelper::RpcOnce&& reply, auto&& channel
+                    ) mutable
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -532,8 +533,9 @@ void Session::registerRpcQueuedRemoves()
                         for (auto const& path : paths)
                         {
                             const auto newOperationId = Ids::generateOperationId();
-                            const auto result =
-                                self->operationQueue_->addDeleteOperation(*channel, newOperationId, path, recursive);
+                            const auto result = self->operationQueue_->addDeleteOperation(
+                                *channel, newOperationId, path, recursive, insertRefresh
+                            );
                             operationIds.push_back(newOperationId.value());
                         }
 

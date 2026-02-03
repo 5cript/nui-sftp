@@ -44,6 +44,7 @@ namespace Components
 
       private:
         void updateText();
+        void recalculate();
 
       private:
         struct Implementation;

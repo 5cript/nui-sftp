@@ -1,6 +1,6 @@
 #pragma once
 
-#include <shared_data/file_operations/download_progress.hpp>
+#include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
@@ -9,6 +9,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 
@@ -30,4 +31,5 @@ class OperationCardInterface
     virtual std::chrono::steady_clock::time_point completionTime() const = 0;
     virtual void completionTime(std::chrono::steady_clock::time_point time) = 0;
     virtual Nui::ElementRenderer operator()() const = 0;
+    virtual void setError(SharedData::OperationError const& error) = 0;
 };

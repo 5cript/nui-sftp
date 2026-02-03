@@ -15,7 +15,7 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),
-              false
+              true
           }
         , action_{[alreadyPerformed = false,
                       action = std::move(action)](std::optional<Ids::OperationId> const& id) mutable
@@ -37,7 +37,10 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
     {
         OperationCard::state(state);
         if (state == SharedData::OperationState::Completed)
+        {
             action_(operationId());
+            doRemoveSelf_(*this);
+        }
     }
 
     Nui::ElementRenderer body() const override
@@ -46,6 +49,8 @@ struct DisplayedCustomAction : public OperationCard<DisplayedCustomAction>
         using namespace Nui::Attributes;
         using Nui::Elements::div;
         using Nui::Elements::span;
+
+        return Nui::nil();
 
         // clang-format off
         return div{

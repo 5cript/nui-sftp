@@ -184,7 +184,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
 std::expected<void, BulkUploadOperation::Error>
 BulkUploadOperation::createDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entry)
 {
-    auto fut = sftp_->createDirectory(path, determinePerms(entry));
+    auto fut = sftp_->createDirectoryIfItDoesntExist(path, determinePerms(entry));
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
     {
         Log::error("BulkUploadOperation: Failed to create remote sftp directory: timeout.");

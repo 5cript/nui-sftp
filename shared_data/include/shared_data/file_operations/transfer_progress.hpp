@@ -10,7 +10,7 @@
 
 namespace SharedData
 {
-    struct DownloadProgress
+    struct TransferProgress
     {
         Ids::OperationId operationId;
         std::uint64_t min;
@@ -18,5 +18,5 @@ namespace SharedData
         std::uint64_t current;
         std::make_signed_t<std::size_t> bytesPerSecond;
     };
-    BOOST_DESCRIBE_STRUCT(DownloadProgress, (), (operationId, min, max, current, bytesPerSecond))
+    BOOST_DESCRIBE_STRUCT(TransferProgress, (), (operationId, min, max, current, bytesPerSecond))
 }

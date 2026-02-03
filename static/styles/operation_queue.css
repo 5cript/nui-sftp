@@ -1,17 +1,17 @@
 .operation-queue {
     margin: auto auto;
-    padding: 5px;
     width: 100%;
     height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    gap: 5px;
 }
 
 header.opq-controls {
     display: flex;
     gap: 8px;
     align-items: center;
+    padding: 5px;
+    border-bottom: 1px solid var(--opq-border);
 }
 
 .opq-play-toggle {
@@ -20,7 +20,7 @@ header.opq-controls {
     gap: 8px;
     padding: 4px 8px;
     border-radius: 10px;
-    border: 1px solid var(--opq-border);
+    border: 1px solid var(--opq-border-faint);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
     cursor: pointer;
     user-select: none;
@@ -44,11 +44,12 @@ header.opq-controls {
 }
 
 .opq-list {
-    display: flex;
-    flex-direction: column;
+    display: grid;
     overflow-y: auto;
     gap: 1px;
     min-height: 0;
+    grid-template-columns: min-content 1fr 1fr max-content max-content max-content;
+    grid-auto-rows: 36px;
 }
 
 .opq-footer {
@@ -57,22 +58,21 @@ header.opq-controls {
     display: flex;
     align-items: center;
     gap: 12px;
+    padding: 0 5px;
+    border-top: 1px solid var(--opq-border);
 
-    &>ui5-switch::part(root) {
+    &>ui5-switch::part(slider) {
         height: 24px;
     }
 }
 
 .opq-card {
-    border: 1px solid var(--opq-border);
+    border-bottom: 1px solid var(--opq-border-faint);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
-    padding: 0 8px;
     overflow: hidden;
     transition: box-shadow .18s ease;
-    display: flex;
     font-size: 0.75rem;
-    align-items: center;
-    flex-shrink: 0;
+    padding: 0 5px;
     height: 36px;
 
     /* first child */
@@ -81,6 +81,25 @@ header.opq-controls {
         height: 20px;
         margin-right: 8px;
     }
+
+    .progress-bar {
+        font-size: 9px;
+    }
+}
+
+.opq-card-gridspan {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.opq-card-subgrid {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: span 6;
+    align-items: center;
+    grid-template-rows: 36px;
 }
 
 .opq-card:hover {
@@ -110,7 +129,7 @@ header.opq-controls {
 .opq-btn {
     padding: 3px 5px;
     border-radius: 8px;
-    border: 1px solid var(--opq-border);
+    border: 1px solid var(--opq-border-faint);
     background: transparent;
     color: var(--opq-muted);
     cursor: pointer;
@@ -130,11 +149,29 @@ header.opq-controls {
 /* dynamic content area */
 .opq-body {
     overflow: hidden;
-    transition: max-height .35s cubic-bezier(.2, .9, .2, 1), opacity .25s ease;
     display: flex;
     gap: 8px;
     align-items: center;
     flex-grow: 1;
+}
+
+.opq-bytes-per-second {
+    text-align: right;
+    min-width: 45px;
+}
+
+.opq-single {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    column-gap: 12px;
+    row-gap: 2px;
+
+    &>div {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+    }
 }
 
 .opq-bulk {
@@ -149,9 +186,14 @@ header.opq-controls {
         flex-direction: row;
         gap: 4px;
 
-        &>.progress-bar {
+        &>.progress-bar:first-child {
             flex-grow: 1;
-            border-radius: 0;
+            border-radius: 8px 0 0 8px;
+        }
+
+        &>.progress-bar:last-child {
+            flex-grow: 1;
+            border-radius: 0 8px 8px 0;
         }
     }
 }
@@ -165,20 +207,31 @@ header.opq-controls {
     }
 }
 
+.opq-card[alt]:hover:after {
+    content: attr(alt);
+    position: absolute;
+    z-index: 5;
+    border: solid 2px var(--opq-accent);
+    background-color: var(--brighterBackground);
+    color: var(--subduedText);
+    padding: 5px;
+    border-radius: 8px;
+}
+
 /* states */
-.opq-completed .opq-card {
-    background: rgba(30, 243, 30, 0.3);
+.opq-card.opq-completed {
+    background: rgba(37, 65, 37, 0.3);
     border-color: rgb(0, 187, 16);
     color: var(--opq-lime)
 }
 
-.opq-failed .opq-card {
-    background: rgba(255, 40, 40, 0.3);
+.opq-card.opq-failed {
+    background: rgba(104, 52, 52, 0.3);
     border-color: rgb(168, 0, 0);
     color: var(--opq-red)
 }
 
-.opq-canceled .opq-card {
+.opq-card.opq-canceled {
     background: rgba(153, 153, 153, 0.04);
     border-color: rgb(153, 153, 153);
     color: var(--opq-gray)

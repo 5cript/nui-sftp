@@ -28,12 +28,12 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
         using Nui::Elements::span;
 
         // clang-format off
-        return div{
-            class_ = "opq-body"
-        }(
+        return fragment(
             span{}(
-                fmt::format("Scan '{}' - ", remotePath_.string())
+                fmt::format("Scan '{}'", remotePath_.string())
             ),
+            // Spanner
+            div{}(),
             span{}(
                 observe(totalBytes_, currentIndex_, totalScanned_).generate([this]() -> std::string {
                     return fmt::format(

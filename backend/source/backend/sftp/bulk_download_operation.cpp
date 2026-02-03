@@ -163,7 +163,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
 
                     downloadOptions.progressCallback = [this, operationId = this->id(), remoteFullPath](
-                                                           auto min, auto max, auto current, auto bytesPerSecond
+                                                           auto, auto max, auto current, auto bytesPerSecond
                                                        )
                     {
                         // Call overall progress callback

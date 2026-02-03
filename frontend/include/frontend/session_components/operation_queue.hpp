@@ -5,8 +5,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/terminal/file_engine.hpp>
 
-#include <shared_data/file_operations/download_progress.hpp>
-#include <shared_data/file_operations/upload_progress.hpp>
+#include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
@@ -86,15 +85,14 @@ class OperationQueue
     void cancelOperation(OperationCard const& operation);
 
     void onOperationAdded(SharedData::OperationAdded const& added);
-    void onDownloadProgress(SharedData::DownloadProgress const& progress);
-    void onUploadProgress(SharedData::UploadProgress const& progress);
+    void onDownloadProgress(SharedData::TransferProgress const& progress);
+    void onUploadProgress(SharedData::TransferProgress const& progress);
     void onBulkDownloadProgress(SharedData::BulkProgress const& progress);
     void onBulkUploadProgress(SharedData::BulkProgress const& progress);
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
-    void cleanupCustomActionsAfterId(Ids::OperationId const& id);
 
     void addCustomActionOperation(std::function<void()>);
 

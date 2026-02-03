@@ -71,7 +71,8 @@ class OperationQueue
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
         std::filesystem::path const& remotePath,
-        bool recursive
+        bool recursive,
+        bool insertRefresh
     );
 
     void registerRpc();

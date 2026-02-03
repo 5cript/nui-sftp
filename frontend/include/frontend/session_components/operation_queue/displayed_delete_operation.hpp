@@ -55,16 +55,15 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         Log::info("Rendering bulk delete operation body");
 
         // clang-format off
-            return div{
-                class_ = "opq-body"
-            }(
+            return fragment(
                 span{}(
                     observe(currentFile),
                     [this](){
                         return fmt::format("Deleting: '{}'", currentFile.value());
                     }
                 ),
-                progressBar_()
+                progressBar_(),
+                div{}()
             );
         // clang-format on
     }

@@ -83,5 +83,6 @@ body {
     --opq-red: #ff6b6b;
     --opq-gray: #9aa0a6;
     --opq-accent: #2563eb;
-    --opq-border: rgba(255, 255, 255, 0.06);
+    --opq-border-faint: rgba(255, 255, 255, 0.06);
+    --opq-border: rgba(255, 255, 255, 0.25);
 }

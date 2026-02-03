@@ -221,6 +221,7 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 
                 Nui::val args = Nui::val::object();
                 args.set("paths", Nui::val::array());
+                args.set("recursive", true);
 
                 for (const auto& item : items)
                 {

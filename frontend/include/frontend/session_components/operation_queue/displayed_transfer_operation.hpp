@@ -5,23 +5,19 @@
 
 #include <utility/format_bytes.hpp>
 
-class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperation>
+class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperation>
 {
   public:
-    DisplayedDownloadOperation(
-        long long max,
+    DisplayedTransferOperation(
         Ids::OperationId operationId,
+        SharedData::OperationType type,
+        long long max,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
     )
-        : OperationCard{
-              SharedData::OperationType::Download,
-              std::move(operationId),
-              std::move(doRemoveSelf),
-              std::move(doDeletionCountdown)
-          }
+        : OperationCard{type, std::move(operationId), std::move(doRemoveSelf), std::move(doDeletionCountdown)}
         , progressBar_{{
               .height = std::string{progressHeight},
               .min = 0,
@@ -42,32 +38,35 @@ class DisplayedDownloadOperation : public OperationCard<DisplayedDownloadOperati
 
         // clang-format off
         return div{
-            class_ = "opq-body"
+            class_ = "opq-body opq-single"
         }(
-            span{}(
-                fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
-            ),
-            div{
-                class_ = "opq-progress-grow"
-            }(
-                progressBar_()
-            ),
             div{}(
-                observe(bytesPerSecond_).generate(
-                    [](std::make_signed_t<std::size_t> bytesPerSecond)
-                    {
-                        return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
-                    }
+                span{
+                    style = "flex-grow: 1"
+                }(
+                    fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
+                ),
+                div{
+                    class_ = "opq-bytes-per-second"
+                }(
+                    observe(bytesPerSecond_).generate(
+                        [](std::make_signed_t<std::size_t> bytesPerSecond)
+                        {
+                            return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                        }
+                    )
                 )
-            )
+            ),
+            progressBar_()
         );
         // clang-format on
     }
 
-    void setProgress(long long current, std::make_signed_t<std::size_t> bytesPerSecond)
+    void setProgress(SharedData::TransferProgress progress)
     {
-        progressBar_.setProgress(current);
-        bytesPerSecond_ = bytesPerSecond;
+        progressBar_.max(progress.max);
+        progressBar_.setProgress(progress.current - progress.min);
+        bytesPerSecond_ = progress.bytesPerSecond;
     }
 
     bool warrantsCancelConfirm() const override

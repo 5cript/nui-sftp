@@ -33,12 +33,11 @@ class ObservedRandomAccessMap
 
     void pop_front()
     {
-        if (observedValues_.empty())
+        if (observedValues_.value().empty())
             return;
-        observedValues_.pop_front();
 
-        // TODO: be more clever here:
-        rebuildIndexMap();
+        keyToIndexMap_.erase(observedValues_.value().front()->key());
+        observedValues_.pop_front();
     }
 
     ValueT* front()
@@ -55,6 +54,10 @@ class ObservedRandomAccessMap
             throw std::out_of_range("Key not found in ObservedRandomAccessMap");
 
         Log::info("Erasing key '{}' at index '{}'", key.value(), it->second);
+
+        if (it->second >= observedValues_.value().size())
+            throw std::out_of_range("Index out of range in ObservedRandomAccessMap erase");
+
         observedValues_.erase(observedValues_.begin() + it->second);
 
         // TODO: be more clever here:

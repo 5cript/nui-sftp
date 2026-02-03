@@ -4,8 +4,7 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
 
-#include <frontend/session_components/operation_queue/displayed_download_operation.hpp>
-#include <frontend/session_components/operation_queue/displayed_upload_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_transfer_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_scan_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_bulk_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_delete_operation.hpp>
@@ -42,6 +41,7 @@ struct OperationQueue::Implementation
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
     Nui::Observed<bool> paused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
+    Nui::Observed<int> invisibleOperationCount{0};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
 
@@ -148,52 +148,53 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
 {
     if (operation.isCompletedState())
     {
-        impl_->operations.erase(operation.operationId());
+        const auto id = operation.operationId();
+        if (operation.isInvisible())
+            impl_->invisibleOperationCount = impl_->invisibleOperationCount.value() - 1;
+        impl_->operations.erase(id);
         Nui::globalEventContext.executeActiveEventsImmediately();
+        return;
+    }
+
+    auto doCancel = [this, operationId = operation.operationId()]()
+    {
+        Nui::RpcClient::callWithBackChannel(
+            fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value()),
+            [this, operationId](SharedData::ErrorOrSuccess<> const& result)
+            {
+                if (!result)
+                {
+                    return Log::error(
+                        "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
+                    );
+                }
+
+                auto* operation = impl_->operations.at(operationId);
+                if (operation)
+                    operation->state(SharedData::OperationState::Canceled);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            },
+            operationId
+        );
+    };
+
+    if (operation.warrantsCancelConfirm())
+    {
+        impl_->confirmDialog->open({
+            .headerText = "Cancel Operation",
+            .text = fmt::format("Are you sure you want to cancel the operation?"),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .onClose = [doCancel](ConfirmDialog::Button buttonPressed)
+            {
+                if (buttonPressed == ConfirmDialog::Button::Yes)
+                    doCancel();
+            },
+        });
     }
     else
     {
-        auto doCancel = [this, operationId = operation.operationId()]()
-        {
-            Nui::RpcClient::callWithBackChannel(
-                fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value()),
-                [this, operationId](SharedData::ErrorOrSuccess<> const& result)
-                {
-                    if (!result)
-                    {
-                        return Log::error(
-                            "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
-                        );
-                    }
-
-                    auto* operation = impl_->operations.at(operationId);
-                    if (operation)
-                        operation->state(SharedData::OperationState::Canceled);
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
-                operationId
-            );
-        };
-
-        if (operation.warrantsCancelConfirm())
-        {
-            impl_->confirmDialog->open({
-                .headerText = "Cancel Operation",
-                .text = fmt::format("Are you sure you want to cancel the operation?"),
-                .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-                .onClose = [doCancel](ConfirmDialog::Button buttonPressed)
-                {
-                    if (buttonPressed == ConfirmDialog::Button::Yes)
-                        doCancel();
-                },
-            });
-        }
-        else
-        {
-            doCancel();
-        }
+        doCancel();
     }
-    cleanupCustomActionsAfterId(operation.operationId());
 }
 
 void OperationQueue::deactivate()
@@ -220,7 +221,7 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onDownloadProgress", impl_->sessionId.value()),
-            [this](SharedData::DownloadProgress const& progress)
+            [this](SharedData::TransferProgress const& progress)
             {
                 onDownloadProgress(progress);
             }
@@ -230,7 +231,7 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onUploadProgress", impl_->sessionId.value()),
-            [this](SharedData::UploadProgress const& progress)
+            [this](SharedData::TransferProgress const& progress)
             {
                 onUploadProgress(progress);
             }
@@ -321,12 +322,13 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedDownloadOperation>(
-                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
+            return std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
+                SharedData::OperationType::Download,
+                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
                 *added.localPath,
                 *added.remotePath,
-                [this](OperationCard<DisplayedDownloadOperation> const& operation)
+                [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -343,11 +345,13 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedUploadOperation>(
+            return std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
+                SharedData::OperationType::Upload,
+                0,
                 *added.localPath,
                 *added.remotePath,
-                [this](OperationCard<DisplayedUploadOperation> const& operation)
+                [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -512,6 +516,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
 void OperationQueue::addCustomActionOperation(std::function<void()> action)
 {
     auto id = Ids::generateOperationId();
+    ++impl_->invisibleOperationCount;
     impl_->operations.insert(
         id,
         DisplayedOperation{
@@ -560,7 +565,7 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
     renderer->setProgress(progress);
 }
 
-void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& progress)
+void OperationQueue::onDownloadProgress(SharedData::TransferProgress const& progress)
 {
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -575,7 +580,7 @@ void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& prog
         );
         return;
     }
-    auto* card = operation->getCardSpecifically<DisplayedDownloadOperation>();
+    auto* card = operation->getCardSpecifically<DisplayedTransferOperation>();
     if (!card)
     {
         Log::error(
@@ -584,7 +589,7 @@ void OperationQueue::onDownloadProgress(SharedData::DownloadProgress const& prog
         );
         return;
     }
-    card->setProgress(progress.current - progress.min, progress.bytesPerSecond);
+    card->setProgress(progress);
 }
 
 void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
@@ -665,7 +670,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
     card->setProgress(progress);
 }
 
-void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress)
+void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progress)
 {
     auto* operation = impl_->operations.at(progress.operationId);
     if (!operation)
@@ -680,7 +685,7 @@ void OperationQueue::onUploadProgress(SharedData::UploadProgress const& progress
         );
         return;
     }
-    auto* renderer = operation->getCardSpecifically<DisplayedUploadOperation>();
+    auto* renderer = operation->getCardSpecifically<DisplayedTransferOperation>();
     if (!renderer)
     {
         Log::error(
@@ -756,6 +761,13 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         case (SharedData::OperationCompletionReason::Failed):
         {
             operation->state(SharedData::OperationState::Failed);
+            operation->setError(completed.error.value_or(
+                SharedData::OperationError{
+                    .type = SharedData::OperationErrorType::UnknownError,
+                    .sftpError = std::nullopt,
+                    .extraInfo = "Unknown Error"
+                }
+            ));
             break;
         }
         default:
@@ -765,25 +777,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                 static_cast<int>(completed.reason)
             );
     }
-    cleanupCustomActionsAfterId(completed.operationId);
     Nui::globalEventContext.executeActiveEventsImmediately();
-}
-
-void OperationQueue::cleanupCustomActionsAfterId(Ids::OperationId const& id)
-{
-    auto iter = impl_->operations.find(id);
-    if (iter != impl_->operations.end())
-    {
-        ++iter;
-        for (
-            auto end = impl_->operations.end();
-            iter != end && iter->get()->type() == SharedData::OperationType::CustomAction;
-            ++iter
-        )
-        {
-            iter->get()->state(SharedData::OperationState::Completed);
-        }
-    }
 }
 
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
@@ -809,7 +803,10 @@ Nui::ElementRenderer OperationQueue::operator()()
 
     auto makeSummaryText = [this]() -> std::string
     {
-        return fmt::format("{} total operations", static_cast<int>(impl_->operations.observedValues().value().size()));
+        return fmt::format(
+            "{} total operations",
+            static_cast<int>(impl_->operations.observedValues().value().size()) - impl_->invisibleOperationCount.value()
+        );
     };
 
     // clang-format off
@@ -862,7 +859,7 @@ Nui::ElementRenderer OperationQueue::operator()()
             div{
                 class_ = "opq-summary"
             }(
-                observe(impl_->operations.observedValues()).generate(makeSummaryText)
+                observe(impl_->operations.observedValues(), impl_->invisibleOperationCount).generate(makeSummaryText)
             )
         ),
         // Main content

@@ -13,19 +13,20 @@
 // @inline(css, scp-progress-bar)
 .progress-bar {
     height: 30px;
-    background-color: #f1f1f1;
+    background-color: #606060;
     border-radius: 15px;
     overflow: hidden;
     position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
+    user-select: none;
 }
 
 .progress-bar > div:nth-child(1) {
     height: 100%;
     width: 0%;
-    transition: width 0.3s linear, background-color 0.3s linear;
+    /*transition: width 0.3s linear, background-color 0.3s linear;*/
     background-color: #4CAF50;
     position: absolute;
     left: 0;
@@ -74,21 +75,24 @@
 
 namespace
 {
-    int percentageBetween(long long current, long long min, long long max)
+    double percentageBetween(long long current, long long min, long long max)
     {
         // Ensure min is less than or equal to max
         if (min > max)
             std::swap(min, max);
+
+        if (max == 0)
+            return 0.;
 
         // Clamp current between min and max
         current = std::clamp(current, min, max);
 
         // Avoid division by zero if min == max
         if (min == max)
-            return 100.0;
+            return 100.;
 
         // Calculate percentage
-        return static_cast<int>(100. * static_cast<double>(current - min) / static_cast<double>(max - min));
+        return 100. * (static_cast<double>(current - min) / static_cast<double>(max - min));
     }
 }
 
@@ -133,7 +137,7 @@ namespace Components
         div{
             style = Style{
                 "width"_style = observe(impl_->progress, impl_->maxObserved).generate([this]() {
-                    return format("{}%", percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value()));
+                    return format("{:.2f}%", percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value()));
                 }),
                 "height"_style = impl_->height,
                 "background-color"_style = impl_->backgroundColor
@@ -157,29 +161,39 @@ namespace Components
                 if (impl_->byteMode)
                 {
                     return fmt::format(
-                        "{} - {} ({}%)",
+                        "{} - {} ({:.1f}%)",
                         Utility::formatBytes(impl_->progress.value(), impl_->magnitude),
                         Utility::formatBytes(impl_->maxObserved.value(), impl_->magnitude),
                         percent
                     );
                 }
                 else
-                    return fmt::format("{} / {} ({}%)", impl_->progress.value(), impl_->maxObserved.value(), percent);
+                    return fmt::format(
+                        "{} / {} ({:.1f}%)", impl_->progress.value(), impl_->maxObserved.value(), percent
+                    );
             }
             else
-                return fmt::format("{}%", percent);
+                return fmt::format("{:.1f}%", percent);
         }();
+    }
+
+    void ProgressBar::recalculate()
+    {
+        const auto current = impl_->progress.value();
+        const auto percent = percentageBetween(current, impl_->min, impl_->maxObserved.value());
+        const auto hue = current == impl_->maxObserved.value()
+            ? 120.
+            : std::max(5., 120. * std::pow(static_cast<double>(percent) / 100., 1.8));
+
+        impl_->progress = current;
+        impl_->backgroundColor = fmt::format("hsl({}, 40%, 45%)", static_cast<int>(hue));
+        updateText();
     }
 
     void ProgressBar::setProgress(long long current)
     {
-        const auto percent = percentageBetween(current, impl_->min, impl_->maxObserved.value());
-        const auto hue = std::max(5., 120. * std::pow(static_cast<double>(percent) / 100., 1.8));
-
         impl_->progress = current;
-        impl_->backgroundColor = fmt::format("hsl({}, 100%, 50%)", static_cast<int>(hue));
-        updateText();
-
+        recalculate();
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
@@ -194,7 +208,7 @@ namespace Components
         {
             impl_->magnitude = Utility::determineOrderOfMagnitude(max);
             impl_->maxObserved = max;
-            updateText();
+            recalculate();
         }
     }
 }

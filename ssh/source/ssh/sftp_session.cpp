@@ -148,6 +148,43 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
+    SftpSession::createDirectoryIfItDoesntExist(std::filesystem::path const& path, std::filesystem::perms permissions)
+    {
+        return performPromise(
+            [this, path = std::move(path), permissions]() -> std::expected<void, SftpSession::Error>
+            {
+                std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+                    sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                };
+                if (!attributes)
+                {
+                    auto result = sftp_mkdir(
+                        session_,
+                        path.generic_string().c_str(),
+                        static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+                    );
+                    if (result != SSH_OK)
+                        return std::unexpected(lastError());
+                }
+                else
+                {
+                    if (attributes->type != SSH_FILEXFER_TYPE_DIRECTORY)
+                    {
+                        return std::unexpected(
+                            SftpSession::Error{
+                                .message = "Path exists and is not a directory",
+                                .sshError = SSH_OK,
+                                .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
+                            }
+                        );
+                    }
+                }
+                return {};
+            }
+        );
+    }
+
+    std::future<std::expected<void, SftpSession::Error>>
     SftpSession::createFile(std::filesystem::path const& path, std::filesystem::perms permissions)
     {
         return performPromise(
