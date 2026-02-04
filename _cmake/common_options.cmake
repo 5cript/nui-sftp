@@ -9,7 +9,12 @@ endif()
 set(MEM64 "")
 set(EXCEPTIONS "")
 if (EMSCRIPTEN)
-    set(MEM64 "-sMEMORY64=1")
+    if (WIN32)
+        set(MEM64 "-sMEMORY64=1")
+    else()
+        # No support for WASM64 in webkit
+        set(MEM64 "-sWASM_BIGINT=1")
+    endif()
     set(EXCEPTIONS "-fexceptions")
 endif()
 

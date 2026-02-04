@@ -184,7 +184,7 @@ namespace SecureShell
 
             ReadState(FileStream& stream, std::size_t limit, std::function<bool(std::string_view data)> callback)
                 : stream{stream}
-                , buffer(std::min(4096ull, limit), '\0')
+                , buffer(std::min(std::size_t{4096}, limit), '\0')
                 , callback{std::move(callback)}
                 , promise{}
                 , totalRead{0}

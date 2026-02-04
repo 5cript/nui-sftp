@@ -5,7 +5,7 @@ add_executable(
     main.cpp
 )
 
-find_package(Boost CONFIG REQUIRED COMPONENTS filesystem asio system process)
+find_package(Boost CONFIG REQUIRED COMPONENTS filesystem process)
 
 target_link_libraries(
     nui-scp-utility-test
@@ -16,8 +16,6 @@ target_link_libraries(
         GTest::gmock_main
         GTest::Main
         Boost::filesystem
-        Boost::asio
-        Boost::system
 )
 
 set_target_properties(nui-scp-utility-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")

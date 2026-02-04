@@ -6,10 +6,15 @@ target_include_directories(events
 target_link_libraries(events PUBLIC nui-events PRIVATE core-target)
 
 if (EMSCRIPTEN)
-    set_target_properties(
-        nui-events
-        PROPERTIES
-            LINK_FLAGS "-sMEMORY64=1"
-            COMPILE_FLAGS "-sMEMORY64=1"
-    )
+    if (WIN32)
+        target_compile_options(nui-events PRIVATE -sMEMORY64=1)
+        target_link_options(nui-events PRIVATE -sMEMORY64=1)
+    else()
+        # No support for WASM64 in webkit
+        target_link_options(
+            nui-events
+            PRIVATE
+                -sWASM_BIGINT=1
+        )
+    endif()
 endif()

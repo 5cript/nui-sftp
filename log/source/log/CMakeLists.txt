@@ -14,12 +14,17 @@ if (EMSCRIPTEN)
             fmt
             nui-frontend
     )
-    set_target_properties(
-        fmt
-        PROPERTIES
-            LINK_FLAGS "-sMEMORY64=1"
-            COMPILE_FLAGS "-sMEMORY64=1"
-    )
+    if (WIN32)
+        target_compile_options(fmt PRIVATE -sMEMORY64=1)
+        target_link_options(fmt PRIVATE -sMEMORY64=1)
+    else()
+        # No support for WASM64 in webkit
+        target_link_options(
+            fmt
+            PRIVATE
+                -sWASM_BIGINT=1
+        )
+    endif()
 else()
     target_link_libraries(
         log
