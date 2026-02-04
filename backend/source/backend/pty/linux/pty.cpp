@@ -145,10 +145,10 @@ namespace PTY
         };
 
         termios ttyOptions{
-            .c_iflag = termy.inputFlags ? termy.inputFlags->assemble() : saneTty.inputFlags->assemble(),
-            .c_oflag = termy.outputFlags ? termy.outputFlags->assemble() : saneTty.outputFlags->assemble(),
-            .c_cflag = termy.controlFlags ? termy.controlFlags->assemble() : saneTty.controlFlags->assemble(),
-            .c_lflag = termy.localFlags ? termy.localFlags->assemble() : saneTty.localFlags->assemble(),
+            .c_iflag = termy.inputFlags.assemble(),
+            .c_oflag = termy.outputFlags.assemble(),
+            .c_cflag = termy.controlFlags.assemble(),
+            .c_lflag = termy.localFlags.assemble(),
             .c_line = 0,
             .c_cc = {},
             .c_ispeed = termy.iSpeed ? *termy.iSpeed : 0,

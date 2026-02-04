@@ -9,4 +9,5 @@ git clone https://github.com/5cript/work-dependency-cloner.git dependencies/work
 # Create a "build dir"
 mkdir -p build/dependency-cloner
 cmake -S dependencies/work-dependency-cloner -B build/dependency-cloner
+cmake --build build/dependency-cloner --target clean
 cmake --build build/dependency-cloner

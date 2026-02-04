@@ -390,7 +390,7 @@ void RpcFilesystem::registerWriteFile()
 {
     on("RpcFilesystem::writeFile")
         .perform(
-            [this](RpcHelper::RpcOnce&& reply, std::string const& filePath, std::string const& content)
+            [](RpcHelper::RpcOnce&& reply, std::string const& filePath, std::string const& content)
             {
                 Log::info("RpcFilesystem::writeFile called for file: {}", filePath);
 

@@ -73,12 +73,21 @@ function(set_memory64_flags)
         ${ARGN}
     )
     foreach(target IN LISTS MEM64_TARGETS)
-        set_target_properties(
-            ${target}
-            PROPERTIES
-                LINK_FLAGS "-sMEMORY64=1"
-                COMPILE_FLAGS "-sMEMORY64=1"
-        )
+        if (WIN32)
+            set_target_properties(
+                ${target}
+                PROPERTIES
+                    LINK_FLAGS "-sMEMORY64=1"
+                    COMPILE_FLAGS "-sMEMORY64=1"
+            )
+        else()
+            # No support for WASM64 in webkit
+            set_target_properties(
+                ${target}
+                PROPERTIES
+                    LINK_FLAGS "-sWASM_BIGINT=1"
+            )
+        endif()
     endforeach()
 endfunction()
 
@@ -107,13 +116,11 @@ nui_prepare_emscripten_target(
     EMSCRIPTEN_LINK_OPTIONS
         -sEXPORTED_FUNCTIONS=_frontendMain
         -sALLOW_MEMORY_GROWTH=1
-        -sMEMORY64=1
         -sWASM_BIGINT
         -fexceptions
         ${DEPENDANT_LINK_OPTIONS}
         # or other options, see emscripten docs.
     EMSCRIPTEN_COMPILE_OPTIONS
-        -sMEMORY64=1
         -fexceptions
         ${DEPENDANT_COMPILE_OPTIONS}
     CXX_STANDARD

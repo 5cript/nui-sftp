@@ -43,7 +43,7 @@ target_sources(
         main.cpp
 )
 
-find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS system filesystem asio process)
+find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS filesystem process)
 
 target_include_directories(backend PUBLIC "${CMAKE_SOURCE_DIR}/backend/include")
 
@@ -59,8 +59,6 @@ target_link_libraries(
         mplex
         efsw-static
         Boost::filesystem
-        Boost::asio
-        Boost::system
         Boost::process
         roar-include-only
         shared-data
@@ -96,7 +94,6 @@ endif()
 nui_add_emscripten_target(
     TARGET
         ${PROJECT_NAME}
-    ENABLE_TAILWIND
     PREJS
         ${PREJS_FILE}
     SOURCE_DIR

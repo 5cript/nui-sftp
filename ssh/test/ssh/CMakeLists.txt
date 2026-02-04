@@ -5,7 +5,7 @@ add_executable(
     main.cpp
 )
 
-find_package(Boost CONFIG REQUIRED COMPONENTS filesystem asio system process)
+find_package(Boost CONFIG REQUIRED COMPONENTS filesystem process)
 
 target_link_libraries(
     nui-scp-ssh-test
@@ -15,8 +15,6 @@ target_link_libraries(
         GTest::GTest
         GTest::Main
         Boost::filesystem
-        Boost::asio
-        Boost::system
         Boost::process
 )
 

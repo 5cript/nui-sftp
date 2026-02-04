@@ -6,6 +6,7 @@ FetchContent_Declare(
     base-icons
     URL "https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/icons.tar.gz"
     URL_HASH MD5=38d01d8769dda2a006495c7a3caa11b4
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 FetchContent_MakeAvailable(base-icons)

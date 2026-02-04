@@ -36,8 +36,19 @@ target_include_directories(
 )
 
 if (NUI_FILE_EXPLORER_MEMORY64)
-    target_compile_options(nui-file-explorer PRIVATE -sMEMORY64=1)
-    target_link_options(nui-file-explorer PRIVATE -sMEMORY64=1)
+    if (WIN32)
+        target_compile_options(nui-file-explorer PRIVATE 
+            -sMEMORY64=1
+        )
+        target_link_options(nui-file-explorer PRIVATE 
+            -sMEMORY64=1
+        )
+    else()
+        # No support for WASM64 in webkit
+        target_link_options(nui-file-explorer PRIVATE 
+                -sWASM_BIGINT=1
+        )
+    endif()
 endif()
 
 target_compile_definitions(nui-file-explorer PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
