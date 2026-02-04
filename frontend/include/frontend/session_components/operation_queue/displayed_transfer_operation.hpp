@@ -15,9 +15,16 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
-        std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
+        std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
+        std::function<void()> onCompleteAction
     )
-        : OperationCard{type, std::move(operationId), std::move(doRemoveSelf), std::move(doDeletionCountdown)}
+        : OperationCard{
+              type,
+              std::move(operationId),
+              std::move(doRemoveSelf),
+              std::move(doDeletionCountdown),
+              std::move(onCompleteAction)
+          }
         , progressBar_{{
               .height = std::string{progressHeight},
               .min = 0,

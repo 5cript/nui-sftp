@@ -9,7 +9,6 @@
 #include <frontend/session_components/operation_queue/displayed_bulk_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_delete_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
-#include <frontend/session_components/operation_queue/displayed_custom_action.hpp>
 
 #include <log/log.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -41,7 +40,6 @@ struct OperationQueue::Implementation
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
     Nui::Observed<bool> paused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
-    Nui::Observed<int> invisibleOperationCount{0};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
 
@@ -149,8 +147,6 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
     if (operation.isCompletedState())
     {
         const auto id = operation.operationId();
-        if (operation.isInvisible())
-            impl_->invisibleOperationCount = impl_->invisibleOperationCount.value() - 1;
         impl_->operations.erase(id);
         Nui::globalEventContext.executeActiveEventsImmediately();
         return;
@@ -311,6 +307,19 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
 {
     auto makeCard = [&added, this]() -> std::unique_ptr<OperationCardInterface>
     {
+        std::function<void()> localRefresh;
+        std::function<void()> remoteRefresh;
+        if (added.insertRefresh)
+            localRefresh = [this]()
+            {
+                impl_->localModel->onRefresh();
+            };
+        if (added.insertRefresh)
+            remoteRefresh = [this]()
+            {
+                impl_->remoteModel->onRefresh();
+            };
+
         Log::info("Operation of type '{}' added to frontend queue", Utility::enumToString(added.type));
         if (added.type == SharedData::OperationType::Download)
         {
@@ -332,7 +341,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 {
                     cancelOperation(operation);
                 },
-                impl_->autoClean
+                impl_->autoClean,
+                localRefresh
             );
         }
         else if (added.type == SharedData::OperationType::Upload)
@@ -355,7 +365,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 {
                     cancelOperation(operation);
                 },
-                impl_->autoClean
+                impl_->autoClean,
+                remoteRefresh
             );
         }
         else if (added.type == SharedData::OperationType::Scan)
@@ -404,7 +415,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 {
                     cancelOperation(operation);
                 },
-                impl_->autoClean
+                impl_->autoClean,
+                remoteRefresh
             );
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
@@ -431,7 +443,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 {
                     cancelOperation(operation);
                 },
-                impl_->autoClean
+                impl_->autoClean,
+                localRefresh
             );
         }
         else if (added.type == SharedData::OperationType::BulkUpload)
@@ -458,7 +471,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 {
                     cancelOperation(operation);
                 },
-                impl_->autoClean
+                impl_->autoClean,
+                remoteRefresh
             );
         }
         Log::error(
@@ -479,31 +493,6 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     try
     {
         impl_->operations.insert(added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)});
-        if (added.insertRefresh)
-        {
-            if (added.type == SharedData::OperationType::Download ||
-                added.type == SharedData::OperationType::BulkDownload)
-            {
-                addCustomActionOperation(
-                    [this]()
-                    {
-                        impl_->localModel->onRefresh();
-                    }
-                );
-            }
-            else if (
-                added.type == SharedData::OperationType::Upload ||
-                added.type == SharedData::OperationType::BulkUpload || added.type == SharedData::OperationType::Delete
-            )
-            {
-                addCustomActionOperation(
-                    [this]()
-                    {
-                        impl_->remoteModel->onRefresh();
-                    }
-                );
-            }
-        }
     }
     catch (std::exception const& e)
     {
@@ -511,32 +500,6 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         return;
     }
     Nui::globalEventContext.executeActiveEventsImmediately();
-}
-
-void OperationQueue::addCustomActionOperation(std::function<void()> action)
-{
-    auto id = Ids::generateOperationId();
-    ++impl_->invisibleOperationCount;
-    impl_->operations.insert(
-        id,
-        DisplayedOperation{
-            id,
-            SharedData::OperationType::CustomAction,
-            std::make_unique<DisplayedCustomAction>(
-                id,
-                [this](OperationCard<DisplayedCustomAction> const& operation)
-                {
-                    cancelOperation(operation);
-                },
-                impl_->autoClean,
-                [action = std::move(action)](std::optional<Ids::OperationId> const&)
-                {
-                    if (action)
-                        action();
-                }
-            ),
-        }
-    );
 }
 
 void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& progress)
@@ -803,10 +766,7 @@ Nui::ElementRenderer OperationQueue::operator()()
 
     auto makeSummaryText = [this]() -> std::string
     {
-        return fmt::format(
-            "{} total operations",
-            static_cast<int>(impl_->operations.observedValues().value().size()) - impl_->invisibleOperationCount.value()
-        );
+        return fmt::format("{} total operations", static_cast<int>(impl_->operations.observedValues().value().size()));
     };
 
     // clang-format off
@@ -859,7 +819,7 @@ Nui::ElementRenderer OperationQueue::operator()()
             div{
                 class_ = "opq-summary"
             }(
-                observe(impl_->operations.observedValues(), impl_->invisibleOperationCount).generate(makeSummaryText)
+                observe(impl_->operations.observedValues()).generate(makeSummaryText)
             )
         ),
         // Main content

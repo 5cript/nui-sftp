@@ -11,13 +11,15 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         Ids::OperationId operationId,
         std::filesystem::path removePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
-        std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
+        std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
+        std::function<void()> onCompleteAction
     )
         : OperationCard{
               SharedData::OperationType::Delete,
               std::move(operationId),
               std::move(doRemoveSelf),
-              std::move(doDeletionCountdown)
+              std::move(doDeletionCountdown),
+              std::move(onCompleteAction)
           }
         , removePath_{std::move(removePath)}
         , progressBar_({

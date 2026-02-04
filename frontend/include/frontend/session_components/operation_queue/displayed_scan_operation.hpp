@@ -15,7 +15,8 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
               SharedData::OperationType::Scan,
               std::move(operationId),
               std::move(doRemoveSelf),
-              std::move(doDeletionCountdown)
+              std::move(doDeletionCountdown),
+              []() {}
           }
         , remotePath_{std::move(remotePath)}
     {}
