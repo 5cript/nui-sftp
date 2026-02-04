@@ -36,8 +36,6 @@ struct DisplayedOperation
     void state(SharedData::OperationState newState)
     {
         card_->state(newState);
-        if (card_->isCompletedState())
-            card_->completionTime(std::chrono::steady_clock::now());
     }
 
     bool isCompletedState() const

@@ -45,13 +45,13 @@ class OperationCard : public OperationCardInterface
         Ids::OperationId operationId,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
-        bool invisible = false
+        std::function<void()> onCompleteAction
     )
         : type_{type}
         , operationId_{std::move(operationId)}
         , doRemoveSelf_{std::move(doRemoveSelf)}
         , doDeletionCountdown_{std::move(doDeletionCountdown)}
-        , invisible_{invisible}
+        , onCompleteAction_{std::move(onCompleteAction)}
     {}
 
     std::string formattedState() const
@@ -62,6 +62,15 @@ class OperationCard : public OperationCardInterface
     void state(SharedData::OperationState newState) override
     {
         state_ = newState;
+        if (isCompletedState())
+        {
+            completionTime_ = std::chrono::steady_clock::now();
+            if (onCompleteAction_)
+            {
+                onCompleteAction_();
+                onCompleteAction_ = {};
+            }
+        }
     }
 
     SharedData::OperationState state() const override
@@ -79,11 +88,6 @@ class OperationCard : public OperationCardInterface
         error_ = error;
     }
 
-    bool isInvisible() const
-    {
-        return invisible_;
-    }
-
     Nui::ElementRenderer operator()() const override
     {
         using namespace Nui::Elements;
@@ -92,9 +96,6 @@ class OperationCard : public OperationCardInterface
         namespace svga = Nui::Attributes::Svg;
         using Nui::Elements::div;
         using Nui::Elements::span;
-
-        if (invisible_)
-            return Nui::nil();
 
         // clang-format off
         return div{
@@ -236,12 +237,6 @@ class OperationCard : public OperationCardInterface
         return completionTime_.value();
     }
 
-    void completionTime(std::chrono::steady_clock::time_point time) override
-    {
-        completionTime_ = time;
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
     std::chrono::steady_clock::time_point startTime() const
     {
         return startTime_;
@@ -256,5 +251,5 @@ class OperationCard : public OperationCardInterface
     Ids::OperationId operationId_;
     std::function<void(OperationCard const& operation)> doRemoveSelf_;
     std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown_;
-    bool invisible_{false};
+    std::function<void()> onCompleteAction_;
 };

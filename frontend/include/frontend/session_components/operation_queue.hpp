@@ -94,8 +94,6 @@ class OperationQueue
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
 
-    void addCustomActionOperation(std::function<void()>);
-
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

@@ -29,7 +29,6 @@ class OperationCardInterface
     virtual SharedData::OperationType type() const = 0;
     virtual bool isCompletedState() const = 0;
     virtual std::chrono::steady_clock::time_point completionTime() const = 0;
-    virtual void completionTime(std::chrono::steady_clock::time_point time) = 0;
     virtual Nui::ElementRenderer operator()() const = 0;
     virtual void setError(SharedData::OperationError const& error) = 0;
 };
