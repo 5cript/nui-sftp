@@ -2,6 +2,12 @@ en_US:
   language: "Language"
   cancel: "Cancel"
   add: "Add"
+  operationQueue:
+    pause: "Pause"
+    continue: "Continue"
+    autoCleanCompleted: "Auto Remove Completed operations"
+    totalOperations: "{} total operations"
+    cancelAll: "Cancel All"
   remoteSideModel:
     newDirectory: "New Directory"
     enterNewDirectoryName: "Enter the name of the new directory"
@@ -458,6 +464,12 @@ de_DE:
   language: "Sprache"
   cancel: "Abbrechen"
   add: "Hinzufügen"
+  operationQueue:
+    pause: "Pausieren"
+    continue: "Fortsetzen"
+    autoCleanCompleted: "Abgeschlossene Operationen automatisch enterfernen"
+    totalOperations: "{} gesamte Operationen"
+    cancelAll: "Alle abbrechen"
   sessionFrontend:
     sessionCreationFailedHeader: "Sitzungserstellung fehlgeschlagen"
     sessionCreationFailedText: "Sitzungsinstanz konnte nicht erstellt werden:\n{}"

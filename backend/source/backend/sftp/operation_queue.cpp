@@ -840,4 +840,17 @@ void OperationQueue::registerRpc()
                 return reply(SharedData::success());
             }
         );
+
+    on(fmt::format("OperationQueue::{}::cancelAll", sessionId_.value()))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply(SharedData::error("OperationQueue no longer exists"));
+
+                self->cancelAll();
+                return reply(SharedData::success());
+            }
+        );
 }
