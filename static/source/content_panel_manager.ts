@@ -67,7 +67,7 @@ class ContentPanelManager {
             if (children) {
                 const first = children[0] as DockLayout.ISplitAreaConfig;
                 if (first) {
-                    first.sizes = [0.7, 0.3];
+                    first.sizes = [0.5, 0.5];
                 }
             }
         }

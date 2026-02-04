@@ -11,6 +11,8 @@
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
 
 #include <log/log.hpp>
+#include <utility/language.hpp>
+
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -140,6 +142,12 @@ OperationQueue::OperationQueue(
     );
 }
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(OperationQueue);
+
+void OperationQueue::cancelAll()
+{
+    impl_->operations.clear();
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
 
 template <typename OperationCard>
 void OperationQueue::cancelOperation(OperationCard const& operation)
@@ -766,7 +774,10 @@ Nui::ElementRenderer OperationQueue::operator()()
 
     auto makeSummaryText = [this]() -> std::string
     {
-        return fmt::format("{} total operations", static_cast<int>(impl_->operations.observedValues().value().size()));
+        return fmt::format(
+            fmt::runtime(language->get("operationQueue", "totalOperations")),
+            static_cast<int>(impl_->operations.observedValues().value().size())
+        );
     };
 
     // clang-format off
@@ -776,11 +787,14 @@ Nui::ElementRenderer OperationQueue::operator()()
         header{
             class_ = "opq-controls"
         }(
-            div{
-                class_ = "opq-play-toggle",
-                role = "button",
+            ui5::button{
                 tabIndex = "0",
-                onClick = [this](){
+                "icon"_prop = observe(impl_->paused).generate([](bool paused){
+                    if (paused)
+                        return "media-play";
+                    return "pause";
+                }),
+                "click"_event = [this](){
                     Nui::RpcClient::callWithBackChannel(
                         fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
                         [this, requestToPauseUnpauseWas = !impl_->paused.value()](SharedData::ErrorOrSuccess<> const& result)
@@ -797,24 +811,31 @@ Nui::ElementRenderer OperationQueue::operator()()
                     );
                 }
             }(
-                div{
-                    class_ = "opq-icon",
-                }(
-                    observe(impl_->paused).generate([this](){
-                        if (impl_->paused.value())
-                            return Svgs::play();
-                        return Svgs::pause();
-                    })
-                ),
-                div{
-                    class_ = "opq-label",
-                }(
-                    observe(impl_->paused).generate([this]() -> std::string {
-                        if (!impl_->paused.value())
-                            return "Pause";
-                        return "Continue";
-                    })
-                )
+                observe(impl_->paused).generate([this]() -> std::string {
+                    if (!impl_->paused.value())
+                        return language->get("operationQueue", "pause");
+                    return language->get("operationQueue", "continue");
+                })
+            ),
+            ui5::button{
+                tabIndex = "0",
+                "click"_event = [this](){
+                    Nui::RpcClient::callWithBackChannel(
+                        fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
+                        [this](SharedData::ErrorOrSuccess<> const& result)
+                        {
+                            if (result) {
+                                Log::info("Operation queue all was canceled");
+                                cancelAll();
+                                Nui::globalEventContext.executeActiveEventsImmediately();
+                            }
+                            else
+                                Log::error("Failed to cancel all operation queue: {}", result.error.value());
+                        }
+                    );
+                }
+            }(
+                language->getObserved("operationQueue", "cancelAll")
             ),
             div{
                 class_ = "opq-summary"
@@ -867,7 +888,7 @@ Nui::ElementRenderer OperationQueue::operator()()
             }(),
             div{
                 style = "font-size: 14px; color: var(--muted);"
-            }("Auto Remove Completed Operations")
+            }(language->getObserved("operationQueue", "autoCleanCompleted"))
         )
     );
     // clang-format on

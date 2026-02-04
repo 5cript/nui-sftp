@@ -141,6 +141,10 @@ header.opq-controls {
     color: var(--opq-accent)
 }
 
+.opq-clock {
+    margin: 0 8px;
+}
+
 .opq-cancel-btn {
     color: #ffb3b3;
     margin-left: 8px;

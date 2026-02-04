@@ -107,6 +107,12 @@ class ObservedRandomAccessMap
         return observedValues_.value().empty();
     }
 
+    void clear()
+    {
+        observedValues_.clear();
+        keyToIndexMap_.clear();
+    }
+
   private:
     void rebuildIndexMap()
     {

@@ -83,6 +83,7 @@ class OperationQueue
   private:
     template <typename OperationCard>
     void cancelOperation(OperationCard const& operation);
+    void cancelAll();
 
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onDownloadProgress(SharedData::TransferProgress const& progress);

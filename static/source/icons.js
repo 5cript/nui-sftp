@@ -18,7 +18,8 @@ import "@ui5/webcomponents-icons/dist/delete.js";
 import "@ui5/webcomponents-icons/dist/palette.js";
 import "@ui5/webcomponents-icons/dist/browse-folder.js";
 import "@ui5/webcomponents-icons/dist/decline.js";
-
+import "@ui5/webcomponents-icons/dist/pause.js";
+import "@ui5/webcomponents-icons/dist/media-play.js";
 
 // Added for user icons - session:
 import "@ui5/webcomponents-icons/dist/laptop.js";
