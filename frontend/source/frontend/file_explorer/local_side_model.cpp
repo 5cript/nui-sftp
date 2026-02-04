@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/local_side_model.hpp>
+#include <nui-file-explorer/preprocessor.hpp>
 #include <log/log.hpp>
 
 #include <nui/rpc.hpp>
@@ -345,6 +346,18 @@ void LocalSideModel::onTransfer(
                 uploadItemsConfirmed(uploadItems);
             }}
     );
+}
+
+void LocalSideModel::onDropExternal(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir,
+    bool issueWebkitWarning
+)
+{
+    // Not implemented yet.
+    (void)items;
+    (void)subDir;
+    (void)issueWebkitWarning;
 }
 
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)

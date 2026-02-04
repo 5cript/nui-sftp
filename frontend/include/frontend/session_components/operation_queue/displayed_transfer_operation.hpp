@@ -49,7 +49,8 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         }(
             div{}(
                 span{
-                    style = "flex-grow: 1"
+                    class_ = "opq-transfer-text",
+                    alt = fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
                 }(
                     fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
                 ),

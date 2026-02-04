@@ -165,6 +165,23 @@ header.opq-controls {
     min-width: 45px;
 }
 
+.opq-transfer-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.opq-transfer-text[alt]:hover:after {
+    content: attr(alt);
+    position: absolute;
+    z-index: 5;
+    border: solid 2px var(--opq-accent);
+    background-color: var(--brighterBackground);
+    color: var(--subduedText);
+    padding: 5px;
+    border-radius: 8px;
+}
+
 .opq-single {
     display: grid;
     grid-template-columns: 1fr;
@@ -173,8 +190,8 @@ header.opq-controls {
     row-gap: 2px;
 
     &>div {
-        display: flex;
-        flex-direction: row;
+        display: grid;
+        grid-template-columns: 1fr max-content;
         gap: 4px;
     }
 }

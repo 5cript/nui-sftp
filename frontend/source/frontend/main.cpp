@@ -38,6 +38,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
         {
             Log::error("Failed to load terminalUtility");
             Nui::WebApi::Console::log(Nui::val::global("terminalUtility"));
+            return false;
         }
         else
             Log::info("terminalUtility available.");
@@ -46,12 +47,14 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
         persistence->load(
             [](std::optional<std::string> const&, Persistence::StateHolder&, std::optional<std::string> const&)
             {
+                Log::info("State loaded, setting up frontend.");
                 frontendEvents = std::make_unique<FrontendEvents>();
                 frontendEvents->onLanguageChanged = persistence->stateCache().localizationOptions.languageCode;
 
                 persistence->loadLanguageFile(
                     [](std::optional<nlohmann::json> lang)
                     {
+                        Log::info("Language file loaded, continuing setup.");
                         try
                         {
                             language = std::make_unique<LanguageProvider>(

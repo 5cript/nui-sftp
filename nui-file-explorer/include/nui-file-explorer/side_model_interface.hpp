@@ -108,6 +108,19 @@ namespace NuiFileExplorer
         virtual void onTransfer(std::vector<Item> const& items, std::optional<std::string> const& subDir) = 0;
 
         /**
+         * @brief Triggered when items are requested to be downloaded / uploaded via drop.
+         *
+         * @param subDir Optional sub-directory within the current path to transfer into.
+         * @param issueWebkitWarning Whether to show a warning that dropping external items is not fully supported on
+         * WebKit-based engines due to technical limitations and bugs.
+         */
+        virtual void onDropExternal(
+            std::vector<Item> const& items,
+            std::optional<std::string> const& subDir,
+            bool issueWebkitWarning
+        ) = 0;
+
+        /**
          * @brief Triggered when an error occurs.
          */
         virtual void onError(std::string const& error) = 0;
