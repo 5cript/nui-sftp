@@ -65,6 +65,11 @@ class OperationCard : public OperationCardInterface
         if (isCompletedState())
         {
             completionTime_ = std::chrono::steady_clock::now();
+            auto elem = cardElement_.lock();
+            if (elem)
+            {
+                elem->val().call<void>("scrollIntoView");
+            }
             if (onCompleteAction_)
             {
                 onCompleteAction_();
@@ -99,6 +104,9 @@ class OperationCard : public OperationCardInterface
 
         // clang-format off
         return div{
+            reference = [this](std::weak_ptr<Nui::Dom::BasicElement>&& element){
+                cardElement_ = std::move(element);
+            },
             Nui::Attributes::alt = observe(error_).generate([this]() -> std::optional<std::string> {
                 if (error_.value().has_value())
                     return error_.value()->toString();
@@ -243,6 +251,7 @@ class OperationCard : public OperationCardInterface
     }
 
   protected:
+    mutable std::weak_ptr<Nui::Dom::BasicElement> cardElement_;
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
     Nui::Observed<std::chrono::steady_clock::time_point> completionTime_{};
     Nui::Observed<SharedData::OperationState> state_{SharedData::OperationState::NotStarted};
