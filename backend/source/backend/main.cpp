@@ -245,8 +245,9 @@ void Main::registerRpc()
 void Main::show()
 {
     window_.setSize(1600, 900, Nui::WebViewHint::WEBVIEW_HINT_NONE);
-    window_.centerOnPrimaryDisplay();
+    // window_.centerOnPrimaryDisplay();
     // window_.setHtml(index());
+    window_.openDevTools();
     window_.navigate("nui://app.example/index.html");
     window_.setConsoleOutput(false);
     window_.run();

@@ -9,12 +9,34 @@ set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Dont build shared spdlog" FORCE)
 set(NUI_FILE_EXPLORER_MEMORY64 ON CACHE BOOL "Enable MEMORY64 for nui-file-explorer" FORCE)
 set(JSON_Diagnostics ON CACHE BOOL "Enable json diagnostics" FORCE)
 set(NUI_JSON_DIAGNOSTICS ON CACHE BOOL "Enable json diagnostics for nlohmann_json through nui" FORCE)
+set(WEBKIT_PATH "" CACHE PATH "Path to custom built WebKit, if empty, will use system WebKit")
+set(WEBKIT_PACKAGE_NAME "webkitgtk-6.0" CACHE STRING "Pkg-config package name for WebKit, used if WEBKIT_PATH is set")
 
 option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SCP_ENABLE_TESTING "Enable testing for nui-scp" OFF)
 
 include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
+
+# Webkit from custom build
+if (NOT EMSCRIPTEN)
+    if (WEBKIT_PATH)
+        message(STATUS "Using custom WebKit build from ${WEBKIT_PATH}")
+        set(ENV{PKG_CONFIG_PATH} "${WEBKIT_PATH}/lib/pkgconfig")
+        message(STATUS "PKG_CONFIG_PATH set to: $ENV{PKG_CONFIG_PATH}")
+
+        find_package(PkgConfig REQUIRED)
+        pkg_search_module(
+            webkit2 REQUIRED ${WEBKIT_PACKAGE_NAME}
+            IMPORTED_TARGET GLOBAL
+            NO_CMAKE_ENVIRONMENT_PATH
+            PATHS "${WEBKIT_PATH}/lib/pkgconfig"
+        )
+        # get include directories from pkgconfig target
+        get_target_property(WEBKIT_INCLUDE_DIRS PkgConfig::webkit2 INTERFACE_INCLUDE_DIRECTORIES)
+        message(STATUS "WebKit include directories: ${WEBKIT_INCLUDE_DIRS}")
+    endif()
+endif()
 
 # Nui Dependency
 add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui")

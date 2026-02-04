@@ -1,10 +1,13 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 
 #include <utility/language.hpp>
+#include <nui-file-explorer/preprocessor.hpp>
 #include <log/log.hpp>
 
 #include <algorithm>
 #include <iterator>
+
+using namespace std::string_literals;
 
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
@@ -564,6 +567,31 @@ void RemoteSideModel::downloadItemsConfirmed(
     args.set("path", fileToCheckFor);
 
     Nui::RpcClient::callWithBackChannel("RpcFilesystem::exists", onExistsResponse, args);
+}
+
+void RemoteSideModel::onDropExternal(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir,
+    bool issueWebkitWarning
+)
+{
+    if (issueWebkitWarning &&
+        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s))
+    {
+        confirmDialog_->open({
+            .state = ConfirmDialog::State::Information,
+            .headerText = "External Drop Is Faulty",
+            .text = "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote "
+                    "side only works for single items.",
+            .buttons = ConfirmDialog::Button::Ok,
+            .onClose = [this, items, subDir](ConfirmDialog::Button)
+            {
+                onDropExternal(items, subDir, false);
+            },
+        });
+    }
+
+    onTransfer(items, subDir);
 }
 
 void RemoteSideModel::onTransfer(

@@ -23,6 +23,11 @@ class LocalSideModel : public SideModel
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
+    void onDropExternal(
+        std::vector<NuiFileExplorer::Item> const& items,
+        std::optional<std::string> const& subDir,
+        bool issueWebkitWarning
+    ) override;
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
     void onError(std::string const& error) override;

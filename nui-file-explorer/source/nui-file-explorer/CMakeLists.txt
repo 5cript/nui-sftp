@@ -7,6 +7,7 @@ add_library(
         "${CMAKE_CURRENT_LIST_DIR}/dropdown_menu.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/flavor.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/drop_event_extractor.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/path_suggestion_cache.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side/flavor_implementation.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side/icon_flavor.cpp"
@@ -46,7 +47,7 @@ if (NUI_FILE_EXPLORER_MEMORY64)
     else()
         # No support for WASM64 in webkit
         target_link_options(nui-file-explorer PRIVATE 
-                -sWASM_BIGINT=1
+            -sWASM_BIGINT=1
         )
     endif()
 endif()

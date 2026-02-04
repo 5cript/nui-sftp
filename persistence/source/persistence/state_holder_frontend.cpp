@@ -59,9 +59,11 @@ namespace Persistence
             return;
         }
 
+        Log::info("StateHolder::loadLanguageFile calling frontend.");
         Nui::RpcClient::getRemoteCallableWithBackChannel(
             "StateHolder::loadLanguageFile",
             [onLoadComplete](Nui::val const& val) {
+                Log::info("StateHolder::loadLanguageFile got response, checking for error.");
                 if (val.hasOwnProperty("error"))
                 {
                     Log::error("Failed to load language file: {}", val["error"].as<std::string>());
