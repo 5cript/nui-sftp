@@ -45,6 +45,7 @@ header.opq-controls {
 
 .opq-list {
     display: grid;
+    position: relative;
     overflow-y: auto;
     gap: 1px;
     min-height: 0;

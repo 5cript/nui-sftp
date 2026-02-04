@@ -15,15 +15,14 @@ Still under construction :construction:
 - [ ] ConfirmDialog List items are broken
 
 ## Operation Queue (UI)
-- [ ] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
-- [ ] Better header footer borders
-- [ ] MUCH smaller list items.
-- [ ] MUCH smaller icons.
-- [ ] Scroll operations into view when they complete.
-- [ ] "Remove" to an X button
-- [ ] Hover for more info (Download from to)
-- [ ] Error message in hover.
-- [ ] Sometimes refreshes on remote side are not added to queue. (Bulk delete for example)
+- [x] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
+- [x] Better header footer borders
+- [x] MUCH smaller list items.
+- [x] MUCH smaller icons.
+- [x] Scroll operations into view when they complete.
+- [x] "Remove" to an X button
+- [x] Error message in hover.
+- [x] Sometimes refreshes on remote side are not added to queue. (Bulk delete for example)
 
 ## Settings UI
 - [x] Add UI for settings.
@@ -93,7 +92,6 @@ Still under construction :construction:
 - [x] Persist mode as part of layout.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
 - [ ] Table header is too thick and text too bold.
-- [ ]
 
 # No intention to support for now:
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
@@ -111,6 +109,7 @@ Still under construction :construction:
 
 ## SFTP
 - [ ] Implement bulk download to archives.
+- [ ] Optimize download/upload speed of lots of files.
 
 ## File View UI
 - [ ] Same side drag and drop for moving files locally or remotely.
