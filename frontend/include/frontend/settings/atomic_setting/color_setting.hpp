@@ -6,6 +6,7 @@
 #include <log/log.hpp>
 #include <ids/id.hpp>
 
+#include <ui5/components/button.hpp>
 #include <ui5/components/label.hpp>
 #include <ui5/components/input.hpp>
 #include <ui5/components/color_palette_popover.hpp>

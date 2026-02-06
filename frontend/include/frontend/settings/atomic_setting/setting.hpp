@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nui/frontend/api/console.hpp"
 #include <frontend/classes.hpp>
 #include <utility/language.hpp>
 #include <ids/id.hpp>
@@ -7,18 +8,21 @@
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
 #include <traits/functions.hpp>
-#include <ui5/components/button.hpp>
-#include <ui5/components/responsive_popover.hpp>
-#include <ui5/components/label.hpp>
-#include <ui5/components/switch.hpp>
-#include <ui5/components/check_box.hpp>
 
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/reference.hpp>
 #include <nui/frontend/attributes/id.hpp>
 #include <nui/frontend/attributes/class.hpp>
 #include <nui/frontend/attributes/style.hpp>
+#include <nui/frontend/attributes/type.hpp>
+#include <nui/frontend/attributes/checked.hpp>
+#include <nui/frontend/attributes/on_click.hpp>
+#include <nui/frontend/attributes/alt.hpp>
+#include <nui/frontend/attributes/disabled.hpp>
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/span.hpp>
+#include <nui/frontend/elements/input.hpp>
+#include <nui/frontend/elements/button.hpp>
 #include <nui/frontend/elements/fragment.hpp>
 
 #include <log/log.hpp>
@@ -177,37 +181,36 @@ class Setting
     Nui::ElementRenderer label(auto&& label)
     {
         using namespace Nui::Attributes;
+        using namespace Nui::Elements;
         using Nui::Elements::div;
+        using Nui::Elements::span;
 
         if constexpr (!Disengageable)
         {
-            return div{class_ = "setting-fixed"}(ui5::label{
+            return div{class_ = "setting-fixed"}(span{
                 style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
             }(std::forward<decltype(label)>(label)));
         }
         else
         {
             return Nui::Elements::fragment(
-                ui5::checkbox{
+                input{
+                    type = "checkbox",
                     class_ = "setting-disengage-checkbox",
-                    "checked"_prop = Nui::observe(engaged_).generate(
-                        [](bool engaged)
-                        {
-                            return engaged;
-                        }
-                    ),
+                    checked = engaged_,
                     "change"_event =
                         [this](Nui::val event)
                     {
+                        Nui::WebApi::Console::log("Engaged changed: ", event["target"]["checked"].as<bool>());
                         engaged_ = event["target"]["checked"].as<bool>();
                         onChange_();
                     }
                 }(),
                 div{class_ = "setting-disengageable"}(
-                    ui5::label{
+                    span{
                         style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
                     }(std::forward<decltype(label)>(label)),
-                    ui5::label{
+                    span{
                         style = "color: var(--subduedText);",
                     }(observe(engaged_, inheritanceStatus_)
                             .generate(
@@ -245,16 +248,15 @@ class Setting
     Nui::ElementRenderer reset()
     {
         using namespace Nui::Attributes;
+        using namespace Nui::Elements;
 
-        return ui5::button{
-            "design"_prop = "Transparent",
-            "icon"_prop = "refresh",
-            "tooltip"_prop = language->getObserved("settings", "setting", "resetToDefaultValue"),
-            "click"_event = [this]()
+        return button{
+            alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
+            onClick = [this]()
             {
                 resetAction_();
-            },
-        }();
+            }
+        }("R");
     }
 
     Nui::ElementRenderer help()
@@ -264,31 +266,32 @@ class Setting
 
         const auto idString = Ids::generateId().id();
 
-        return div{}(
-            ui5::button{
-                "design"_prop = "Transparent",
-                "icon"_prop = "sys-help",
-                id = idString,
-                "click"_event =
-                    [this]()
-                {
-                    // did it like this, because Observed<bool> looses track of the open status on clickoutside.
-                    if (auto helpPopover = helpPopoverElement_.lock(); helpPopover)
-                    {
-                        helpPopover->val().set("open", !helpPopover->val()["open"].as<bool>());
-                    }
-                },
-            }(),
-            ui5::responsive_popover{
-                reference =
-                    [this](std::weak_ptr<Nui::Dom::BasicElement> const& ptr)
-                {
-                    helpPopoverElement_ = ptr;
-                },
-                "opener"_prop = idString,
-                "header-text"_prop = "Help"
-            }(helpText_)
-        );
+        // return div{}(
+        //     ui5::button{
+        //         "design"_prop = "Transparent",
+        //         "icon"_prop = "sys-help",
+        //         id = idString,
+        //         "click"_event =
+        //             [this]()
+        //         {
+        //             // did it like this, because Observed<bool> looses track of the open status on clickoutside.
+        //             if (auto helpPopover = helpPopoverElement_.lock(); helpPopover)
+        //             {
+        //                 helpPopover->val().set("open", !helpPopover->val()["open"].as<bool>());
+        //             }
+        //         },
+        //     }(),
+        //     ui5::responsive_popover{
+        //         reference =
+        //             [this](std::weak_ptr<Nui::Dom::BasicElement> const& ptr)
+        //         {
+        //             helpPopoverElement_ = ptr;
+        //         },
+        //         "opener"_prop = idString,
+        //         "header-text"_prop = "Help"
+        //     }(helpText_)
+        // );
+        return div{alt = helpText_}("?");
     }
 
   protected:

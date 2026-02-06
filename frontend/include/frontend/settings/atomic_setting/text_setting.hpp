@@ -4,12 +4,12 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/input.hpp>
-
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/input.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
+#include <nui/frontend/attributes/value.hpp>
+#include <nui/frontend/attributes/disabled.hpp>
 
 template <bool Disengageable = false>
 class TextSetting : public Setting<Disengageable, std::string>
@@ -29,17 +29,18 @@ class TextSetting : public Setting<Disengageable, std::string>
 
     Nui::ElementRenderer operator()(auto&& labelText)
     {
+        using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ui5::input{
+            input{
                 class_ = "setting-input",
-                "value"_prop = SettingBase::observedValueWithInheritance(),
-                observeEngagedToBool("disabled"_prop),
-                "change"_event = [this](Nui::val event){
+                value = SettingBase::observedValueWithInheritance(),
+                observeEngagedToBool(disabled),
+                "blur"_event = [this](Nui::val event){
                     state_ = event["target"]["value"].as<std::string>();
                     onChange_();
                 }

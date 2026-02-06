@@ -4,8 +4,6 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-
 #include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/nil.hpp>

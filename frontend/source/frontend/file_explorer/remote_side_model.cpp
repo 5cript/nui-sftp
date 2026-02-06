@@ -575,23 +575,10 @@ void RemoteSideModel::onDropExternal(
     bool issueWebkitWarning
 )
 {
-    if (issueWebkitWarning &&
-        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s))
-    {
-        confirmDialog_->open({
-            .state = ConfirmDialog::State::Information,
-            .headerText = "External Drop Is Faulty",
-            .text = "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote "
-                    "side only works for single items.",
-            .buttons = ConfirmDialog::Button::Ok,
-            .onClose = [this, items, subDir](ConfirmDialog::Button)
-            {
-                onDropExternal(items, subDir, false);
-            },
-        });
-    }
-
-    onTransfer(items, subDir);
+    // Not implemented yet.
+    (void)items;
+    (void)subDir;
+    (void)issueWebkitWarning;
 }
 
 void RemoteSideModel::onTransfer(

@@ -1,6 +1,8 @@
 #include <frontend/settings/layout_setting.hpp>
 
 #include <ui5/components/select.hpp>
+#include <ui5/components/label.hpp>
+#include <ui5/components/button.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>

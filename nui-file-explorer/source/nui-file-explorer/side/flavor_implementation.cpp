@@ -43,6 +43,7 @@ namespace NuiFileExplorer
                 );
                 return;
             }
+            Nui::WebApi::Console::log("External items dropped: ", eventExtracted->externDroppedItems->size());
             otherSide_->model().onDropExternal(
                 *eventExtracted->externDroppedItems,
                 eventExtracted->internalDropSubdir,
