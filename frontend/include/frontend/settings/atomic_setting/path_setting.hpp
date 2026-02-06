@@ -1,16 +1,19 @@
 #pragma once
 
+#include "nui/frontend/elements/button.hpp"
 #include <frontend/settings/atomic_setting/setting.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/input.hpp>
-
 #include <nui/frontend/filesystem/file_dialog.hpp>
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/input.hpp>
+#include <nui/frontend/elements/button.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
+#include <nui/frontend/attributes/value.hpp>
+#include <nui/frontend/attributes/disabled.hpp>
+#include <nui/frontend/attributes/on_click.hpp>
 
 enum class PathSettingType
 {
@@ -102,6 +105,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
 
     Nui::ElementRenderer operator()(auto&& labelText)
     {
+        using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
@@ -111,23 +115,21 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
             div{
                 class_ = "setting-path"
             }(
-                ui5::input{
+                input{
                     class_ = "setting-input",
-                    "value"_prop = SettingBase::observedValueWithInheritance(),
-                    observeEngagedToBool("disabled"_prop),
-                    "change"_event = [this](Nui::val event){
+                    value = SettingBase::observedValueWithInheritance(),
+                    observeEngagedToBool(disabled),
+                    "blur"_event = [this](Nui::val event){
                         state_ = event["target"]["value"].as<std::string>();
                         onChange_();
                     }
                 }(),
-                ui5::button{
-                    "design"_prop = "Transparent",
-                    "icon"_prop = "browse-folder",
-                    observeEngagedToBool("disabled"_prop),
-                    "click"_event = [this](){
+                button{
+                    observeEngagedToBool(disabled),
+                    onClick = [this](){
                         openDialog();
                     }
-                }()
+                }("Browse")
             ),
             reset(),
             help()

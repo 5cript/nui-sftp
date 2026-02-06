@@ -4,12 +4,13 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/switch.hpp>
-
-#include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
+#include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/input.hpp>
 #include <nui/frontend/attributes/style.hpp>
+#include <nui/frontend/attributes/type.hpp>
+#include <nui/frontend/attributes/checked.hpp>
+#include <nui/frontend/attributes/disabled.hpp>
 
 template <bool Disengageable = false>
 class BoolSetting : public Setting<Disengageable, bool>
@@ -28,14 +29,24 @@ class BoolSetting : public Setting<Disengageable, bool>
     Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
+        using namespace Nui::Elements;
         using Nui::Elements::div;
 
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ui5::switch_{
-                "checked"_prop = SettingBase::observedValueWithInheritance(),
-                observeEngagedToBool("disabled"_prop),
+            // ui5::switch_{
+            //     "checked"_prop = SettingBase::observedValueWithInheritance(),
+            //     observeEngagedToBool("disabled"_prop),
+            //     "change"_event = [this](Nui::val event){
+            //         state_ = event["target"]["checked"].as<bool>();
+            //         onChange_();
+            //     }
+            // }(),
+            input{
+                type = "checkbox",
+                checked = SettingBase::observedValueWithInheritance(),
+                observeEngagedToBool(disabled),
                 "change"_event = [this](Nui::val event){
                     state_ = event["target"]["checked"].as<bool>();
                     onChange_();

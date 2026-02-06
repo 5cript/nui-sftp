@@ -4,6 +4,8 @@
 
 #include <nui/rpc.hpp>
 
+using namespace std::string_literals;
+
 LocalSideModel::LocalSideModel(
     Persistence::UiOptions uiOptions,
     ConfirmDialog* confirmDialog,
@@ -354,10 +356,23 @@ void LocalSideModel::onDropExternal(
     bool issueWebkitWarning
 )
 {
-    // Not implemented yet.
-    (void)items;
-    (void)subDir;
-    (void)issueWebkitWarning;
+    if (issueWebkitWarning &&
+        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s))
+    {
+        confirmDialog_->open({
+            .state = ConfirmDialog::State::Information,
+            .headerText = "External Drop Is Faulty",
+            .text = "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote "
+                    "side only works for single items.",
+            .buttons = ConfirmDialog::Button::Ok,
+            .onClose = [this, items, subDir](ConfirmDialog::Button)
+            {
+                onDropExternal(items, subDir, false);
+            },
+        });
+    }
+    else
+        onTransfer(items, subDir);
 }
 
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)

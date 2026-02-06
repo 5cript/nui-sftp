@@ -204,16 +204,16 @@ namespace NuiFileExplorer
             auto extractedLink = extractFromHtmlLink(html);
             if (!extractedLink.empty())
             {
-                Nui::WebApi::Console::log("Extracted link from html: " + extractedLink);
                 if (looksLikeAPath(extractedLink))
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
                     result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = extractedLink}});
+                    result.issueWebkitWarning =
+                        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s ||
+                            STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s);
+                    return result;
                 }
             }
-            result.issueWebkitWarning =
-                (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s);
-            return result;
         }
 
         const auto hasUriList = std::find(types.begin(), types.end(), "text/uri-list") != types.end();
