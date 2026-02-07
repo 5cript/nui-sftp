@@ -127,8 +127,26 @@ void setupLogger(std::shared_ptr<Nui::TimerHandle> setupWait)
 
 extern "C" void frontendMain()
 {
-    std::shared_ptr<Nui::TimerHandle> setupWait = std::make_shared<Nui::TimerHandle>();
-    setupLogger(setupWait);
+    Nui::RpcClient::awaitRpcAvailable(
+        [](bool timeout)
+        {
+            if (timeout)
+            {
+                // Show load failure in dom body:
+                dom = std::make_unique<Nui::Dom::Dom>();
+                dom->setBody(
+                    Nui::Elements::body{}(Nui::Elements::div{
+                        Nui::Attributes::style = "color: red; font-size: 20px; text-align: center; margin-top: 20px;"
+                    }("Failed to load application: RPC initialization timed out. Restart the application."))
+                );
+                return;
+            }
+
+            std::shared_ptr<Nui::TimerHandle> setupWait = std::make_shared<Nui::TimerHandle>();
+            setupLogger(setupWait);
+        },
+        std::chrono::seconds(10)
+    );
 }
 
 EMSCRIPTEN_BINDINGS(nui_example_frontend)
