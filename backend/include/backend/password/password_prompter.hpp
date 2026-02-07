@@ -6,10 +6,13 @@ class PasswordPrompter : public PasswordProvider
   public:
     PasswordPrompter(Nui::RpcHub& rpcHub);
 
+    void registerRpc();
+
     void getPassword(
         std::string const& whatFor,
         std::string const& prompt,
-        std::function<void(std::optional<std::string>)> const& onPasswordReady) override;
+        std::function<void(std::optional<std::string>)> const& onPasswordReady
+    ) override;
 
   private:
     Nui::RpcHub* rpcHub_;

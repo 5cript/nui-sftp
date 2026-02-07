@@ -17,6 +17,7 @@
 
 #include <filesystem>
 #include <atomic>
+#include <mutex>
 
 class Main
 {
@@ -35,6 +36,7 @@ class Main
 
   private:
     void registerInitialWarningGetter();
+    void onRpcAlive();
 
   private:
     std::atomic_bool shuttingDown_;
@@ -50,6 +52,7 @@ class Main
     boost::asio::steady_timer childSignalTimer_;
     // for display later in UI
     std::string initialPersistenceLoadWarning_;
+    std::once_flag rpcAliveOnce_;
 
     struct PlatformSpecifics;
     std::unique_ptr<PlatformSpecifics> platformSpecifics_;

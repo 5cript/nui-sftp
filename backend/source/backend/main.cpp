@@ -164,6 +164,9 @@ Main::Main(int const, char const* const* argv)
               .title = "NuiScp"s,
               .debug = true,
               .customSchemes = {createFolderMapping(programDir_, "nui")},
+              .onRpcAliveMessage = [this]() {
+                  onRpcAlive();
+              }
           },
       }
     , hub_{window_}
@@ -176,6 +179,40 @@ Main::Main(int const, char const* const* argv)
     , platformSpecifics_{std::make_unique<PlatformSpecifics>(window_, hub_)}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
+}
+Main::~Main()
+{
+    shuttingDown_ = true;
+    // sshSessionManager_->stopUpdateDispatching();
+    childSignalTimer_.cancel();
+}
+
+void Main::onRpcAlive()
+{
+    std::call_once(
+        rpcAliveOnce_,
+        [this]()
+        {
+            registerRpc();
+        }
+    );
+}
+
+void Main::registerRpc()
+{
+    hub_.enableFetch();
+    hub_.enableTimer();
+    hub_.enableWindowFunctions();
+    hub_.enableEnvironmentVariables();
+    hub_.enableThrottle();
+    hub_.enableFileDialogs();
+
+    Log::setupBackendRpcHub(&hub_);
+    prompter_.registerRpc();
+    stateHolder_.registerRpc(hub_);
+    processes_.registerRpc(window_, hub_);
+    sshSessionManager_->registerRpc();
+    registerInitialWarningGetter();
 
     stateHolder_.load(
         [this](
@@ -216,30 +253,10 @@ Main::Main(int const, char const* const* argv)
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
                 window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions
             );
+
+            hub_.markRpcAsInitialized();
         }
     );
-}
-Main::~Main()
-{
-    shuttingDown_ = true;
-    // sshSessionManager_->stopUpdateDispatching();
-    childSignalTimer_.cancel();
-}
-
-void Main::registerRpc()
-{
-    hub_.enableFetch();
-    hub_.enableTimer();
-    hub_.enableWindowFunctions();
-    hub_.enableEnvironmentVariables();
-    hub_.enableThrottle();
-    hub_.enableFileDialogs();
-
-    Log::setupBackendRpcHub(&hub_);
-    stateHolder_.registerRpc(hub_);
-    processes_.registerRpc(window_, hub_);
-    sshSessionManager_->registerRpc();
-    registerInitialWarningGetter();
 }
 
 void Main::show()
@@ -339,7 +356,6 @@ int main(int const argc, char const* const* argv)
 
     {
         Main m{argc, argv};
-        m.registerRpc();
         m.startChildSignalTimer();
         m.show();
     }
