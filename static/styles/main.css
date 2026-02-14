@@ -12,11 +12,59 @@
 @import "./file_property_dialog.css";
 @import "../../../../../nui-file-explorer/styles/file_grid.css";
 @import "../../../../../nui-file-explorer/styles/dropdown_menu.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/button.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/color_picker.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/resizeable_table.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/select.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/switch.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/switch.css";
+@import "../../../../../dependencies/5cript-nui-components/styles/text_input.css";
 
 *,
 *::before,
 *::after {
     box-sizing: border-box;
+}
+
+:root {
+    /* Non Dark/Light Dependent */
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    font-size: 16px;
+    --theme-color: #90d26d;
+
+    /* Fields */
+    --script-nui-components-field-theme-color: var(--theme-color);
+
+    /* Dark / Light */
+    --background-color: var(--sapBackgroundColor);
+    --background-color-fields: #202020;
+    --color: #dddddd;
+    --color-fields: var(--color);
+    --border-color-fields: #505050;
+
+    /* Switch */
+    --script-nui-components-switch-color-inactive: #8e8e8e;
+    --script-nui-components-switch-thumb-color: var(--color-fields);
+}
+
+:root[data-theme="light"] {
+    /* Dark / Light */
+    --background-color: #eeeeee;
+    --background-color-fields: #b9b9b9;
+    --color: black;
+    --color-fields: var(--color);
+
+    /* Switch */
+    --script-nui-components-switch-color-active: #008000;
+    --script-nui-components-switch-color-inactive: #b9b9b9;
+    --script-nui-components-switch-thumb-color: #383838;
+
+    --script-nui-components-field-color: var(--color-fields);
+    --script-nui-components-field-background-color: var(--background-color-fields);
+    --script-nui-components-field-border-color: color-mix(in srgb, var(--color-fields) 50%, white);
+
+    --script-nui-components-button-color-regular: var(--background-color-fields);
+    --script-nui-components-button-color: var(--color-fields);
 }
 
 .prompter-form {
@@ -46,7 +94,6 @@ body {
     background-color: var(--sapBackgroundColor);
     color: var(--sapTextColor);
     /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
     --resizeHandleColor: #707070;
     --brighterBackground: #404040;
     --subduedText: #888888;

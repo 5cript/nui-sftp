@@ -68,13 +68,16 @@ set(PREJS_FILE "${CMAKE_SOURCE_DIR}/frontend/source/frontend/js/module.js")
 
 if (EMSCRIPTEN)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/theme_compilation.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/svg_to_hpp.cmake")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/ui5")
     add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components")
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
 else()
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/resource_copy.cmake")
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
+
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
     # add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/process")
 

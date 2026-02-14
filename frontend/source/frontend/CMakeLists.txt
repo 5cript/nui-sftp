@@ -42,7 +42,17 @@ target_sources(
         file_explorer/local_side_model.cpp
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/frontend/include)
+target_include_directories(
+    ${PROJECT_NAME}
+    PRIVATE
+        "${CMAKE_SOURCE_DIR}/frontend/include"
+        "${CMAKE_BINARY_DIR}/include"
+)
+
+target_compile_definitions(
+    script-nui-components
+    PUBLIC -DSCRIPT_NUI_COMPONENTS_NO_INLINE
+)
 
 # Link frontend of nui inside of emscripten
 target_link_libraries(
@@ -60,6 +70,7 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
         events
         ids
+        script-nui-components
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
@@ -91,7 +102,7 @@ function(set_memory64_flags)
     endforeach()
 endfunction()
 
-set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json)
+set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json script-nui-components)
 
 set(DEPENDANT_LINK_OPTIONS "")
 set(DEPENDANT_COMPILE_OPTIONS "")
@@ -102,6 +113,15 @@ else()
     set(DEPENDANT_LINK_OPTIONS "-O2")
     set(DEPENDANT_COMPILE_OPTIONS "-O2")
 endif()
+
+svg_to_hpp(
+    SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
+    HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
+    NAMESPACE "GeneratedSvgs"
+    TARGET ui5_svgs
+    ABBREVIATE
+    TOOLPATH "${CMAKE_BINARY_DIR}/../tools_bin/xml-to-nui"
+)
 
 nui_prepare_emscripten_target(
     TARGET
@@ -170,7 +190,16 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/widget.css"
         "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets"
         "${CMAKE_SOURCE_DIR}/static/styles/lumino"
+        # 5cript-nui-components
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/resizeable_table.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
 )
 
 add_dependencies(theme_compilation ${PROJECT_NAME}-npm-install)
 add_dependencies(${PROJECT_NAME}-parcel theme_compilation)
+add_dependencies(${PROJECT_NAME}-parcel ui5_svgs)
