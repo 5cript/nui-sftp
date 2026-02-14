@@ -4,6 +4,8 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
+#include <script-nui-components/switch.hpp>
+
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/input.hpp>
@@ -18,7 +20,7 @@ class BoolSetting : public Setting<Disengageable, bool>
   public:
     using SettingBase = Setting<Disengageable, bool>;
 
-    using SettingBase::state_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
@@ -35,23 +37,17 @@ class BoolSetting : public Setting<Disengageable, bool>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            // ui5::switch_{
-            //     "checked"_prop = SettingBase::observedValueWithInheritance(),
-            //     observeEngagedToBool("disabled"_prop),
-            //     "change"_event = [this](Nui::val event){
-            //         state_ = event["target"]["checked"].as<bool>();
-            //         onChange_();
-            //     }
-            // }(),
-            input{
-                type = "checkbox",
-                checked = SettingBase::observedValueWithInheritance(),
-                observeEngagedToBool(disabled),
-                "change"_event = [this](Nui::val event){
-                    state_ = event["target"]["checked"].as<bool>();
-                    onChange_();
+            ScriptNuiComponents::Switch{}(
+                ScriptNuiComponents::Switch::Options<decltype(stateWithInheritance_)>{
+                    .isChecked = stateWithInheritance_,
+                    .attributes = {
+                        observeEngagedToBool(disabled)
+                    },
+                    .onChange = [this](bool, Nui::WebApi::MouseEvent const&){
+                        onChange_();
+                    },
                 }
-            }(),
+            ),
             reset(),
             help()
         );

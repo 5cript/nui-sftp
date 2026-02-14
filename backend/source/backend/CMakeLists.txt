@@ -105,3 +105,5 @@ nui_add_emscripten_target(
         -DNUI_FETCH_TRAITS=Off
         -DBROWSER_ENGINE=${BROWSER_ENGINE}
 )
+
+add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)

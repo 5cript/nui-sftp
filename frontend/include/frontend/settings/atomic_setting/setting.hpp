@@ -1,6 +1,5 @@
 #pragma once
 
-#include "nui/frontend/api/console.hpp"
 #include <frontend/classes.hpp>
 #include <utility/language.hpp>
 #include <ids/id.hpp>
@@ -9,6 +8,15 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <traits/functions.hpp>
 
+#include <svgs/refresh.hpp>
+#include <svgs/question-mark.hpp>
+
+#include <script-nui-components/button.hpp>
+#include <script-nui-components/text_input.hpp>
+#include <script-nui-components/switch.hpp>
+#include <script-nui-components/style_variant.hpp>
+
+#include <nui/frontend/api/console.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/reference.hpp>
 #include <nui/frontend/attributes/id.hpp>
@@ -81,6 +89,7 @@ class Setting
             engaged_ = true;
         }
         state_ = value;
+        updateStateWithInheritance();
     }
     virtual OutfacingValueType value() const
     {
@@ -99,10 +108,21 @@ class Setting
     {
         engaged_ = value.has_value();
         if (value)
-            state_ = *value;
+            this->value(*value);
         else
-            state_ = ValueType{};
+            this->value(ValueType{});
     }
+    void updateStateWithInheritance()
+    {
+        stateWithInheritance_ = [this]()
+        {
+            if (!engaged_.value() && inheritedState_.value() &&
+                inheritanceStatus_.value() == InheritanceStatus::AncestorEngaged)
+                return inheritedState_->value();
+            return state_.value();
+        }();
+    }
+    // TODO: Remove
     auto observedValueWithInheritance()
     {
         return observe(engaged_, state_, inheritedState_, inheritanceStatus_)
@@ -147,6 +167,7 @@ class Setting
             inheritedState_ = std::nullopt;
             inheritanceStatus(InheritanceStatus::AncestorDisengaged);
         }
+        updateStateWithInheritance();
     }
     void inherit(ValueType const&) = delete;
     // As opposed to inherit(value), because this is intentional:
@@ -154,6 +175,7 @@ class Setting
     {
         inheritedState_ = value;
         inheritanceStatus(InheritanceStatus::AncestorEngaged);
+        updateStateWithInheritance();
     }
 
     auto observeEngagedToBool(auto&& prop)
@@ -194,18 +216,15 @@ class Setting
         else
         {
             return Nui::Elements::fragment(
-                input{
-                    type = "checkbox",
-                    class_ = "setting-disengage-checkbox",
-                    checked = engaged_,
-                    "change"_event =
-                        [this](Nui::val event)
+                ScriptNuiComponents::Switch{}(ScriptNuiComponents::Switch::Options<decltype(engaged_)>{
+                    .isChecked = engaged_,
+                    .attributes = {class_ = "setting-disengage-checkbox"},
+                    .onChange =
+                        [this](bool, Nui::WebApi::MouseEvent const&)
                     {
-                        Nui::WebApi::Console::log("Engaged changed: ", event["target"]["checked"].as<bool>());
-                        engaged_ = event["target"]["checked"].as<bool>();
                         onChange_();
                     }
-                }(),
+                }),
                 div{class_ = "setting-disengageable"}(
                     span{
                         style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
@@ -250,13 +269,17 @@ class Setting
         using namespace Nui::Attributes;
         using namespace Nui::Elements;
 
-        return button{
-            alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
-            onClick = [this]()
-            {
-                resetAction_();
-            }
-        }("R");
+        return ScriptNuiComponents::Button{}(ScriptNuiComponents::Button::Options{
+            .icon = GeneratedSvgs::refresh(),
+            .attributes =
+                {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
+                    onClick =
+                        [this]()
+                    {
+                        resetAction_();
+                    }},
+            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+        });
     }
 
     Nui::ElementRenderer help()
@@ -266,46 +289,30 @@ class Setting
 
         const auto idString = Ids::generateId().id();
 
-        // return div{}(
-        //     ui5::button{
-        //         "design"_prop = "Transparent",
-        //         "icon"_prop = "sys-help",
-        //         id = idString,
-        //         "click"_event =
-        //             [this]()
-        //         {
-        //             // did it like this, because Observed<bool> looses track of the open status on clickoutside.
-        //             if (auto helpPopover = helpPopoverElement_.lock(); helpPopover)
-        //             {
-        //                 helpPopover->val().set("open", !helpPopover->val()["open"].as<bool>());
-        //             }
-        //         },
-        //     }(),
-        //     ui5::responsive_popover{
-        //         reference =
-        //             [this](std::weak_ptr<Nui::Dom::BasicElement> const& ptr)
-        //         {
-        //             helpPopoverElement_ = ptr;
-        //         },
-        //         "opener"_prop = idString,
-        //         "header-text"_prop = "Help"
-        //     }(helpText_)
-        // );
-        return div{alt = helpText_}("?");
+        return ScriptNuiComponents::Button{}(ScriptNuiComponents::Button::Options{
+            .icon = GeneratedSvgs::questionmark(),
+            .attributes =
+                {alt = helpText_,
+                    onClick =
+                        [this]()
+                    {
+                        // TODO: Replace with proper popover instead of alert
+                        Nui::val::global("alert")(helpText_.value());
+                    }},
+            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+        });
     }
 
   protected:
     Nui::Observed<ValueType> state_;
     Nui::Observed<std::optional<ValueType>> inheritedState_;
+    Nui::Observed<ValueType> stateWithInheritance_;
     Nui::Observed<bool> engaged_{!Disengageable};
     std::function<void()> onChange_;
     std::function<void()> resetAction_;
     Nui::Observed<bool>* externalDisengage_;
     LanguageObservedText helpText_;
     Nui::Observed<InheritanceStatus> inheritanceStatus_{InheritanceStatus::NoAncestor};
-
-  private:
-    std::weak_ptr<Nui::Dom::BasicElement> helpPopoverElement_;
 };
 
 template <typename ValueType>
