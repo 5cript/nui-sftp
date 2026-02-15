@@ -3,42 +3,34 @@
 #include <frontend/settings/atomic_setting/setting.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/select.hpp>
+#include <script-nui-components/select.hpp>
 
 #include <nui/frontend/elements/div.hpp>
+#include <nui/frontend/elements/fragment.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
 #include <nui/frontend/attributes/style.hpp>
+#include <nui/frontend/attributes/class.hpp>
 
 template <typename ValueType, typename TransformedType = ValueType, bool Disengageable = false>
 class ComboSetting : public Setting<Disengageable, ValueType>
 {
   public:
     using SettingBase = Setting<Disengageable, ValueType>;
-    using SettingBase::state_;
-    using SettingBase::inheritedState_;
-    using SettingBase::inheritanceStatus_;
-    using SettingBase::engaged_;
+    using SettingBase::stateWithInheritance_;
+    using SettingBase::observeEngagedToBool;
 
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
+    using SettingBase::value;
 
     ComboSetting(
         std::vector<ValueType> availableStates,
         LanguageObservedText helpText,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
-        std::function<TransformedType(ValueType const&)> valueTransformer =
-            [](ValueType const& v)
-        {
-            return v;
-        },
-        std::function<std::optional<std::string>(ValueType const&)> iconAccessor =
-            [](ValueType const&)
-        {
-            return std::nullopt;
-        }
+        std::function<TransformedType(ValueType const&)> valueTransformer = {},
+        std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer = {}
     )
         : SettingBase{
               std::move(helpText),
@@ -46,64 +38,123 @@ class ComboSetting : public Setting<Disengageable, ValueType>
               std::forward<decltype(resetAction)>(resetAction)
           }
         , availableStates_{std::move(availableStates)}
-        , iconAccessor_{std::move(iconAccessor)}
-        , transform_{std::move(valueTransformer)}
+        , valueTransformer_{std::move(valueTransformer)}
+        , iconRenderer_{std::move(iconRenderer)}
+    {}
+
+    Nui::ElementRenderer renderActive()
     {
-        if (!transform_)
+        using Nui::Elements::span;
+        using Nui::Elements::div;
+        using namespace Nui::Attributes;
+
+        auto transform = [this]()
         {
-            Log::error("ComboSetting: Invalid value transformer provided.");
-            throw std::invalid_argument("Invalid value transformer provided to ComboSetting.");
-        }
-        if (!iconAccessor_)
+            if (valueTransformer_)
+                return valueTransformer_(stateWithInheritance_.value());
+            else
+            {
+                if constexpr (std::is_same_v<ValueType, TransformedType>)
+                    return stateWithInheritance_.value();
+                else
+                {
+                    Nui::WebApi::Console::error(
+                        "ComboSetting: No value transformer provided for different ValueType and TransformedType!"
+                    );
+                    return TransformedType{};
+                }
+            }
+        };
+
+        if (!iconRenderer_)
+            return span{}(
+                observe(stateWithInheritance_),
+                [transform]()
+                {
+                    return transform();
+                }
+            );
+
+        return div{
+            class_ = "combo-setting-option"
+        }(observe(stateWithInheritance_),
+            [this, transform](ValueType const& option) -> Nui::ElementRenderer
+            {
+                return Nui::Elements::fragment(
+                    iconRenderer_(option),
+                    span{}(
+                        [transform]()
+                        {
+                            return transform();
+                        }
+                    )
+                );
+            });
+    }
+
+    Nui::ElementRenderer renderOption(ValueType const& option)
+    {
+        using Nui::Elements::span;
+        using Nui::Elements::div;
+        using namespace Nui::Attributes;
+
+        auto transform = [this, option]()
         {
-            Log::error("ComboSetting: Invalid icon accessor provided.");
-            throw std::invalid_argument("Invalid icon accessor provided to ComboSetting.");
-        }
+            if (valueTransformer_)
+                return valueTransformer_(option);
+            else
+            {
+                if constexpr (std::is_same_v<ValueType, TransformedType>)
+                    return option;
+                else
+                {
+                    Nui::WebApi::Console::error(
+                        "ComboSetting: No value transformer provided for different ValueType and TransformedType!"
+                    );
+                    return TransformedType{};
+                }
+            }
+        };
+
+        if (!iconRenderer_)
+            return span{}(transform());
+
+        return div{class_ = "combo-setting-option"}(iconRenderer_(option), span{}(transform()));
     }
 
     Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        using Nui::Elements::span;
 
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ui5::select{
-                "change"_event = [this](Nui::val event){
-                    const auto index = static_cast<std::size_t>(event["detail"]["selectedOption"]["valueIndex"].as<int>());
-                    if (index < 0 || index > availableStates_.size())
+            ScriptNuiComponents::Select{}(
+                ScriptNuiComponents::Select::Options<decltype(stateWithInheritance_), decltype(availableStates_)>{
+                    .activeOption = stateWithInheritance_,
+                    .options = availableStates_,
+                    .attributes = {
+                        observeEngagedToBool(disabled)
+                    },
+                    .onChange = [this](auto const& newValue, auto const&)
                     {
-                        Log::error("ComboSetting: Selected index {} is out of bounds.", index);
-                        return;
-                    }
-                    state_ = availableStates_[index];
-                    onChange_();
-                },
-                SettingBase::observeEngagedToBool("disabled"_prop),
-                "value"_prop = observe(engaged_, state_, inheritedState_, inheritanceStatus_).generate(
-                    [this]() {
-                        try {
-                            if (!*engaged_ && *inheritedState_ && *inheritanceStatus_ == SettingBase::InheritanceStatus::AncestorEngaged)
-                                return transform_(**inheritedState_);
-                            return transform_(*state_);
-                        } catch (std::exception const& e) {
-                            Log::error("ComboSetting: Exception in value generation: {}", e.what());
-                            return TransformedType{};
-                        }
-                    }
-                )
-            }(
-                Nui::range(availableStates_),
-                [this](auto index, ValueType const& value) {
-                    return ui5::option{
-                        "icon"_prop = observe(state_).generate([this, value](){
-                            return iconAccessor_ ? iconAccessor_(value) : std::nullopt;
-                        }),
-                        "valueIndex"_prop = static_cast<int>(index),
-                    }(transform_(value));
+                        this->value(newValue);
+                        onChange_();
+                    },
+                    .activeRenderer = [this](auto const&) -> Nui::ElementRenderer
+                    {
+                        return renderActive();
+                    },
+                    .elementRenderer = [this](auto const& option) -> Nui::ElementRenderer
+                    {
+                        return renderOption(option);
+                    },
+                    .dontUpdateValue = true
                 }
             ),
+            //div{}("ComboSetting not implemented yet"),// TODO implement select component and use it here instead of this placeholder
             reset(),
             help()
         );
@@ -112,6 +163,6 @@ class ComboSetting : public Setting<Disengageable, ValueType>
 
   private:
     std::vector<ValueType> availableStates_;
-    std::function<std::optional<std::string>(ValueType const&)> iconAccessor_;
-    std::function<TransformedType(ValueType const&)> transform_;
+    std::function<TransformedType(ValueType const&)> valueTransformer_;
+    std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer_;
 };
