@@ -1,5 +1,13 @@
 #include <frontend/settings/general_settings.hpp>
 
+#include <svgs/activity-items.hpp>
+#include <svgs/zoom-in.hpp>
+#include <svgs/information.hpp>
+#include <svgs/alert.hpp>
+#include <svgs/error.hpp>
+#include <svgs/incident.hpp>
+#include <svgs/hide.hpp>
+
 GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events)
     : logLevel{
         {
@@ -22,26 +30,26 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
         {
             return Utility::enumToString<Log::Level>(level);
         },
-        [](Log::Level const& level) -> std::optional<std::string>
+        [](Log::Level const& level) -> Nui::ElementRenderer
         {
             switch (level)
             {
                 case Log::Level::Trace:
-                    return "activity-items";
+                    return GeneratedSvgs::activityitems();
                 case Log::Level::Debug:
-                    return "zoom-in";
+                    return GeneratedSvgs::zoomin();
                 case Log::Level::Info:
-                    return "information";
+                    return GeneratedSvgs::information();
                 case Log::Level::Warning:
-                    return "alert";
+                    return GeneratedSvgs::alert();
                 case Log::Level::Error:
-                    return "error";
+                    return GeneratedSvgs::error();
                 case Log::Level::Critical:
-                    return "incident";
+                    return GeneratedSvgs::incident();
                 case Log::Level::Off:
-                    return "hide";
+                    return GeneratedSvgs::hide();
                 default:
-                    return std::nullopt;
+                    return Nui::nil();
             }
         }
     }

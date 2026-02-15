@@ -339,3 +339,18 @@ ui5-button.multi-setting-key-add-button::part(button) {
         pointer-events: none;
     }
 }
+
+.combo-setting-option {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+
+    &>svg {
+        width: 24px;
+        height: 24px;
+
+        & path {
+            fill: white;
+        }
+    }
+}

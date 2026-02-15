@@ -28,6 +28,7 @@
 #include <ui5/components/busy_indicator.hpp>
 #include <ui5/components/message_strip.hpp>
 #include <ui5/components/busy_indicator.hpp>
+#include <ui5/components/select.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -616,12 +617,12 @@ Nui::ElementRenderer Settings::operator()()
                     }
                 ),
             }(
-                Nui::Elements::span{}(language->get("settings", "loadingSettings")),
-                ui5::busy_indicator{
-                    "size"_prop = "L",
-                    "active"_prop = observe(impl_->initialLoadDone).generate([](bool done) { return !done; }),
-                    "delay"_prop = 1,
-                }()
+                Nui::Elements::span{}(language->get("settings", "loadingSettings")) //,
+                // ui5::busy_indicator{
+                //     "size"_prop = "L",
+                //     "active"_prop = observe(impl_->initialLoadDone).generate([](bool done) { return !done; }),
+                //     "delay"_prop = 1,
+                // }()
             ),
             impl_->newSessionDialog(),
             div{
