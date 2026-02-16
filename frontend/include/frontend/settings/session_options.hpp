@@ -33,8 +33,9 @@ struct SessionOptions
     SessionOptions(
         std::function<void()> const& onChange,
         std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
-        ConfirmDialog* confirmDialog,
-        InputDialog* newItemDialog
+        ConfirmDialog& confirmDialog,
+        InputDialog& newItemDialog,
+        MultiInputDialog& multiInputDialog
     );
 
     void applyToState(Persistence::SessionOptions& state) const;

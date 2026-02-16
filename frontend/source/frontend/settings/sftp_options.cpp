@@ -3,6 +3,7 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/optional_converters.hpp>
 #include <frontend/settings/subgroup.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -179,10 +180,12 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                 .mayOverwrite = downloadOptions.mayOverwrite.value(),
                 .tryContinue = downloadOptions.tryContinue.value(),
                 .inheritPermissions = downloadOptions.inheritPermissions.value(),
-                .customFilePermissions =
-                    uShortOptionalToFilesystemPermsOptional(downloadOptions.customFilePermissions.value()),
-                .customDirectoryPermissions =
-                    uShortOptionalToFilesystemPermsOptional(downloadOptions.customDirectoryPermissions.value()),
+                .customFilePermissions = downloadOptions.customFilePermissions.valueIsValid()
+                    ? uShortOptionalToFilesystemPermsOptional(downloadOptions.customFilePermissions.value())
+                    : std::nullopt,
+                .customDirectoryPermissions = downloadOptions.customDirectoryPermissions.valueIsValid()
+                    ? uShortOptionalToFilesystemPermsOptional(downloadOptions.customDirectoryPermissions.value())
+                    : std::nullopt,
             },
             .reserveSpace = downloadOptions.reserveSpace.value(),
             .doCleanup = downloadOptions.doCleanup.value(),
@@ -197,18 +200,23 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
             .mayOverwrite = uploadOptions.mayOverwrite.value(),
             .tryContinue = uploadOptions.tryContinue.value(),
             .inheritPermissions = uploadOptions.inheritPermissions.value(),
-            .customFilePermissions =
-                uShortOptionalToFilesystemPermsOptional(uploadOptions.customFilePermissions.value()),
-            .customDirectoryPermissions =
-                uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value()),
+            .customFilePermissions = uploadOptions.customFilePermissions.valueIsValid()
+                ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customFilePermissions.value())
+                : std::nullopt,
+            .customDirectoryPermissions = uploadOptions.customDirectoryPermissions.valueIsValid()
+                ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value())
+                : std::nullopt,
         }};
     }
 
-    state.concurrency = concurrency.value();
-    auto timeout = operationTimeoutSeconds.value();
-    state.operationTimeout =
-        timeout.has_value() ? std::chrono::seconds{timeout.value()} : std::optional<std::chrono::seconds>{std::nullopt};
-    state.defaultDirectory = defaultDirectory.value();
+    assignIfValid(state.concurrency, concurrency);
+    if (operationTimeoutSeconds.valueIsValid())
+    {
+        auto timeout = operationTimeoutSeconds.value();
+        state.operationTimeout = timeout.has_value() ? std::chrono::seconds{timeout.value()}
+                                                     : std::optional<std::chrono::seconds>{std::nullopt};
+    }
+    assignIfValid(state.defaultDirectory, defaultDirectory);
 }
 
 void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)

@@ -1,4 +1,5 @@
 #include <frontend/settings/terminal_options.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/subgroup.hpp>
@@ -216,38 +217,42 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
 
 void TerminalOptions::applyToState(Persistence::TerminalOptions& state) const
 {
-    state.fontFamily = fontFamily.value();
-    state.fontSize = fontSize.value();
-    state.lineHeight = lineHeight.value();
-    state.cursorBlink = cursorBlink.value();
-    state.renderer = renderer.value();
-    state.letterSpacing = letterSpacing.value();
+    assignIfValid(state.fontFamily, fontFamily);
+    assignIfValid(state.fontSize, fontSize);
+    assignIfValid(state.lineHeight, lineHeight);
+    assignIfValid(state.cursorBlink, cursorBlink);
+    assignIfValid(state.renderer, renderer);
+    assignIfValid(state.letterSpacing, letterSpacing);
     if (themeEngaged.value())
     {
         state.theme = Persistence::TerminalTheme{
-            .background = theme.background.value(),
-            .black = theme.black.value(),
-            .blue = theme.blue.value(),
-            .brightBlack = theme.brightBlack.value(),
-            .brightBlue = theme.brightBlue.value(),
-            .brightCyan = theme.brightCyan.value(),
-            .brightGreen = theme.brightGreen.value(),
-            .brightMagenta = theme.brightMagenta.value(),
-            .brightRed = theme.brightRed.value(),
-            .brightWhite = theme.brightWhite.value(),
-            .brightYellow = theme.brightYellow.value(),
-            .cursor = theme.cursor.value(),
-            .cursorAccent = theme.cursorAccent.value(),
-            .cyan = theme.cyan.value(),
-            .foreground = theme.foreground.value(),
-            .green = theme.green.value(),
-            .magenta = theme.magenta.value(),
-            .red = theme.red.value(),
-            .selectionBackground = theme.selectionBackground.value(),
-            .selectionForeground = theme.selectionForeground.value(),
-            .selectionInactiveBackground = theme.selectionInactiveBackground.value(),
-            .white = theme.white.value(),
-            .yellow = theme.yellow.value(),
+            .background = theme.background.valueIsValid() ? theme.background.value() : std::nullopt,
+            .black = theme.black.valueIsValid() ? theme.black.value() : std::nullopt,
+            .blue = theme.blue.valueIsValid() ? theme.blue.value() : std::nullopt,
+            .brightBlack = theme.brightBlack.valueIsValid() ? theme.brightBlack.value() : std::nullopt,
+            .brightBlue = theme.brightBlue.valueIsValid() ? theme.brightBlue.value() : std::nullopt,
+            .brightCyan = theme.brightCyan.valueIsValid() ? theme.brightCyan.value() : std::nullopt,
+            .brightGreen = theme.brightGreen.valueIsValid() ? theme.brightGreen.value() : std::nullopt,
+            .brightMagenta = theme.brightMagenta.valueIsValid() ? theme.brightMagenta.value() : std::nullopt,
+            .brightRed = theme.brightRed.valueIsValid() ? theme.brightRed.value() : std::nullopt,
+            .brightWhite = theme.brightWhite.valueIsValid() ? theme.brightWhite.value() : std::nullopt,
+            .brightYellow = theme.brightYellow.valueIsValid() ? theme.brightYellow.value() : std::nullopt,
+            .cursor = theme.cursor.valueIsValid() ? theme.cursor.value() : std::nullopt,
+            .cursorAccent = theme.cursorAccent.valueIsValid() ? theme.cursorAccent.value() : std::nullopt,
+            .cyan = theme.cyan.valueIsValid() ? theme.cyan.value() : std::nullopt,
+            .foreground = theme.foreground.valueIsValid() ? theme.foreground.value() : std::nullopt,
+            .green = theme.green.valueIsValid() ? theme.green.value() : std::nullopt,
+            .magenta = theme.magenta.valueIsValid() ? theme.magenta.value() : std::nullopt,
+            .red = theme.red.valueIsValid() ? theme.red.value() : std::nullopt,
+            .selectionBackground =
+                theme.selectionBackground.valueIsValid() ? theme.selectionBackground.value() : std::nullopt,
+            .selectionForeground =
+                theme.selectionForeground.valueIsValid() ? theme.selectionForeground.value() : std::nullopt,
+            .selectionInactiveBackground = theme.selectionInactiveBackground.valueIsValid()
+                ? theme.selectionInactiveBackground.value()
+                : std::nullopt,
+            .white = theme.white.valueIsValid() ? theme.white.value() : std::nullopt,
+            .yellow = theme.yellow.valueIsValid() ? theme.yellow.value() : std::nullopt,
         };
     }
     else

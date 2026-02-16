@@ -4,6 +4,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/session_options.hpp>
 #include <utility/language.hpp>
@@ -23,8 +24,9 @@ class Settings
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
-        InputDialog* inputDialog,
-        ConfirmDialog* confirmDialog
+        InputDialog& inputDialog,
+        ConfirmDialog& confirmDialog,
+        MultiInputDialog& multiInputDialog
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Settings);
 

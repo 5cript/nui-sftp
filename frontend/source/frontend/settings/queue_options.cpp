@@ -1,6 +1,7 @@
 #include <frontend/settings/queue_options.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -20,8 +21,8 @@ QueueOptions::QueueOptions(std::function<void()> const& onChange)
 
 void QueueOptions::applyToState(Persistence::QueueOptions& state) const
 {
-    state.autoRemoveCompletedOperations = autoRemoveCompletedOperations.value();
-    state.startInPausedState = startInPausedState.value();
+    assignIfValid(state.autoRemoveCompletedOperations, autoRemoveCompletedOperations);
+    assignIfValid(state.startInPausedState, startInPausedState);
 }
 
 void QueueOptions::loadFromState(Persistence::QueueOptions const& state)

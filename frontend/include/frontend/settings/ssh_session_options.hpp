@@ -1,5 +1,7 @@
 #pragma once
 
+#include <frontend/dialog/input_dialog.hpp>
+#include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
@@ -23,7 +25,11 @@ struct SshSessionOptions
     SshOptions sshOptions;
     SftpOptions sftpOptions;
 
-    SshSessionOptions(std::function<void()> const& onChange);
+    SshSessionOptions(
+        std::function<void()> const& onChange,
+        InputDialog& inputDialog,
+        MultiInputDialog& multiInputDialog
+    );
 
     void applyToState(Persistence::SshSessionOptions& state) const;
     void loadFromState(Persistence::SshSessionOptions const& state, bool loadRefs);

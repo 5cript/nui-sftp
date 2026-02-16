@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/events/frontend_events.hpp>
+#include <frontend/dialog/multi_input_dialog.hpp>
 
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
@@ -34,5 +35,5 @@ struct GeneralSettings
         PathSetting<true> homeOverride;
     } localFilesystemOptions;
 
-    GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events);
+    GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, MultiInputDialog& multiInputDialog);
 };

@@ -37,7 +37,7 @@ struct SshOptions : public GroupKeys
     MapSetting<true> environment;
     ListSetting<true> identities;
 
-    SshOptions(std::function<void()> const& onChange);
+    SshOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog);
 
     void applyToState(Persistence::SshOptions& state) const;
     void loadFromState(Persistence::SshOptions const& state, bool loadRefs);

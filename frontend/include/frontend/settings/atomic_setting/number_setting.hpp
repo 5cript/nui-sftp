@@ -4,6 +4,8 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
+#include <script-nui-components/text_input.hpp>
+
 #include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/nil.hpp>
@@ -29,9 +31,7 @@ class NumberSetting : public Setting<Disengageable, ValueType>
     using SettingBase = Setting<Disengageable, ValueType>;
 
     using SettingBase::state_;
-    using SettingBase::engaged_;
-    using SettingBase::inheritedState_;
-    using SettingBase::inheritanceStatus_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
@@ -95,7 +95,7 @@ class NumberSetting : public Setting<Disengageable, ValueType>
     }
 
   private:
-    ValueType retrieveValueFromEvent(Nui::val event)
+    ValueType convertValue(std::string const& valueString)
     {
         try
         {
@@ -105,7 +105,6 @@ class NumberSetting : public Setting<Disengageable, ValueType>
                     [[fallthrough]];
                 case NumberBase::Decimal:
                 {
-                    const auto valueString = event["target"]["value"].as<std::string>();
                     ValueType result;
                     std::stringstream ss(valueString);
                     ss >> result;
@@ -113,15 +112,13 @@ class NumberSetting : public Setting<Disengageable, ValueType>
                 }
                 case NumberBase::Hexadecimal:
                 {
-                    const auto valueStr = event["target"]["value"].as<std::string>();
-                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 16));
+                    return static_cast<ValueType>(std::stoul(valueString, nullptr, 16));
                 }
                 case NumberBase::Octal:
                 {
-                    const auto valueStr = event["target"]["value"].as<std::string>();
-                    if (valueStr.starts_with("0o") || valueStr.starts_with("0O"))
-                        return static_cast<ValueType>(std::stoul(valueStr.substr(2), nullptr, 8));
-                    return static_cast<ValueType>(std::stoul(valueStr, nullptr, 8));
+                    if (valueString.starts_with("0o") || valueString.starts_with("0O"))
+                        return static_cast<ValueType>(std::stoul(valueString.substr(2), nullptr, 8));
+                    return static_cast<ValueType>(std::stoul(valueString, nullptr, 8));
                 }
             }
         }
@@ -162,7 +159,7 @@ class NumberSetting : public Setting<Disengageable, ValueType>
         using namespace Nui::Attributes;
         using Nui::Elements::input;
 
-        std::string type = "number";
+        std::string type = "text";
         std::optional<std::string> validationPattern;
         if (args_.numberBase)
         {
@@ -181,63 +178,36 @@ class NumberSetting : public Setting<Disengageable, ValueType>
                     break;
             }
         }
-        if (args_.asRangeType)
-            type = "range";
+        // TODO: Reintroduce
+        // if (args_.asRangeType)
+        //     type = "range";
 
-        return input{
-            class_ = "setting-number-input",
-            observeEngagedToBool("disabled"_attr),
-            Nui::Attributes::type = type,
-            min = args_.minValue,
-            max = args_.maxValue,
-            step = args_.stepValue,
-            pattern = validationPattern,
-            value = Nui::observe(engaged_, state_, inheritedState_, inheritanceStatus_)
-                .generate(
-                    [this](
-                        bool engaged,
-                        ValueType const& value,
-                        std::optional<ValueType> const& inheritedValue,
-                        SettingBase::InheritanceStatus status
-                    )
+        return ScriptNuiComponents::textInput(
+            ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
+                .value = stateWithInheritance_,
+                .attributes =
                     {
-                        if (!engaged && inheritedValue && status == SettingBase::InheritanceStatus::AncestorEngaged)
-                            return valueToString(*inheritedValue);
-                        return valueToString(value);
-                    }
-                ),
-            "keyup"_event =
-                [this, type](Nui::WebApi::KeyboardEvent event)
-            {
-                const auto valueUnsanitized = retrieveValueFromEvent(event.val());
-                const auto sanitized = std::clamp(
-                    valueUnsanitized,
-                    args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
-                    args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
-                );
-                Log::debug(
-                    "clamping value input '{}' of type '{}' to range [{}, {}] = '{}'",
-                    valueUnsanitized,
-                    type,
-                    args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
-                    args_.maxValue.value_or(std::numeric_limits<ValueType>::max()),
-                    sanitized
-                );
-                if (valueUnsanitized != sanitized)
-                    event.target().set("value", valueToString(sanitized));
-            },
-            "change"_event =
-                [this](Nui::val event)
-            {
-                const auto valueUnsanitized = retrieveValueFromEvent(event);
-                state_ = std::clamp(
-                    valueUnsanitized,
-                    args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
-                    args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
-                );
-                onChange_();
-            },
-        }();
+                        observeEngagedToBool(disabled),
+                        pattern = validationPattern,
+                        Nui::Attributes::type = type,
+                    },
+                .onChange =
+                    [this, type](auto const& state, Nui::WebApi::Event const& event)
+                {
+                    const auto valueUnsanitized = convertValue(state);
+                    this->value(
+                        std::clamp(
+                            valueUnsanitized,
+                            args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
+                            args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
+                        )
+                    );
+                    this->valueIsValid_ = !event.target()["validity"]["patternMismatch"].as<bool>();
+                    onChange_();
+                },
+                .dontUpdateValue = true
+            }
+        );
     }
 
   private:

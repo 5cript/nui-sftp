@@ -1,10 +1,11 @@
 #include <frontend/settings/ssh_session_options.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 using namespace std::string_literals;
 
-SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange)
+SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
     : host{
           language->getObserved("settings", "sessionSettings", "host"),
           onChange,
@@ -41,18 +42,18 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange)
           onChange,
           valueReset(openSftpByDefault, onChange, Persistence::SshSessionOptions{}.openSftpByDefault)
       }
-    , sshOptions{onChange}
+    , sshOptions{onChange, inputDialog, multiInputDialog}
     , sftpOptions{onChange}
 {}
 
 void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) const
 {
-    state.host = host.value();
-    state.port = port.value();
-    state.user = user.value();
-    state.sshKeyPublic = sshKeyPublic.value();
-    state.sshKeyPrivate = sshKeyPrivate.value();
-    state.openSftpByDefault = openSftpByDefault.value();
+    assignIfValid(state.host, host);
+    assignIfValid(state.port, port);
+    assignIfValid(state.user, user);
+    assignIfValid(state.sshKeyPublic, sshKeyPublic);
+    assignIfValid(state.sshKeyPrivate, sshKeyPrivate);
+    assignIfValid(state.openSftpByDefault, openSftpByDefault);
     sshOptions.applyToState(state.sshOptions.value());
     sftpOptions.applyToState(state.sftpOptions.value());
 

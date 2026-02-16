@@ -3,6 +3,8 @@
 #include <persistence/state/termios.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/optional_converters.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -850,25 +852,25 @@ void TermiosSettings::applyToState(Persistence::Termios& state) const
     if (ccEngaged.value())
     {
         state.cc = Persistence::Termios::CC{
-            .VDISCARD_ = cc.VDISCARD.value(),
-            .VDSUSP_ = cc.VDSUSP.value(),
-            .VEOF_ = cc.VEOF.value(),
-            .VEOL_ = cc.VEOL.value(),
-            .VEOL2_ = cc.VEOL2.value(),
-            .VERASE_ = cc.VERASE.value(),
-            .VINTR_ = cc.VINTR.value(),
-            .VKILL_ = cc.VKILL.value(),
-            .VLNEXT_ = cc.VLNEXT.value(),
-            .VMIN_ = cc.VMIN.value(),
-            .VQUIT_ = cc.VQUIT.value(),
-            .VREPRINT_ = cc.VREPRINT.value(),
-            .VSTART_ = cc.VSTART.value(),
-            .VSTATUS_ = cc.VSTATUS.value(),
-            .VSTOP_ = cc.VSTOP.value(),
-            .VSUSP_ = cc.VSUSP.value(),
-            .VSWTCH_ = cc.VSWTCH.value(),
-            .VTIME_ = cc.VTIME.value(),
-            .VWERASE_ = cc.VWERASE.value(),
+            .VDISCARD_ = cc.VDISCARD.valueIsValid() ? cc.VDISCARD.value() : Persistence::Termios::CC{}.VDISCARD_,
+            .VDSUSP_ = cc.VDSUSP.valueIsValid() ? cc.VDSUSP.value() : Persistence::Termios::CC{}.VDSUSP_,
+            .VEOF_ = cc.VEOF.valueIsValid() ? cc.VEOF.value() : Persistence::Termios::CC{}.VEOF_,
+            .VEOL_ = cc.VEOL.valueIsValid() ? cc.VEOL.value() : Persistence::Termios::CC{}.VEOL_,
+            .VEOL2_ = cc.VEOL2.valueIsValid() ? cc.VEOL2.value() : Persistence::Termios::CC{}.VEOL2_,
+            .VERASE_ = cc.VERASE.valueIsValid() ? cc.VERASE.value() : Persistence::Termios::CC{}.VERASE_,
+            .VINTR_ = cc.VINTR.valueIsValid() ? cc.VINTR.value() : Persistence::Termios::CC{}.VINTR_,
+            .VKILL_ = cc.VKILL.valueIsValid() ? cc.VKILL.value() : Persistence::Termios::CC{}.VKILL_,
+            .VLNEXT_ = cc.VLNEXT.valueIsValid() ? cc.VLNEXT.value() : Persistence::Termios::CC{}.VLNEXT_,
+            .VMIN_ = cc.VMIN.valueIsValid() ? cc.VMIN.value() : Persistence::Termios::CC{}.VMIN_,
+            .VQUIT_ = cc.VQUIT.valueIsValid() ? cc.VQUIT.value() : Persistence::Termios::CC{}.VQUIT_,
+            .VREPRINT_ = cc.VREPRINT.valueIsValid() ? cc.VREPRINT.value() : Persistence::Termios::CC{}.VREPRINT_,
+            .VSTART_ = cc.VSTART.valueIsValid() ? cc.VSTART.value() : Persistence::Termios::CC{}.VSTART_,
+            .VSTATUS_ = cc.VSTATUS.valueIsValid() ? cc.VSTATUS.value() : Persistence::Termios::CC{}.VSTATUS_,
+            .VSTOP_ = cc.VSTOP.valueIsValid() ? cc.VSTOP.value() : Persistence::Termios::CC{}.VSTOP_,
+            .VSUSP_ = cc.VSUSP.valueIsValid() ? cc.VSUSP.value() : Persistence::Termios::CC{}.VSUSP_,
+            .VSWTCH_ = cc.VSWTCH.valueIsValid() ? cc.VSWTCH.value() : Persistence::Termios::CC{}.VSWTCH_,
+            .VTIME_ = cc.VTIME.valueIsValid() ? cc.VTIME.value() : Persistence::Termios::CC{}.VTIME_,
+            .VWERASE_ = cc.VWERASE.valueIsValid() ? cc.VWERASE.value() : Persistence::Termios::CC{}.VWERASE_,
         };
     }
     else
@@ -876,8 +878,8 @@ void TermiosSettings::applyToState(Persistence::Termios& state) const
         state.cc = std::nullopt;
     }
 
-    state.iSpeed = iSpeed.value();
-    state.oSpeed = oSpeed.value();
+    assignIfValid(state.iSpeed, iSpeed);
+    assignIfValid(state.oSpeed, oSpeed);
 }
 
 void TermiosSettings::loadFromState(Persistence::Termios const& state)

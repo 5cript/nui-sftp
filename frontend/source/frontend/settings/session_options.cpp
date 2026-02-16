@@ -1,6 +1,7 @@
 #include <frontend/settings/session_options.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/session_icon_options.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 #include <log/log.hpp>
 
@@ -45,7 +46,13 @@
 
 using namespace std::string_literals;
 
-SessionOptions::SessionOptions(std::function<void()> const& onChange, std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout, ConfirmDialog* confirmDialog, InputDialog* newItemDialog)
+SessionOptions::SessionOptions(
+    std::function<void()> const& onChange,
+    std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
+    ConfirmDialog& confirmDialog,
+    InputDialog& newItemDialog,
+    MultiInputDialog& multiInputDialog
+)
     : terminalEngineType{
           {
               Persistence::TerminalEngineType::shell,
@@ -179,16 +186,16 @@ SessionOptions::SessionOptions(std::function<void()> const& onChange, std::funct
     , terminalOptions{onChange}
     , termios{onChange}
     , queueOptions{onChange}
-    , executingSessionOptions{onChange}
-    , sshSessionOptions{onChange}
+    , executingSessionOptions{onChange, newItemDialog, multiInputDialog}
+    , sshSessionOptions{onChange, newItemDialog, multiInputDialog}
 {}
 
 void SessionOptions::applyToState(Persistence::SessionOptions& state) const
 {
-    state.type = terminalEngineType.value();
-    state.icon = icon.value();
-    state.orderBy = orderBy.value();
-    state.startupSession = isStartupSession.value();
+    assignIfValid(state.type, terminalEngineType);
+    assignIfValid(state.icon, icon);
+    assignIfValid(state.orderBy, orderBy);
+    assignIfValid(state.startupSession, isStartupSession);
     state.layouts = layout.value();
     terminalOptions.applyToState(state.terminalOptions.value());
     termios.applyToState(state.termios.value());

@@ -20,6 +20,7 @@ class BoolSetting : public Setting<Disengageable, bool>
   public:
     using SettingBase = Setting<Disengageable, bool>;
 
+    using SettingBase::state_;
     using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
@@ -37,13 +38,14 @@ class BoolSetting : public Setting<Disengageable, bool>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ScriptNuiComponents::Switch{}(
-                ScriptNuiComponents::Switch::Options<decltype(stateWithInheritance_)>{
+            ScriptNuiComponents::switch_(
+                ScriptNuiComponents::SwitchOptions<decltype(stateWithInheritance_)>{
                     .isChecked = stateWithInheritance_,
                     .attributes = {
                         observeEngagedToBool(disabled)
                     },
-                    .onChange = [this](bool, Nui::WebApi::MouseEvent const&){
+                    .onChange = [this](bool state, Nui::WebApi::MouseEvent const&){
+                        this->value(state);
                         onChange_();
                     },
                 }

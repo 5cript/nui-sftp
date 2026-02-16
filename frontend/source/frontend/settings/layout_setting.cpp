@@ -11,12 +11,12 @@ LayoutSetting::LayoutSetting(
     LanguageObservedText helpText,
     std::function<void()> onChange,
     std::function<std::optional<nlohmann::json>()> obtainCurrentLayout,
-    ConfirmDialog* confirmDialog,
-    InputDialog* newItemDialog
+    ConfirmDialog& confirmDialog,
+    InputDialog& newItemDialog
 )
     : SettingBase{std::move(helpText), std::move(onChange), []() {}}
-    , confirmDialog_{confirmDialog}
-    , newItemDialog_{newItemDialog}
+    , confirmDialog_{&confirmDialog}
+    , newItemDialog_{&newItemDialog}
     , selected_{}
     , obtainCurrentLayout_{std::move(obtainCurrentLayout)}
 {}

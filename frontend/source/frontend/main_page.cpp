@@ -8,6 +8,7 @@
 #include <utility/language.hpp>
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/input_dialog.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -22,6 +23,7 @@ struct MainPage::Implementation
     InputDialog newItemAskDialog;
     FilePropertyDialog filePropertyDialog;
     PasswordPrompter prompter;
+    MultiInputDialog multiInputDialog;
     Sidebar sidebar;
     Toolbar toolbar;
     SessionArea sessionArea;
@@ -36,12 +38,13 @@ struct MainPage::Implementation
         , newItemAskDialog{"AskDialog"}
         , filePropertyDialog{"FilePropertyDialog"}
         , prompter{}
+        , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events, &confirmDialog}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
-        },&newItemAskDialog, &confirmDialog}
+        }, newItemAskDialog, confirmDialog, multiInputDialog}
         , darkMode{true}
         , setupWait{}
     {

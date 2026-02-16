@@ -66,6 +66,7 @@ struct Settings::Implementation
     FrontendEvents* events;
     InputDialog* inputDialog;
     ConfirmDialog* confirmDialog;
+    MultiInputDialog* multiInputDialog;
     NewSessionDialog newSessionDialog{"settings"};
     Nui::ThrottledFunction throttledSave{};
     Nui::ThrottledFunction throttledReloadInheritance{};
@@ -94,16 +95,18 @@ struct Settings::Implementation
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
-        InputDialog* inputDialog,
-        ConfirmDialog* confirmDialog,
+        InputDialog& inputDialog,
+        ConfirmDialog& confirmDialog,
+        MultiInputDialog& multiInputDialog,
         std::invocable auto const& onChange,
         std::invocable auto const& reloadInheritance
     )
         : stateHolder{stateHolder}
         , events{events}
-        , inputDialog{inputDialog}
-        , confirmDialog{confirmDialog}
-        , generalSettings{onChange, events}
+        , inputDialog{&inputDialog}
+        , confirmDialog{&confirmDialog}
+        , multiInputDialog{&multiInputDialog}
+        , generalSettings{onChange, events, multiInputDialog}
         , termiosSettings{[onChange, reloadInheritance]()
               {
                   onChange();
@@ -113,7 +116,7 @@ struct Settings::Implementation
               {
                   onChange();
                   reloadInheritance();
-              }}
+              }, inputDialog, multiInputDialog}
         , sftpOptions{[onChange, reloadInheritance]()
               {
                   onChange();
@@ -129,7 +132,7 @@ struct Settings::Implementation
                   onChange();
                   reloadInheritance();
               }}
-        , currentSessionOptions{onChange, obtainCurrentLayout, confirmDialog, inputDialog}
+        , currentSessionOptions{onChange, obtainCurrentLayout, confirmDialog, inputDialog, multiInputDialog}
     {}
 };
 
@@ -137,8 +140,9 @@ Settings::Settings(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
     std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
-    InputDialog* inputDialog,
-    ConfirmDialog* confirmDialog
+    InputDialog& inputDialog,
+    ConfirmDialog& confirmDialog,
+    MultiInputDialog& multiInputDialog
 )
     : impl_{std::make_unique<Implementation>(
           stateHolder,
@@ -146,6 +150,7 @@ Settings::Settings(
           obtainCurrentLayout,
           inputDialog,
           confirmDialog,
+          multiInputDialog,
           [this]()
           {
               if (impl_->throttledSave.valid())

@@ -1,9 +1,11 @@
 #pragma once
 
-#include "nui/frontend/elements/button.hpp"
 #include <frontend/settings/atomic_setting/setting.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
+
+#include <script-nui-components/text_input.hpp>
+#include <script-nui-components/button.hpp>
 
 #include <nui/frontend/filesystem/file_dialog.hpp>
 #include <nui/frontend/elements/div.hpp>
@@ -29,8 +31,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
     using Type = PathSettingType;
 
     using SettingBase::state_;
-    using SettingBase::inheritedState_;
-    using SettingBase::inheritanceStatus_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
@@ -115,21 +116,27 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
             div{
                 class_ = "setting-path"
             }(
-                input{
-                    class_ = "setting-input",
-                    value = SettingBase::observedValueWithInheritance(),
-                    observeEngagedToBool(disabled),
-                    "blur"_event = [this](Nui::val event){
-                        state_ = event["target"]["value"].as<std::string>();
-                        onChange_();
+                ScriptNuiComponents::textInput(
+                    ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
+                        .value = stateWithInheritance_,
+                        .attributes = {observeEngagedToBool(disabled)},
+                        .onChange = [this](auto const& state, Nui::WebApi::Event const&){
+                            this->value(std::filesystem::path{state});
+                            onChange_();
+                        },
+                        .dontUpdateValue = true
                     }
-                }(),
-                button{
-                    observeEngagedToBool(disabled),
-                    onClick = [this](){
-                        openDialog();
-                    }
-                }("Browse")
+                ),
+                ScriptNuiComponents::button(ScriptNuiComponents::ButtonOptions{
+                    .text = language->get("settings", "pathSetting", "browseButton"),
+                    .attributes = {
+                        observeEngagedToBool(disabled),
+                        onClick = [this](auto const&){
+                            openDialog();
+                        }
+                    },
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Regular,
+                })
             ),
             reset(),
             help()

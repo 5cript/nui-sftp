@@ -1,10 +1,11 @@
 #include <frontend/settings/executing_session_options.hpp>
 
 #include <frontend/settings/nullopt_reset.hpp>
+#include <frontend/settings/setting_helper.hpp>
 
 using namespace std::string_literals;
 
-ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& onChange)
+ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
     : isPty{
         language->getObserved("settings", "sessionOptions", "executingSessionOptions", "isPtyHelpText"),
         onChange,
@@ -18,11 +19,13 @@ ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& on
     }
     , arguments{
         language->getObserved("settings", "sessionOptions", "executingSessionOptions", "argumentsHelpText"),
+        inputDialog,
         onChange,
         nulloptReset(arguments, onChange)
     }
     , environment{
         language->getObserved("settings", "sessionOptions", "executingSessionOptions", "environmentHelpText"),
+        multiInputDialog,
         onChange,
         nulloptReset(environment, onChange)
     }
@@ -44,12 +47,12 @@ ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& on
 
 void ExecutingSessionOptions::applyToState(Persistence::ExecutingSessionOptions& state) const
 {
-    state.isPty = isPty.value();
-    state.command = command.value();
-    state.arguments = arguments.value();
-    state.environment = environment.value();
-    state.exitTimeoutSeconds = exitTimeoutSeconds.value();
-    state.cleanEnvironment = cleanEnvironment.value();
+    assignIfValid(state.isPty, isPty);
+    assignIfValid(state.command, command);
+    assignIfValid(state.arguments, arguments);
+    assignIfValid(state.environment, environment);
+    assignIfValid(state.exitTimeoutSeconds, exitTimeoutSeconds);
+    assignIfValid(state.cleanEnvironment, cleanEnvironment);
 }
 
 void ExecutingSessionOptions::loadFromState(Persistence::ExecutingSessionOptions const& state, bool)
