@@ -131,8 +131,8 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ScriptNuiComponents::Select{}(
-                ScriptNuiComponents::Select::Options<decltype(stateWithInheritance_), decltype(availableStates_)>{
+            ScriptNuiComponents::select(
+                ScriptNuiComponents::SelectOptions<decltype(stateWithInheritance_), decltype(availableStates_)>{
                     .activeOption = stateWithInheritance_,
                     .options = availableStates_,
                     .attributes = {

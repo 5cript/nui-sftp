@@ -4,6 +4,8 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
+#include <script-nui-components/text_input.hpp>
+
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/input.hpp>
 #include <nui/frontend/attributes/impl/attribute_factory.hpp>
@@ -18,8 +20,7 @@ class TextSetting : public Setting<Disengageable, std::string>
     using SettingBase = Setting<Disengageable, std::string>;
 
     using SettingBase::state_;
-    using SettingBase::inheritedState_;
-    using SettingBase::inheritanceStatus_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
@@ -36,15 +37,15 @@ class TextSetting : public Setting<Disengageable, std::string>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            input{
-                class_ = "setting-input",
-                value = SettingBase::observedValueWithInheritance(),
-                observeEngagedToBool(disabled),
-                "blur"_event = [this](Nui::val event){
-                    state_ = event["target"]["value"].as<std::string>();
+            ScriptNuiComponents::textInput(ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
+                .value = stateWithInheritance_,
+                .attributes = {observeEngagedToBool(disabled)},
+                .onChange = [this](auto const& state, Nui::WebApi::Event const&){
+                    this->value(state);
                     onChange_();
-                }
-            }(),
+                },
+                .dontUpdateValue = true
+            }),
             reset(),
             help()
         );

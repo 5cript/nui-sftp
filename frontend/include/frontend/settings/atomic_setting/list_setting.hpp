@@ -1,19 +1,15 @@
 #pragma once
 
 #include <frontend/settings/atomic_setting/setting.hpp>
+#include <frontend/dialog/input_dialog.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 #include <ids/id.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/switch.hpp>
-#include <ui5/components/table.hpp>
-#include <ui5/components/dialog.hpp>
-#include <ui5/components/input.hpp>
-#include <ui5/components/button.hpp>
-#include <ui5/components/toolbar.hpp>
-#include <ui5/components/toolbar_button.hpp>
+#include <script-nui-components/resizeable_table.hpp>
+#include <svgs/delete.hpp>
 
+#include <nui/event_system/listen.hpp>
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/span.hpp>
 #include <nui/frontend/elements/section.hpp>
@@ -29,24 +25,133 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
     using ListType = std::vector<std::string>;
 
     using SettingBase::state_;
-    using SettingBase::inheritedState_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
     using SettingBase::isEngaged;
-    using SettingBase::engaged_;
     using SettingBase::observeEngagedToBool;
 
-    ListSetting(LanguageObservedText helpText, std::invocable auto&& onChange, std::invocable auto&& resetAction)
+    ListSetting(
+        LanguageObservedText helpText,
+        InputDialog& inputDialog,
+        std::invocable auto&& onChange,
+        std::invocable auto&& resetAction
+    )
         : SettingBase{
               std::move(helpText),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction)
           }
         , elementIdPrefix_{Ids::generateId().id()}
-    {}
+        , inputDialog_{&inputDialog}
+        , table_{std::make_shared<ScriptNuiComponents::ResizableTable>(
+              ScriptNuiComponents::ResizableTable::HeaderRow{
+                  {std::string{language->get("settings", "listSettings", "valueName")}},
+                  // Delete Item Row:
+                  ScriptNuiComponents::ResizableTable::HeaderTableCell{
+                      .content = std::string{},
+                      .initialWidth = 40,
+                      .resizeable = false
+                  }
+              },
+              // No Footer required.
+              std::nullopt,
+              ScriptNuiComponents::ResizableTable::AddFeature{
+                  .onAdd =
+                      [this](auto const&)
+                  {
+                      if (!isEngaged())
+                          return;
+                      inputDialog_->open(
+                          InputDialog::OpenOptions{
+                              .whatFor = "",
+                              .prompt = language->get("settings", "listSettings", "addItemPrompt"),
+                              .headerText = language->get("settings", "listSettings", "addItemHeader"),
+                              .onConfirm = [this](std::optional<std::string> const& result)
+                              {
+                                  if (!result) // The dialog was closed without confirming
+                                      return;
+                                  if (result->empty()) // The dialog was confirmed with an empty value
+                                      return;
 
-    // TODO: Proper inheritance support for lists
+                                  auto currentList = state_.value();
+                                  currentList.push_back(*result);
+                                  this->value(currentList);
+                                  onChange_();
+                              },
+                          }
+                      );
+                  },
+                  .addNewEntryText = language->get("settings", "listSettings", "addItemText")
+              }
+          )}
+        , selfAlive_{std::make_shared<bool>(true)}
+    {
+        Nui::listen(
+            stateWithInheritance_,
+            [this,
+                weakTable = std::weak_ptr<ScriptNuiComponents::ResizableTable>(table_),
+                selfAlive = selfAlive_](std::vector<std::string> const& list)
+            {
+                using namespace ScriptNuiComponents;
+                using namespace std::string_literals;
+
+                // Should realistically never occur, but stateWithInheritance_ survives this derived class, lets not
+                // make useAfterFree bugs.
+                if (!*selfAlive)
+                    return;
+
+                auto table = weakTable.lock();
+                if (!table)
+                    return;
+
+                if (!isEngaged())
+                {
+                    table->clear();
+                    return;
+                }
+
+                std::vector<ResizableTable::TableRow> rows;
+                for (const auto& element : list)
+                {
+                    rows.push_back(
+                        ResizableTable::TableRow{
+                            element,
+                            ResizableTable::TableCell{
+                                [this](std::unique_ptr<ResizableTable::ISelfController> controller)
+                                    -> Nui::ElementRenderer
+                                {
+                                    // std::function must be copiable
+                                    std::shared_ptr<ResizableTable::ISelfController> sharedController =
+                                        std::move(controller);
+
+                                    return button({
+                                        .icon = GeneratedSvgs::delete_(),
+                                        .attributes = {
+                                            Nui::Attributes::onClick =
+                                                [this, controller = std::move(sharedController)](auto const&)
+                                            {
+                                                state_.value().erase(state_.value().begin() + controller->row());
+                                                controller->remove();
+                                            }
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                    );
+                }
+                table->setRows(rows);
+            }
+        );
+    }
+
+    ~ListSetting()
+    {
+        *selfAlive_ = false;
+    }
+
     Nui::ElementRenderer operator()(auto&& labelText)
     {
         using namespace Nui::Attributes;
@@ -56,78 +161,9 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
 
         // clang-format off
         return div{}(
-            ui5::dialog{
-                reference = dialog_,
-                "header-text"_attr = language->getObserved("settings", "listSettings", "addItemText"),
-            }(
-                section{
-                    class_ = "list-setting-add-entry-container",
-                }(
-                    div{}(
-                        ui5::label{
-                            "for"_attr = elementIdPrefix_ + "-value-input",
-                            style = "margin: 10px 0 5px 0;",
-                        }(language->getObserved("settings", "listSettings", "itemValue")),
-                        ui5::input{
-                            "id"_attr = elementIdPrefix_ + "-value-input",
-                            reference = valueInput_,
-                            "placeholder"_attr = language->getObserved("settings", "listSettings", "itemValue"),
-                        }()
-                    )
-                ),
-                ui5::toolbar{
-                    "slot"_attr = "footer",
-                }(
-                    ui5::toolbar_button{
-                        "design"_prop = "Emphasized",
-                        "text"_prop = language->getObserved("settings", "listSettings", "addItemText"),
-                        "click"_event = [this]() {
-                            auto valueInput = valueInput_.lock();
-                            auto dialog = dialog_.lock();
-
-                            if (!valueInput || !dialog) {
-                                Log::error("ListSetting: Unable to add new entry, dialog or inputs are not available");
-                                return;
-                            }
-
-                            const auto value = valueInput->val()["value"].as<std::string>();
-
-                            if (!value.empty()) {
-                                state_->push_back(value);
-                                state_.modify();
-                                onChange_();
-                            }
-
-                            valueInput->val().set("value", "");
-                            dialog->val().set("open", false);
-                        }
-                    }(),
-                    ui5::toolbar_button{
-                        "design"_prop = "Transparent",
-                        "text"_prop = language->getObserved("cancel"),
-                        "click"_event = [this]() {
-                            auto valueInput = valueInput_.lock();
-                            auto dialog = dialog_.lock();
-
-                            if (valueInput)
-                                valueInput->val().set("value", "");
-
-                            if (dialog)
-                                dialog->val().set("open", false);
-                        }
-                    }()
-                )
-            ),
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            div{
-                class_ = "list-setting-table-container",
-            }(
-                observe(engaged_),
-                [this]() -> Nui::ElementRenderer {
-                    if (isEngaged())
-                        return tableContainer();
-                    return inheritedDisplay();
-                }
+            (*table_)(
+                {observeEngagedToBool(disabled)}
             ),
             reset(),
             help()
@@ -136,138 +172,11 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
     }
 
   private:
-    Nui::ElementRenderer inheritedDisplay()
-    {
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-        using Nui::Elements::section;
-
-        if (!*inheritedState_)
-        {
-            // clang-format off
-            return ui5::table{
-                "row-action-count"_attr = 1, class_ = "multi-setting-disabled-table"
-            }(
-                ui5::table_header_row{}(
-                    ui5::table_header_cell{}(language->getObserved("settings", "listSettings", "itemValue"))
-                )
-            );
-            // clang-format on
-        }
-
-        // clang-format off
-        return ui5::table{
-            "row-action-count"_attr = 1,
-            class_ = "multi-setting-disabled-table"
-        }(
-            Nui::range(**inheritedState_).before(
-                ui5::table_header_row{
-                    "slot"_attr = "headerRow"
-                }(
-                    ui5::table_header_cell{}(
-                        span{
-                            style = "margin-right: 8px;"
-                        }(language->getObserved("settings", "listSettings", "itemValue")),
-                        ui5::button{
-                            class_ = "multi-setting-key-add-button",
-                            "design"_prop = "Transparent",
-                            "icon"_prop = "add",
-                            "click"_event = [this]() {
-                                if (!isEngaged())
-                                    return;
-                                auto dialog = dialog_.lock();
-                                if (dialog)
-                                    dialog->val().set("open", true);
-                            }
-                        }()
-                    )
-                )
-            ),
-            [this](long long index, std::string const& element) {
-                return ui5::table_row{
-                    "row-key"_attr = index
-                }(
-                    ui5::table_cell{}(element),
-                    ui5::table_row_action{
-                        "design"_prop = "Transparent",
-                        "slot"_attr = "actions",
-                        "icon"_prop = "delete",
-                        "text"_prop = "Delete",
-                        observeEngagedToBool("disabled"_prop),
-                        "tooltip"_prop = language->get("settings", "deleteEntry"),
-                        "click"_event = [this, index]() {
-                            state_->erase(state_->begin() + static_cast<std::size_t>(index));
-                            state_.modify();
-                            onChange_();
-                        },
-                    }()
-                );
-            }
-        );
-        // clang-format on
-    }
-
-    Nui::ElementRenderer tableContainer()
-    {
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-        using Nui::Elements::section;
-
-        // clang-format off
-        return ui5::table{
-            "row-action-count"_attr = 1,
-        }(
-            Nui::range(state_).before(
-                ui5::table_header_row{
-                    "slot"_attr = "headerRow"
-                }(
-                    ui5::table_header_cell{}(
-                        span{
-                            style = "margin-right: 8px;"
-                        }(language->getObserved("settings", "listSettings", "itemValue")),
-                        ui5::button{
-                            class_ = "multi-setting-key-add-button",
-                            "design"_prop = "Transparent",
-                            "icon"_prop = "add",
-                            "click"_event = [this]() {
-                                if (!isEngaged())
-                                    return;
-                                auto dialog = dialog_.lock();
-                                if (dialog)
-                                    dialog->val().set("open", true);
-                            }
-                        }()
-                    )
-                )
-            ),
-            [this](long long index, std::string const& element) {
-                return ui5::table_row{
-                    "row-key"_attr = index
-                }(
-                    ui5::table_cell{}(element),
-                    ui5::table_row_action{
-                        "design"_prop = "Transparent",
-                        "slot"_attr = "actions",
-                        "icon"_prop = "delete",
-                        "text"_prop = "Delete",
-                        observeEngagedToBool("disabled"_prop),
-                        "tooltip"_prop = language->get("settings", "deleteEntry"),
-                        "click"_event = [this, index]() {
-                            state_->erase(state_->begin() + static_cast<std::size_t>(index));
-                            state_.modify();
-                            onChange_();
-                        },
-                    }()
-                );
-            }
-        );
-        // clang-format on
-    }
-
-  private:
     std::string elementIdPrefix_;
-    std::weak_ptr<Nui::Dom::BasicElement> dialog_;
+    InputDialog* inputDialog_;
     std::weak_ptr<Nui::Dom::BasicElement> valueInput_;
+    std::shared_ptr<ScriptNuiComponents::ResizableTable> table_{};
+
+    // Keep last:
+    std::shared_ptr<bool> selfAlive_;
 };

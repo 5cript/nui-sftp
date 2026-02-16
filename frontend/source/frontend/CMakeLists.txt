@@ -12,6 +12,7 @@ target_sources(
         settings.cpp
         color.cpp
         dialog/input_dialog.cpp
+        dialog/multi_input_dialog.cpp
         dialog/password_prompter.cpp
         dialog/confirm_dialog.cpp
         dialog/new_session_dialog.cpp

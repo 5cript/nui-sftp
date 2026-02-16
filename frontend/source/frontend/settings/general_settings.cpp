@@ -8,7 +8,7 @@
 #include <svgs/incident.hpp>
 #include <svgs/hide.hpp>
 
-GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events)
+GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, MultiInputDialog& multiInputDialog)
     : logLevel{
         {
             Log::Level::Trace,
@@ -103,6 +103,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
             .fileGridExtensionIcons = MapSetting<>{
                 language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsHelpText"),
+                multiInputDialog,
                 onChange,
                 [this, onChange]()
                 {

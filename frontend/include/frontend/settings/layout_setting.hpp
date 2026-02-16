@@ -22,8 +22,8 @@ class LayoutSetting : public Setting<false, std::map<std::string, nlohmann::json
         LanguageObservedText helpText,
         std::function<void()> onChange,
         std::function<std::optional<nlohmann::json>()> obtainCurrentLayout,
-        ConfirmDialog* confirmDialog,
-        InputDialog* newItemDialog
+        ConfirmDialog& confirmDialog,
+        InputDialog& newItemDialog
     );
 
     Nui::ElementRenderer operator()();

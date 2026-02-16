@@ -1,11 +1,12 @@
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/optional_converters.hpp>
+#include <frontend/settings/setting_helper.hpp>
 #include <utility/enum_string_convert.hpp>
 
 #include <nui/frontend/elements.hpp>
 
-SshOptions::SshOptions(std::function<void()> const& onChange)
+SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
     : sshDirectory{
         language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
         PathSettingType::Directory,
@@ -140,11 +141,13 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
     },
     environment{
         language->getObserved("settings", "sshOptions", "environmentHelpText"),
+        multiInputDialog,
         onChange,
         nulloptReset(environment, onChange)
     },
     identities {
         language->getObserved("settings", "sshOptions", "identitiesHelpText"),
+        inputDialog,
         onChange,
         nulloptReset(identities, onChange)
     },
@@ -153,29 +156,29 @@ SshOptions::SshOptions(std::function<void()> const& onChange)
 
 void SshOptions::applyToState(Persistence::SshOptions& state) const
 {
-    state.sshDirectory = sshDirectory.value();
-    state.knownHostsFile = knownHostsFile.value();
-    state.tryAgentForAuthentication = tryAgentForAuthentication.value();
-    state.usePublicKeyAutoAuth = usePublicKeyAutoAuth.value();
-    state.usePasswordAuth = usePasswordAuth.value();
-    state.logVerbosity = logVerbosity.value();
-    state.keyExchangeAlgorithms = keyExchangeAlgorithms.value();
-    state.compressionClientToServer = compressionClientToServer.value();
-    state.compressionServerToClient = compressionServerToClient.value();
-    state.compressionLevel = compressionLevel.value();
-    state.strictHostKeyCheck = strictHostKeyCheck.value();
-    state.proxyCommand = proxyCommand.value();
-    state.proxyJump = proxyJump.value();
-    state.gssapiServerIdentity = gssapiServerIdentity.value();
-    state.gssapiClientIdentity = gssapiClientIdentity.value();
-    state.gssapiDelegateCredentials = gssapiDelegateCredentials.value();
-    state.noDelay = noDelay.value();
-    state.bypassConfig = bypassConfig.value();
-    state.identityAgent = identityAgent.value();
-    state.connectTimeoutSeconds = connectTimeoutSeconds.value();
-    state.connectTimeoutUSeconds = connectTimeoutUSeconds.value();
-    state.environment = environment.value();
-    state.identities = identities.value();
+    assignIfValid(state.sshDirectory, sshDirectory);
+    assignIfValid(state.knownHostsFile, knownHostsFile);
+    assignIfValid(state.tryAgentForAuthentication, tryAgentForAuthentication);
+    assignIfValid(state.usePublicKeyAutoAuth, usePublicKeyAutoAuth);
+    assignIfValid(state.usePasswordAuth, usePasswordAuth);
+    assignIfValid(state.logVerbosity, logVerbosity);
+    assignIfValid(state.keyExchangeAlgorithms, keyExchangeAlgorithms);
+    assignIfValid(state.compressionClientToServer, compressionClientToServer);
+    assignIfValid(state.compressionServerToClient, compressionServerToClient);
+    assignIfValid(state.compressionLevel, compressionLevel);
+    assignIfValid(state.strictHostKeyCheck, strictHostKeyCheck);
+    assignIfValid(state.proxyCommand, proxyCommand);
+    assignIfValid(state.proxyJump, proxyJump);
+    assignIfValid(state.gssapiServerIdentity, gssapiServerIdentity);
+    assignIfValid(state.gssapiClientIdentity, gssapiClientIdentity);
+    assignIfValid(state.gssapiDelegateCredentials, gssapiDelegateCredentials);
+    assignIfValid(state.noDelay, noDelay);
+    assignIfValid(state.bypassConfig, bypassConfig);
+    assignIfValid(state.identityAgent, identityAgent);
+    assignIfValid(state.connectTimeoutSeconds, connectTimeoutSeconds);
+    assignIfValid(state.connectTimeoutUSeconds, connectTimeoutUSeconds);
+    assignIfValid(state.environment, environment);
+    assignIfValid(state.identities, identities);
 }
 
 void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)

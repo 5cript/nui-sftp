@@ -110,7 +110,7 @@ class Setting
         if (value)
             this->value(*value);
         else
-            this->value(ValueType{});
+            updateStateWithInheritance();
     }
     void updateStateWithInheritance()
     {
@@ -121,22 +121,6 @@ class Setting
                 return inheritedState_->value();
             return state_.value();
         }();
-    }
-    // TODO: Remove
-    auto observedValueWithInheritance()
-    {
-        return observe(engaged_, state_, inheritedState_, inheritanceStatus_)
-            .generate(
-                [](bool engaged,
-                    ValueType const& value,
-                    std::optional<ValueType> const& inheritedValue,
-                    InheritanceStatus status)
-                {
-                    if (!engaged && inheritedValue && status == InheritanceStatus::AncestorEngaged)
-                        return *inheritedValue;
-                    return value;
-                }
-            );
     }
 
     InheritanceStatus inheritanceStatus() const
@@ -216,15 +200,16 @@ class Setting
         else
         {
             return Nui::Elements::fragment(
-                ScriptNuiComponents::Switch{}(ScriptNuiComponents::Switch::Options<decltype(engaged_)>{
-                    .isChecked = engaged_,
-                    .attributes = {class_ = "setting-disengage-checkbox"},
-                    .onChange =
-                        [this](bool, Nui::WebApi::MouseEvent const&)
-                    {
-                        onChange_();
+                ScriptNuiComponents::switch_(
+                    ScriptNuiComponents::SwitchOptions<decltype(engaged_)>{
+                        .isChecked = engaged_,
+                        .onChange =
+                            [this](bool, Nui::WebApi::MouseEvent const&)
+                        {
+                            onChange_();
+                        }
                     }
-                }),
+                ),
                 div{class_ = "setting-disengageable"}(
                     span{
                         style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
@@ -269,17 +254,19 @@ class Setting
         using namespace Nui::Attributes;
         using namespace Nui::Elements;
 
-        return ScriptNuiComponents::Button{}(ScriptNuiComponents::Button::Options{
-            .icon = GeneratedSvgs::refresh(),
-            .attributes =
-                {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
-                    onClick =
-                        [this]()
-                    {
-                        resetAction_();
-                    }},
-            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
-        });
+        return ScriptNuiComponents::button(
+            ScriptNuiComponents::ButtonOptions{
+                .icon = GeneratedSvgs::refresh(),
+                .attributes =
+                    {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
+                        onClick =
+                            [this]()
+                        {
+                            resetAction_();
+                        }},
+                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+            }
+        );
     }
 
     Nui::ElementRenderer help()
@@ -289,18 +276,25 @@ class Setting
 
         const auto idString = Ids::generateId().id();
 
-        return ScriptNuiComponents::Button{}(ScriptNuiComponents::Button::Options{
-            .icon = GeneratedSvgs::questionmark(),
-            .attributes =
-                {alt = helpText_,
-                    onClick =
-                        [this]()
-                    {
-                        // TODO: Replace with proper popover instead of alert
-                        Nui::val::global("alert")(helpText_.value());
-                    }},
-            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
-        });
+        return ScriptNuiComponents::button(
+            ScriptNuiComponents::ButtonOptions{
+                .icon = GeneratedSvgs::questionmark(),
+                .attributes =
+                    {alt = helpText_,
+                        onClick =
+                            [this]()
+                        {
+                            // TODO: Replace with proper popover instead of alert
+                            Nui::val::global("alert")(helpText_.value());
+                        }},
+                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+            }
+        );
+    }
+
+    bool valueIsValid() const
+    {
+        return valueIsValid_;
     }
 
   protected:
@@ -313,6 +307,7 @@ class Setting
     Nui::Observed<bool>* externalDisengage_;
     LanguageObservedText helpText_;
     Nui::Observed<InheritanceStatus> inheritanceStatus_{InheritanceStatus::NoAncestor};
+    bool valueIsValid_{true};
 };
 
 template <typename ValueType>
