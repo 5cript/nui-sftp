@@ -1,0 +1,10 @@
+.multi-input-dialog-section {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.5em 1em;
+}
+
+.multi-input-dialog-field {
+    display: grid;
+    grid-template-columns: subgrid;
+}

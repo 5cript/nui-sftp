@@ -113,6 +113,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->prompter.dialog(),
         impl_->confirmDialog(),
         impl_->filePropertyDialog(),
+        impl_->multiInputDialog(),
         impl_->settings(),
         div{
             style = "background-color: var(--sapBackgroundColor); color: var(--sapTextColor);",

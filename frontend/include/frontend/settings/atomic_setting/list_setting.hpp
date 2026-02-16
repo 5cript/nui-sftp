@@ -174,7 +174,6 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
   private:
     std::string elementIdPrefix_;
     InputDialog* inputDialog_;
-    std::weak_ptr<Nui::Dom::BasicElement> valueInput_;
     std::shared_ptr<ScriptNuiComponents::ResizableTable> table_{};
 
     // Keep last:

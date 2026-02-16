@@ -142,19 +142,6 @@
     }
 }
 
-.map-setting-table-container {
-    max-height: 300px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    -webkit-user-select: none;
-    user-select: none;
-
-    & ui5-table {
-        flex-grow: 1;
-    }
-}
-
 .map-setting-add-entry-container {
     display: flex;
     flex-direction: column;
