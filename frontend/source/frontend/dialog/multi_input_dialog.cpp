@@ -5,6 +5,7 @@
 #include <script-nui-components/text_input.hpp>
 #include <script-nui-components/button.hpp>
 
+#include <nui/frontend/api/keyboard_event.hpp>
 #include <ui5/components/dialog.hpp>
 #include <ui5/components/button.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -42,6 +43,17 @@ void MultiInputDialog::open(OpenOptions const& options)
     {
         diag->val().set("header-text", options.headerText);
         diag->val().set("open", true);
+        // Focus first input field:
+        if (!options.inputFields.empty())
+        {
+            const auto firstFieldSelector = fmt::format("[data-key=\"{}\"]", impl_->inputFields.value().front().key);
+            Nui::WebApi::Console::log("Focusing first input field with selector: {}", firstFieldSelector);
+            if (auto firstInput = diag->val().call<Nui::val>("querySelector", firstFieldSelector);
+                !firstInput.isNull() && !firstInput.isUndefined())
+            {
+                firstInput.call<void>("focus");
+            }
+        }
     }
 }
 
@@ -78,15 +90,57 @@ Nui::ElementRenderer MultiInputDialog::operator()()
         "headerText"_prop = impl_->headerText,
         reference = impl_->dialog,
     }(
-        section{class_ = "prompter-form"}(
+        section{
+            class_ = "multi-input-dialog-section",
+            tabIndex = 0
+        }(
             Nui::range(impl_->inputFields),
-            [this](long long, InputField const& field) -> Nui::ElementRenderer
+            [this](long long i, InputField const& field) -> Nui::ElementRenderer
             {
-                return div{class_ = "prompter-form-field"}(
+                const auto fieldsSize = static_cast<long long>(impl_->inputFields.value().size());
+
+                return div{class_ = "multi-input-dialog-field"}(
                     span{}(field.label),
                     Snc::textInput(
                         Snc::TextInputOptions<std::string>{
+                            .attributes = {
+                                "data-key"_attr = field.key,
+                                onKeyDown = [this, i, fieldsSize, key = field.key](Nui::WebApi::KeyboardEvent event)
+                                {
+                                    using namespace std::string_literals;
+                                    if (event.key() != "Enter")
+                                        return;
+
+                                    event.preventDefault();
+
+                                    // Set value for the current field
+                                    impl_->values[key] = event.target()["value"].as<std::string>();
+
+                                    if (i == fieldsSize - 1)
+                                    {
+                                        confirm();
+                                        return;
+                                    }
+                                    // Focus next input field
+                                    if (i < fieldsSize - 1)
+                                    {
+                                        const auto nextFieldSelector = fmt::format("[data-key=\"{}\"]", impl_->inputFields.value()[i + 1].key);
+                                        if (auto diag = impl_->dialog.lock(); diag)
+                                        {
+                                            if (auto nextInput = diag->val().call<Nui::val>("querySelector", nextFieldSelector); !nextInput.isNull() && !nextInput.isUndefined())
+                                            {
+                                                nextInput.call<void>("focus");
+                                            }
+                                            else
+                                            {
+                                                Nui::WebApi::Console::error("Could not find next input field with selector: {}", nextFieldSelector);
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                             .onChange = [this, field](std::string const& value, auto const&){
+                                Nui::WebApi::Console::log("Input changed for field {}: {}", field.key, value);
                                 impl_->values[field.key] = value;
                             },
                             .dontUpdateValue = true

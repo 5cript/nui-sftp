@@ -87,7 +87,7 @@ en_US:
       browseButton: "Browse"
     mapSettings:
       addItemText: "Add Element"
-      addItemHeader: "Add Element"
+      addEntryHeader: "Add Element"
       keyInputLabel: "Key"
       keyInputPlaceholder: "Enter key"
       valueInputLabel: "Value"
@@ -531,7 +531,7 @@ de_DE:
       browseButton: "Durchsuchen"
     mapSettings:
       addItemText: "Element hinzufügen"
-      addItemHeader: "Element hinzufügen"
+      addEntryHeader: "Element hinzufügen"
       keyInputLabel: "Schlüssel"
       keyInputPlaceholder: "Geben Sie den Schlüssel ein"
       valueInputLabel: "Wert"

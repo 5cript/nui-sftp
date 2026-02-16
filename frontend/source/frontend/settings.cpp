@@ -1471,10 +1471,9 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                 }();
             };
 
-            return div{class_ = "settings-group-key-container"}(
-                ui5::label{
-                    "design"_prop = "Bold",
-                }(language->getObserved("settings", "groupKey")),
+            return div{
+                class_ = "settings-group-key-container"
+            }(Nui::Elements::span{}(language->getObserved("settings", "groupKey")),
                 ui5::select{
                     "disabled"_prop = observe(*groupKeys)
                         .generate(
@@ -1530,8 +1529,7 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                         }(inheritKey);
                     }),
                 addGroupButton(),
-                removeGroupButton()
-            );
+                removeGroupButton());
         };
 
         auto makeSessionTypeFilteredDiv =

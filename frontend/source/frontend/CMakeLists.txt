@@ -155,6 +155,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/icon_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/multi_input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/new_session_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/operation_queue.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"

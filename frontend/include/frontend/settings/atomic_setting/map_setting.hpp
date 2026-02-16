@@ -6,15 +6,10 @@
 #include <log/log.hpp>
 #include <ids/id.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/switch.hpp>
-#include <ui5/components/table.hpp>
-#include <ui5/components/dialog.hpp>
-#include <ui5/components/input.hpp>
-#include <ui5/components/button.hpp>
-#include <ui5/components/toolbar.hpp>
-#include <ui5/components/toolbar_button.hpp>
+#include <script-nui-components/resizeable_table.hpp>
+#include <svgs/delete.hpp>
 
+#include <nui/event_system/listen.hpp>
 #include <nui/frontend/elements/div.hpp>
 #include <nui/frontend/elements/span.hpp>
 #include <nui/frontend/elements/section.hpp>
@@ -30,12 +25,13 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
     using MapType = std::map<std::string, std::string>;
 
     using SettingBase::state_;
-    using SettingBase::inheritedState_;
+    using SettingBase::stateWithInheritance_;
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
     using SettingBase::isEngaged;
-    using SettingBase::engaged_;
+    using SettingBase::observeEngagedToBool;
+    using SettingBase::updateStateWithInheritance;
 
     MapSetting(
         LanguageObservedText helpText,
@@ -50,7 +46,101 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
           }
         , elementIdPrefix_{Ids::generateId().id()}
         , multiInputDialog_{&multiInputDialog}
-    {}
+        , table_{std::make_shared<ScriptNuiComponents::ResizableTable>(
+              ScriptNuiComponents::ResizableTable::HeaderRow{
+                  {std::string{language->get("settings", "mapSettings", "keyName")}},
+                  {std::string{language->get("settings", "mapSettings", "valueName")}},
+                  // Delete Item Row:
+                  ScriptNuiComponents::ResizableTable::HeaderTableCell{
+                      .content = std::string{},
+                      .initialWidth = 40,
+                      .resizeable = false
+                  }
+              },
+              // No Footer required.
+              std::nullopt,
+              ScriptNuiComponents::ResizableTable::AddFeature{
+                  .onAdd =
+                      [this](auto const&)
+                  {
+                      if (!isEngaged())
+                      {
+                          return;
+                      }
+                      return openDialog();
+                  },
+                  .addNewEntryText = language->get("settings", "listSettings", "addItemText")
+              }
+          )}
+        , selfAlive_{std::make_shared<bool>(true)}
+    {
+        Nui::listen(
+            stateWithInheritance_,
+            [this,
+                weakTable = std::weak_ptr<ScriptNuiComponents::ResizableTable>(table_),
+                selfAlive = selfAlive_](std::map<std::string, std::string> const& map)
+            {
+                using namespace ScriptNuiComponents;
+                using namespace std::string_literals;
+
+                // Should realistically never occur, but stateWithInheritance_ survives this derived class, lets not
+                // make useAfterFree bugs.
+                if (!*selfAlive)
+                    return;
+
+                auto table = weakTable.lock();
+                if (!table)
+                    return;
+
+                if (!isEngaged())
+                {
+                    table->clear();
+                    return;
+                }
+
+                std::vector<ResizableTable::TableRow> rows;
+                for (const auto& [key, value] : map)
+                {
+                    rows.push_back(
+                        ResizableTable::TableRow{
+                            key,
+                            value,
+                            ResizableTable::TableCell{
+                                [this](std::unique_ptr<ResizableTable::ISelfController> controller)
+                                    -> Nui::ElementRenderer
+                                {
+                                    // std::function must be copiable
+                                    std::shared_ptr<ResizableTable::ISelfController> sharedController =
+                                        std::move(controller);
+
+                                    return button({
+                                        .icon = GeneratedSvgs::delete_(),
+                                        .attributes = {
+                                            Nui::Attributes::onClick =
+                                                [this, controller = std::move(sharedController)](auto const&)
+                                            {
+                                                const auto key = std::get<std::string>(controller->rowData()[0]);
+                                                state_->erase(key);
+                                                updateStateWithInheritance();
+                                                state_.modifyNow();
+                                                onChange_();
+                                            }
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                    );
+                }
+                table->setRows(rows);
+            }
+        );
+    }
+
+    ~MapSetting()
+    {
+        *selfAlive_ = false;
+    }
 
     Nui::ElementRenderer operator()(auto&& labelText)
     {
@@ -62,15 +152,8 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            div{
-                class_ = "map-setting-table-container"
-            }(
-                observe(engaged_),
-                [this]() -> Nui::ElementRenderer {
-                    if (isEngaged())
-                        return tableContainer();
-                    return inheritedDisplay();
-                }
+            (*table_)(
+                {observeEngagedToBool(disabled)}
             ),
             reset(),
             help()
@@ -99,157 +182,54 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
                     },
                 .onConfirm = [this](std::optional<std::unordered_map<std::string, std::string>> const& result)
                 {
+                    Nui::WebApi::Console::log(
+                        "Dialog confirmed with result: {}", result ? "value present" : "no value"
+                    );
                     if (!result)
-                        return;
-                    if (result->empty())
-                        return;
-
-                    auto& mapState = *state_;
-                    for (const auto& [key, value] : *result)
                     {
-                        mapState[key] = value;
+                        Nui::WebApi::Console::log("Dialog was cancelled, ignoring.");
+                        return;
                     }
-                    state_.modify();
+                    if (result->empty())
+                    {
+                        Nui::WebApi::Console::log("Dialog confirmed without input, ignoring.");
+                        return;
+                    }
+
+                    const auto keyIter = result->find("key");
+                    const auto valueIter = result->find("value");
+                    if (keyIter == result->end() || valueIter == result->end())
+                    {
+                        Nui::WebApi::Console::log(
+                            "Result from MultiInputDialog did not contain expected keys, ignoring."
+                        );
+                        return;
+                    }
+
+                    const auto key = keyIter->second;
+                    const auto value = valueIter->second;
+
+                    if (key.empty())
+                    {
+                        Nui::WebApi::Console::log("Tried to add entry with empty key, ignoring.");
+                        return;
+                    }
+
+                    Nui::WebApi::Console::log("Adding entry: {}={}", key, value);
+                    state_.value().emplace(key, value);
+                    updateStateWithInheritance();
+                    state_.modifyNow();
                     onChange_();
                 }
             }
         );
     }
 
-    Nui::ElementRenderer inheritedDisplay()
-    {
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-        using Nui::Elements::section;
-
-        if (!*inheritedState_)
-        {
-            // clang-format off
-            return ui5::table{
-                "row-action-count"_attr = 1, class_ = "multi-setting-disabled-table"
-            }(
-                ui5::table_header_row{
-                    "slot"_attr = "headerRow"
-                }(
-                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "keyName")),
-                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
-                )
-            );
-            // clang-format on
-        }
-
-        // clang-format off
-        return ui5::table{
-            "row-action-count"_attr = 1,
-            class_ = "multi-setting-disabled-table"
-        }(
-            Nui::range(**inheritedState_).before(
-                ui5::table_header_row{
-                    "slot"_attr = "headerRow"
-                }(
-                    ui5::table_header_cell{}(
-                        span{
-                            style = "margin-right: 8px;"
-                        }(language->getObserved("settings", "mapSettings", "keyName")),
-                        ui5::button{
-                            class_ = "multi-setting-key-add-button",
-                            "design"_prop = "Transparent",
-                            "icon"_prop = "add",
-                            "click"_event = [this]() {
-                                if (!isEngaged())
-                                    return;
-                                openDialog();
-                            }
-                        }()
-                    ),
-                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
-                )
-            ),
-            [this](long long index, std::pair<std::string, std::string> const& element) {
-                return ui5::table_row{
-                    "row-key"_attr = index
-                }(
-                    ui5::table_cell{}(element.first),
-                    ui5::table_cell{}(element.second),
-                    ui5::table_row_action{
-                        "design"_prop = "Transparent",
-                        "slot"_attr = "actions",
-                        "icon"_prop = "delete",
-                        "text"_prop = "Delete",
-                        "tooltip"_prop = language->get("settings", "mapSettings", "deleteEntry"),
-                        "click"_event = [this, key = element.first]() {
-                            state_->erase(key);
-                            state_.modify();
-                            onChange_();
-                        },
-                    }()
-                );
-            }
-        );
-        // clang-format on
-    }
-
-    Nui::ElementRenderer tableContainer()
-    {
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-        using Nui::Elements::section;
-
-        // clang-format off
-        return ui5::table{
-            "row-action-count"_attr = 1,
-        }(
-            Nui::range(state_).before(
-                ui5::table_header_row{
-                    "slot"_attr = "headerRow"
-                }(
-                    ui5::table_header_cell{}(
-                        span{
-                            style = "margin-right: 8px;"
-                        }(language->getObserved("settings", "mapSettings", "keyName")),
-                        ui5::button{
-                            class_ = "multi-setting-key-add-button",
-                            "design"_prop = "Transparent",
-                            "icon"_prop = "add",
-                            "click"_event = [this]() {
-                                if (!isEngaged())
-                                    return;
-                                openDialog();
-                            }
-                        }()
-                    ),
-                    ui5::table_header_cell{}(language->getObserved("settings", "mapSettings", "valueName"))
-                )
-            ),
-            [this](long long index, std::pair<std::string, std::string> const& element) {
-                return ui5::table_row{
-                    "row-key"_attr = index
-                }(
-                    ui5::table_cell{}(element.first),
-                    ui5::table_cell{}(element.second),
-                    ui5::table_row_action{
-                        "design"_prop = "Transparent",
-                        "slot"_attr = "actions",
-                        "icon"_prop = "delete",
-                        "text"_prop = "Delete",
-                        "tooltip"_prop = language->get("settings", "mapSettings", "deleteEntry"),
-                        "click"_event = [this, key = element.first]() {
-                            state_->erase(key);
-                            state_.modify();
-                            onChange_();
-                        },
-                    }()
-                );
-            }
-        );
-        // clang-format on
-    }
-
   private:
     std::string elementIdPrefix_;
     MultiInputDialog* multiInputDialog_;
-    std::weak_ptr<Nui::Dom::BasicElement> keyInput_;
-    std::weak_ptr<Nui::Dom::BasicElement> valueInput_;
+    std::shared_ptr<ScriptNuiComponents::ResizableTable> table_{};
+
+    // Keep last:
+    std::shared_ptr<bool> selfAlive_;
 };
