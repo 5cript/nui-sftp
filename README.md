@@ -88,7 +88,7 @@ Still under construction :construction:
 - [x] Ask user to overwrite files on upload/download.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Drag and drop from system on Windows.
-- [ ] Drag and drop from system on Linux.
+- [x] Drag and drop from system on Linux.
 - [x] Persist mode as part of layout.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
 - [ ] Table header is too thick and text too bold.
