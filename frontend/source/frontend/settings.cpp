@@ -1,6 +1,7 @@
 #include <frontend/settings.hpp>
 
 #include <frontend/components/icon_panel.hpp>
+#include <frontend/icon_from_name.hpp>
 #include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
@@ -32,8 +33,10 @@
 #include <svgs/it-system.hpp>
 #include <svgs/delete.hpp>
 #include <svgs/add.hpp>
+#include <svgs/wrench.hpp>
 #include <svgs/navigation-right-arrow.hpp>
 #include <svgs/navigation-down-arrow.hpp>
+#include <svgs/action-settings.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -49,8 +52,8 @@ struct Settings::Implementation
     {
         Nui::Observed<bool> localization{false};
         Nui::Observed<bool> loggingAndErrorReporting{false};
-        Nui::Observed<bool> userInterface{false};
-        Nui::Observed<bool> localFilesystemOptions{false};
+        Nui::Observed<bool> userInterface{true};
+        Nui::Observed<bool> localFilesystemOptions{true};
         Nui::Observed<bool> sshOptions{true};
         Nui::Observed<bool> sftpOptions{true};
         Nui::Observed<bool> termios{true};
@@ -59,7 +62,7 @@ struct Settings::Implementation
 
         struct SessionCollapsibles
         {
-            Nui::Observed<bool> overarchingSettings{false};
+            Nui::Observed<bool> overarchingSettings{true};
             Nui::Observed<bool> sshOptions{true};
             Nui::Observed<bool> sftpOptions{true};
             Nui::Observed<bool> terminalOptions{true};
@@ -324,7 +327,7 @@ void Settings::applySettingsToUi()
                     Settings::SectionSelectorOptions{
                         .thisSection = Settings::Section::Session,
                         .sessionId = sessionId,
-                        .icon = !session.icon.empty() ? session.icon : "it-system"s,
+                        .icon = !session.icon.empty() ? iconFromName(session.icon) : GeneratedSvgs::itsystem(),
                     }
                 );
             }
@@ -738,7 +741,7 @@ Nui::ElementRenderer Settings::header()
             class_ = "settings-page-header",
         }(
             iconPanel({
-                .name = "action-settings",
+                .icon = GeneratedSvgs::actionsettings(),
                 .color = "var(--sapBrandColor)",
                 .withBorder = true
             }),
@@ -795,7 +798,7 @@ void Settings::addNewSession()
     impl_->newSessionDialog.open(
         [this](auto const& result)
         {
-            Log::info("New session created: {} with icon {}", result.sessionName, result.iconName);
+            Log::info("New session created: {}.", result.sessionName);
             impl_->stateHolder->stateCache().sessions[result.sessionName] = Persistence::SessionOptions{
                 .icon = result.iconName,
             };
@@ -819,7 +822,7 @@ void Settings::addNewSession()
                         Settings::SectionSelectorOptions{
                             .thisSection = Settings::Section::Session,
                             .sessionId = result.sessionName,
-                            .icon = result.iconName,
+                            .icon = iconFromName(result.iconName),
                         }
                     );
                     impl_->sessionSelectors.modifyNow();
@@ -921,10 +924,8 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
 
                 return fragment(
                     [icon = options.icon, active]() -> Nui::ElementRenderer {
-                        if (icon.empty())
-                            return Nui::nil();
                         return iconPanel({
-                            .name = icon,
+                            .icon = icon,
                             .color = active ? "var(--sapBrandColor)" : "#404040",
                             .withBorder = true
                         });
@@ -975,11 +976,11 @@ Nui::ElementRenderer Settings::side()
         ),
         sectionSelector({
             .thisSection = Settings::Section::GeneralSettings,
-            .icon = "wrench",
+            .icon = GeneratedSvgs::wrench(),
         }),
         sectionSelector({
             .thisSection = Settings::Section::GlobalInheritables,
-            .icon = "settings",
+            .icon = GeneratedSvgs::settings(),
         }),
         div{style = "width: calc(100% - 20px); border-top: 1px solid gray; margin-bottom: 20px; margin-top: 10px"}(),
         div{class_ = "configuration-text"}(
@@ -988,7 +989,7 @@ Nui::ElementRenderer Settings::side()
         ),
         sectionSelector({
             .thisSection = Settings::Section::Add,
-            .icon = "add",
+            .icon = GeneratedSvgs::add(),
         }),
         div{style = "display: flex; flex-direction: column;"}(
             impl_->sessionSelectors.map([this](long long, auto const& item) -> Nui::ElementRenderer {

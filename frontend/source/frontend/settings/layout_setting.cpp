@@ -1,8 +1,10 @@
 #include <frontend/settings/layout_setting.hpp>
 
-#include <ui5/components/select.hpp>
-#include <ui5/components/label.hpp>
-#include <ui5/components/button.hpp>
+#include <script-nui-components/select.hpp>
+#include <script-nui-components/button.hpp>
+
+#include <svgs/add.hpp>
+#include <svgs/delete.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -23,46 +25,38 @@ LayoutSetting::LayoutSetting(
 
 Nui::ElementRenderer LayoutSetting::operator()()
 {
+    namespace Snc = ScriptNuiComponents;
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
     using Nui::Elements::div;
+    using Nui::Elements::span;
 
     // clang-format off
     return div{class_ = "layout-setting-container"}
     (
-        ui5::label{
-            style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
+        span{
+            style = "color: var(--sapTextColor); margin-right: 10px"
         }(language->getObserved("settings", "layoutSetting", "layoutKeysLabel")),
         div{class_ = "layout-setting-controls"}(
-            ui5::select{
-                "value"_prop = selected_,
-                "disabled"_prop = observe(state_).generate(
-                    [](auto const& state)
-                    {
+            Snc::select(Snc::SelectOptions<decltype(selected_), decltype(state_)>{
+                .activeOption = selected_,
+                .options = state_,
+                .attributes {
+                    disabled = observe(state_).generate([](auto const& state) {
                         return state.empty();
-                    }
-                ),
-                "change"_event =
-                    [this](Nui::val event)
-                {
-                    selected_ = event["detail"]["selectedOption"]["key"].as<std::string>();
+                    }),
                 },
-            }(
-                Nui::range(state_),
-                [](long long, std::pair<std::string, nlohmann::json> const& element)
+                .onChange = [this](auto const&, auto const& /*event*/)
                 {
-                    return ui5::option{
-                        "key"_prop = element.first
-                    }(element.first);
-                }
-            ),
-            ui5::button{
-                "design"_prop = "Transparent",
-                "icon"_prop = "add",
-                "click"_event =
-                    [this]()
-                {
-                    newItemDialog_->open({
+                    onChange_();
+                },
+            }),
+            Snc::button({
+                .text = language->get("settings", "layoutSetting", "saveCurrentLayout"),
+                .icon = GeneratedSvgs::add(),
+                .attributes = {
+                    onClick = [this]() {
+                                newItemDialog_->open({
                         .whatFor = language->get("settings", "layoutSetting", "addLayoutKeyBody"),
                         .headerText = language->get("settings", "layoutSetting", "addLayoutKeyHeader"),
                         .onConfirm = [this](std::optional<std::string> const& newKey)
@@ -101,14 +95,15 @@ Nui::ElementRenderer LayoutSetting::operator()()
                             }
                         },
                     });
+                    }
                 },
-            }(language->getObserved("settings", "layoutSetting", "saveCurrentLayout")),
-            ui5::button{
-                "design"_prop = "Transparent",
-                "icon"_prop = "delete",
-                "click"_event =
-                    [this]()
-                {
+                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+            }),
+            Snc::button({
+                .text = language->get("settings", "layoutSetting", "deleteLayoutKey"),
+                .icon = GeneratedSvgs::delete_(),
+                .attributes = {
+                    onClick = [this]() {
                     if (state_->empty())
                         return;
 
@@ -134,8 +129,10 @@ Nui::ElementRenderer LayoutSetting::operator()()
                             onChange_();
                         },
                     });
+                    },
                 },
-            }()
+                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+            })
         ),
         SettingBase::reset(),
         SettingBase::help()
