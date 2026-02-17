@@ -23,12 +23,17 @@
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/button.hpp>
-#include <ui5/components/switch.hpp>
-#include <ui5/components/busy_indicator.hpp>
-#include <ui5/components/message_strip.hpp>
-#include <ui5/components/busy_indicator.hpp>
-#include <ui5/components/select.hpp>
+#include <script-nui-components/button.hpp>
+#include <script-nui-components/switch.hpp>
+#include <script-nui-components/select.hpp>
+
+#include <svgs/decline.hpp>
+#include <svgs/settings.hpp>
+#include <svgs/it-system.hpp>
+#include <svgs/delete.hpp>
+#include <svgs/add.hpp>
+#include <svgs/navigation-right-arrow.hpp>
+#include <svgs/navigation-down-arrow.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -36,6 +41,7 @@
 #include <nui/frontend/attributes.hpp>
 
 using namespace std::string_literals;
+namespace Snc = ScriptNuiComponents;
 
 struct Settings::Implementation
 {
@@ -743,25 +749,27 @@ Nui::ElementRenderer Settings::header()
                     return inProgress ? "visibility: visible;" : "visibility: hidden;";
                 })
             }(
-                ui5::busy_indicator{
-                    "size"_prop = "M",
-                }(),
+                // ui5::busy_indicator{
+                //     "size"_prop = "M",
+                // }(),
                 span{}(language->getObserved("settings", "saving"))
             ),
-            ui5::button{
-                "design"_prop = "Transparent",
-                "icon"_prop = "decline",
-                "click"_event = [this]() {
-                    impl_->events->settingsOpen = false;
-                    // Warning that most settings currently require a restart:
-                    impl_->confirmDialog->open({
-                        .state = ConfirmDialog::State::Critical,
-                        .headerText = language->get("settings", "settingsClosedHeader"),
-                        .text = language->get("settings", "settingsClosedText"),
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
+            Snc::button({
+                .icon = GeneratedSvgs::decline(),
+                .attributes = {
+                    onClick = [this]() {
+                        impl_->events->settingsOpen = false;
+                        // Warning that most settings currently require a restart:
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Critical,
+                            .headerText = language->get("settings", "settingsClosedHeader"),
+                            .text = language->get("settings", "settingsClosedText"),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
                 },
-            }()
+                .styleVariant = Snc::StyleVariant::Transparent,
+            })
         );
         // clang-format on
     }
@@ -962,10 +970,7 @@ Nui::ElementRenderer Settings::side()
     // clang-format off
     return div{class_ = "side"}(
         div{class_ = "configuration-text"}(
-            ui5::icon{
-                "name"_prop = "settings",
-                "design"_prop = "Neutral"
-            }(),
+            GeneratedSvgs::settings(),
             span{}(language->getObserved("settings", "configuration"))
         ),
         sectionSelector({
@@ -978,10 +983,7 @@ Nui::ElementRenderer Settings::side()
         }),
         div{style = "width: calc(100% - 20px); border-top: 1px solid gray; margin-bottom: 20px; margin-top: 10px"}(),
         div{class_ = "configuration-text"}(
-            ui5::icon{
-                "name"_prop = "it-system",
-                "design"_prop = "Neutral"
-            }(),
+            GeneratedSvgs::itsystem(),
             span{}(language->getObserved("settings", "sessionsServers"))
         ),
         sectionSelector({
@@ -1093,12 +1095,12 @@ Nui::ElementRenderer Settings::inheritableSettings()
     {
         // clang-format off
         return fragment(
-            ui5::message_strip{
-                "design"_prop = "Information",
-                "hideCloseButton"_prop = true,
-            }(
-                language->getObserved("settings", "inheritableSettingsInfoMessage")
-            ),
+            // ui5::message_strip{
+            //     "design"_prop = "Information",
+            //     "hideCloseButton"_prop = true,
+            // }(
+            //     language->getObserved("settings", "inheritableSettingsInfoMessage")
+            // ),
             group({
                 .isCollapsed = impl_->collapsibleStates.sshOptions,
                 .content = impl_->sshOptions.render(),
@@ -1149,6 +1151,61 @@ Nui::ElementRenderer Settings::inheritableSettings()
     }
 }
 
+void Settings::deleteActiveSession()
+{
+    if (!*impl_->activeSession)
+        return;
+
+    const auto sessionId = **impl_->activeSession;
+    impl_->confirmDialog->open(
+        {.state = ConfirmDialog::State::Critical,
+            .headerText = language->get("settings", "deleteSessionConfirmHeader"),
+            .text =
+                fmt::format(fmt::runtime(language->get("settings", "deleteSessionConfirmText") + ": {}"), sessionId),
+            .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+            .onClose = [this, sessionId](ConfirmDialog::Button button)
+            {
+                if (button != ConfirmDialog::Button::Ok)
+                    return;
+
+                impl_->stateHolder->stateCache().sessions.erase(sessionId);
+                impl_->stateHolder->save(
+                    [this](std::optional<std::string> const& error)
+                    {
+                        if (error)
+                        {
+                            impl_->confirmDialog->open({
+                                .state = ConfirmDialog::State::Negative,
+                                .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                                .text = fmt::format(
+                                    fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                ),
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
+                        }
+                    }
+                );
+
+                // delete session from session selectors:
+                impl_->sessionSelectors.value().erase(
+                    std::remove_if(
+                        impl_->sessionSelectors.value().begin(),
+                        impl_->sessionSelectors.value().end(),
+                        [sessionId](auto const& item)
+                        {
+                            return item.sessionId == sessionId;
+                        }
+                    ),
+                    impl_->sessionSelectors.value().end()
+                );
+
+                impl_->activeSession = std::nullopt;
+                impl_->activeSection = Section::GeneralSettings;
+                impl_->sessionSelectors.modifyNow();
+            }}
+    );
+}
+
 Nui::ElementRenderer Settings::currentSession()
 {
     using namespace Nui;
@@ -1165,63 +1222,16 @@ Nui::ElementRenderer Settings::currentSession()
                 class_ = "settings-session-deleter",
                 style = "grid-template-columns: unset; padding: 0;"
             }(
-                ui5::button{
-                    "design"_prop = "Negative",
-                    "icon"_prop = "delete",
-                    "click"_event = [this]() {
-                        if (!*impl_->activeSession)
-                            return;
-
-                        const auto sessionId = **impl_->activeSession;
-                        impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Critical,
-                            .headerText = language->get("settings", "deleteSessionConfirmHeader"),
-                            .text = fmt::format(
-                                fmt::runtime(language->get("settings", "deleteSessionConfirmText") + ": {}"),
-                                sessionId
-                            ),
-                            .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                            .onClose = [this, sessionId](ConfirmDialog::Button button) {
-                                if (button != ConfirmDialog::Button::Ok)
-                                    return;
-
-                                impl_->stateHolder->stateCache().sessions.erase(sessionId);
-                                impl_->stateHolder->save(
-                                    [this](std::optional<std::string> const& error)
-                                    {
-                                        if (error)
-                                        {
-                                            impl_->confirmDialog->open({
-                                                .state = ConfirmDialog::State::Negative,
-                                                .headerText = language->get("settings", "errorSavingSettingsHeader"),
-                                                .text = fmt::format(
-                                                    fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
-                                                ),
-                                                .buttons = ConfirmDialog::Button::Ok,
-                                            });
-                                        }
-                                    }
-                                );
-
-                                // delete session from session selectors:
-                                impl_->sessionSelectors.value().erase(
-                                    std::remove_if(
-                                        impl_->sessionSelectors.value().begin(),
-                                        impl_->sessionSelectors.value().end(),
-                                        [sessionId](auto const& item) {
-                                            return item.sessionId == sessionId;
-                                        }
-                                    ),
-                                    impl_->sessionSelectors.value().end()
-                                );
-
-                                impl_->activeSession = std::nullopt;
-                                impl_->activeSection = Section::GeneralSettings;
-                                impl_->sessionSelectors.modifyNow();
-                            }
-                        });
+                Snc::button({
+                    .text = language->get("settings", "deleteSessionButton"),
+                    .icon = GeneratedSvgs::delete_(),
+                    .attributes = {
+                        onClick = [this]() {
+                            deleteActiveSession();
+                        },
                     },
-                }(language->getObserved("settings", "deleteSessionButton"))
+                    .styleVariant = Snc::StyleVariant::Danger,
+                })
             ),
             impl_->currentSessionOptions.terminalEngineType(
                 language->getObserved("settings", "sessionOptions", "terminalEngineType")
@@ -1290,12 +1300,12 @@ Nui::ElementRenderer Settings::currentSession()
         );
 
         return fragment(
-            ui5::message_strip{
-                "design"_prop = "Information",
-                "hideCloseButton"_prop = true,
-            }(
-                language->getObserved("settings", "inheritableSettingsInfoMessage")
-            ),
+            // ui5::message_strip{
+            //     "design"_prop = "Information",
+            //     "hideCloseButton"_prop = true,
+            // }(
+            //     language->getObserved("settings", "inheritableSettingsInfoMessage")
+            // ),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
                 .content = std::move(overarchingSettings),
@@ -1355,6 +1365,82 @@ Nui::ElementRenderer Settings::currentSession()
     }
 }
 
+void Settings::addGroup(
+    Nui::Observed<std::optional<std::string>>& currentGroupKey,
+    Nui::Observed<std::vector<std::string>>& groupKeys
+)
+{
+    impl_->inputDialog->open({
+        .whatFor = language->get("settings", "groupKey"),
+        .prompt = language->get("settings", "enterGroupKeyPlaceholder"),
+        .headerText = language->get("settings", "groupKey"),
+        .isPassword = false,
+        .onConfirm = [this, &currentGroupKey, &groupKeys](std::optional<std::string> const& result)
+        {
+            if (result && !result->empty())
+            {
+                *currentGroupKey = *result;
+                if (std::find(groupKeys->begin(), groupKeys->end(), *result) == groupKeys->end())
+                {
+                    groupKeys->push_back(*result);
+                    groupKeys.modify();
+                    reloadInheritance();
+                    onChange();
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+                else
+                {
+                    // Key already exists, do nothing or show a message if needed
+                    impl_->confirmDialog->open({
+                        .state = ConfirmDialog::State::Critical,
+                        .headerText = language->get("settings", "groupKeyExistsHeader"),
+                        .text = language->get("settings", "groupKeyExistsText"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                }
+            }
+        },
+    });
+}
+void Settings::removeGroup(
+    Nui::Observed<std::optional<std::string>>& currentGroupKey,
+    Nui::Observed<std::vector<std::string>>& groupKeys
+)
+{
+    impl_->confirmDialog->open({
+        .state = ConfirmDialog::State::Critical,
+        .headerText = language->get("settings", "confirmDeleteGroupKeyHeader"),
+        .text = language->get("settings", "confirmDeleteGroupKeyText"),
+        .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+        .onClose = [this, &currentGroupKey, &groupKeys](ConfirmDialog::Button btn)
+        {
+            if (!*currentGroupKey)
+                return;
+
+            const auto key = **currentGroupKey;
+
+            if (btn == ConfirmDialog::Button::Ok)
+            {
+                groupKeys->erase(std::remove(groupKeys->begin(), groupKeys->end(), key), groupKeys->end());
+                groupKeys.modify();
+                if (!groupKeys->empty())
+                {
+                    *currentGroupKey = (groupKeys->front());
+                }
+                else
+                {
+                    *currentGroupKey = "default"s;
+                    groupKeys->push_back("default"s);
+                    groupKeys.modify();
+                }
+                reloadInheritance();
+                onChange();
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        },
+    });
+}
+
 Nui::ElementRenderer Settings::group(GroupParameters&& params)
 {
     using namespace Nui;
@@ -1378,45 +1464,18 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                 if (inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
                     return Nui::nil();
 
-                return ui5::button{
-                    "design"_prop = "Primary",
-                    "icon"_prop = "add",
-                    "click"_event = [this, currentGroupKey, groupKeys]()
-                    {
-                        impl_->inputDialog->open({
-                            .whatFor = language->get("settings", "groupKey"),
-                            .prompt = language->get("settings", "enterGroupKeyPlaceholder"),
-                            .headerText = language->get("settings", "groupKey"),
-                            .isPassword = false,
-                            .onConfirm = [this, currentGroupKey, groupKeys](std::optional<std::string> const& result)
+                return Snc::button({
+                    .icon = GeneratedSvgs::add(),
+                    .attributes =
+                        {
+                            onClick =
+                                [this, currentGroupKey, groupKeys]()
                             {
-                                if (result && !result->empty())
-                                {
-                                    *currentGroupKey = *result;
-                                    if (std::find((*groupKeys)->begin(), (*groupKeys)->end(), *result) ==
-                                        (*groupKeys)->end())
-                                    {
-                                        (*groupKeys)->push_back(*result);
-                                        groupKeys->modify();
-                                        reloadInheritance();
-                                        onChange();
-                                        Nui::globalEventContext.executeActiveEventsImmediately();
-                                    }
-                                    else
-                                    {
-                                        // Key already exists, do nothing or show a message if needed
-                                        impl_->confirmDialog->open({
-                                            .state = ConfirmDialog::State::Critical,
-                                            .headerText = language->get("settings", "groupKeyExistsHeader"),
-                                            .text = language->get("settings", "groupKeyExistsText"),
-                                            .buttons = ConfirmDialog::Button::Ok,
-                                        });
-                                    }
-                                }
+                                addGroup(*currentGroupKey, *groupKeys);
                             },
-                        });
-                    },
-                }();
+                        },
+                    .styleVariant = Snc::StyleVariant::Primary,
+                });
             };
 
             auto removeGroupButton = [this, inheritanceBehavior, currentGroupKey, groupKeys]() -> Nui::ElementRenderer
@@ -1424,110 +1483,76 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                 if (inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
                     return Nui::nil();
 
-                return ui5::button{
-                    "design"_prop = "Negative",
-                    "icon"_prop = "delete",
-                    "click"_event = [this, currentGroupKey, groupKeys]()
-                    {
-                        if (!**currentGroupKey)
-                            return;
-
-                        impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Critical,
-                            .headerText = language->get("settings", "confirmDeleteGroupKeyHeader"),
-                            .text = language->get("settings", "confirmDeleteGroupKeyText"),
-                            .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                            .onClose = [this, currentGroupKey, groupKeys](ConfirmDialog::Button btn)
+                return Snc::button({
+                    .icon = GeneratedSvgs::delete_(),
+                    .attributes =
+                        {
+                            onClick =
+                                [this, currentGroupKey, groupKeys]()
                             {
-                                if (!**currentGroupKey)
-                                    return;
-
-                                const auto key = ***currentGroupKey;
-
-                                if (btn == ConfirmDialog::Button::Ok)
-                                {
-                                    groupKeys->erase(
-                                        std::remove((*groupKeys)->begin(), (*groupKeys)->end(), key),
-                                        (*groupKeys)->end()
-                                    );
-                                    groupKeys->modify();
-                                    if (!(*groupKeys)->empty())
-                                    {
-                                        *currentGroupKey = ((*groupKeys)->front());
-                                    }
-                                    else
-                                    {
-                                        *currentGroupKey = "default"s;
-                                        (*groupKeys)->push_back("default"s);
-                                        groupKeys->modify();
-                                    }
-                                    reloadInheritance();
-                                    onChange();
-                                    Nui::globalEventContext.executeActiveEventsImmediately();
-                                }
+                                removeGroup(*currentGroupKey, *groupKeys);
                             },
-                        });
-                    },
-                }();
+                        },
+                    .styleVariant = Snc::StyleVariant::Danger,
+                });
             };
 
             return div{
                 class_ = "settings-group-key-container"
             }(Nui::Elements::span{}(language->getObserved("settings", "groupKey")),
-                ui5::select{
-                    "disabled"_prop = observe(*groupKeys)
-                        .generate(
-                            [](std::vector<std::string> const& keys)
+                Snc::select(
+                    Snc::SelectOptions<decltype(*currentGroupKey), decltype(*groupKeys)>{
+                        .activeOption = *currentGroupKey,
+                        .options = *groupKeys,
+                        .attributes =
                             {
-                                return keys.empty();
-                            }
-                        ),
-                    "change"_event =
-                        [this, currentGroupKey, inheritanceBehavior](Nui::val event)
-                    {
-                        const auto key = event["detail"]["selectedOption"]["leKey"].as<std::string>();
-                        Log::debug("Group key changed event: {}", key);
-                        if (key == "</>")
-                            *currentGroupKey = std::nullopt;
-                        else
-                            *currentGroupKey = key;
-                        if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheritable)
-                            reloadInheritables();
-                        else if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
+                                disabled = observe(*groupKeys)
+                                    .generate(
+                                        [](std::vector<std::string> const& keys)
+                                        {
+                                            return keys.empty();
+                                        }
+                                    ),
+                            },
+                        .onChange =
+                            [this,
+                                currentGroupKey,
+                                inheritanceBehavior](auto const& newValue, Nui::WebApi::MouseEvent const&)
                         {
-                            if (*impl_->activeSession)
-                                applySessionToState(**impl_->activeSession);
-                            reloadInheritance();
-                        }
-                    },
-                    "value"_prop = observe(*currentGroupKey)
-                        .generate(
-                            [](std::optional<std::string> const& keyOpt)
+                            const auto key = newValue.value_or(""s);
+                            Log::debug("Group key changed event: {}", key);
+                            if (key == "</>")
+                                *currentGroupKey = std::nullopt;
+                            else
+                                *currentGroupKey = key;
+                            if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheritable)
+                                reloadInheritables();
+                            else if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
                             {
-                                if (keyOpt)
-                                    return *keyOpt;
-                                return "</>"s;
+                                if (*impl_->activeSession)
+                                    applySessionToState(**impl_->activeSession);
+                                reloadInheritance();
                             }
-                        ),
-                }(Nui::range(*groupKeys)
-                        .before(
-                            [inheritanceBehavior]() -> Nui::ElementRenderer
-                            {
-                                if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
+                        },
+                        .activeRenderer = [](auto const& option) -> Nui::ElementRenderer
+                        {
+                            return Nui::Elements::span{}(
+                                observe(option),
+                                [&option]() -> std::string
                                 {
-                                    return ui5::option{
-                                        "leKey"_prop = "</>",
-                                    }("</>");
+                                    if (!option.value())
+                                        return "</>";
+                                    return *option.value();
                                 }
-                                return Nui::nil();
-                            }()
-                        ),
-                    [](long long, std::string const& inheritKey) -> Nui::ElementRenderer
-                    {
-                        return ui5::option{
-                            "leKey"_prop = inheritKey,
-                        }(inheritKey);
-                    }),
+                            );
+                        },
+                        .elementRenderer = [](auto const& option) -> Nui::ElementRenderer
+                        {
+                            return Nui::Elements::span{}(option);
+                        },
+                        .dontUpdateValue = true
+                    }
+                ),
                 addGroupButton(),
                 removeGroupButton());
         };
@@ -1563,15 +1588,14 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                     isCollapsed = !*isCollapsed;
                 }
             }(
-                // collapse indicator:
                 span{class_ = "settings-group-header-collapse-indicator"}(
-                    ui5::icon{
-                        "name"_prop = observe(params.isCollapsed).generate([](bool isCollapsed) {
-                            return isCollapsed ? "navigation-right-arrow" : "navigation-down-arrow";
-                        }),
-                        "design"_prop = "Neutral",
-                        style = "color: var(--sapTextColor)"
-                    }()
+                    observe(params.isCollapsed),
+                    [](bool isCollapsed){
+                        if (isCollapsed)
+                            return GeneratedSvgs::navigationrightarrow();
+                        else
+                            return GeneratedSvgs::navigationdownarrow();
+                    }
                 ),
                 span{class_ = "settings-group-header-title"}(std::move(params.headerTitle))
             ),

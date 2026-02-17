@@ -96,6 +96,15 @@ class Settings
 
     void reloadInheritables();
     void reloadInheritance();
+    void deleteActiveSession();
+    void addGroup(
+        Nui::Observed<std::optional<std::string>>& currentGroupKey,
+        Nui::Observed<std::vector<std::string>>& groupKeys
+    );
+    void removeGroup(
+        Nui::Observed<std::optional<std::string>>& currentGroupKey,
+        Nui::Observed<std::vector<std::string>>& groupKeys
+    );
 
   private:
     struct Implementation;
