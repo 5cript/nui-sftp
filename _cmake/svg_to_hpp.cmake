@@ -138,12 +138,6 @@ function(svg_to_hpp)
         list(APPEND generated_headers ${hpp_file})
     endforeach()
 
-    # Create a custom target that depends on all generated headers
-    add_custom_target(${ARG_TARGET}
-        DEPENDS ${generated_headers}
-        COMMENT "Generating HPP files from SVG sources"
-    )
-
     # Make the target depend on xml-to-nui to ensure build order
     if(NOT ARG_TOOLPATH)
         add_dependencies(${ARG_TARGET} xml-to-nui)
