@@ -31,8 +31,9 @@ Still under construction :construction:
 - [x] Better number boxes.
 - [x] Number box value constraining.
 - [ ] Option to disable some warning boxes.
-- [ ] Number inputs have terrible user feel, input validation should not insert valid numbers, but only indicate problems and then not save if its invalid.
-- [ ] Number boxes lack :hover/:focus effect and border.
+- [ ] Number inputs have bad user feel, input validation should not insert valid numbers, but only indicate problems and then not save if its invalid.
+- [ ] Inheritance on lists and maps does not work.
+
 
 ## SSH
 - [x] Keyboard interactive password auth.
@@ -88,7 +89,7 @@ Still under construction :construction:
 - [x] Ask user to overwrite files on upload/download.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Drag and drop from system on Windows.
-- [x] Drag and drop from system on Linux.
+- [ ] Drag and drop from system on Linux.
 - [x] Persist mode as part of layout.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
 - [ ] Table header is too thick and text too bold.

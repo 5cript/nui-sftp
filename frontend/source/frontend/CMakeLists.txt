@@ -1,5 +1,25 @@
 set(NUISCP_NPM_INSTALL_ARGS "" CACHE STRING "Arguments to pass to npm install for nui-scp")
 
+svg_to_hpp(
+    SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
+    HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
+    NAMESPACE "GeneratedSvgs"
+    TARGET ui5_svgs
+    ABBREVIATE
+    TOOLPATH "${XML_TO_NUI_TOOL}"
+    NAMES ${UI5_SVG_FILES}
+)
+
+message(STATUS "SVG Fullpaths: ${UI5_SVGS_FULLPATH}")
+
+add_npm_install(
+    TARGET_NAME ${PROJECT_NAME}-npm-install
+    NPM_EXECUTABLE "${NUI_NPM}"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    INSTALL_ARGS ${NUISCP_NPM_INSTALL_ARGS}
+    OUTPUTS ${UI5_SVGS_FULLPATH}
+)
+
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -42,6 +62,88 @@ target_sources(
         file_explorer/side_model.cpp
         file_explorer/remote_side_model.cpp
         file_explorer/local_side_model.cpp
+        ${ui5_svgs_GENERATED_HEADERS}
+)
+
+nui_prepare_emscripten_target(
+    NO_NPM_INSTALL
+    TARGET
+        ${PROJECT_NAME}
+    PARCEL_ARGS
+        --no-optimize
+    PREJS
+        ${PREJS_FILE}
+    LEAN_INDEX_HTML
+    NPM_INSTALL_ARGS
+        ${NUISCP_NPM_INSTALL_ARGS}
+    EMSCRIPTEN_LINK_OPTIONS
+        -sEXPORTED_FUNCTIONS=_frontendMain
+        -sALLOW_MEMORY_GROWTH=1
+        -sWASM_BIGINT
+        -fexceptions
+        ${DEPENDANT_LINK_OPTIONS}
+        # or other options, see emscripten docs.
+    EMSCRIPTEN_COMPILE_OPTIONS
+        -fexceptions
+        ${DEPENDANT_COMPILE_OPTIONS}
+    CXX_STANDARD
+        23
+    NPM_EXTRA_OUTPUTS
+        ${UI5_SVGS_FULLPATH}
+    OBSERVED_BUNDLE_FILES
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/index.js"
+        "${CMAKE_SOURCE_DIR}/static/styles/file_property_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/icon_panel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/main.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/multi_input_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/new_session_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/operation_queue.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/session.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
+        "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"
+        "${CMAKE_SOURCE_DIR}/static/styles/images/caretright.png"
+        "${CMAKE_SOURCE_DIR}/static/styles/images/caretup.png"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/accordionpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/commandpalette.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/datagrid.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dockpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dragdrop/index.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dragdrop"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/index.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/menu.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/menubar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/scrollbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/tabbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/accordionpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/commandpalette.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/dockpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/index.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/menu.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/menubar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/scrollbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/splitpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/tabbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/tabpanel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/widget.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets"
+        "${CMAKE_SOURCE_DIR}/static/styles/lumino"
+        # 5cript-nui-components
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/resizeable_table.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
 )
 
 target_include_directories(
@@ -116,95 +218,5 @@ else()
     set(DEPENDANT_COMPILE_OPTIONS "-O2")
 endif()
 
-# FIXME: Need to run npm install before this step, otherwise the icons won't be there.
-# After ${PROJECT_NAME}-npm-install
-svg_to_hpp(
-    SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
-    HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
-    NAMESPACE "GeneratedSvgs"
-    TARGET ui5_svgs
-    ABBREVIATE
-    TOOLPATH "${XML_TO_NUI_TOOL}"
-)
-
-nui_prepare_emscripten_target(
-    TARGET
-        ${PROJECT_NAME}
-    PARCEL_ARGS
-        --no-optimize
-    PREJS
-        ${PREJS_FILE}
-    LEAN_INDEX_HTML
-    NPM_INSTALL_ARGS
-        ${NUISCP_NPM_INSTALL_ARGS}
-    EMSCRIPTEN_LINK_OPTIONS
-        -sEXPORTED_FUNCTIONS=_frontendMain
-        -sALLOW_MEMORY_GROWTH=1
-        -sWASM_BIGINT
-        -fexceptions
-        ${DEPENDANT_LINK_OPTIONS}
-        # or other options, see emscripten docs.
-    EMSCRIPTEN_COMPILE_OPTIONS
-        -fexceptions
-        ${DEPENDANT_COMPILE_OPTIONS}
-    CXX_STANDARD
-        23
-    OBSERVED_BUNDLE_FILES
-        "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
-        "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
-        "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"
-        "${CMAKE_SOURCE_DIR}/static/source/index.js"
-        "${CMAKE_SOURCE_DIR}/static/styles/file_property_dialog.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/icon_panel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/main.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/multi_input_dialog.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/new_session_dialog.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/operation_queue.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/session.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
-        "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"
-        "${CMAKE_SOURCE_DIR}/static/styles/images/caretright.png"
-        "${CMAKE_SOURCE_DIR}/static/styles/images/caretup.png"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/accordionpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/commandpalette.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/datagrid.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dockpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dragdrop/index.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/dragdrop"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/index.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/menu.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/menubar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/scrollbar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/tabbar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/accordionpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/commandpalette.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/dockpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/index.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/menu.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/menubar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/scrollbar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/splitpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/tabbar.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/tabpanel.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets/widget.css"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino/widgets"
-        "${CMAKE_SOURCE_DIR}/static/styles/lumino"
-        # 5cript-nui-components
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/resizeable_table.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
-        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
-)
-
 add_dependencies(theme_compilation ${PROJECT_NAME}-npm-install)
 add_dependencies(${PROJECT_NAME}-parcel theme_compilation)
-add_dependencies(${PROJECT_NAME}-parcel ui5_svgs)
