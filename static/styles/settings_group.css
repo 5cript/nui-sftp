@@ -110,6 +110,11 @@
     margin-right: 4px;
     position: relative;
     top: 2px;
+    width: 16px;
+
+    & path {
+        fill: var(--color);
+    }
 }
 
 .settings-group-key-container {

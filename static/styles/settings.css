@@ -90,10 +90,20 @@
 
         & .configuration-text {
             display: flex;
-            gap: 4px;
-            align-items: baseline;
+            gap: 10px;
+            align-items: center;
             color: gray;
             margin-bottom: 10px;
+            margin-left: 5px;
+
+            &>svg {
+                width: 24px;
+                height: 24px;
+
+                & path {
+                    fill: var(--sapBrandColor);
+                }
+            }
         }
     }
 
@@ -163,10 +173,6 @@
     flex-direction: column;
     -webkit-user-select: none;
     user-select: none;
-
-    & ui5-table {
-        flex-grow: 1;
-    }
 }
 
 .list-setting-add-entry-container {
@@ -202,7 +208,7 @@
     align-items: center;
     gap: 8px;
 
-    & ui5-input {
+    & input {
         flex-grow: 1;
     }
 }
@@ -212,7 +218,7 @@
     align-items: center;
     gap: 8px;
 
-    & ui5-input {
+    & input {
         flex-grow: 1;
     }
 }
@@ -231,11 +237,6 @@
     border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
     margin: 0 16px;
     grid-column: 1 / -1;
-}
-
-ui5-button.multi-setting-key-add-button::part(button) {
-    --_ui5-v2-18-0_button_base_min_width: 26px;
-    --_ui5-v2-18-0_button_base_height: 26px;
 }
 
 .setting-input {
@@ -293,7 +294,7 @@ ui5-button.multi-setting-key-add-button::part(button) {
 }
 
 .layout-setting-container {
-    & ui5-label {
+    & span {
         grid-column: 2;
     }
 }
