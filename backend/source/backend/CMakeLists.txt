@@ -104,6 +104,7 @@ nui_add_emscripten_target(
         -DCMAKE_BUILD_TYPE=Release
         -DNUI_FETCH_TRAITS=Off
         -DBROWSER_ENGINE=${BROWSER_ENGINE}
+        -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
 )
 
 add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)

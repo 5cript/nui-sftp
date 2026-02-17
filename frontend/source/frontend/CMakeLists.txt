@@ -116,13 +116,15 @@ else()
     set(DEPENDANT_COMPILE_OPTIONS "-O2")
 endif()
 
+# FIXME: Need to run npm install before this step, otherwise the icons won't be there.
+# After ${PROJECT_NAME}-npm-install
 svg_to_hpp(
     SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
     HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
     NAMESPACE "GeneratedSvgs"
     TARGET ui5_svgs
     ABBREVIATE
-    TOOLPATH "${CMAKE_BINARY_DIR}/../tools_bin/xml-to-nui"
+    TOOLPATH "${XML_TO_NUI_TOOL}"
 )
 
 nui_prepare_emscripten_target(
