@@ -74,7 +74,7 @@ class Settings
     {
         Section thisSection{Section::Session};
         std::optional<std::string> sessionId{std::nullopt};
-        std::string icon{};
+        Nui::ElementRenderer icon{};
     };
     Nui::ElementRenderer sectionSelector(SectionSelectorOptions const& options);
     bool isActive(SectionSelectorOptions const& options);

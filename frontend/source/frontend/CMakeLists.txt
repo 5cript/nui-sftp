@@ -11,6 +11,7 @@ target_sources(
         session.cpp
         settings.cpp
         color.cpp
+        icon_from_name.cpp
         dialog/input_dialog.cpp
         dialog/multi_input_dialog.cpp
         dialog/password_prompter.cpp

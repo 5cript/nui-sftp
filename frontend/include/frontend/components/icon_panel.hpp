@@ -1,7 +1,5 @@
 #pragma once
 
-#include <frontend/components/ui5/icon.hpp>
-
 #include <nui/frontend/element_renderer.hpp>
 
 #include <fmt/format.h>
@@ -12,7 +10,7 @@
 
 struct IconPanelOptions
 {
-    std::string name;
+    Nui::ElementRenderer icon;
     std::string color;
     int padding = 12;
     bool withBorder = false;
@@ -43,5 +41,5 @@ inline Nui::ElementRenderer iconPanel(IconPanelOptions const& options)
             }(),
             "padding"_style = fmt::format("{}px", options.padding),
         }
-    }(ui5::icon{"name"_prop = options.name}());
+    }(std::move(options.icon));
 }

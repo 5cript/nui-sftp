@@ -4,4 +4,10 @@
     justify-content: center;
     padding: 12px;
     border-radius: 6px;
+
+    &>svg {
+        width: 24px;
+        height: 24px;
+        fill: var(--color);
+    }
 }
