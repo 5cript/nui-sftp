@@ -2,8 +2,7 @@
 
 #include <log/log.hpp>
 
-#include <ui5/components/label.hpp>
-#include <ui5/components/switch.hpp>
+#include <script-nui-components/switch.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -40,16 +39,13 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
                         return Nui::nil();
 
                     return fragment(
-                        ui5::label{
-                            "design"_prop = "Bold",
-                        }(std::move(title).value()),
-                        ui5::switch_{
-                            "checked"_prop = *engagedStatus,
-                            "change"_event = [engagedStatus, onChange = std::move(onChange)](Nui::val event) {
-                                *engagedStatus = event["target"]["checked"].as<bool>();
+                        span{}(std::move(title).value()),
+                        ScriptNuiComponents::switch_(ScriptNuiComponents::SwitchOptions<decltype(*engagedStatus)>{
+                            .isChecked = *engagedStatus,
+                            .onChange = [onChange = std::move(onChange)](bool, Nui::WebApi::MouseEvent const&){
                                 onChange();
-                            },
-                        }()
+                            }
+                        })
                     );
                 }()
             ),
