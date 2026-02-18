@@ -30,10 +30,9 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [x] Better number boxes.
 - [x] Number box value constraining.
-- [ ] Option to disable some warning boxes.
 - [ ] Number inputs have bad user feel, input validation should not insert valid numbers, but only indicate problems and then not save if its invalid.
 - [ ] Inheritance on lists and maps does not work.
-
+- [ ] Default settings are broken.
 
 ## SSH
 - [x] Keyboard interactive password auth.
@@ -47,6 +46,7 @@ Still under construction :construction:
 - [x] SSH shell.
 - [x] Terminal UIs works.
 - [x] Terminal resizing.
+- [ ] Local shell is broken on windows and linux.
 
 ## SFTP
 - [x] Single file downloads.
@@ -68,6 +68,7 @@ Still under construction :construction:
 - [ ] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
+- [ ] Default directory on connect.
 
 ## File View UI
 - [x] Grid view.
@@ -89,7 +90,7 @@ Still under construction :construction:
 - [x] Ask user to overwrite files on upload/download.
 - [ ] Improve arrow navigation with shift and control.
 - [x] Drag and drop from system on Windows.
-- [ ] Drag and drop from system on Linux.
+- [x] Drag and drop from system on Linux. (Partially, only 1 file from file managers due to webkit breaking itself for security reasons without providing a proper fix. https://github.com/WebKit/WebKit/commit/89838b9164a1dd3baa7053539cf93414977fb081)
 - [x] Persist mode as part of layout.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
 - [ ] Table header is too thick and text too bold.
@@ -104,6 +105,7 @@ Still under construction :construction:
 ## General UI
 - [ ] Custom top bar with moveability and minimize, maximize, close buttons.
 - [ ] More/Custom themes.
+- [ ] Split language file into multiple for each language for easier maintenance.
 
 ## Synchronization
 - [ ] Synchronize directories.
@@ -111,6 +113,9 @@ Still under construction :construction:
 ## SFTP
 - [ ] Implement bulk download to archives.
 - [ ] Optimize download/upload speed of lots of files.
+
+## Settings UI
+- [ ] Option to disable some warning boxes.
 
 ## File View UI
 - [ ] Same side drag and drop for moving files locally or remotely.
