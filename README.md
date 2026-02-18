@@ -91,7 +91,6 @@ Still under construction :construction:
 - [x] Drag and drop from system on Linux. (Partially, only 1 file from file managers due to webkit breaking itself for security reasons without providing a proper fix. https://github.com/WebKit/WebKit/commit/89838b9164a1dd3baa7053539cf93414977fb081)
 - [x] Persist mode as part of layout.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
-- [ ] Table header is too thick and text too bold.
 
 # No intention to support for now:
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
