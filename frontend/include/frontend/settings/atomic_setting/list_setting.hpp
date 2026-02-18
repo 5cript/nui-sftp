@@ -100,15 +100,15 @@ class ListSetting : public Setting<Disengageable, std::vector<std::string>>
                 // Should realistically never occur, but stateWithInheritance_ survives this derived class, lets not
                 // make useAfterFree bugs.
                 if (!*selfAlive)
+                {
+                    Nui::WebApi::Console::error("ListSetting: Receive update for destroyed ListSetting, ignoring.");
                     return;
+                }
 
                 auto table = weakTable.lock();
                 if (!table)
-                    return;
-
-                if (!isEngaged())
                 {
-                    table->clear();
+                    Nui::WebApi::Console::error("ListSetting: Table component was destroyed, cannot update.");
                     return;
                 }
 
