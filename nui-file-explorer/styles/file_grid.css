@@ -324,7 +324,6 @@
 }
 
 .nui-file-grid-table-header {
-    font-weight: bold;
     background-color: var(--nui-file-grid-table-header-background);
     color: var(--nui-file-grid-table-header-color);
     border-bottom: 1px solid var(--nui-file-grid-border-color);
@@ -448,7 +447,7 @@
 }
 
 .nui-file-grid-table-header-cell {
-    padding: 4px;
+    padding: 0 4px;
     display: flex;
     align-items: center;
     border-right: 1px solid hsl(0 100% 100% / 0.1);
