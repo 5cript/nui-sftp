@@ -69,7 +69,6 @@ en_US:
     addNew: "Add New!"
     configuration: "Configuration"
     sessionsServers: "Sessions / Servers"
-    logLevel: "Log Level"
     termiosGroupName: "Termios"
     sshOptionsGroupName: "SSH Options"
     sftpOptionsGroupName: "SFTP Options"
@@ -83,6 +82,10 @@ en_US:
     groupKeyExistsText: "The entered inheritance ID already exists."
     inheritableSettingsInfoMessage: "The settings in this category can be inherited by sessions and servers. Configure some base settings to reuse across multiple sessions! Setting groups are associated by keys. Individual settings can be turned off, meaning that they will not be inherited."
     ccSettingsSubgroupTitle: "Control Characters (cc) Active?"
+    numberSetting:
+      validationErrorTooSmall: "Value is too small. Minimum value is {}."
+      validationErrorTooBig: "Value is too big. Maximum value is {}."
+      validationErrorStep: "Value does not conform to step of {}."
     pathSetting:
       browseButton: "Browse"
     mapSettings:
@@ -103,6 +106,13 @@ en_US:
       valueName: "Value"
       deleteEntry: "Delete Entry"
       itemValue: "Item"
+    logOptions:
+      logLevel: "Log Level"
+      logDirectory: "Log Directory"
+      disableFileLogging: "Disable File Logging"
+      logLevelHelpText: "The log level determines the verbosity of the application's logging output."
+      logDirectoryHelpText: "The directory where log files are stored. if the string starts with %key% it is replaced with a special path. The following keys map to the following directories: ~, %userprofile%: home directory. %appdata%: AppData/Roaming on windows, home on linux. %localappdata%: AppData/Local on windows, home on linux. %temp%: Temp directory. %config_home%, %config_home2%, %config_home3%: Configuration directory (1,2,3 is Home, Documents, AppData on windows). %state_home%, %state_home2%, %state_home3%: State directory. %data_home%, %data_home2%, %data_home3%: Data directory."
+      disableFileLoggingHelpText: "When enabled, logging to files is disabled. Logs will only be output to the console."
     layoutSetting:
       layoutKeysLabel: "Saved layouts"
       deleteLayoutKey: "Delete layout"
@@ -528,6 +538,10 @@ de_DE:
     groupKeyExistsText: "Die eingegebene Vererbungs ID ist bereits vorhanden."
     inheritableSettingsInfoMessage: "Die Einstellungen in dieser Kategorie können von Sitzungen und Servern geerbt werden. Konfigurieren Sie einige Basiseinstellungen, die Sie in mehreren Sitzungen wiederverwenden können! Einstellungsgruppen werden durch Schlüssel zugeordnet. Einzelne Einstellungen können deaktiviert werden, was bedeutet, dass sie nicht vererbt werden."
     ccSettingsSubgroupTitle: "Steuerungszeichen (cc) Aktiv?"
+    numberSetting:
+      validationErrorTooSmall: "Wert ist zu klein. Minimalwert ist {}."
+      validationErrorTooBig: "Wert ist zu groß. Maximalwert ist {}."
+      validationErrorStep: "Wert entspricht nicht dem Schritt von {}."
     pathSetting:
       browseButton: "Durchsuchen"
     mapSettings:
@@ -548,6 +562,13 @@ de_DE:
       valueName: "Wert"
       deleteEntry: "Eintrag löschen"
       itemValue: "Eintrag"
+    logOptions:
+      logLevel: "Protokollierungsstufe"
+      logDirectory: "Protokollverzeichnis"
+      disableFileLogging: "Datei-Protokollierung deaktivieren"
+      logLevelHelpText: "Die Protokollierungsstufe bestimmt die Detailgenauigkeit der Protokollausgabe der Anwendung."
+      logDirectoryHelpText: "Das Verzeichnis, in dem die Protokolldateien gespeichert werden. Wenn der String mit %key% beginnt, wird er durch einen speziellen Pfad ersetzt. Die folgenden Schlüssel werden den folgenden Verzeichnissen zugeordnet: ~, %userprofile%: Heimatverzeichnis. %appdata%: AppData/Roaming unter Windows, Heimatverzeichnis unter Linux. %localappdata%: AppData/Local unter Windows, Heimatverzeichnis unter Linux. %temp%: Temp-Verzeichnis. %config_home%, %config_home2%, %config_home3%: Konfigurationsverzeichnis (1,2,3 ist Home, Dokumente, AppData unter Windows). %state_home%, %state_home2%, %state_home3%: Zustandsverzeichnis. %data_home%, %data_home2%, %data_home3%: Datenverzeichnis."
+      disableFileLoggingHelpText: "Wenn aktiviert, wird die Protokollierung in Dateien deaktiviert. Protokolle werden nur in der Konsole ausgegeben."
     layoutSetting:
       layoutKeysLabel: "Gespeicherte Layouts"
       deleteLayoutKey: "Layout löschen"

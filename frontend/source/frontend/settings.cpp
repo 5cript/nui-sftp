@@ -12,6 +12,7 @@
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/terminal_options.hpp>
+#include <frontend/settings/log_options.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
@@ -51,7 +52,7 @@ struct Settings::Implementation
     struct CollapsibleStates
     {
         Nui::Observed<bool> localization{false};
-        Nui::Observed<bool> loggingAndErrorReporting{false};
+        Nui::Observed<bool> logging{false};
         Nui::Observed<bool> userInterface{true};
         Nui::Observed<bool> localFilesystemOptions{true};
         Nui::Observed<bool> sshOptions{true};
@@ -86,6 +87,7 @@ struct Settings::Implementation
     Nui::Observed<std::vector<Settings::SectionSelectorOptions>> sessionSelectors{};
 
     GeneralSettings generalSettings;
+    LogOptions logOptions;
     TermiosSettings termiosSettings;
     SshOptions sshOptions;
     SftpOptions sftpOptions;
@@ -116,6 +118,7 @@ struct Settings::Implementation
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
         , generalSettings{onChange, events, multiInputDialog}
+        , logOptions{onChange}
         , termiosSettings{[onChange, reloadInheritance]()
               {
                   onChange();
@@ -229,11 +232,14 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Settings);
 void Settings::applySettingsToState(Persistence::State& state)
 {
     // Uncategorized / General:
-    state.logLevel = impl_->generalSettings.logLevel.value();
+    // None anymore right now
 
     // Localization Options:
     state.localizationOptions.languageCode = impl_->generalSettings.localization.language.value();
     state.localizationOptions.dateTimeFormatString = impl_->generalSettings.localization.dateTimeFormat.value();
+
+    // Log Options
+    impl_->logOptions.applyToState(state.logOptions);
 
     // Ui Options
     state.uiOptions.fileGridPathBarOnTop = impl_->generalSettings.userInterface.fileGridPathBarOnTop.value();
@@ -333,7 +339,7 @@ void Settings::applySettingsToUi()
             }
             impl_->sessionSelectors.modify();
 
-            impl_->generalSettings.logLevel.value(impl_->stateHolder->stateCache().logLevel);
+            impl_->logOptions.loadFromState(impl_->stateHolder->stateCache().logOptions);
             impl_->generalSettings.localization.language.value(
                 impl_->stateHolder->stateCache().localizationOptions.languageCode
             );
@@ -558,6 +564,28 @@ void Settings::reloadInheritance()
     );
 }
 
+void Settings::save()
+{
+    impl_->stateHolder->save(
+        [this](std::optional<std::string> const& error)
+        {
+            if (error)
+            {
+                impl_->confirmDialog->open({
+                    .state = ConfirmDialog::State::Negative,
+                    .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                    .text =
+                        fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+            }
+
+            impl_->saveInProgress = false;
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+    );
+}
+
 void Settings::onChange()
 {
     impl_->saveInProgress = true;
@@ -569,26 +597,7 @@ void Settings::onChange()
         [this](bool, Persistence::State const&)
         {
             applySettingsToState(impl_->stateHolder->stateCache());
-
-            impl_->stateHolder->save(
-                [this](std::optional<std::string> const& error)
-                {
-                    if (error)
-                    {
-                        impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Negative,
-                            .headerText = language->get("settings", "errorSavingSettingsHeader"),
-                            .text = fmt::format(
-                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
-                            ),
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
-                    }
-
-                    impl_->saveInProgress = false;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
-            );
+            save();
         },
         language->get("settings", "errorLoadingSettings")
     );
@@ -864,22 +873,6 @@ void Settings::applySessionToState(std::string const& sessionId)
     }
 
     impl_->currentSessionOptions.applyToState(sessionIter->second);
-
-    impl_->stateHolder->save(
-        [this](std::optional<std::string> const& error)
-        {
-            if (error)
-            {
-                impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
-                    .headerText = language->get("settings", "errorSavingSettingsHeader"),
-                    .text =
-                        fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-            }
-        }
-    );
 }
 
 Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& options)
@@ -907,7 +900,10 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                 }
 
                 if (impl_->activeSession.value())
+                {
                     applySessionToState(*impl_->activeSession.value());
+                    save();
+                }
                 if (options.thisSection == Section::Session && options.sessionId.has_value()) {
                     impl_->activeSection = Section::Session;
                     impl_->activeSession = options.sessionId;
@@ -1015,10 +1011,6 @@ Nui::ElementRenderer Settings::generalSettings()
     try
     {
         // clang-format off
-        auto loggingAndErrorReporting = fragment(
-            impl_->generalSettings.logLevel(language->getObserved("settings", "logLevel"))
-        );
-
         auto localization = fragment(
             impl_->generalSettings.localization.language(language->getObserved("language"))//,
             //impl_->generalSettings.localization.dateTimeFormat(language->getObserved("settings", "general", "localization", "dateTimeFormatString"))
@@ -1060,8 +1052,8 @@ Nui::ElementRenderer Settings::generalSettings()
                 .headerTitle = language->getObserved("settings", "generalSettings")
             }),
             group({
-                .isCollapsed = impl_->collapsibleStates.loggingAndErrorReporting,
-                .content = std::move(loggingAndErrorReporting),
+                .isCollapsed = impl_->collapsibleStates.logging,
+                .content = impl_->logOptions.render(),
                 .headerTitle = language->getObserved("settings", "loggingAndErrorReportingGroupHeader")
             }),
             group({
@@ -1531,7 +1523,10 @@ Nui::ElementRenderer Settings::group(GroupParameters&& params)
                             else if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
                             {
                                 if (*impl_->activeSession)
+                                {
                                     applySessionToState(**impl_->activeSession);
+                                    save();
+                                }
                                 reloadInheritance();
                             }
                         },
