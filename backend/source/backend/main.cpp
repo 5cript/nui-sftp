@@ -155,10 +155,24 @@ namespace
     }
 }
 
+Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
+{
+    stateHolder.load(
+        [](std::optional<std::string> const&, Persistence::StateHolder& holder, std::optional<std::string> const&)
+        {
+            auto const& state = holder.stateCache();
+            Log::Logger::setupGlobalSinks(
+                state.logOptions.logLevel, state.logOptions.logDirectory, state.logOptions.disableFileLogging
+            );
+        }
+    );
+}
+
 Main::Main(int const, char const* const* argv)
     : shuttingDown_{false}
     , programDir_{std::filesystem::path{argv[0]}.parent_path()}
     , stateHolder_{programDir_}
+    , loggerSetup_{stateHolder_}
     , window_{
           Nui::WindowOptions{
               .title = "NuiScp"s,
@@ -247,8 +261,6 @@ void Main::registerRpc()
                 );
                 return;
             }
-
-            Log::setLevel(holder.stateCache().logLevel);
 
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
                 window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions

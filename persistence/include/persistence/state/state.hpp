@@ -10,6 +10,7 @@
 #include <persistence/state/queue_options.hpp>
 #include <persistence/state/local_filesystem_options.hpp>
 #include <persistence/state/localization_options.hpp>
+#include <persistence/state/log_options.hpp>
 
 #include <map>
 #include <string>
@@ -26,7 +27,7 @@ namespace Persistence
         std::map<std::string, QueueOptions> queueOptions{};
         LocalFilesystemOptions localFilesystemOptions{};
         UiOptions uiOptions{};
-        Log::Level logLevel{Log::Level::Info};
+        LogOptions logOptions{};
         LocalizationOptions localizationOptions{};
 
         State fullyResolve() const;
@@ -41,7 +42,7 @@ namespace Persistence
             sshOptions,
             sftpOptions,
             uiOptions,
-            logLevel,
+            logOptions,
             localizationOptions,
             queueOptions,
             localFilesystemOptions)

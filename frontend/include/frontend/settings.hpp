@@ -81,6 +81,7 @@ class Settings
 
     void addNewSession();
     void onChange();
+    void save();
     void applySettingsToState(Persistence::State& state);
 
     void loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);

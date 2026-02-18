@@ -141,14 +141,13 @@ class Setting
     }
     void inherit(std::optional<ValueType> const& value)
     {
+        inheritedState_ = value;
         if (value)
         {
-            inheritedState_ = value;
             inheritanceStatus(InheritanceStatus::AncestorEngaged);
         }
         else
         {
-            inheritedState_ = std::nullopt;
             inheritanceStatus(InheritanceStatus::AncestorDisengaged);
         }
         updateStateWithInheritance();
@@ -206,6 +205,10 @@ class Setting
                         .onChange =
                             [this](bool, Nui::WebApi::MouseEvent const&)
                         {
+                            Nui::WebApi::Console::log(
+                                "Setting: Engaged state changed to {}, triggering onChange.", engaged_.value()
+                            );
+                            updateStateWithInheritance();
                             onChange_();
                         }
                     }

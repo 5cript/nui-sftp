@@ -12,8 +12,6 @@
 
 struct GeneralSettings
 {
-    ComboSetting<Log::Level, std::string> logLevel;
-
     struct Localization
     {
         ComboSetting<std::string, std::string> language;

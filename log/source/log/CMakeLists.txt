@@ -33,5 +33,13 @@ else()
             utility
             spdlog::spdlog
             nui-backend
+        PRIVATE
+            roar
+            constants
+    )
+    target_sources(
+        log
+        PRIVATE
+            logger_backend.cpp
     )
 endif()

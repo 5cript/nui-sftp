@@ -11,7 +11,7 @@ Still under construction :construction:
 - [x] Fix session being in hanging state when connect fails.
 - [x] Implement proper handling of connection loss.
 - [x] Multi session support.
-- [ ] Accessible logs.
+- [x] Accessible logs.
 - [ ] ConfirmDialog List items are broken
 
 ## Operation Queue (UI)
@@ -30,8 +30,6 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [x] Better number boxes.
 - [x] Number box value constraining.
-- [ ] Number inputs have bad user feel, input validation should not insert valid numbers, but only indicate problems and then not save if its invalid.
-- [ ] Inheritance on lists and maps does not work.
 - [ ] Default settings are broken.
 
 ## SSH

@@ -1,59 +1,7 @@
 #include <frontend/settings/general_settings.hpp>
 
-#include <svgs/activity-items.hpp>
-#include <svgs/zoom-in.hpp>
-#include <svgs/information.hpp>
-#include <svgs/alert.hpp>
-#include <svgs/error.hpp>
-#include <svgs/incident.hpp>
-#include <svgs/hide.hpp>
-
 GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, MultiInputDialog& multiInputDialog)
-    : logLevel{
-        {
-            Log::Level::Trace,
-            Log::Level::Debug,
-            Log::Level::Info,
-            Log::Level::Warning,
-            Log::Level::Error,
-            Log::Level::Critical,
-            Log::Level::Off,
-        },
-        language->getObserved("settings", "general", "loggingAndErrorReporting", "logLevelHelpText"),
-        onChange,
-        [this, onChange]()
-        {
-            logLevel.value(Persistence::State{}.logLevel);
-            onChange();
-        },
-        [](Log::Level const& level)
-        {
-            return Utility::enumToString<Log::Level>(level);
-        },
-        [](Log::Level const& level) -> Nui::ElementRenderer
-        {
-            switch (level)
-            {
-                case Log::Level::Trace:
-                    return GeneratedSvgs::activityitems();
-                case Log::Level::Debug:
-                    return GeneratedSvgs::zoomin();
-                case Log::Level::Info:
-                    return GeneratedSvgs::information();
-                case Log::Level::Warning:
-                    return GeneratedSvgs::alert();
-                case Log::Level::Error:
-                    return GeneratedSvgs::error();
-                case Log::Level::Critical:
-                    return GeneratedSvgs::incident();
-                case Log::Level::Off:
-                    return GeneratedSvgs::hide();
-                default:
-                    return Nui::nil();
-            }
-        }
-    }
-    , localization{
+    : localization{
             .language = {
                 {"en_US", "de_DE"},
                 language->getObserved("settings", "general", "localization", "languageHelpText"),

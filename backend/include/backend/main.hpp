@@ -42,6 +42,10 @@ class Main
     std::atomic_bool shuttingDown_;
     std::filesystem::path programDir_;
     Persistence::StateHolder stateHolder_;
+    struct LoggerSetup
+    {
+        LoggerSetup(Persistence::StateHolder& stateHolder);
+    } loggerSetup_;
     Nui::Window window_;
     Nui::RpcHub hub_;
     std::unique_ptr<RpcFilesystem> rpcFilesystem_;
