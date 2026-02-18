@@ -92,12 +92,6 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
                 if (!table)
                     return;
 
-                if (!isEngaged())
-                {
-                    table->clear();
-                    return;
-                }
-
                 std::vector<ResizableTable::TableRow> rows;
                 for (const auto& [key, value] : map)
                 {
