@@ -129,6 +129,31 @@ class NumberSetting : public Setting<Disengageable, ValueType>
         }
     }
 
+    std::string /* empty is all valid */ checkValidity(std::string const& value)
+    {
+        const auto val = convertValue(value);
+
+        if (args_.minValue && val < *args_.minValue)
+            return fmt::format(
+                fmt::runtime(language->get("settings", "numberSetting", "validationErrorTooSmall")),
+                valueToString(*args_.minValue)
+            );
+        if (args_.maxValue && val > *args_.maxValue)
+            return fmt::format(
+                fmt::runtime(language->get("settings", "numberSetting", "validationErrorTooLarge")),
+                valueToString(*args_.maxValue)
+            );
+        if constexpr (!std::is_floating_point_v<ValueType>)
+        {
+            if (args_.stepValue && ((val - args_.minValue.value_or(0)) % *args_.stepValue != 0))
+                return fmt::format(
+                    fmt::runtime(language->get("settings", "numberSetting", "validationErrorStep")),
+                    valueToString(*args_.stepValue)
+                );
+        }
+        return {};
+    }
+
     std::string valueToString(ValueType value)
     {
         if (args_.numberBase)
@@ -189,20 +214,31 @@ class NumberSetting : public Setting<Disengageable, ValueType>
                     {
                         observeEngagedToBool(disabled),
                         pattern = validationPattern,
+                        onKeyUp =
+                            [this](Nui::WebApi::KeyboardEvent event)
+                        {
+                            const auto valid = checkValidity(event.target()["value"].as<std::string>());
+                            event.target().call<void>("setCustomValidity", valid);
+                            event.target().call<void>("reportValidity");
+                        },
                         Nui::Attributes::type = type,
                     },
                 .onChange =
                     [this, type](auto const& state, Nui::WebApi::Event const& event)
                 {
                     const auto valueUnsanitized = convertValue(state);
-                    this->value(
-                        std::clamp(
-                            valueUnsanitized,
-                            args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
-                            args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
-                        )
-                    );
-                    this->valueIsValid_ = !event.target()["validity"]["patternMismatch"].as<bool>();
+                    // this->value(
+                    //     std::clamp(
+                    //         valueUnsanitized,
+                    //         args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
+                    //         args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
+                    //     )
+                    // );
+                    this->valueIsValid_ = event.target().call<bool>("checkValidity");
+                    if (this->valueIsValid_)
+                    {
+                        this->value(valueUnsanitized);
+                    }
                     onChange_();
                 },
                 .dontUpdateValue = true
