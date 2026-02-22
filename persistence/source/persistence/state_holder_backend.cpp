@@ -277,33 +277,33 @@ namespace Persistence
             hasMissingDefaults = true;
         }
 
-        if (stateCache_.sessions.empty())
-        {
-            Log::warn("Config file misses terminal engines, adding defaults.");
-#ifdef _WIN32
-            stateCache_.sessions["msys2_default"] = SessionOptions{
-                .type = TerminalEngineType::shell,
-                .engine = defaultMsys2SessionOption(),
-                .terminalOptions = Reference{"default"},
-                .termios = Reference{"default"},
-            };
-            extendWarning("Added default msys2 terminal engine.");
-#elif __APPLE__
-// nothing
-#else
-            stateCache_.sessions["bash_default"] = SessionOptions{
-                .type = TerminalEngineType::shell,
-                .engine = defaultBashSessionOption(),
-                .terminalOptions = Reference{"default"},
-                .termios = Reference{"default"},
-                .queueOptions = Reference{"default"},
+        //         if (stateCache_.sessions.empty())
+        //         {
+        //             Log::warn("Config file misses terminal engines, adding defaults.");
+        // #ifdef _WIN32
+        //             stateCache_.sessions["msys2_default"] = SessionOptions{
+        //                 .type = TerminalEngineType::shell,
+        //                 .engine = defaultMsys2SessionOption(),
+        //                 .terminalOptions = Reference{"default"},
+        //                 .termios = Reference{"default"},
+        //             };
+        //             extendWarning("Added default msys2 terminal engine.");
+        // #elif __APPLE__
+        // // nothing
+        // #else
+        //             stateCache_.sessions["bash_default"] = SessionOptions{
+        //                 .type = TerminalEngineType::shell,
+        //                 .engine = defaultBashSessionOption(),
+        //                 .terminalOptions = Reference{"default"},
+        //                 .termios = Reference{"default"},
+        //                 .queueOptions = Reference{"default"},
 
-            };
-            extendWarning("Added default bash terminal engine.");
-#endif
-            mustSave = true;
-            hasMissingDefaults = true;
-        }
+        //             };
+        //             extendWarning("Added default bash terminal engine.");
+        // #endif
+        //             mustSave = true;
+        //             hasMissingDefaults = true;
+        //         }
 
         if (hasMissingDefaults)
         {

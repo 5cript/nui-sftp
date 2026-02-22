@@ -31,8 +31,10 @@ SessionOptions::SessionOptions(
           ),
           [](Persistence::TerminalEngineType const& v)
           {
-              return Utility::enumToString(v);
-        }
+            if (v == Persistence::TerminalEngineType::shell)
+                return "Shell (CURRENTLY BROKEN)"s;
+            return Utility::enumToString(v);
+          }
       }
     , icon{
         [](){
