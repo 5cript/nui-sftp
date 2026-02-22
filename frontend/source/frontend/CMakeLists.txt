@@ -38,6 +38,7 @@ target_sources(
         dialog/confirm_dialog.cpp
         dialog/new_session_dialog.cpp
         dialog/file_property_dialog.cpp
+        dialog/dialog_buttons_keyboard_support.cpp
         settings/general_settings.cpp
         settings/optional_converters.cpp
         settings/sftp_options.cpp

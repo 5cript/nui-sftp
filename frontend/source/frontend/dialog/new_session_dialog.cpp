@@ -1,10 +1,12 @@
 #include <frontend/dialog/new_session_dialog.hpp>
+#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/session_icon_options.hpp>
 #include <log/log.hpp>
 
+#include <script-nui-components/button.hpp>
+
 #include <nui/rpc.hpp>
 #include <ui5/components/dialog.hpp>
-#include <ui5/components/button.hpp>
 #include <ui5/components/input.hpp>
 #include <ui5/components/label.hpp>
 #include <ui5/components/select.hpp>
@@ -13,6 +15,8 @@
 #include <nui/frontend/dom/basic_element.hpp>
 
 #include <regex>
+
+namespace Snc = ScriptNuiComponents;
 
 struct NewSessionDialog::Implementation
 {
@@ -107,6 +111,7 @@ Nui::ElementRenderer NewSessionDialog::operator()()
         id = "InputDialog_" + impl_->id,
         "headerText"_prop = "Create New Session",
         reference = impl_->dialog,
+        "initialFocus"_prop = "NewSessionDialogInput_" + impl_->id,
     }(
         section{class_ = "new-session-section"}(
             ui5::label{id = "NewSessionDialogLabel_" + impl_->id, "for"_prop = "NewSessionDialogInput_" + impl_->id}(
@@ -154,22 +159,38 @@ Nui::ElementRenderer NewSessionDialog::operator()()
         ),
         div{
             "slot"_attr = "footer",
-            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px"
+            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px; padding: 5px",
+            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
+                dialogButtonContainerKeydown(event);
+            },
         }(
-            div{style = "flex: 1;"}(),
-            ui5::button{
-                "design"_prop = "Emphasized",
-                "click"_event = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    closeDialog(std::nullopt);
+            Snc::button(
+                Snc::ButtonOptions{
+                    .text = "OK",
+                    .attributes = std::vector<Nui::Attribute>{
+                        onClick = [this](Nui::WebApi::Event event){
+                            event.stopPropagation();
+                            confirm();
+                        },
+                        style = "grid-row: 1",
+                        tabIndex = 0
+                    },
+                    .styleVariant = Snc::StyleVariant::Primary,
                 }
-            }("Cancel"),
-            ui5::button{
-                "design"_prop = "Emphasized",
-                "click"_event = [this](Nui::val){
-                    confirm();
+            ),
+            Snc::button(
+                Snc::ButtonOptions{
+                    .text = "Cancel",
+                    .attributes = std::vector<Nui::Attribute>{
+                        onClick = [this](Nui::WebApi::Event event){
+                            event.stopPropagation();
+                            closeDialog(std::nullopt);
+                        },
+                        style = "grid-row: 1"
+                    },
+                    .styleVariant = Snc::StyleVariant::Regular,
                 }
-            }("Ok")
+            )
         )
     );
     // clang-format on
