@@ -11,6 +11,9 @@
 #include <fstream>
 #include <chrono>
 
+using namespace std::string_literals;
+using namespace std::chrono_literals;
+
 namespace Persistence
 {
     namespace
@@ -171,10 +174,19 @@ namespace Persistence
         {
             Log::warn("Config file misses terminal options, adding defaults.");
             stateCache_.terminalOptions["default"] = TerminalOptions{
-                .fontFamily = "consolas, courier-new, courier, monospace",
-                .fontSize = 14,
-                .lineHeight = std::nullopt,
-                .renderer = "canvas",
+#ifdef _WIN32
+                .fontFamily = "consolas, monospace",
+#else
+                .fontFamily = "Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace",
+#endif
+                .fontSize = 12,
+                .lineHeight = 1,
+                .cursorBlink = false,
+#ifdef __linux__
+                .renderer = "dom",
+#else
+                .renderer = "webgl"
+#endif
                 .letterSpacing = 0,
                 .theme = TerminalTheme{
                     .background = "#202020",
@@ -190,7 +202,16 @@ namespace Persistence
         if (sshDefault == stateCache_.sshOptions.end())
         {
             Log::warn("Config file misses ssh options, adding defaults.");
-            stateCache_.sshOptions["default"] = SshOptions{};
+            stateCache_.sshOptions["default"] = SshOptions{
+#ifdef __linux__
+                .tryAgentForAuthentication = true,
+                .usePublicKeyAutoAuth = true,
+#endif
+                .usePasswordAuth = true,
+                .logVerbosity = SshLogVerbosity::Off,
+                .strictHostKeyCheck = true,
+                .connectTimeoutSeconds = 5
+            };
             extendWarning("Added default ssh options.");
             mustSave = true;
             hasMissingDefaults = true;
@@ -200,7 +221,45 @@ namespace Persistence
         if (sftpDefault == stateCache_.sftpOptions.end())
         {
             Log::warn("Config file misses sftp options, adding defaults.");
-            stateCache_.sftpOptions["default"] = SftpOptions{};
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+            stateCache_.sftpOptions["default"] = SftpOptions{
+                .downloadOptions =
+                    DownloadOptions{
+                        CommonTransferOptions{
+                            .tempFileSuffix = ".filepart",
+                            .mayOverwrite = false,
+                            .tryContinue = true,
+                            .inheritPermissions = true,
+#ifdef __linux__
+                            .symlinkHandling = SymlinkHandling::AsSymlink,
+#elif defined(_WIN32)
+                            .symlinkHandling = SymlinkHandling::FollowSymlink,
+#endif
+                            .failFast = false
+                        },
+                        .reserveSpace = false,
+                        .doCleanup = true,
+                    },
+                .uploadOptions =
+                    UploadOptions{
+                        CommonTransferOptions{
+                            .tempFileSuffix = ".filepart",
+                            .mayOverwrite = false,
+                            .tryContinue = true,
+                            .inheritPermissions = true,
+#ifdef __linux__
+                            .symlinkHandling = SymlinkHandling::AsSymlink,
+#elif defined(_WIN32)
+                            .symlinkHandling = SymlinkHandling::FollowSymlink,
+#endif
+                            .failFast = false
+                        },
+                    },
+                .concurrency = 1,
+                .operationTimeout = 5s
+            };
+#pragma clang diagnostic pop
             extendWarning("Added default sftp options.");
             mustSave = true;
             hasMissingDefaults = true;
@@ -210,7 +269,9 @@ namespace Persistence
         if (queueOptionsDefault == stateCache_.queueOptions.end())
         {
             Log::warn("Config file misses queue options, adding defaults.");
-            stateCache_.queueOptions["default"] = QueueOptions{};
+            stateCache_.queueOptions["default"] = QueueOptions{
+                .startInPausedState = true,
+            };
             extendWarning("Added default queue options.");
             mustSave = true;
             hasMissingDefaults = true;
