@@ -29,7 +29,6 @@ Still under construction :construction:
 - [x] Save / Delete Current Layout.
 - [x] Better number boxes.
 - [x] Number box value constraining.
-- [ ] Default settings are broken.
 
 ## SSH
 - [x] Keyboard interactive password auth.
