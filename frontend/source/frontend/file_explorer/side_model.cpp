@@ -1,5 +1,6 @@
 #include <frontend/file_explorer/side_model.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 void SideModel::operationQueue(OperationQueue* operationQueue)
 {
@@ -39,6 +40,14 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
     if (!directoryEntries)
     {
         Log::error("Failed to list directory");
+        confirmDialog_->open({
+            .state = ConfirmDialog::State::Negative,
+            .headerText = language->get("sideModel", "failedToListDirectory"),
+            .text = fmt::format(
+                fmt::runtime(language->get("sideModel", "failedToListDirectoryText")), currentPath_->generic_string()
+            ),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
         // undo the navigation:
         if (currentPath_.value() != preNavigatePath_)
         {
