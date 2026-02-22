@@ -139,12 +139,20 @@ namespace SecureShell
         filterOutEmptyDirectories(std::vector<std::filesystem::path> directories);
 
         /**
-         * @brief Gets the attributes of a file or directory.
+         * @brief Gets the attributes of a file or directory (resolves links).
          *
          * @param path
          * @return std::future<std::expected<FileInformation, Error>>
          */
         std::future<std::expected<FileInformation, Error>> stat(std::filesystem::path const& path);
+
+        /**
+         * @brief Gets the attributes of a file or directory and if it is a link, the attributes of the link itself.
+         *
+         * @param path
+         * @return std::future<std::expected<FileInformation, Error>>
+         */
+        std::future<std::expected<FileInformation, Error>> lstat(std::filesystem::path const& path);
 
         /**
          * @brief Sets the attributes of a file or directory.
@@ -199,6 +207,18 @@ namespace SecureShell
         {
             return strand_.get();
         }
+
+        struct DeepLinkResult
+        {
+            std::filesystem::path linkTarget;
+            // target may not exist:
+            std::optional<FileInformation> targetInfo;
+        };
+        std::future<std::expected<DeepLinkResult, Error>>
+        readLinkDeep(std::filesystem::path const& path, int maxDepth = 10);
+
+        std::future<std::expected<void, Error>>
+        createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath);
 
       private:
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);

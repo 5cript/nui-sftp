@@ -86,9 +86,6 @@ class ScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
 
   private:
-    std::expected<void, ScanOperation::Error> scanOnce(std::filesystem::path const& path);
-
-  private:
     SecureShell::SftpSession* sftp_;
     std::filesystem::path remotePath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>

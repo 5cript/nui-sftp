@@ -563,7 +563,7 @@ void Session::openLocalFilesystem()
     );
 }
 
-void Session::openSftp()
+void Session::openSftp(std::string const& username)
 {
     if (impl_->frontendSessionManager.value() && impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
     {
@@ -578,7 +578,12 @@ void Session::openSftp()
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().operationQueue(&impl_->operationQueue);
-            remoteFileGridSide().path(opts.sftpOptions->defaultDirectory.value_or("/"));
+            remoteFileGridSide().path(
+                fmt::format(
+                    fmt::runtime(opts.sftpOptions->defaultDirectory.value_or("/home/{user}").generic_string()),
+                    fmt::arg("user", username)
+                )
+            );
             openLocalFilesystem();
         }
     }
@@ -628,7 +633,7 @@ void Session::onOpenSession(bool success, std::string const& info)
                         host = "[" + host + "]";
                     *impl_->tabTitle = impl_->disambiguateTitle(user + "@" + host + ":" + std::to_string(port));
 
-                    openSftp();
+                    openSftp(user);
                 }
             );
         }
@@ -643,6 +648,12 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
     if (!channelId)
     {
         Log::error("Failed to open channel: {}", info);
+        impl_->confirmDialog->open({
+            .state = ConfirmDialog::State::Negative,
+            .headerText = language->get("sessionFrontend", "channelCreationFailedHeader"),
+            .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "channelCreationFailedText")), info),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
         return;
     }
 

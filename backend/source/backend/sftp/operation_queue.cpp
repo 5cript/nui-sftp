@@ -55,13 +55,14 @@ namespace
                         .error = error,
                     };
                 },
-                [reason, operationId, error](BulkDownloadOperation const&)
+                [reason, operationId, error](BulkDownloadOperation const& op)
                 {
                     return OperationQueue::OperationCompleted{
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
                         .error = error,
+                        .failedEntries = op.getFailed(),
                     };
                 },
                 [reason, operationId, error](UploadOperation const&)
@@ -159,7 +160,7 @@ void OperationQueue::cancel(Ids::OperationId id)
 void OperationQueue::completeOperation(SharedData::OperationCompleted&& operationCompleted)
 {
     within_strand_do(
-        [weak = weak_from_this(), operationCompleted = std::move(operationCompleted)]()
+        [weak = weak_from_this(), operationCompleted = std::move(operationCompleted)]() mutable
         {
             auto self = weak.lock();
             if (!self)
@@ -178,14 +179,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
 
             self->hub_->callRemote(
                 fmt::format("OperationQueue::{}::onOperationCompleted", self->sessionId_.value()),
-                SharedData::OperationCompleted{
-                    .reason = operationCompleted.reason,
-                    .operationId = operationCompleted.operationId,
-                    .completionTime = operationCompleted.completionTime,
-                    .localPath = operationCompleted.localPath,
-                    .remotePath = operationCompleted.remotePath,
-                    .error = operationCompleted.error,
-                }
+                std::move(operationCompleted)
             );
         }
     );
@@ -319,7 +313,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
 {
     // Assumed in strand
 
-    auto fut = sftp.stat(remotePath);
+    auto fut = sftp.lstat(remotePath);
     if (fut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
     {
         Log::error("Failed to stat remote sftp file: timeout");
@@ -339,28 +333,10 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     if (allowOverwrite)
         transferOptions.mayOverwrite = allowOverwrite;
 
-    if (result->isRegularFile())
+    if (result->isRegularFile() || result->isSymlink())
     {
-        const auto fileSize = result->size;
-
-        auto fut = sftp.openFile(remotePath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown);
-        if (fut.wait_for(std::chrono::seconds{5}) != std::future_status::ready)
-        {
-            Log::error("Failed to open remote sftp file: timeout");
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::OpenFailure});
-        }
-
-        const auto openResult = fut.get();
-        if (!openResult.has_value())
-        {
-            Log::error("Failed to open remote sftp file: {}", openResult.error().message);
-            return std::unexpected(
-                Operation::Error{.type = Operation::ErrorType::SftpError, .sftpError = openResult.error()}
-            );
-        }
-
         auto operation = std::make_unique<DownloadOperation>(
-            std::move(openResult).value(),
+            sftp,
             DownloadOperation::DownloadOperationOptions{
                 .progressCallback =
                     [weak = weak_from_this(), operationId](auto min, auto max, auto current, auto bytesPerSecond)
@@ -395,6 +371,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                     ? transferOptions.customDirectoryPermissions
                     : defaultOptions.directoryPermissions,
                 .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
+                .entry = result.value(),
             }
         );
 
@@ -407,7 +385,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .operationId = operationId,
                 .type = SharedData::OperationType::Download,
                 .insertRefresh = insertRefresh,
-                .totalBytes = fileSize,
+                .totalBytes = result->size,
                 .localPath = localPath,
                 .remotePath = remotePath
             }
@@ -480,21 +458,24 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 },
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions = DownloadOperation::DownloadOperationOptions{
-                    .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                    .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                    .reserveSpace = transferOptions.reserveSpace.value_or(defaultOptions.reserveSpace),
-                    .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                    .inheritPermissions =
-                        transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                    .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
-                    .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                             : defaultOptions.filePermissions,
-                    .directoryPermissions = transferOptions.customDirectoryPermissions
-                        ? transferOptions.customDirectoryPermissions
-                        : defaultOptions.directoryPermissions,
-                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                },
+                .individualOptions =
+                    DownloadOperation::DownloadOperationOptions{
+                        .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
+                        .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
+                        .reserveSpace = transferOptions.reserveSpace.value_or(defaultOptions.reserveSpace),
+                        .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
+                        .inheritPermissions =
+                            transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                        .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
+                        .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                                 : defaultOptions.filePermissions,
+                        .directoryPermissions = transferOptions.customDirectoryPermissions
+                            ? transferOptions.customDirectoryPermissions
+                            : defaultOptions.directoryPermissions,
+                        .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                        .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
+                    },
+                .failFast = transferOptions.failFast.value_or(false),
             }
         );
 

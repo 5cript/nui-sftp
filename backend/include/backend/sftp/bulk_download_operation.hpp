@@ -2,13 +2,14 @@
 
 #include <backend/sftp/operation.hpp>
 #include <ssh/file_stream.hpp>
+#include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <backend/sftp/download_operation.hpp>
+#include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
 #include <string>
 
-// TODO: concurrent downloads!
 class BulkDownloadOperation : public Operation
 {
   public:
@@ -33,6 +34,7 @@ class BulkDownloadOperation : public Operation
         std::string archiveFormat{"tar"};
         std::string compressionMethod{"gz"};
         int compressionLevel{5};
+        bool failFast{false};
     };
 
     BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options);
@@ -59,12 +61,15 @@ class BulkDownloadOperation : public Operation
         return 1;
     }
 
+    std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
+
     SecureShell::ProcessingStrand* strand() const override;
 
   private:
     std::expected<WorkStatus, Error> workNormal();
     std::expected<WorkStatus, Error> workAsArchive();
     std::expected<WorkStatus, Error> workCurrentFile();
+    void completeCurrentDownload();
     std::filesystem::path fullLocalPath(SharedData::DirectoryEntry const& entry) const;
     std::expected<void, Error>
     applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
@@ -74,6 +79,7 @@ class BulkDownloadOperation : public Operation
     BulkDownloadOperationOptions options_;
     std::unique_ptr<DownloadOperation> currentDownload_;
     std::vector<SharedData::DirectoryEntry> entries_;
+    std::vector<std::pair<std::filesystem::path, Error>> failedEntries_;
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};

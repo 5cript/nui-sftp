@@ -15,5 +15,7 @@ namespace SharedData
         Finalizing,
         Completed,
         Canceled,
-        Failed)
+        Failed,
+        PartialSuccess
+    )
 }

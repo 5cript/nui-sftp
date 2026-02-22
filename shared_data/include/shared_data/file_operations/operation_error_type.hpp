@@ -39,6 +39,8 @@ namespace SharedData
         InvalidOperationState,
         OperationNotPossibleOnFileType,
         FilesystemError,
-        DeleteFailed
+        DeleteFailed,
+        CannotCreateSymlink,
+        SymlinkPointsToDirectory
     );
 }

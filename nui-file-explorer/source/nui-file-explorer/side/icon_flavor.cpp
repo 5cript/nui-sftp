@@ -321,7 +321,8 @@ namespace NuiFileExplorer
                         "dragleave"_event = [&item](Nui::WebApi::DragEvent){
                             item.isDropHovered(false);
                         },
-                        "data-index"_attr = std::to_string(index)
+                        "data-index"_attr = std::to_string(index),
+                        "data-type"_attr = fileTypeToString(item.item.type),
                     }(
                         img{
                             src = item.item.icon,

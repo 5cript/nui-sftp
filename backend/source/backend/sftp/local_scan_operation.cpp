@@ -121,6 +121,11 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
             Log::warn("LocalScanOperation: Cannot work on canceled operation.");
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
         }
+        case (PartialSuccess):
+        {
+            Log::warn("LocalScanOperation: Operation completed with partial success.");
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
+        }
     }
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }

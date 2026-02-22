@@ -129,6 +129,15 @@
     /* Important for the sheen effect */
     overflow: hidden;
 
+    &[data-type="Symbolic Link"] {
+        color: rgb(0, 242, 255);
+
+        &>div::before {
+            content: "⤷";
+            margin-right: 4px;
+        }
+    }
+
     & img {
         position: relative;
         cursor: pointer;
@@ -321,6 +330,7 @@
     height: 100%;
     overflow: auto;
     position: relative;
+    font-size: 12px;
 }
 
 .nui-file-grid-table-header {
@@ -476,6 +486,15 @@
 
     &>span {
         overflow: hidden;
+    }
+
+    &[data-type="Symbolic Link"] {
+        color: rgb(0, 242, 255);
+
+        &>span::before {
+            content: "⤷";
+            margin-right: 4px;
+        }
     }
 }
 

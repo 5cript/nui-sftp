@@ -1,5 +1,7 @@
 #pragma once
 
+#include <log/log.hpp>
+
 #include <vector>
 #include <type_traits>
 #include <filesystem>
@@ -83,20 +85,31 @@ namespace Utility
             if (completed())
                 return false;
 
-            auto result = scanner_(fullPath(entries_[currentIndex_]));
-            if (!result)
-                return std::unexpected(std::move(result).error());
+            if (entries_[currentIndex_].isDirectory())
+            {
+                auto result = scanner_(fullPath(entries_[currentIndex_]));
+                if (!result)
+                    return std::unexpected(std::move(result).error());
 
-            moveEntries(std::move(result).value(), currentIndex_);
-            ++currentIndex_;
+                moveEntries(std::move(result).value(), currentIndex_);
+                ++currentIndex_;
+            }
+            else
+            {
+                Log::warn(
+                    "DeepDirectoryWalker: Encountered non-directory entry '{}' during walk at a point where a "
+                    "directory was expected, skipping.",
+                    fullPath(entries_[currentIndex_]).generic_string()
+                );
+            }
 
-            // Move over all files:
+            // Move over all non dirs
             for (; currentIndex_ < entries_.size(); ++currentIndex_)
             {
                 auto const& current = entries_[currentIndex_];
                 if (current.isRegularFile())
                     totalBytes_ += current.size;
-                else
+                if (current.isDirectory())
                     break;
             }
 
@@ -188,10 +201,16 @@ namespace Utility
                     }
                 }
 
-                std::transform(iter, endMarker, std::back_inserter(entries_), [parent](EntryT&& entry) {
-                    entry.parent = parent;
-                    return std::move(entry);
-                });
+                std::transform(
+                    iter,
+                    endMarker,
+                    std::back_inserter(entries_),
+                    [parent](EntryT&& entry)
+                    {
+                        entry.parent = parent;
+                        return std::move(entry);
+                    }
+                );
             }
             else
             {
@@ -199,10 +218,12 @@ namespace Utility
                     std::make_move_iterator(begin(newEntries)),
                     std::make_move_iterator(end(newEntries)),
                     std::back_inserter(entries_),
-                    [parent](EntryT&& entry) {
+                    [parent](EntryT&& entry)
+                    {
                         entry.parent = parent;
                         return std::move(entry);
-                    });
+                    }
+                );
             }
         }
 

@@ -64,6 +64,14 @@ struct DisplayedOperation
         return dynamic_cast<T*>(card_.get());
     }
 
+    void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries)
+    {
+        if (auto* specificCard = getCardSpecifically<OperationCardInterface>())
+        {
+            specificCard->failedEntries(std::move(entries));
+        }
+    }
+
   private:
     Ids::OperationId operationId_;
     SharedData::OperationType type_;

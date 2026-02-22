@@ -92,6 +92,12 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
             // Do not enter error state here, it would overwrite the cancel state.
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
         }
+        case (PartialSuccess):
+        {
+            Log::warn("DeleteOperation: Operation completed with partial success.");
+            // Do not enter error state here, it would overwrite the partial success state.
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
+        }
     }
     Log::error("DeleteOperation: Unknown operation state: {}", static_cast<int>(state_));
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});

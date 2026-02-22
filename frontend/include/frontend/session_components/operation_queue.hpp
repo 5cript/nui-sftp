@@ -56,26 +56,26 @@ class OperationQueue
     void enqueueDownload(
         NuiFileExplorer::Item const& remoteItem,
         NuiFileExplorer::Item const& localItem,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh
     );
     void enqueueUpload(
         NuiFileExplorer::Item const& remoteItem,
         NuiFileExplorer::Item const& localItem,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh
     );
     void enqueueRename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
-        std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete
     );
     void enqueueDelete(
         std::vector<std::filesystem::path> const& paths,
         bool recursive,
-        std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
     );
 
     Nui::ElementRenderer operator()();

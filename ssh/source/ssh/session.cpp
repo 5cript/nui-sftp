@@ -85,7 +85,7 @@ namespace SecureShell
 
     std::string Session::getErrorMessage()
     {
-        return fmt::format("SSH Error (code {}): {}", ssh_get_error(session_.getCSession()), session_.getError());
+        return fmt::format("SSH Error (code {}): {}", session_.getErrorCode(), session_.getError());
     }
 
     void Session::channelRemoveItself(Channel* channel, bool isBackElement)
@@ -164,8 +164,8 @@ namespace SecureShell
                     return promise->set_value(
                         std::unexpected(
                             SftpError{
-                                .message = ssh_get_error(session_.getCSession()),
-                                .sshError = ssh_get_error_code(session_.getCSession()),
+                                .message = session_.getError(),
+                                .sshError = session_.getErrorCode(),
                                 .sftpError = 0,
                             }
                         )
@@ -178,8 +178,8 @@ namespace SecureShell
                     promise->set_value(
                         std::unexpected(
                             SftpError{
-                                .message = ssh_get_error(session_.getCSession()),
-                                .sshError = result,
+                                .message = session_.getError(),
+                                .sshError = session_.getErrorCode(),
                                 .sftpError = sftp_get_error(sftp),
                             }
                         )

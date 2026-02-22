@@ -41,35 +41,39 @@ void SftpFileEngine::dispose(std::function<void()> onComplete)
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(SftpFileEngine);
 
-void SftpFileEngine::lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&)> const& onOpen)
+void SftpFileEngine::lazyOpen(
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen
+)
 {
     if (impl_->sftpChannelId)
     {
-        onOpen(impl_->sftpChannelId);
+        onOpen(impl_->sftpChannelId, "Channel already open");
         return;
     }
 
     Log::info("Creating sftp channel");
     impl_->engine->createSftpChannel(
-        [this, onOpen](auto const& id)
+        [this, onOpen](auto const& id, std::string const& info)
         {
             impl_->sftpChannelId = id;
-            onOpen(id);
+            onOpen(id, info);
         }
     );
 }
 
 void SftpFileEngine::listDirectory(
     std::filesystem::path const& path,
-    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete
+    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
+        onComplete
 )
 {
     lazyOpen(
-        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
                 Log::error("Cannot list directory, no sftp channel");
+                onComplete(std::nullopt, info);
                 return;
             }
 
@@ -91,11 +95,13 @@ void SftpFileEngine::listDirectory(
                         {
                             Log::error("(Frontend) Failed to list directory: no entries");
                         }
-                        onComplete(std::nullopt);
+                        onComplete(
+                            std::nullopt, val.hasOwnProperty("error") ? val["error"].as<std::string>() : "No entries"
+                        );
                         return;
                     }
 
-                    onComplete(nlohmann::json::parse(Nui::JSON::stringify(val))["entries"]);
+                    onComplete(nlohmann::json::parse(Nui::JSON::stringify(val))["entries"], "Success");
                 },
                 channelId.value().value(),
                 path.generic_string()
@@ -104,14 +110,18 @@ void SftpFileEngine::listDirectory(
     );
 }
 
-void SftpFileEngine::createDirectory(std::filesystem::path const& path, std::function<void(bool)> onComplete)
+void SftpFileEngine::createDirectory(
+    std::filesystem::path const& path,
+    std::function<void(bool, std::string const& info)> onComplete
+)
 {
     lazyOpen(
-        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
                 Log::error("Cannot create directory, no channel");
+                onComplete(false, info);
                 return;
             }
 
@@ -125,11 +135,11 @@ void SftpFileEngine::createDirectory(std::filesystem::path const& path, std::fun
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to create directory: {}", val["error"].as<std::string>());
-                        onComplete(false);
+                        onComplete(false, val["error"].as<std::string>());
                         return;
                     }
 
-                    onComplete(true);
+                    onComplete(true, "Success");
                 },
                 channelId.value().value(),
                 path.generic_string()
@@ -138,14 +148,18 @@ void SftpFileEngine::createDirectory(std::filesystem::path const& path, std::fun
     );
 }
 
-void SftpFileEngine::createFile(std::filesystem::path const& path, std::function<void(bool)> onComplete)
+void SftpFileEngine::createFile(
+    std::filesystem::path const& path,
+    std::function<void(bool, std::string const& info)> onComplete
+)
 {
     lazyOpen(
-        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
                 Log::error("Cannot create file, no channel");
+                onComplete(false, info);
                 return;
             }
 
@@ -159,11 +173,11 @@ void SftpFileEngine::createFile(std::filesystem::path const& path, std::function
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to create file: {}", val["error"].as<std::string>());
-                        onComplete(false);
+                        onComplete(false, val["error"].as<std::string>());
                         return;
                     }
 
-                    onComplete(true);
+                    onComplete(true, "Success");
                 },
                 channelId.value().value(),
                 path.generic_string()
@@ -175,7 +189,7 @@ void SftpFileEngine::createFile(std::filesystem::path const& path, std::function
 void SftpFileEngine::addDownload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+    std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh
 )
@@ -189,12 +203,12 @@ void SftpFileEngine::addDownload(
             localPath,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
-            insertRefresh](auto const& channelId)
+            insertRefresh](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
                 Log::error("Cannot add download, no channel");
-                onOperationCreated(std::nullopt);
+                onOperationCreated(std::nullopt, info);
                 return;
             }
 
@@ -216,10 +230,10 @@ void SftpFileEngine::addDownload(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to add download: {}", val["error"].as<std::string>());
-                        onOperationCreated(std::nullopt);
+                        onOperationCreated(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
-                    onOperationCreated(operationId);
+                    onOperationCreated(operationId, "Success");
                 },
                 channelId.value().value(),
                 operationId.value(),
@@ -236,7 +250,7 @@ void SftpFileEngine::addDownload(
 void SftpFileEngine::addUpload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
-    std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+    std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh
 )
@@ -248,12 +262,12 @@ void SftpFileEngine::addUpload(
             localPath,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
-            insertRefresh](auto const& channelId)
+            insertRefresh](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
                 Log::error("Cannot add upload, no channel");
-                onOperationCreated(std::nullopt);
+                onOperationCreated(std::nullopt, info);
                 return;
             }
 
@@ -275,10 +289,10 @@ void SftpFileEngine::addUpload(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to add upload: {}", val["error"].as<std::string>());
-                        onOperationCreated(std::nullopt);
+                        onOperationCreated(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
-                    onOperationCreated(operationId);
+                    onOperationCreated(operationId, "Success");
                 },
                 channelId.value().value(),
                 operationId.value(),
@@ -295,7 +309,7 @@ void SftpFileEngine::addUpload(
 void SftpFileEngine::remove(
     std::vector<NuiFileExplorer::Item> const& files,
     std::vector<NuiFileExplorer::Item> const& directories,
-    std::function<void(bool)> onComplete,
+    std::function<void(bool, std::string const& info)> onComplete,
     std::function<void(
         std::vector<std::filesystem::path>, /* regular files & empty */
         std::vector<std::filesystem::path> /* non empties */
@@ -309,12 +323,13 @@ void SftpFileEngine::remove(
             onComplete = std::move(onComplete),
             files,
             directories,
-            onNonEmptyDirectoriesFound = std::move(onNonEmptyDirectoriesFound)](auto const& channelId) mutable
+            onNonEmptyDirectoriesFound =
+                std::move(onNonEmptyDirectoriesFound)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
                 Log::error("Cannot add upload, no channel");
-                onComplete(false);
+                onComplete(false, info);
                 return;
             }
 
@@ -343,13 +358,13 @@ void SftpFileEngine::remove(
                         Log::error(
                             "(Frontend) Failed to perform pre-delete checks: {}", val["error"].as<std::string>()
                         );
-                        onComplete(false);
+                        onComplete(false, val["error"].as<std::string>());
                         return;
                     }
                     if (!val.hasOwnProperty("nonEmptyDirectories"))
                     {
                         Log::error("(Frontend) Failed to perform pre-delete checks: no nonEmptyDirectories");
-                        onComplete(false);
+                        onComplete(false, "no nonEmptyDirectories");
                         return;
                     }
                     std::vector<std::filesystem::path> nonEmpties;
@@ -396,19 +411,19 @@ void SftpFileEngine::remove(
 void SftpFileEngine::performDelete(
     std::vector<NuiFileExplorer::Item> files,
     std::vector<std::filesystem::path> directoriesEmpty,
-    std::function<void(bool)> onComplete
+    std::function<void(bool, std::string const& info)> onComplete
 )
 {
     lazyOpen(
         [this,
             onComplete = std::move(onComplete),
             files = std::move(files),
-            directoriesEmpty = std::move(directoriesEmpty)](auto const& channelId) mutable
+            directoriesEmpty = std::move(directoriesEmpty)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
                 Log::error("Cannot add upload, no channel");
-                onComplete(false);
+                onComplete(false, info);
                 return;
             }
 
@@ -442,10 +457,10 @@ void SftpFileEngine::performDelete(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to delete files: {}", val["error"].as<std::string>());
-                        onComplete(false);
+                        onComplete(false, val["error"].as<std::string>());
                         return;
                     }
-                    onComplete(true);
+                    onComplete(true, "Success");
                 },
                 channelId.value().value(),
                 transformedPaths
@@ -457,18 +472,20 @@ void SftpFileEngine::performDelete(
 void SftpFileEngine::rename(
     std::filesystem::path const& oldPath,
     std::filesystem::path const& newPath,
-    std::function<void(bool)> onComplete
+    std::function<void(bool, std::string const& info)> onComplete
 )
 {
     Log::info("Requesting to rename file: {} -> {}", oldPath.generic_string(), newPath.generic_string());
 
     lazyOpen(
-        [this, oldPath, newPath, onComplete = std::move(onComplete)](auto const& channelId)
+        [this, oldPath, newPath, onComplete = std::move(onComplete)](
+            auto const& channelId, std::string const& info
+        ) mutable
         {
             if (!channelId)
             {
                 Log::error("Cannot rename file, no channel");
-                onComplete(false);
+                onComplete(false, info);
                 return;
             }
 
@@ -479,10 +496,10 @@ void SftpFileEngine::rename(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to rename file: {}", val["error"].as<std::string>());
-                        onComplete(false);
+                        onComplete(false, val["error"].as<std::string>());
                         return;
                     }
-                    onComplete(true);
+                    onComplete(true, "Success");
                 },
                 channelId.value().value(),
                 oldPath.generic_string(),
@@ -495,16 +512,18 @@ void SftpFileEngine::rename(
 void SftpFileEngine::removeOnQueueUnchecked(
     std::vector<std::filesystem::path> const& paths,
     bool recursive,
-    std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
 )
 {
     lazyOpen(
-        [this, paths, recursive, onComplete = std::move(onComplete)](auto const& channelId) mutable
+        [this, paths, recursive, onComplete = std::move(onComplete)](
+            auto const& channelId, std::string const& info
+        ) mutable
         {
             if (!channelId)
             {
                 Log::error("Cannot add upload, no channel");
-                onComplete(std::nullopt);
+                onComplete(std::nullopt, info);
                 return;
             }
 
@@ -515,7 +534,7 @@ void SftpFileEngine::removeOnQueueUnchecked(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to delete files: {}", val["error"].as<std::string>());
-                        onComplete(std::nullopt);
+                        onComplete(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
 
@@ -524,7 +543,7 @@ void SftpFileEngine::removeOnQueueUnchecked(
                     for (const auto& idVal : ids)
                         operationIds.push_back(Ids::makeOperationId(idVal.as<std::string>()));
 
-                    onComplete(operationIds);
+                    onComplete(operationIds, "Success");
                 },
                 channelId.value().value(),
                 paths,
@@ -537,18 +556,20 @@ void SftpFileEngine::removeOnQueueUnchecked(
 
 void SftpFileEngine::stat(
     std::filesystem::path const& path,
-    std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
+    std::function<
+        void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&, std::string const& info)>
+        onComplete
 )
 {
     Log::info("Requesting info of file: {}", path.generic_string());
 
     lazyOpen(
-        [this, path, onComplete = std::move(onComplete)](auto const& channelId)
+        [this, path, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
                 Log::error("Cannot stat file, no channel");
-                onComplete(std::nullopt);
+                onComplete(std::nullopt, info);
                 return;
             }
 
@@ -560,18 +581,21 @@ void SftpFileEngine::stat(
                     if (val.hasOwnProperty("error"))
                     {
                         Log::error("(Frontend) Failed to rename file: {}", val["error"].as<std::string>());
-                        onComplete(std::nullopt);
+                        onComplete(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
                     if (!val.hasOwnProperty("stat") || val["stat"].isNull() || val["stat"].isUndefined())
                     {
-                        onComplete(std::pair<bool /*exists*/, SharedData::DirectoryEntry>{false, {}});
+                        onComplete(
+                            std::pair<bool /*exists*/, SharedData::DirectoryEntry>{false, {}}, "File does not exist"
+                        );
                         return;
                     }
                     onComplete(
                         std::pair<bool /*exists*/, SharedData::DirectoryEntry>{
                             true, nlohmann::json::parse(Nui::JSON::stringify(val))["stat"]
-                        }
+                        },
+                        "Success"
                     );
                 },
                 channelId.value().value(),

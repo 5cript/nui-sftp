@@ -90,9 +90,6 @@ class LocalScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
 
   private:
-    std::expected<void, LocalScanOperation::Error> scanOnce(std::filesystem::path const& path);
-
-  private:
     std::filesystem::path localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

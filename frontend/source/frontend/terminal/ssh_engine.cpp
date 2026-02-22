@@ -117,14 +117,14 @@ void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool byLo
 void SshTerminalEngine::createChannelImpl(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
-    std::function<void(std::optional<Ids::ChannelId> const&)> onCreated,
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
     bool fileMode
 )
 {
     if (impl_->blockedByDestruction)
     {
         Log::error("Blocked by destruction");
-        return onCreated(std::nullopt);
+        return onCreated(std::nullopt, "Blocked by destruction");
     }
 
     Nui::val obj = Nui::val::object();
@@ -143,14 +143,14 @@ void SshTerminalEngine::createChannelImpl(
             if (val.hasOwnProperty("error"))
             {
                 Log::error("Failed to create channel: {}", val["error"].as<std::string>());
-                onCreated(std::nullopt);
+                onCreated(std::nullopt, val["error"].as<std::string>());
                 return;
             }
 
             if (!val.hasOwnProperty("id"))
             {
                 Log::error("Session::Channel::create callback did not return an id");
-                onCreated(std::nullopt);
+                onCreated(std::nullopt, "Session::Channel::create callback did not return an id");
                 return;
             }
 
@@ -171,18 +171,18 @@ void SshTerminalEngine::createChannelImpl(
                         {
                             Log::error("Failed to start reading: {}", val["error"].as<std::string>());
                             closeChannel(channelId, []() {});
-                            onCreated(std::nullopt);
+                            onCreated(std::nullopt, val["error"].as<std::string>());
                             return;
                         }
                         Log::info("Started reading: {}", channelId.value());
-                        onCreated(channelId);
+                        onCreated(channelId, "Started reading successfully");
                     },
                     channelId.value()
                 );
             }
             else
             {
-                onCreated(channelId);
+                onCreated(channelId, "Started reading successfully");
             }
         },
         obj
@@ -192,13 +192,15 @@ void SshTerminalEngine::createChannelImpl(
 void SshTerminalEngine::createChannel(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
-    std::function<void(std::optional<Ids::ChannelId> const&)> onCreated
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
 )
 {
     createChannelImpl(std::move(handler), std::move(errorHandler), std::move(onCreated), false);
 }
 
-void SshTerminalEngine::createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&)> onCreated)
+void SshTerminalEngine::createSftpChannel(
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+)
 {
     createChannelImpl([](std::string const&) {}, [](std::string const&) {}, std::move(onCreated), true);
 }

@@ -11,25 +11,32 @@ class SftpFileEngine : public FileEngine
 
     void listDirectory(
         std::filesystem::path const& path,
-        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&)> onComplete
+        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
+            onComplete
     ) override;
     void dispose(std::function<void()> onComplete) override;
-    void createDirectory(std::filesystem::path const& path, std::function<void(bool)> onComplete) override;
-    void createFile(std::filesystem::path const& path, std::function<void(bool)> onComplete) override;
+    void createDirectory(
+        std::filesystem::path const& path,
+        std::function<void(bool, std::string const& info)> onComplete
+    ) override;
+    void createFile(
+        std::filesystem::path const& path,
+        std::function<void(bool, std::string const& info)> onComplete
+    ) override;
 
     std::optional<Ids::ChannelId> release();
 
     void addDownload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
     ) override;
     void addUpload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
-        std::function<void(std::optional<Ids::OperationId>)> onOperationCreated,
+        std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
     ) override;
@@ -37,7 +44,7 @@ class SftpFileEngine : public FileEngine
     void remove(
         std::vector<NuiFileExplorer::Item> const& files,
         std::vector<NuiFileExplorer::Item> const& directories,
-        std::function<void(bool)> onComplete,
+        std::function<void(bool, std::string const& info)> onComplete,
         std::function<void(
             std::vector<std::filesystem::path>, /* regular files & empty */
             std::vector<std::filesystem::path> /* non empties */
@@ -47,26 +54,28 @@ class SftpFileEngine : public FileEngine
     void removeOnQueueUnchecked(
         std::vector<std::filesystem::path> const& paths,
         bool recursive,
-        std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
     ) override;
 
     void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
-        std::function<void(bool)> onComplete
+        std::function<void(bool, std::string const& info)> onComplete
     ) override;
 
     void stat(
         std::filesystem::path const& path,
-        std::function<void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&)> onComplete
+        std::function<
+            void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&, std::string const& info)>
+            onComplete
     ) override;
 
   private:
-    void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&)> const& onOpen);
+    void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen);
     void performDelete(
         std::vector<NuiFileExplorer::Item> files,
         std::vector<std::filesystem::path> directoriesEmpty,
-        std::function<void(bool)> onComplete
+        std::function<void(bool, std::string const& info)> onComplete
     );
 
   private:

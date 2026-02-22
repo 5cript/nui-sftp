@@ -614,11 +614,13 @@ void FrontendSessionManager::createChannel(
                     }
                 }
             },
-            [this, channelId, onChannelCreated, host, options](std::optional<Ids::ChannelId> const& creationResult)
+            [this, channelId, onChannelCreated, host, options](
+                std::optional<Ids::ChannelId> const& creationResult, std::string const& info
+            )
             {
                 if (!creationResult)
                 {
-                    onChannelCreated(std::nullopt, "Failed to create channel");
+                    onChannelCreated(std::nullopt, info);
                     return;
                 }
                 Log::info("Channel created.");

@@ -2,6 +2,7 @@
 
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
+#include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
 #include <frontend/settings/atomic_setting/number_setting.hpp>
 #include <frontend/settings/atomic_setting/path_setting.hpp>
@@ -22,6 +23,8 @@ struct SftpOptions : public GroupKeys
         NumberSetting<unsigned short, true> customDirectoryPermissions;
         BoolSetting<true> reserveSpace;
         BoolSetting<true> doCleanup;
+        ComboSetting<Persistence::SymlinkHandling, std::string, true> symlinkHandling;
+        BoolSetting<true> failFast;
     };
     struct UploadOptions
     {
@@ -31,11 +34,12 @@ struct SftpOptions : public GroupKeys
         BoolSetting<true> inheritPermissions;
         NumberSetting<unsigned short, true> customFilePermissions;
         NumberSetting<unsigned short, true> customDirectoryPermissions;
+        ComboSetting<Persistence::SymlinkHandling, std::string, true> symlinkHandling;
+        BoolSetting<true> failFast;
     };
     DownloadOptions downloadOptions;
     UploadOptions uploadOptions;
     PathSetting<true> defaultDirectory;
-
     Nui::Observed<bool> downloadOptionsEngaged{false};
     Nui::Observed<bool> uploadOptionsEngaged{false};
 

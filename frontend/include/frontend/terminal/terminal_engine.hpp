@@ -21,8 +21,10 @@ class MultiChannelTerminalEngine : public TerminalEngine
     virtual void createChannel(
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
-        std::function<void(std::optional<Ids::ChannelId> const&)> onCreated) = 0;
-    virtual void createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&)> onCreated) = 0;
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+    ) = 0;
+    virtual void
+    createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated) = 0;
     virtual void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) = 0;
     virtual ChannelInterface* channel(Ids::ChannelId const& channelId) = 0;
 };

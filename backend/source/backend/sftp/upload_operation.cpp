@@ -178,6 +178,12 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             // Do not enter error state here, it would overwrite the cancel state.
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
         }
+        case (PartialSuccess):
+        {
+            Log::warn("UploadOperation: Operation completed with partial success.");
+            // Do not enter error state here, it would overwrite the partial success state.
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
+        }
     }
     Log::error("UploadOperation: Unknown operation state: {}", static_cast<int>(state_));
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});

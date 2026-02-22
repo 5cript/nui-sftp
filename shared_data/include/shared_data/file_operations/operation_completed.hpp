@@ -25,6 +25,11 @@ namespace SharedData
         std::optional<std::filesystem::path> localPath{std::nullopt};
         std::optional<std::filesystem::path> remotePath{std::nullopt};
         std::optional<OperationError> error{std::nullopt};
+        std::vector<std::pair<std::filesystem::path, OperationError>> failedEntries{};
     };
-    BOOST_DESCRIBE_STRUCT(OperationCompleted, (), (reason, operationId, completionTime, localPath, remotePath, error))
+    BOOST_DESCRIBE_STRUCT(
+        OperationCompleted,
+        (),
+        (reason, operationId, completionTime, localPath, remotePath, error, failedEntries)
+    )
 }

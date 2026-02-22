@@ -83,13 +83,7 @@ namespace SecureShell
                     };
                     if (dir == nullptr)
                     {
-                        return std::unexpected(
-                            SftpSession::Error{
-                                .message = ssh_get_error(session_),
-                                .sshError = ssh_get_error_code(session_),
-                                .sftpError = sftp_get_error(session_),
-                            }
-                        );
+                        return std::unexpected(lastError());
                     }
 
                     {
@@ -105,24 +99,12 @@ namespace SecureShell
 
                     if (!sftp_dir_eof(dir.get()))
                     {
-                        return std::unexpected(
-                            SftpSession::Error{
-                                .message = ssh_get_error(session_),
-                                .sshError = ssh_get_error_code(session_),
-                                .sftpError = sftp_get_error(session_),
-                            }
-                        );
+                        return std::unexpected(lastError());
                     }
                 }
                 if (closeResult != SSH_OK)
                 {
-                    return std::unexpected(
-                        SftpSession::Error{
-                            .message = ssh_get_error(session_),
-                            .sshError = closeResult,
-                            .sftpError = sftp_get_error(session_),
-                        }
-                    );
+                    return std::unexpected(lastError());
                 }
 
                 return entries;
@@ -271,13 +253,7 @@ namespace SecureShell
                         };
                         if (dir == nullptr)
                         {
-                            return std::unexpected(
-                                SftpSession::Error{
-                                    .message = ssh_get_error(session_),
-                                    .sshError = ssh_get_error_code(session_),
-                                    .sftpError = sftp_get_error(session_),
-                                }
-                            );
+                            return std::unexpected(lastError());
                         }
 
                         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> entry{
@@ -310,13 +286,7 @@ namespace SecureShell
                 }
                 if (closeResult != SSH_OK)
                 {
-                    return std::unexpected(
-                        SftpSession::Error{
-                            .message = ssh_get_error(session_),
-                            .sshError = closeResult,
-                            .sftpError = sftp_get_error(session_),
-                        }
-                    );
+                    return std::unexpected(lastError());
                 }
                 return nonEmpties;
             }
@@ -363,6 +333,23 @@ namespace SecureShell
             {
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
                     sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                };
+                if (attributes == nullptr)
+                    return std::unexpected(lastError());
+
+                return fromSftpAttributes(attributes.get());
+            }
+        );
+    }
+
+    std::future<std::expected<FileInformation, SftpSession::Error>>
+    SftpSession::lstat(std::filesystem::path const& path)
+    {
+        return performPromise(
+            [this, path = std::move(path)]() -> std::expected<FileInformation, Error>
+            {
+                std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+                    sftp_lstat(session_, path.generic_string().c_str()), sftp_attributes_free
                 };
                 if (attributes == nullptr)
                     return std::unexpected(lastError());
@@ -436,11 +423,12 @@ namespace SecureShell
 
     SftpError SftpSession::lastError() const
     {
-        return SftpError{
-            .message = ssh_get_error(session_),
-            .sshError = ssh_get_error_code(session_),
+        const auto result = SftpError{
+            .message = "",
+            .sshError = 0,
             .sftpError = sftp_get_error(session_),
         };
+        return result;
     }
 
     std::future<std::expected<sftp_limits_struct, SftpSession::Error>> SftpSession::limits()
@@ -489,6 +477,75 @@ namespace SecureShell
                 fileStreams_.push_back(stream);
 
                 return std::weak_ptr<FileStream>{stream};
+            }
+        );
+    }
+
+    std::future<std::expected<SftpSession::DeepLinkResult, SftpSession::Error>>
+    SftpSession::readLinkDeep(std::filesystem::path const& path, int maxDepth)
+    {
+        return performPromise(
+            [this, path = std::move(path), maxDepth]() -> std::expected<DeepLinkResult, Error>
+            {
+                std::filesystem::path currentPath = path;
+                for (int i = 0; i < maxDepth; ++i)
+                {
+                    std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+                        sftp_lstat(session_, currentPath.generic_string().c_str()), sftp_attributes_free
+                    };
+                    if (attributes == nullptr)
+                    {
+                        auto last = lastError();
+                        // File does not exist:
+                        if (last.sftpError == 2)
+                        {
+                            return DeepLinkResult{
+                                .linkTarget = currentPath,
+                                .targetInfo = std::nullopt,
+                            };
+                        }
+                        return std::unexpected(std::move(last));
+                    }
+
+                    if (attributes->type != SSH_FILEXFER_TYPE_SYMLINK)
+                    {
+                        return DeepLinkResult{
+                            .linkTarget = currentPath,
+                            .targetInfo = fromSftpAttributes(attributes.get()),
+                        };
+                    }
+
+                    const auto readLinkResult = std::unique_ptr<char, decltype(&ssh_string_free_char)>(
+                        sftp_readlink(session_, currentPath.generic_string().c_str()), ssh_string_free_char
+                    );
+                    if (readLinkResult == nullptr)
+                        return std::unexpected(lastError());
+
+                    currentPath = readLinkResult.get();
+                }
+
+                return std::unexpected(
+                    Error{
+                        .message = "Maximum symlink depth exceeded",
+                        .sshError = SSH_OK,
+                        .sftpError = SSH_FX_FAILURE,
+                    }
+                );
+            }
+        );
+    }
+
+    std::future<std::expected<void, SftpSession::Error>>
+    SftpSession::createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath)
+    {
+        return performPromise(
+            [this, target = std::move(target), linkPath = std::move(linkPath)]() -> std::expected<void, Error>
+            {
+                auto result =
+                    sftp_symlink(session_, target.generic_string().c_str(), linkPath.generic_string().c_str());
+                if (result != SSH_OK)
+                    return std::unexpected(lastError());
+                return {};
             }
         );
     }
