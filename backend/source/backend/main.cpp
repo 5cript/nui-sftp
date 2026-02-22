@@ -176,7 +176,11 @@ Main::Main(int const, char const* const* argv)
     , window_{
           Nui::WindowOptions{
               .title = "NuiScp"s,
+#ifdef NDEBUG
+              .debug = false,
+#else
               .debug = true,
+#endif
               .customSchemes = {createFolderMapping(programDir_, "nui")},
               .onRpcAliveMessage = [this]() {
                   onRpcAlive();
