@@ -185,7 +185,7 @@ namespace Persistence
 #ifdef __linux__
                 .renderer = "dom",
 #else
-                .renderer = "webgl"
+                .renderer = "webgl",
 #endif
                 .letterSpacing = 0,
                 .theme = TerminalTheme{
