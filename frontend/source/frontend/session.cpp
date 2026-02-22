@@ -187,7 +187,9 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
         observe(impl_->frontendSessionManager),
         [this]() -> Nui::ElementRenderer {
             return div{
-                style = "height: 100%; width: 100%",
+                style = observe(impl_->options).generate([this](){
+                    return fmt::format("height: 100%; width: 100%; background-color: {};", impl_->options->theme && impl_->options->theme->background ? *impl_->options->theme->background : "#202020");
+                }),
                 class_ = "terminal-channel",
                 reference.onMaterialize([this](Nui::val element) {
                     Log::info("Channel terminal materialized");
@@ -1113,13 +1115,6 @@ Nui::ElementRenderer Session::operator()()
         class_ = observe(impl_->isVisible).generate([this]() {
             return classes("terminal-session", impl_->isVisible.value() ? "terminal-session-visible" : "terminal-session-hidden");
         }),
-        style = Style{
-            "background-color"_style = observe(impl_->options).generate([this]() -> std::string {
-                if (impl_->options->theme && impl_->options->theme->background)
-                    return *impl_->options->theme->background;
-                return "#202020";
-            }),
-        },
         !(reference = [this](
             std::weak_ptr<Nui::Dom::BasicElement>&& elem
         ){
