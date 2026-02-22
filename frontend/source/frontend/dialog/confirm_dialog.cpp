@@ -1,4 +1,5 @@
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/components/ui5/text.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
@@ -200,54 +201,12 @@ Nui::ElementRenderer ConfirmDialog::operator()()
         div{
             style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px;",
             tabIndex = 0,
+            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
+                dialogButtonContainerKeydown(event);
+            },
             reference = [this](std::weak_ptr<Nui::Dom::BasicElement> footer) {
                 impl_->footer = std::move(footer);
             },
-            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
-                // clang-format on
-                if (event.key() == "ArrowLeft" || event.key() == "ArrowUp" || event.key() == "ArrowRight" ||
-                    event.key() == "ArrowDown")
-                {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-                if (event.key() == "ArrowLeft" || event.key() == "ArrowUp")
-                {
-                    auto button = event.currentTarget().call<Nui::val>("querySelector", "button:focus"s);
-
-                    if (button.isUndefined() || button.isNull())
-                        return;
-
-                    auto previous = button["previousElementSibling"];
-
-                    if (previous.isUndefined() || previous.isNull())
-                        previous = event.currentTarget().call<Nui::val>("querySelector", "button:last-child"s);
-
-                    if (previous.isUndefined() || previous.isNull())
-                        return;
-
-                    previous.call<void>("focus");
-                    return;
-                }
-                if (event.key() == "ArrowRight" || event.key() == "ArrowDown")
-                {
-                    auto button = event.currentTarget().call<Nui::val>("querySelector", "button:focus"s);
-
-                    if (button.isUndefined() || button.isNull())
-                        return;
-
-                    auto next = button["nextElementSibling"];
-
-                    if (next.isUndefined() || next.isNull())
-                        next = event.currentTarget().call<Nui::val>("querySelector", "button"s);
-
-                    if (next.isUndefined() || next.isNull())
-                        return;
-
-                    next.call<void>("focus");
-                }
-                // clang-format off
-            }
         }(
             fragment(
                 observe(impl_->buttons),

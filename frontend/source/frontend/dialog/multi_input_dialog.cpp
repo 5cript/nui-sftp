@@ -1,4 +1,5 @@
 #include <frontend/dialog/multi_input_dialog.hpp>
+#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -7,7 +8,6 @@
 
 #include <nui/frontend/api/keyboard_event.hpp>
 #include <ui5/components/dialog.hpp>
-#include <ui5/components/button.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
@@ -89,6 +89,13 @@ Nui::ElementRenderer MultiInputDialog::operator()()
         id = "MultiInputDialog_" + impl_->id,
         "headerText"_prop = impl_->headerText,
         reference = impl_->dialog,
+        "initialFocus"_prop = observe(impl_->inputFields).generate([this]() -> std::string {
+            if (impl_->inputFields.value().empty())
+            {
+                return "";
+            }
+            return fmt::format("MultiInputDialogInput_{}_{}", impl_->id, impl_->inputFields.value().front().key);
+        })
     }(
         section{
             class_ = "multi-input-dialog-section",
@@ -105,6 +112,7 @@ Nui::ElementRenderer MultiInputDialog::operator()()
                         Snc::TextInputOptions<std::string>{
                             .attributes = {
                                 "data-key"_attr = field.key,
+                                id = fmt::format("MultiInputDialogInput_{}_{}", impl_->id, field.key),
                                 onKeyDown = [this, i, fieldsSize, key = field.key](Nui::WebApi::KeyboardEvent event)
                                 {
                                     using namespace std::string_literals;
@@ -151,21 +159,11 @@ Nui::ElementRenderer MultiInputDialog::operator()()
         ),
         div{
             "slot"_attr = "footer",
-            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px"
+            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px; padding: 5px",
+            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
+                dialogButtonContainerKeydown(event);
+            },
         }(
-            div{style = "flex: 1;"}(),
-            Snc::button(
-                Snc::ButtonOptions{
-                    .text = "Cancel",
-                    .attributes = std::vector<Nui::Attribute>{
-                        onClick = [this](Nui::WebApi::Event event){
-                            event.stopPropagation();
-                            closeDialog(std::nullopt);
-                        }
-                    },
-                    .styleVariant = Snc::StyleVariant::Regular,
-                }
-            ),
             Snc::button(
                 Snc::ButtonOptions{
                     .text = "OK",
@@ -173,9 +171,24 @@ Nui::ElementRenderer MultiInputDialog::operator()()
                         onClick = [this](Nui::WebApi::Event event){
                             event.stopPropagation();
                             confirm();
-                        }
+                        },
+                        style = "grid-row: 1",
+                        tabIndex = 0
                     },
                     .styleVariant = Snc::StyleVariant::Primary,
+                }
+            ),
+            Snc::button(
+                Snc::ButtonOptions{
+                    .text = "Cancel",
+                    .attributes = std::vector<Nui::Attribute>{
+                        onClick = [this](Nui::WebApi::Event event){
+                            event.stopPropagation();
+                            closeDialog(std::nullopt);
+                        },
+                        style = "grid-row: 1"
+                    },
+                    .styleVariant = Snc::StyleVariant::Regular,
                 }
             )
         )
