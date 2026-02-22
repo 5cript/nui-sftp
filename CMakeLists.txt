@@ -107,4 +107,6 @@ else()
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
     endif()
+
+    install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 endif()

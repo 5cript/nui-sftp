@@ -1,5 +1,13 @@
 set(NUISCP_NPM_INSTALL_ARGS "" CACHE STRING "Arguments to pass to npm install for nui-scp")
 
+add_npm_install(
+    TARGET_NAME ${PROJECT_NAME}-npm-install
+    NPM_EXECUTABLE "${NUI_NPM}"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    INSTALL_ARGS ${NUISCP_NPM_INSTALL_ARGS}
+    OUTPUTS ${UI5_SVGS_FULLPATH}
+)
+
 svg_to_hpp(
     SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
     HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
@@ -8,16 +16,6 @@ svg_to_hpp(
     ABBREVIATE
     TOOLPATH "${XML_TO_NUI_TOOL}"
     NAMES ${UI5_SVG_FILES}
-)
-
-message(STATUS "SVG Fullpaths: ${UI5_SVGS_FULLPATH}")
-
-add_npm_install(
-    TARGET_NAME ${PROJECT_NAME}-npm-install
-    NPM_EXECUTABLE "${NUI_NPM}"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    INSTALL_ARGS ${NUISCP_NPM_INSTALL_ARGS}
-    OUTPUTS ${UI5_SVGS_FULLPATH}
 )
 
 target_sources(
