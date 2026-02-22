@@ -26,12 +26,19 @@ RemoteSideModel::RemoteSideModel(
 
               fileEngine_->listDirectory(
                   dirPath,
-                  [onResultsAvailable =
-                          std::move(onResultsAvailable)](std::optional<std::vector<SharedData::DirectoryEntry>> entries)
+                  [this, onResultsAvailable = std::move(onResultsAvailable)](
+                      std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info
+                  )
                   {
                       if (!entries)
                       {
-                          Log::error("Failed to list files from remote side.");
+                          Log::error("Failed to list files from remote side: {}", info);
+                          confirmDialog_->open({
+                              .state = ConfirmDialog::State::Negative,
+                              .headerText = "",
+                              .text = info,
+                              .buttons = ConfirmDialog::Button::Ok,
+                          });
                           onResultsAvailable({});
                           return;
                       }
@@ -104,11 +111,17 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                 }
                 fileEngine_->createDirectory(
                     currentPath_.value() / *name,
-                    [this](bool success)
+                    [this](bool success, std::string const& info)
                     {
                         if (!success)
                         {
-                            Log::error("Failed to create directory");
+                            Log::error("Failed to create directory: {}", info);
+                            confirmDialog_->open({
+                                .state = ConfirmDialog::State::Negative,
+                                .headerText = "",
+                                .text = info,
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
                             return;
                         }
                         // Refresh list from server:
@@ -138,11 +151,17 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                 }
                 fileEngine_->createFile(
                     currentPath_.value() / *name,
-                    [this](bool success)
+                    [this](bool success, std::string const& info)
                     {
                         if (!success)
                         {
-                            Log::error("Failed to create file");
+                            Log::error("Failed to create file: {}", info);
+                            confirmDialog_->open({
+                                .state = ConfirmDialog::State::Negative,
+                                .headerText = "",
+                                .text = info,
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
                             return;
                         }
                         // Refresh list from server:
@@ -253,16 +272,19 @@ void RemoteSideModel::enqueueDeletes(
         operationQueue_->enqueueDelete(
             filesAndEmptyDirs,
             false,
-            [this,
-                nonEmpties = std::move(nonEmpties)](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
+            [this, nonEmpties = std::move(nonEmpties)](
+                std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info
+            ) mutable
             {
                 if (!opIds)
                 {
-                    Log::error("Failed to create delete operations");
+                    Log::error("Failed to create delete operations: {}", info);
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
-                        .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                        .text = fmt::format(
+                            fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
+                        ),
                         .buttons = ConfirmDialog::Button::Ok,
                     });
                     return;
@@ -273,15 +295,20 @@ void RemoteSideModel::enqueueDeletes(
                     operationQueue_->enqueueDelete(
                         nonEmpties,
                         true,
-                        [this](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
+                        [this](
+                            std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info
+                        ) mutable
                         {
                             if (!opIds)
                             {
-                                Log::error("Failed to create delete operations");
+                                Log::error("Failed to create delete operations: {}", info);
                                 confirmDialog_->open({
                                     .state = ConfirmDialog::State::Negative,
                                     .headerText = language->get("remoteSideModel", "deleteFailed"),
-                                    .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                                    .text = fmt::format(
+                                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
+                                        info
+                                    ),
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });
                                 return;
@@ -299,15 +326,17 @@ void RemoteSideModel::enqueueDeletes(
         operationQueue_->enqueueDelete(
             nonEmpties,
             true,
-            [this](std::optional<std::vector<Ids::OperationId>> const& opIds) mutable
+            [this](std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info) mutable
             {
                 if (!opIds)
                 {
-                    Log::error("Failed to create delete operations");
+                    Log::error("Failed to create delete operations: {}", info);
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
-                        .text = language->get("remoteSideModel", "failedToCreateDeleteOperation"),
+                        .text = fmt::format(
+                            fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
+                        ),
                         .buttons = ConfirmDialog::Button::Ok,
                     });
                     return;
@@ -381,7 +410,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                 fileEngine_->remove(
                     files,
                     directories,
-                    [this](bool success)
+                    [this](bool success, std::string const& info)
                     {
                         if (!success)
                         {
@@ -389,7 +418,9 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                             confirmDialog_->open({
                                 .state = ConfirmDialog::State::Negative,
                                 .headerText = language->get("remoteSideModel", "deleteFailed"),
-                                .text = language->get("remoteSideModel", "failedToDeleteItems"),
+                                .text = fmt::format(
+                                    fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")), info
+                                ),
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
                             return;
@@ -419,15 +450,17 @@ void RemoteSideModel::enqueueSingleDownload(
     operationQueue_->enqueueDownload(
         remoteItem,
         localItem,
-        [this](std::optional<Ids::OperationId> const& opId)
+        [this](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
             if (!opId)
             {
-                Log::error("Failed to create download operation");
+                Log::error("Failed to create download operation: {}", info);
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
                     .headerText = language->get("remoteSideModel", "downloadFailed"),
-                    .text = language->get("remoteSideModel", "failedToCreateDownloadOperation"),
+                    .text = fmt::format(
+                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
+                    ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;
@@ -490,8 +523,9 @@ void RemoteSideModel::downloadItemsConfirmed(
             Log::error("Failed to check file existence: {}", error);
             confirmDialog_->open({
                 .state = ConfirmDialog::State::Negative,
-                .headerText = "Check File Existence Failed",
-                .text = error,
+                .headerText = language->get("remoteSideModel", "checkFileExistenceFailed"),
+                .text =
+                    fmt::format(fmt::runtime(language->get("remoteSideModel", "invalidResponseFromBackend")), error),
                 .buttons = ConfirmDialog::Button::Ok,
             });
             return;
@@ -693,13 +727,27 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
             fileEngine_->rename(
                 fullFrom,
                 fullTo,
-                [this, fullFrom, fullTo](bool success)
+                [this, fullFrom, fullTo](bool success, std::string const& info)
                 {
                     if (!success)
                     {
                         Log::error(
-                            "Failed to rename item '{}' to '{}'", fullFrom.generic_string(), fullTo.generic_string()
+                            "Failed to rename item '{}' to '{}': {}",
+                            fullFrom.generic_string(),
+                            fullTo.generic_string(),
+                            info
                         );
+                        confirmDialog_->open({
+                            .state = ConfirmDialog::State::Negative,
+                            .headerText = "",
+                            .text = fmt::format(
+                                fmt::runtime(language->get("remoteSideModel", "failedToRenameItem")),
+                                fullFrom.generic_string(),
+                                fullTo.generic_string(),
+                                info
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
                         return;
                     }
                     Log::info("Renamed item '{}' to '{}'", fullFrom.generic_string(), fullTo.generic_string());

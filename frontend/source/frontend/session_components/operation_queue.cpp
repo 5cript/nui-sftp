@@ -342,6 +342,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Download,
+                *impl_->confirmDialog,
                 added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
                 *added.localPath,
                 *added.remotePath,
@@ -366,6 +367,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Upload,
+                *impl_->confirmDialog,
                 0,
                 *added.localPath,
                 *added.remotePath,
@@ -388,6 +390,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             }
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
+                *impl_->confirmDialog,
                 *added.remotePath,
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
@@ -405,6 +408,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             }
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
+                *impl_->confirmDialog,
                 *added.localPath,
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
@@ -418,6 +422,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             Log::info("Creating delete operation card for operation id: {}", added.operationId.value());
             return std::make_unique<DisplayedDeleteOperation>(
                 added.operationId,
+                *impl_->confirmDialog,
                 added.remotePath ? *added.remotePath : std::filesystem::path{},
                 [this](OperationCard<DisplayedDeleteOperation> const& operation)
                 {
@@ -444,6 +449,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             Log::info("Creating bulk download operation card for operation id: {}", added.operationId.value());
             return std::make_unique<DisplayedBulkOperation>(
                 added.operationId,
+                *impl_->confirmDialog,
                 SharedData::OperationType::BulkDownload,
                 *added.localPath,
                 *added.remotePath,
@@ -472,6 +478,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             Log::info("Creating bulk upload operation card for operation id: {}", added.operationId.value());
             return std::make_unique<DisplayedBulkOperation>(
                 added.operationId,
+                *impl_->confirmDialog,
                 SharedData::OperationType::BulkUpload,
                 *added.localPath,
                 *added.remotePath,
@@ -702,6 +709,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     SharedData::OperationCompleted completed{};
     try
     {
+        Nui::WebApi::Console::log(val);
         Nui::convertFromVal(val, completed);
     }
     catch (std::exception const& e)
@@ -717,11 +725,24 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         Log::error("Received operation completed for unknown operation id: {}", completed.operationId.value());
         return;
     }
+
+    bool partial = false;
+    if (!completed.failedEntries.empty())
+    {
+        partial = true;
+        Log::warn(
+            "Operation id: {} has {} failed entries.", completed.operationId.value(), completed.failedEntries.size()
+        );
+        operation->failedEntries(std::move(completed.failedEntries));
+    }
     switch (completed.reason)
     {
         case (SharedData::OperationCompletionReason::Completed):
         {
-            operation->state(SharedData::OperationState::Completed);
+            if (partial)
+                operation->state(SharedData::OperationState::PartialSuccess);
+            else
+                operation->state(SharedData::OperationState::Completed);
             break;
         }
         case (SharedData::OperationCompletionReason::Canceled):
@@ -897,7 +918,7 @@ Nui::ElementRenderer OperationQueue::operator()()
 void OperationQueue::enqueueDownload(
     NuiFileExplorer::Item const& remoteItem,
     NuiFileExplorer::Item const& localItem,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh
 )
@@ -905,7 +926,7 @@ void OperationQueue::enqueueDownload(
     if (!impl_->fileEngine)
     {
         Log::error("No file engine set for operation queue, cannot enqueue download");
-        onComplete(std::nullopt);
+        onComplete(std::nullopt, "No file engine set");
         return;
     }
 
@@ -917,7 +938,7 @@ void OperationQueue::enqueueDownload(
 void OperationQueue::enqueueUpload(
     NuiFileExplorer::Item const& remoteItem,
     NuiFileExplorer::Item const& localItem,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete,
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh
 )
@@ -925,7 +946,7 @@ void OperationQueue::enqueueUpload(
     if (!impl_->fileEngine)
     {
         Log::error("No file engine set for operation queue, cannot enqueue upload");
-        onComplete(std::nullopt);
+        onComplete(std::nullopt, "No file engine set");
         return;
     }
 
@@ -937,13 +958,13 @@ void OperationQueue::enqueueUpload(
 void OperationQueue::enqueueRename(
     std::filesystem::path const&,
     std::filesystem::path const&,
-    std::function<void(std::optional<Ids::OperationId> const&)> onComplete
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete
 )
 {
     if (!impl_->fileEngine)
     {
         Log::error("No file engine set for operation queue, cannot enqueue rename");
-        onComplete(std::nullopt);
+        onComplete(std::nullopt, "No file engine set");
         return;
     }
     // TODO: Implement
@@ -951,13 +972,13 @@ void OperationQueue::enqueueRename(
 void OperationQueue::enqueueDelete(
     std::vector<std::filesystem::path> const& paths,
     bool recursive,
-    std::function<void(std::optional<std::vector<Ids::OperationId>> const&)> onComplete
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
 )
 {
     if (!impl_->fileEngine)
     {
         Log::error("No file engine set for operation queue, cannot enqueue delete");
-        onComplete(std::nullopt);
+        onComplete(std::nullopt, "No file engine set");
         return;
     }
     impl_->fileEngine->removeOnQueueUnchecked(paths, recursive, std::move(onComplete));

@@ -197,11 +197,12 @@ namespace NuiFileExplorer
                         },
                         "dragleave"_event = [&item](Nui::WebApi::DragEvent){
                             item.isDropHovered(false);
-                        },
+                        }
                     }(
                         div{
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
+                            "data-type"_attr = fileTypeToString(item.item.type),
                         }(
                             img{
                                 src = item.item.icon,
@@ -211,22 +212,19 @@ namespace NuiFileExplorer
                                 height = "16",
                                 style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
                             }(),
-                            span{
-                            }(item.item.path.filename().string())
+                            span{}(item.item.path.filename().string())
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
                         }(
-                            span{
-                            }(Utility::formatBytes(item.item.size))
+                            span{}(Utility::formatBytes(item.item.size))
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell",
                             contextMenu(item),
                         }(
-                            span{
-                            }(item.item.lsStyleTypePermsUserGroup())
+                            span{}(item.item.lsStyleTypePermsUserGroup())
                         ),
                         div{
                             class_ = "nui-file-grid-table-cell",

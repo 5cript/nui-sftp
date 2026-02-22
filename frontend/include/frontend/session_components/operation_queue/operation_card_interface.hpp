@@ -31,4 +31,5 @@ class OperationCardInterface
     virtual std::chrono::steady_clock::time_point completionTime() const = 0;
     virtual Nui::ElementRenderer operator()() const = 0;
     virtual void setError(SharedData::OperationError const& error) = 0;
+    virtual void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries) = 0;
 };

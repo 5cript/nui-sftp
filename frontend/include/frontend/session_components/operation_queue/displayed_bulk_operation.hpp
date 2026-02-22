@@ -10,6 +10,7 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
   public:
     DisplayedBulkOperation(
         Ids::OperationId operationId,
+        ConfirmDialog& confirmDialog,
         SharedData::OperationType type,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
@@ -19,6 +20,7 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
     )
         : OperationCard{
               type,
+              confirmDialog,
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),

@@ -1,6 +1,7 @@
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <nui/rpc.hpp>
 
@@ -114,8 +115,8 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                                 Log::error("Invalid response from RpcFilesystem::createDirectory");
                                 confirmDialog_->open({
                                     .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Create Directory Failed",
-                                    .text = "Invalid response from backend",
+                                    .headerText = language->get("localSideModel", "createDirectoryFailedTitle"),
+                                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });
                                 return;
@@ -128,7 +129,7 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                                 Log::error("Failed to create directory: {}", error);
                                 confirmDialog_->open({
                                     .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Create Directory Failed",
+                                    .headerText = language->get("localSideModel", "createDirectoryFailedTitle"),
                                     .text = error,
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });
@@ -156,8 +157,8 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                                 Log::error("Invalid response from RpcFilesystem::createFile");
                                 confirmDialog_->open({
                                     .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Create File Failed",
-                                    .text = "Invalid response from backend",
+                                    .headerText = language->get("localSideModel", "createFileFailedTitle"),
+                                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });
                                 return;
@@ -170,7 +171,7 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                                 Log::error("Failed to create file: {}", error);
                                 confirmDialog_->open({
                                     .state = ConfirmDialog::State::Negative,
-                                    .headerText = "Create File Failed",
+                                    .headerText = language->get("localSideModel", "createFileFailedTitle"),
                                     .text = error,
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });
@@ -188,8 +189,8 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                 {
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
-                        .headerText = "Create Item Failed",
-                        .text = "Unsupported item type",
+                        .headerText = language->get("localSideModel", "createItemFailedTitle"),
+                        .text = language->get("localSideModel", "unsupportedItemType"),
                         .buttons = ConfirmDialog::Button::Ok,
                     });
                 }
@@ -240,8 +241,8 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                             Log::error("Invalid response from RpcFilesystem::remove");
                             confirmDialog_->open({
                                 .state = ConfirmDialog::State::Negative,
-                                .headerText = "Delete Files Failed",
-                                .text = "Invalid response from backend",
+                                .headerText = language->get("localSideModel", "deleteFilesFailedTitle"),
+                                .text = language->get("localSideModel", "invalidResponseFromBackend"),
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
                             return;
@@ -254,7 +255,7 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                             Log::error("Failed to delete files: {}", error);
                             confirmDialog_->open({
                                 .state = ConfirmDialog::State::Negative,
-                                .headerText = "Delete Files Failed",
+                                .headerText = language->get("localSideModel", "deleteFilesFailedTitle"),
                                 .text = error,
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
@@ -293,10 +294,10 @@ void LocalSideModel::onTransfer(
 
     const auto itemsSize = items.size();
     std::string confirmText = fmt::format(
-        "Are you sure you want to upload {} {} {} to {}?:",
-        itemsSize > 1 ? "the following" : items.front().path.generic_string(),
-        itemsSize == 1 ? "" : std::to_string(itemsSize),
-        itemsSize == 1 ? "" : "items",
+        fmt::runtime(
+            language->get("localSideModel", itemsSize > 1 ? "uploadMultipleConfirmText" : "uploadSingleConfirmText")
+        ),
+        itemsSize > 1 ? std::to_string(itemsSize) : items.front().path.filename().generic_string(),
         destinationDir.generic_string()
     );
 
@@ -308,7 +309,7 @@ void LocalSideModel::onTransfer(
 
     confirmDialog_->open(
         {.state = ConfirmDialog::State::Information,
-            .headerText = "Upload Items?",
+            .headerText = language->get("localSideModel", "uploadConfirmTitle"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
@@ -361,9 +362,8 @@ void LocalSideModel::onDropExternal(
     {
         confirmDialog_->open({
             .state = ConfirmDialog::State::Information,
-            .headerText = "External Drop Is Faulty",
-            .text = "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote "
-                    "side only works for single items.",
+            .headerText = language->get("sessionFrontend", "externalDropWebkitWarningTitle"),
+            .text = language->get("sessionFrontend", "externalDropWebkitWarningText"),
             .buttons = ConfirmDialog::Button::Ok,
             .onClose = [this, items, subDir](ConfirmDialog::Button)
             {
@@ -394,8 +394,8 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
                     Log::error("Invalid response from RpcFilesystem::rename");
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
-                        .headerText = "Rename Failed",
-                        .text = "Invalid response from backend",
+                        .headerText = language->get("localSideModel", "renameFailed"),
+                        .text = language->get("localSideModel", "invalidResponseFromBackend"),
                         .buttons = ConfirmDialog::Button::Ok,
                     });
                     return;
@@ -408,7 +408,7 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
                     Log::error("Failed to rename item: {}", error);
                     confirmDialog_->open({
                         .state = ConfirmDialog::State::Negative,
-                        .headerText = "Rename Failed",
+                        .headerText = language->get("localSideModel", "renameFailed"),
                         .text = error,
                         .buttons = ConfirmDialog::Button::Ok,
                     });
@@ -447,7 +447,7 @@ void LocalSideModel::onError(std::string const& error)
     Log::error("File grid error (local side): {}", error);
     confirmDialog_->open({
         .state = ConfirmDialog::State::Negative,
-        .headerText = "File Grid Error (Local Side)",
+        .headerText = language->get("localSideModel", "fileGridError"),
         .text = error,
         .buttons = ConfirmDialog::Button::Ok,
     });
@@ -490,8 +490,8 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 Log::error("Invalid response from RpcFilesystem::properties");
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
-                    .headerText = "List Files Failed",
-                    .text = "Invalid response from backend",
+                    .headerText = language->get("localSideModel", "failedToListFiles"),
+                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;
@@ -504,7 +504,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 Log::error("Failed to list files: {}", error);
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
-                    .headerText = "List Files Failed",
+                    .headerText = language->get("localSideModel", "failedToListFiles"),
                     .text = error,
                     .buttons = ConfirmDialog::Button::Ok,
                 });
@@ -554,7 +554,7 @@ void LocalSideModel::uploadItemsConfirmed(
     fileEngine_->stat(
         uploadItems[index].first.path,
         [this, uploadItems = std::move(uploadItems), index, overwriteNever, overwriteAlways](
-            std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& entry
+            std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& entry, std::string const& info
         ) mutable
         {
             if (!entry)
@@ -562,8 +562,12 @@ void LocalSideModel::uploadItemsConfirmed(
                 Log::error("Failed to stat file: {}", uploadItems[index].first.path.generic_string());
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
-                    .headerText = "Upload Failed",
-                    .text = "Failed to get file information: " + uploadItems[index].first.path.generic_string(),
+                    .headerText = "",
+                    .text = fmt::format(
+                        fmt::runtime(language->get("localSideModel", "failedToStatFile")),
+                        uploadItems[index].first.path.generic_string(),
+                        info
+                    ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;
@@ -586,9 +590,8 @@ void LocalSideModel::uploadItemsConfirmed(
                 );
                 confirmDialog_->open(
                     {.state = ConfirmDialog::State::Information,
-                        .headerText = "File already exists, overwrite?",
-                        .text = "Allow overwriting this file? Do note that bulk uploads in subdirectories might cause "
-                                "multiple files to be overwritten.",
+                        .headerText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
+                        .text = language->get("localSideModel", "fileAlreadyExistsOverwrite"),
                         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                             ConfirmDialog::Button::None,
                         .focusButton = ConfirmDialog::Button::No,
@@ -658,15 +661,19 @@ void LocalSideModel::enqueueSingleUpload(
     operationQueue_->enqueueUpload(
         remoteItem,
         localItem,
-        [this](std::optional<Ids::OperationId> const& opId)
+        [this, localItem](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
             if (!opId)
             {
-                Log::error("Failed to create upload operation");
+                Log::error("Failed to create upload operation: {}", info);
                 confirmDialog_->open({
                     .state = ConfirmDialog::State::Negative,
-                    .headerText = "Upload Failed",
-                    .text = "Failed to create upload operation",
+                    .headerText = "",
+                    .text = fmt::format(
+                        fmt::runtime(language->get("localSideModel", "failedToEnqueueUpload")),
+                        localItem.path.generic_string(),
+                        info
+                    ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return;

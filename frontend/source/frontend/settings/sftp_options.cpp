@@ -84,6 +84,34 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             ),
             onChange,
             nulloptReset(downloadOptions.doCleanup, onChange),
+        },
+        .symlinkHandling{
+            std::vector<Persistence::SymlinkHandling>{
+                Persistence::SymlinkHandling::AsSymlink,
+                Persistence::SymlinkHandling::FollowSymlink,
+                Persistence::SymlinkHandling::SkipSymlink
+            },
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "downloadOptions",
+                "symlinkHandlingHelpText"
+            ),
+            onChange,
+            nulloptReset(downloadOptions.symlinkHandling, onChange),
+            [](Persistence::SymlinkHandling linkHandling){
+                return Utility::enumToString(linkHandling);
+            }
+        },
+        .failFast{
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "downloadOptions",
+                "failFastHelpText"
+            ),
+            onChange,
+            nulloptReset(downloadOptions.failFast, onChange),
         }
     }
     , uploadOptions{
@@ -136,6 +164,34 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
                 .maxValue = 0x1FF, // 0o777, octal literal is a clang extension
                 .numberBase = decltype(SftpOptions::UploadOptions::customDirectoryPermissions)::NumberBase::Octal,
             }
+        },
+        .symlinkHandling{
+            std::vector<Persistence::SymlinkHandling>{
+                Persistence::SymlinkHandling::AsSymlink,
+                Persistence::SymlinkHandling::FollowSymlink,
+                Persistence::SymlinkHandling::SkipSymlink
+            },
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "uploadOptions",
+                "symlinkHandlingHelpText"
+            ),
+            onChange,
+            nulloptReset(uploadOptions.symlinkHandling, onChange),
+            [](Persistence::SymlinkHandling linkHandling){
+                return Utility::enumToString(linkHandling);
+            }
+        },
+        .failFast{
+            language->getObserved(
+                "settings",
+                "sftpOptions",
+                "uploadOptions",
+                "failFastHelpText"
+            ),
+            onChange,
+            nulloptReset(uploadOptions.failFast, onChange),
         }
     }
     , defaultDirectory{
@@ -186,9 +242,11 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                 .customDirectoryPermissions = downloadOptions.customDirectoryPermissions.valueIsValid()
                     ? uShortOptionalToFilesystemPermsOptional(downloadOptions.customDirectoryPermissions.value())
                     : std::nullopt,
+                .symlinkHandling = downloadOptions.symlinkHandling.value(),
+                .failFast = downloadOptions.failFast.value(),
             },
             .reserveSpace = downloadOptions.reserveSpace.value(),
-            .doCleanup = downloadOptions.doCleanup.value(),
+            .doCleanup = downloadOptions.doCleanup.value()
         };
 #pragma clang diagnostic pop
     }
@@ -206,6 +264,8 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
             .customDirectoryPermissions = uploadOptions.customDirectoryPermissions.valueIsValid()
                 ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value())
                 : std::nullopt,
+            .symlinkHandling = uploadOptions.symlinkHandling.value(),
+            .failFast = uploadOptions.failFast.value(),
         }};
     }
 
@@ -236,6 +296,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         );
         downloadOptions.reserveSpace.value(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.value(state.downloadOptions->doCleanup);
+        downloadOptions.symlinkHandling.value(state.downloadOptions->symlinkHandling);
+        downloadOptions.failFast.value(state.downloadOptions->failFast);
     }
     else
     {
@@ -249,6 +311,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         downloadOptions.customDirectoryPermissions.value(std::nullopt);
         downloadOptions.reserveSpace.value(std::nullopt);
         downloadOptions.doCleanup.value(std::nullopt);
+        downloadOptions.symlinkHandling.value(std::nullopt);
+        downloadOptions.failFast.value(std::nullopt);
     }
 
     if (!state.uploadOptions.has_value())
@@ -261,6 +325,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.inheritPermissions.value(std::nullopt);
         uploadOptions.customFilePermissions.value(std::nullopt);
         uploadOptions.customDirectoryPermissions.value(std::nullopt);
+        uploadOptions.symlinkHandling.value(std::nullopt);
+        uploadOptions.failFast.value(std::nullopt);
     }
     else
     {
@@ -275,6 +341,8 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.customDirectoryPermissions.value(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
+        uploadOptions.symlinkHandling.value(state.uploadOptions->symlinkHandling);
+        uploadOptions.failFast.value(state.uploadOptions->failFast);
     }
 
     concurrency.value(state.concurrency);
@@ -300,6 +368,8 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         );
         downloadOptions.reserveSpace.inherit(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.inherit(state.downloadOptions->doCleanup);
+        downloadOptions.symlinkHandling.inherit(state.downloadOptions->symlinkHandling);
+        downloadOptions.failFast.inherit(state.downloadOptions->failFast);
     }
     else
     {
@@ -311,6 +381,8 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         downloadOptions.customDirectoryPermissions.inherit(std::nullopt);
         downloadOptions.reserveSpace.inherit(std::nullopt);
         downloadOptions.doCleanup.inherit(std::nullopt);
+        downloadOptions.symlinkHandling.inherit(std::nullopt);
+        downloadOptions.failFast.inherit(std::nullopt);
     }
 
     if (state.uploadOptions)
@@ -325,6 +397,8 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.customDirectoryPermissions.inherit(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
+        uploadOptions.symlinkHandling.inherit(state.uploadOptions->symlinkHandling);
+        uploadOptions.failFast.inherit(state.uploadOptions->failFast);
     }
     else
     {
@@ -334,6 +408,8 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.inheritPermissions.inherit(std::nullopt);
         uploadOptions.customFilePermissions.inherit(std::nullopt);
         uploadOptions.customDirectoryPermissions.inherit(std::nullopt);
+        uploadOptions.symlinkHandling.inherit(std::nullopt);
+        uploadOptions.failFast.inherit(std::nullopt);
     }
 
     concurrency.inherit(state.concurrency);
@@ -376,6 +452,12 @@ Nui::ElementRenderer SftpOptions::render()
                 ),
                 downloadOptions.doCleanup(
                     language->getObserved("settings", "sftpOptions", "downloadOptions", "doCleanup")
+                ),
+                downloadOptions.symlinkHandling(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "symlinkHandling")
+                ),
+                downloadOptions.failFast(
+                    language->getObserved("settings", "sftpOptions", "downloadOptions", "failFast")
                 )
             )
         ),
@@ -401,9 +483,14 @@ Nui::ElementRenderer SftpOptions::render()
                 ),
                 uploadOptions.customDirectoryPermissions(
                     language->getObserved("settings", "sftpOptions", "uploadOptions", "customDirectoryPermissions")
-                )
+                ),
+                uploadOptions.symlinkHandling(
+                    language->getObserved("settings", "sftpOptions", "uploadOptions", "symlinkHandling")
+                ),
+                uploadOptions.failFast(language->getObserved("settings", "sftpOptions", "uploadOptions", "failFast"))
             )
         ),
+        defaultDirectory(language->getObserved("settings", "sftpOptions", "defaultDirectory")),
         concurrency(language->getObserved("settings", "sftpOptions", "concurrency")),
         operationTimeoutSeconds(language->getObserved("settings", "sftpOptions", "operationTimeoutSeconds"))
     );

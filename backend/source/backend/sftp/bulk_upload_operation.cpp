@@ -178,6 +178,11 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             Log::warn("DownloadOperation: Operation was canceled.");
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
         }
+        case (PartialSuccess):
+        {
+            Log::warn("DownloadOperation: Operation completed with partial success.");
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
+        }
     }
 }
 

@@ -124,7 +124,19 @@ namespace Log
             hub = rpcHub_;
         }
         if (hub != nullptr)
-            hub->callRemote("log", static_cast<int>(level), msg);
+        {
+            try
+            {
+                hub->callRemote("log", static_cast<int>(level), msg);
+            }
+            catch (const std::exception& e)
+            {
+                std::string what = e.what();
+                spdlog::log(
+                    toSpdlogLevel(level), "Failed to send log message to frontend: {}. Original message: {}", what, msg
+                );
+            }
+        }
         else
         {
             std::scoped_lock lock{guard_};

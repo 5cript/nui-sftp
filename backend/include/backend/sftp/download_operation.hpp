@@ -2,7 +2,9 @@
 
 #include <backend/sftp/operation.hpp>
 #include <ssh/file_stream.hpp>
+#include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -32,6 +34,8 @@ class DownloadOperation : public Operation
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
+        Persistence::SymlinkHandling symlinkHandling{Persistence::SymlinkHandling::AsSymlink};
+        std::optional<SharedData::DirectoryEntry> entry{std::nullopt};
     };
 
     SecureShell::ProcessingStrand* strand() const override
@@ -41,7 +45,7 @@ class DownloadOperation : public Operation
         return nullptr;
     }
 
-    DownloadOperation(std::weak_ptr<SecureShell::IFileStream> fileStream, DownloadOperationOptions options);
+    DownloadOperation(SecureShell::SftpSession& sftp, DownloadOperationOptions options);
     ~DownloadOperation() override;
     DownloadOperation(DownloadOperation const&) = delete;
     DownloadOperation(DownloadOperation&&) = delete;
@@ -73,17 +77,19 @@ class DownloadOperation : public Operation
 
     std::filesystem::path remotePath() const
     {
-        return remotePath_;
+        return options_.remotePath;
     }
 
     std::filesystem::path localPath() const
     {
-        return localPath_;
+        return options_.localPath;
     }
 
     std::uint64_t totalSize() const
     {
-        return fileSize_;
+        if (options_.entry)
+            return options_.entry->size;
+        return 0;
     }
 
     std::expected<void, DownloadOperation::Error> cancel(bool adoptCancelState) override;
@@ -97,35 +103,23 @@ class DownloadOperation : public Operation
     /// Returns true if there is more data to read, false if the operation is complete.
     std::expected<bool, Error> readOnce();
 
+    // Returns true if the symlink is to be downloaded like a file:
+    std::expected<bool, Error> handleSymlink();
+
     bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 
     std::expected<void, Error> openOrAdoptFile(SecureShell::IFileStream& stream);
 
+    std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
+    readSymlink(std::filesystem::path const& remoteFullPath);
+
     void cleanup();
 
   private:
+    SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
-    std::filesystem::path remotePath_;
-    std::filesystem::path localPath_;
-    std::string tempFileSuffix_;
-    std::function<void(
-        std::uint64_t min,
-        std::uint64_t max,
-        std::uint64_t current,
-        std::make_signed_t<std::size_t> bytesPerSecond
-    )>
-        progressCallback_;
-    bool mayOverwrite_;
-    bool reserveSpace_;
-    bool tryContinue_;
-    bool inheritPermissions_;
-    bool doCleanup_;
-    bool bigFileOptimized_;
-    std::optional<std::filesystem::perms> filePermissions_;
-    std::optional<std::filesystem::perms> directoryPermissions_;
+    DownloadOperationOptions options_;
     std::ofstream localFile_;
-    std::uint64_t fileSize_;
-    std::chrono::seconds futureTimeout_;
     std::array<char, 16384> buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
 };

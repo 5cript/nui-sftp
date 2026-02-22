@@ -9,6 +9,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
   public:
     DisplayedDeleteOperation(
         Ids::OperationId operationId,
+        ConfirmDialog& confirmDialog,
         std::filesystem::path removePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
@@ -16,6 +17,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     )
         : OperationCard{
               SharedData::OperationType::Delete,
+              confirmDialog,
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),

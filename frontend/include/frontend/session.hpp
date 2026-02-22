@@ -78,7 +78,7 @@ class Session
 
     void onFileExplorerConnectionClose();
     void onTerminalConnectionLoss();
-    void openSftp();
+    void openSftp(std::string const& username);
     void openLocalFilesystem();
     void closeSelf();
     void initializeLayout();

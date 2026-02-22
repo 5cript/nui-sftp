@@ -31,9 +31,11 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
     void createChannel(
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
-        std::function<void(std::optional<Ids::ChannelId> const&)> onCreated
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
     ) override;
-    void createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&)> onCreated) override;
+    void createSftpChannel(
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+    ) override;
 
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onChannelClosed = []() {}) override;
     SshChannel* channel(Ids::ChannelId const& channelId) override;
@@ -55,7 +57,7 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
     void createChannelImpl(
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
-        std::function<void(std::optional<Ids::ChannelId> const&)> onCreated,
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
         bool fileMode
     );
 

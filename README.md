@@ -62,8 +62,8 @@ Still under construction :construction:
 - [x] Recursive folder delete.
 - [x] Error message on delete fail.
 - [x] Delete confirm focus default "ok".
-- [ ] Implement handling of symlinks in bulk downloads.
-- [ ] Implement handling of symlinks in regular downloads.
+- [x] Implement handling of symlinks in bulk downloads.
+- [x] Implement handling of symlinks in regular downloads.
 - [ ] Implement handling of symlinks in bulk uploads.
 - [ ] Implement handling of symlinks in regular uploads.
 - [ ] Default directory on connect.
@@ -110,6 +110,7 @@ Still under construction :construction:
 ## SFTP
 - [ ] Implement bulk download to archives.
 - [ ] Optimize download/upload speed of lots of files.
+- [ ] Test utf path support and implement if faulty.
 
 ## Settings UI
 - [ ] Option to disable some warning boxes.
@@ -120,6 +121,7 @@ Still under construction :construction:
 - [ ] File previews:
   - [ ] Image preview (image as icon?)
   - [ ] Text preview
+- [ ] Show link target in properties window.
 
 ## Open Files & Monitoring
 - [ ] Open files with associated application.

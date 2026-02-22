@@ -8,6 +8,17 @@
 
 namespace Persistence
 {
+    enum class SymlinkHandling
+    {
+        // Best on unix systems
+        AsSymlink,
+        // Sometimes the only option on windows, and best for compatibility with other tools.
+        FollowSymlink,
+        // Best for safety, but can cause problems if the user actually wanted to transfer a symlink (e.g. on windows).
+        SkipSymlink
+    };
+    BOOST_DESCRIBE_ENUM(SymlinkHandling, AsSymlink, FollowSymlink, SkipSymlink)
+
     struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};
@@ -16,6 +27,8 @@ namespace Persistence
         std::optional<bool> inheritPermissions{std::nullopt};
         std::optional<std::filesystem::perms> customFilePermissions{std::nullopt};
         std::optional<std::filesystem::perms> customDirectoryPermissions{std::nullopt};
+        std::optional<SymlinkHandling> symlinkHandling{std::nullopt};
+        std::optional<bool> failFast{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         CommonTransferOptions,
@@ -25,7 +38,9 @@ namespace Persistence
             tryContinue,
             inheritPermissions,
             customFilePermissions,
-            customDirectoryPermissions)
+            customDirectoryPermissions,
+            symlinkHandling,
+            failFast)
     )
 
     struct DownloadOptions : public CommonTransferOptions

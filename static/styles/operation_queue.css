@@ -259,6 +259,12 @@ header.opq-controls {
     color: var(--opq-gray)
 }
 
+.opq-card.opq-partial-success {
+    background: #ffff0040;
+    border-color: rgb(255, 176, 40);
+    color: yellow;
+}
+
 /* pending state (default) */
 .opq-pending .opq-header {
     background: transparent

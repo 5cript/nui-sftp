@@ -1,12 +1,14 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue.hpp>
+#include <frontend/dialog/confirm_dialog.hpp>
 
 #include <frontend/session_components/operation_queue/operation_card_interface.hpp>
 
 #include <ids/ids.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
@@ -42,12 +44,14 @@ class OperationCard : public OperationCardInterface
   public:
     explicit OperationCard(
         SharedData::OperationType type,
+        ConfirmDialog& confirmDialog,
         Ids::OperationId operationId,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction
     )
         : type_{type}
+        , confirmDialog_{&confirmDialog}
         , operationId_{std::move(operationId)}
         , doRemoveSelf_{std::move(doRemoveSelf)}
         , doDeletionCountdown_{std::move(doDeletionCountdown)}
@@ -107,11 +111,6 @@ class OperationCard : public OperationCardInterface
             reference = [this](std::weak_ptr<Nui::Dom::BasicElement>&& element){
                 cardElement_ = std::move(element);
             },
-            Nui::Attributes::alt = observe(error_).generate([this]() -> std::optional<std::string> {
-                if (error_.value().has_value())
-                    return error_.value()->toString();
-                return std::nullopt;
-            }),
             class_ = observe(state_).generate([this](){
                 const auto state = state_.value();
                 const auto isSubgridOperation = type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan || type_ == SharedData::OperationType::Delete;
@@ -122,6 +121,8 @@ class OperationCard : public OperationCardInterface
                         return "opq-failed";
                     else if (state == SharedData::OperationState::Canceled)
                         return "opq-canceled";
+                    else if (state == SharedData::OperationState::PartialSuccess)
+                        return "opq-partial-success";
                     else
                         return "";
                 }(), !isSubgridOperation ? "opq-card-gridspan": "opq-card-subgrid");
@@ -194,6 +195,38 @@ class OperationCard : public OperationCardInterface
                     return Nui::nil();
                 })
             ),
+            // Fail info
+            button {
+                class_ = "opq-btn opq-cancel-btn",
+                onClick = [this](){
+                    auto transformedItems = decltype(ConfirmDialog::OpenOptions::listItems){};
+                    if (!failedEntries_.value().empty())
+                    {
+                        transformedItems.reserve(failedEntries_.value().size());
+                        for (const auto& [path, entryError] : failedEntries_.value())
+                            transformedItems.push_back({.text = fmt::format("{}: {}", path.string(), entryError.toString())});
+                    }
+
+                    confirmDialog_->open(ConfirmDialog::OpenOptions{
+                        .state = ConfirmDialog::State::Negative,
+                        .headerText = "",
+                        .text = makeError(),
+                        .listItems = transformedItems,
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                },
+                style = observe(state_).generate([this](){
+                    if (!isCompletedState() || (state_.value() != SharedData::OperationState::Failed && state_.value() != SharedData::OperationState::PartialSuccess))
+                        return "display: none;";
+                    return "";
+                })
+            }(
+                observe(state_).generate([this]() -> std::string {
+                    if (state_.value() == SharedData::OperationState::Failed || state_.value() == SharedData::OperationState::PartialSuccess)
+                        return "Error!";
+                    return "?";
+                })
+            ),
             // Cancel / Remove
             button {
                 class_ = "opq-btn opq-cancel-btn",
@@ -215,7 +248,7 @@ class OperationCard : public OperationCardInterface
     {
         const auto state = state_.value();
         return state == SharedData::OperationState::Completed || state == SharedData::OperationState::Failed ||
-            state == SharedData::OperationState::Canceled;
+            state == SharedData::OperationState::Canceled || state == SharedData::OperationState::PartialSuccess;
     }
 
     void cancel() const
@@ -250,6 +283,37 @@ class OperationCard : public OperationCardInterface
         return startTime_;
     }
 
+    std::string makeError() const
+    {
+        std::string error;
+        if (!error_.value().has_value())
+        {
+            if (failedEntries_.value().empty())
+                return "No Error";
+            else
+                error = fmt::format("{} entries failed:\n", failedEntries_.value().size());
+        }
+        else
+            error = error_.value()->toString();
+        return error;
+
+        // std::vector<std::string> formattedIndividualEntries;
+        // formattedIndividualEntries.reserve(failedEntries_.value().size());
+        // for (const auto& [path, entryError] : failedEntries_.value())
+        // {
+        //     formattedIndividualEntries.push_back(fmt::format("{}: {}", path.string(), entryError.toString()));
+        // }
+
+        // // Format failed entries to list:
+        // error = fmt::format("{}\n{}", error, fmt::join(formattedIndividualEntries, "\n"));
+        // return error;
+    }
+
+    void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries) override
+    {
+        failedEntries_ = std::move(entries);
+    }
+
   protected:
     mutable std::weak_ptr<Nui::Dom::BasicElement> cardElement_;
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
@@ -257,8 +321,10 @@ class OperationCard : public OperationCardInterface
     Nui::Observed<SharedData::OperationState> state_{SharedData::OperationState::NotStarted};
     Nui::Observed<std::optional<SharedData::OperationError>> error_{std::nullopt};
     SharedData::OperationType type_;
+    ConfirmDialog* confirmDialog_;
     Ids::OperationId operationId_;
     std::function<void(OperationCard const& operation)> doRemoveSelf_;
     std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown_;
     std::function<void()> onCompleteAction_;
+    Nui::Observed<std::vector<std::pair<std::filesystem::path, SharedData::OperationError>>> failedEntries_;
 };

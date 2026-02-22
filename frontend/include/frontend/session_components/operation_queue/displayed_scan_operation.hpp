@@ -7,12 +7,14 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
   public:
     DisplayedScanOperation(
         Ids::OperationId operationId,
+        ConfirmDialog& confirmDialog,
         std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
     )
         : OperationCard{
               SharedData::OperationType::Scan,
+              confirmDialog,
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),
@@ -39,7 +41,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
                 observe(totalBytes_, currentIndex_, totalScanned_).generate([this]() -> std::string {
                     return fmt::format(
                         "{}/{} items ({})",
-                        currentIndex_.value(),
+                        currentIndex_.value() > 0 ? (currentIndex_.value() - 1) : 0,
                         totalScanned_.value(),
                         Utility::formatBytes(totalBytes_.value(), Utility::determineOrderOfMagnitude(totalBytes_.value())));
                 })

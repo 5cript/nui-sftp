@@ -11,6 +11,7 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
     DisplayedTransferOperation(
         Ids::OperationId operationId,
         SharedData::OperationType type,
+        ConfirmDialog& confirmDialog,
         long long max,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
@@ -20,6 +21,7 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
     )
         : OperationCard{
               type,
+              confirmDialog,
               std::move(operationId),
               std::move(doRemoveSelf),
               std::move(doDeletionCountdown),

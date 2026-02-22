@@ -23,7 +23,8 @@ ScanOperation::scanner(std::filesystem::path const& path)
     auto result = fut.get();
     if (!result.has_value())
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-            {.type = ErrorType::SftpError, .sftpError = result.error()});
+            {.type = ErrorType::SftpError, .sftpError = result.error()}
+        );
 
     return {std::move(result).value()};
 }
@@ -48,24 +49,27 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
         }
         case (Running):
         {
-            return withWalkerDo([this](auto& walker) -> std::expected<ScanOperation::WorkStatus, ScanOperation::Error> {
-                if (walker.completed())
+            return withWalkerDo(
+                [this](auto& walker) -> std::expected<ScanOperation::WorkStatus, ScanOperation::Error>
                 {
-                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
-                    state_ = Completed;
-                    return WorkStatus::Complete;
-                }
+                    if (walker.completed())
+                    {
+                        Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
+                        state_ = Completed;
+                        return WorkStatus::Complete;
+                    }
 
-                auto result = walker.walk();
-                if (!result.has_value())
-                {
-                    Log::error("ScanOperation: Failed to scan directory: {}", result.error().toString());
-                    return enterErrorState<WorkStatus>(result.error());
+                    auto result = walker.walk();
+                    if (!result.has_value())
+                    {
+                        Log::error("ScanOperation: Failed to scan directory: {}", result.error().toString());
+                        return enterErrorState<WorkStatus>(result.error());
+                    }
+                    // -1, because the walker includes the base/root dir of the search:
+                    progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
+                    return WorkStatus::MoreWork;
                 }
-                // -1, because the walker includes the base/root dir of the search:
-                progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
-                return WorkStatus::MoreWork;
-            });
+            );
         }
         case (Prepared):
         case (Preparing):
@@ -88,6 +92,11 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
         {
             Log::warn("ScanOperation: Cannot work on canceled operation.");
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
+        }
+        case (PartialSuccess):
+        {
+            Log::warn("ScanOperation: Operation completed with partial success.");
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
         }
     }
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});

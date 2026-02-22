@@ -125,37 +125,11 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0 /*TODO: proper bps*/
                 );
             }
-            else if (entry.isRegularFile())
+            else if (entry.isRegularFile() || entry.isSymlink())
             {
                 if (!currentDownload_)
                 {
                     const auto remoteFullPath = SharedData::fullPath(entries_, entry);
-
-                    auto fut = sftp_->openFile(
-                        remoteFullPath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
-                    );
-
-                    if (fut.wait_for(futureTimeout_) != std::future_status::ready)
-                    {
-                        Log::error("BulkDownloadOperation: Failed to open remote sftp file: timeout.");
-                        return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
-                            .type = ErrorType::FutureTimeout,
-                            .extraInfo = fmt::format("Timeout opening remote file: {}", entry.path.string())
-                        });
-                    }
-
-                    const auto openResult = fut.get();
-                    if (!openResult.has_value())
-                    {
-                        Log::error(
-                            "BulkDownloadOperation: Failed to open remote sftp file: {}.", openResult.error().message
-                        );
-                        return enterErrorState<BulkDownloadOperation::WorkStatus>(Error{
-                            .type = ErrorType::SftpError,
-                            .sftpError = openResult.error(),
-                            .extraInfo = fmt::format("Opening remote file: {}", entry.path.string())
-                        });
-                    }
 
                     auto downloadOptions = options_.individualOptions;
                     downloadOptions.remotePath = remoteFullPath;
@@ -178,32 +152,15 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                             bytesPerSecond
                         );
                     };
+                    downloadOptions.symlinkHandling = options_.individualOptions.symlinkHandling;
+                    downloadOptions.entry = entry;
 
-                    currentDownload_ =
-                        std::make_unique<DownloadOperation>(std::move(openResult).value(), downloadOptions);
+                    currentDownload_ = std::make_unique<DownloadOperation>(*sftp_, downloadOptions);
                 }
                 else
                 {
                     return workCurrentFile();
                 }
-            }
-            else if (entry.isSymlink())
-            {
-                // TODO: handle symlink
-                Log::warn(
-                    "BulkDownloadOperation: Symlinks are not yet supported for entry: {}.",
-                    fullLocalPath(entry).string()
-                );
-
-                // Under linux:
-                // - symlinks that are within the downloaded structure shall be downloaded
-                //   as symlinks.
-                // - symlinks that are outside the downloaded structure shall be downloaded
-                //   as regular files? or not? or also as symlinks? => probably also as links
-                // Under windows we should ask the user earlier how they want to proceed with them (copies? ignore?
-                // windows links - yuck?).
-
-                ++currentIndex_;
             }
             else
             {
@@ -236,6 +193,11 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
         {
             Log::warn("DownloadOperation: Operation was canceled.");
             return std::unexpected(Error{.type = ErrorType::CannotWorkCanceledOperation});
+        }
+        case (PartialSuccess):
+        {
+            Log::warn("DownloadOperation: Operation completed with partial success.");
+            return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
         }
     }
 }
@@ -284,21 +246,46 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
     if (!result)
     {
         auto const& entry = entries_[currentIndex_];
+        const auto error = result.error();
         Log::error(
-            "BulkDownloadOperation: Download failed for file: {}: {}",
-            fullLocalPath(entry).string(),
-            result.error().toString()
+            "BulkDownloadOperation: Download failed for: {}: {}", fullLocalPath(entry).string(), error.toString()
         );
+        if (error.sftpError &&
+            (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE ||
+                error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED || error.sftpError->sftpError == SSH_FX_FAILURE))
+        {
+            // These errors are not critical for the overall bulk download, we can just skip the file and continue with
+            // the next ones. Log and save the failed entry for reporting to the user later.
+            failedEntries_.emplace_back(SharedData::fullPath(entries_, entry), error);
+            completeCurrentDownload();
+
+            if (options_.failFast)
+            {
+                Log::error("BulkDownloadOperation: failFast is enabled, failing the whole operation due to the error.");
+                return enterErrorState<BulkDownloadOperation::WorkStatus>(error);
+            }
+            return WorkStatus::MoreWork;
+        }
         return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
     }
     else if (result.value() == WorkStatus::Complete)
     {
         // Download finished
-        currentBytes_ += currentDownload_->totalSize();
-        currentDownload_.reset();
-        ++currentIndex_;
+        completeCurrentDownload();
     }
     return WorkStatus::MoreWork;
+}
+
+std::vector<std::pair<std::filesystem::path, BulkDownloadOperation::Error>> BulkDownloadOperation::getFailed() const
+{
+    return failedEntries_;
+}
+
+void BulkDownloadOperation::completeCurrentDownload()
+{
+    currentBytes_ += currentDownload_->totalSize();
+    currentDownload_.reset();
+    ++currentIndex_;
 }
 
 std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> BulkDownloadOperation::workAsArchive()
