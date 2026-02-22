@@ -3,6 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <ssh/file_stream.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -30,6 +31,7 @@ class UploadOperation : public Operation
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
+        Persistence::SymlinkHandling symlinkHandling{Persistence::SymlinkHandling::AsSymlink};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -66,12 +68,12 @@ class UploadOperation : public Operation
 
     std::filesystem::path remotePath() const
     {
-        return remotePath_;
+        return options_.remotePath;
     }
 
     std::filesystem::path localPath() const
     {
-        return localPath_;
+        return options_.localPath;
     }
 
     std::size_t totalSize() const
@@ -92,6 +94,8 @@ class UploadOperation : public Operation
 
     SecureShell::IFileStream::SignedSizeType commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes);
 
+    std::expected<void, Error> handleSymlink();
+
     std::expected<void, Error> openOrAdoptFile();
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
@@ -101,24 +105,9 @@ class UploadOperation : public Operation
   private:
     SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
-    std::filesystem::path remotePath_;
-    std::filesystem::path localPath_;
-    std::string tempFileSuffix_;
-    std::function<void(
-        std::uint64_t min,
-        std::uint64_t max,
-        std::uint64_t current,
-        std::make_signed_t<std::size_t> bytesPerSecond
-    )>
-        progressCallback_;
-    bool mayOverwrite_;
-    bool tryContinue_;
-    bool inheritPermissions_;
-    bool bigFileOptimized_;
-    std::optional<std::filesystem::perms> filePermissions_;
-    std::optional<std::filesystem::perms> directoryPermissions_;
+    UploadOperationOptions options_;
     std::ifstream localFile_;
-    std::chrono::seconds futureTimeout_;
+    bool isSymlink_{false};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
     std::array<char, 16384> buffer_{};

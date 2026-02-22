@@ -41,6 +41,7 @@ namespace SharedData
         FilesystemError,
         DeleteFailed,
         CannotCreateSymlink,
-        SymlinkPointsToDirectory
+        SymlinkPointsToDirectory,
+        NotAFile
     );
 }

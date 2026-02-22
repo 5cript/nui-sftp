@@ -102,7 +102,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     fullRemotePath(entry), currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0
                 );
             }
-            else if (entry.isRegularFile())
+            else if (entry.isRegularFile() || entry.isSymlink())
             {
                 if (!currentUpload_)
                 {
@@ -123,29 +123,13 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                             bytesPerSecond
                         );
                     };
+                    individualOpts.symlinkHandling = options_.individualOptions.symlinkHandling;
                     currentUpload_ = std::make_unique<UploadOperation>(*sftp_, individualOpts);
                 }
                 else
                 {
                     return workCurrentFile();
                 }
-            }
-            else if (entry.isSymlink())
-            {
-                // TODO: handle symlink
-                Log::warn(
-                    "BulkUploadOperation: Symlinks are not yet supported for entry: {}.", fullRemotePath(entry).string()
-                );
-
-                // Under linux:
-                // - symlinks that are within the downloaded structure shall be downloaded
-                //   as symlinks.
-                // - symlinks that are outside the downloaded structure shall be downloaded
-                //   as regular files? or not? or also as symlinks? => probably also as links
-                // Under windows we should ask the user earlier how they want to proceed with them (copies? ignore?
-                // windows links - yuck?).
-
-                ++currentIndex_;
             }
             else
             {
@@ -256,21 +240,48 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
     if (!result)
     {
         auto const& entry = entries_[currentIndex_];
+        const auto error = result.error();
         Log::error(
-            "BulkUploadOperation: Upload failed for file: {}: {}",
-            fullRemotePath(entry).string(),
-            result.error().toString()
+            "BulkUploadOperation: Upload failed for file: {}: {}", fullRemotePath(entry).string(), error.toString()
         );
+        if (!error.sftpError ||
+            (error.sftpError &&
+                (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE ||
+                    error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
+                    error.sftpError->sftpError == SSH_FX_FAILURE)))
+        {
+            // These errors are not critical for the overall bulk upload, we can just skip the file and continue with
+            // the next ones. Log and save the failed entry for reporting to the user later.
+            failedEntries_.emplace_back(SharedData::fullPath(entries_, entry), error);
+            completeCurrentUpload();
+
+            if (options_.failFast)
+            {
+                Log::error("BulkUploadOperation: failFast is enabled, failing the whole operation due to the error.");
+                return enterErrorState<BulkUploadOperation::WorkStatus>(error);
+            }
+            return WorkStatus::MoreWork;
+        }
         return enterErrorState<BulkUploadOperation::WorkStatus>(result.error());
     }
     else if (result.value() == WorkStatus::Complete)
     {
         // Upload finished
-        currentBytes_ += currentUpload_->totalSize();
-        currentUpload_.reset();
-        ++currentIndex_;
+        completeCurrentUpload();
     }
     return WorkStatus::MoreWork;
+}
+
+std::vector<std::pair<std::filesystem::path, BulkUploadOperation::Error>> BulkUploadOperation::getFailed() const
+{
+    return failedEntries_;
+}
+
+void BulkUploadOperation::completeCurrentUpload()
+{
+    currentBytes_ += currentUpload_->totalSize();
+    currentUpload_.reset();
+    ++currentIndex_;
 }
 
 SharedData::OperationType BulkUploadOperation::type() const

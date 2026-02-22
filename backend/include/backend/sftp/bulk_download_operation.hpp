@@ -79,7 +79,7 @@ class BulkDownloadOperation : public Operation
     BulkDownloadOperationOptions options_;
     std::unique_ptr<DownloadOperation> currentDownload_;
     std::vector<SharedData::DirectoryEntry> entries_;
-    std::vector<std::pair<std::filesystem::path, Error>> failedEntries_;
+    std::vector<std::pair<std::filesystem::path, Error>> failedEntries_{};
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};

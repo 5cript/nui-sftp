@@ -25,12 +25,13 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         try
         {
             auto const& entry = *iter;
+            const auto status = entry.symlink_status();
             SharedData::DirectoryEntry::FileType type;
-            if (entry.is_directory())
+            if (std::filesystem::is_directory(status))
                 type = SharedData::DirectoryEntry::FileType::Directory;
-            else if (entry.is_regular_file())
+            else if (std::filesystem::is_regular_file(status))
                 type = SharedData::DirectoryEntry::FileType::Regular;
-            else if (entry.is_symlink())
+            else if (std::filesystem::is_symlink(status))
                 type = SharedData::DirectoryEntry::FileType::Symlink;
             else
             {

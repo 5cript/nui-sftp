@@ -103,8 +103,7 @@ class DownloadOperation : public Operation
     /// Returns true if there is more data to read, false if the operation is complete.
     std::expected<bool, Error> readOnce();
 
-    // Returns true if the symlink is to be downloaded like a file:
-    std::expected<bool, Error> handleSymlink();
+    std::expected<void, Error> handleSymlink();
 
     bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 

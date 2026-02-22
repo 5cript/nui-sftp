@@ -64,9 +64,9 @@ Still under construction :construction:
 - [x] Delete confirm focus default "ok".
 - [x] Implement handling of symlinks in bulk downloads.
 - [x] Implement handling of symlinks in regular downloads.
-- [ ] Implement handling of symlinks in bulk uploads.
-- [ ] Implement handling of symlinks in regular uploads.
-- [ ] Default directory on connect.
+- [x] Implement handling of symlinks in bulk uploads.
+- [x] Implement handling of symlinks in regular uploads.
+- [x] Default directory on connect.
 
 ## File View UI
 - [x] Grid view.

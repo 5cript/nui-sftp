@@ -215,7 +215,8 @@ void RpcFilesystem::registerListFiles()
                                 return {u8String.begin(), u8String.end()};
                             }(),
                         },
-                        {"type", static_cast<int>(entry.status().type())},
+                        {"type", static_cast<int>(entry.symlink_status().type())},
+                        {"symlinkTargetType", static_cast<int>(entry.status().type())},
                         {"size", entry.is_regular_file() ? entry.file_size() : 0},
                     });
                 }

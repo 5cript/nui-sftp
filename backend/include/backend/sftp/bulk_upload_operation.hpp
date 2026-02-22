@@ -33,6 +33,7 @@ class BulkUploadOperation : public Operation
         std::filesystem::path remotePath{};
         std::filesystem::path localPath{};
         UploadOperation::UploadOperationOptions individualOptions = {};
+        bool failFast{false};
     };
 
     BulkUploadOperation(SecureShell::SftpSession& sftp, BulkUploadOperationOptions options);
@@ -61,6 +62,8 @@ class BulkUploadOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override;
 
+    std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
+
   private:
     std::expected<WorkStatus, Error> workNormal();
     std::expected<WorkStatus, Error> workCurrentFile();
@@ -69,12 +72,14 @@ class BulkUploadOperation : public Operation
     std::filesystem::perms determinePerms(SharedData::DirectoryEntry const& entry) const;
     std::expected<void, Error>
     createDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entry);
+    void completeCurrentUpload();
 
   private:
     SecureShell::SftpSession* sftp_;
     BulkUploadOperationOptions options_;
     std::unique_ptr<UploadOperation> currentUpload_;
     std::vector<SharedData::DirectoryEntry> entries_;
+    std::vector<std::pair<std::filesystem::path, Error>> failedEntries_{};
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};
