@@ -1,18 +1,23 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/components/ui5/text.hpp>
-#include <ui5/components/text_area.hpp>
-#include <frontend/components/ui5/list.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
+
+#include <script-nui-components/button.hpp>
+#include <script-nui-components/resizeable_table.hpp>
 
 #include <ui5/components/dialog.hpp>
-#include <ui5/components/button.hpp>
+#include <ui5/components/text_area.hpp>
+#include <frontend/components/ui5/list.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 
 using namespace std::string_literals;
+namespace Snc = ScriptNuiComponents;
 
 namespace
 {
@@ -39,6 +44,7 @@ struct ConfirmDialog::Implementation
     std::string id;
     std::weak_ptr<Nui::Dom::BasicElement> dialog;
     std::function<void(Button)> onClose;
+    Snc::ResizableTable table;
     Nui::Observed<State> state;
     Nui::Observed<std::string> headerText;
     // Nui::Observed<std::vector<std::string>> textLines;
@@ -52,6 +58,20 @@ struct ConfirmDialog::Implementation
         : id{std::move(id)}
         , dialog{}
         , onClose{}
+        , table{
+          Snc::ResizableTable::HeaderRow{
+              // Resizeable with dynamic width:
+              Snc::ResizableTable::HeaderTableCell{
+                language->get("confirmDialog", "items"),
+                600,
+                false
+            },
+          },
+          // no footer
+          std::nullopt,
+          // no add feature
+          std::nullopt
+        }
         , state{}
         , headerText{}
         , text{}
@@ -74,6 +94,11 @@ void ConfirmDialog::open(OpenOptions const& options)
     impl_->buttons = options.buttons;
     impl_->listItems = options.listItems;
     impl_->focusButton = options.focusButton;
+    impl_->table.clear();
+    for (const auto& item : options.listItems)
+    {
+        impl_->table.addRow({item.text});
+    }
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     if (auto diag = impl_->dialog.lock(); diag)
@@ -144,46 +169,85 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                     return stateToString(impl_->state.value());
                 }),
             }(),
-            ui5::list{
-                style = "max-height: 500px; overflow-y: auto;"
+            div{
+                style = "margin-bottom: 10px;"
             }(
-                impl_->listItems.map([](auto, auto const& element) {
-                    const auto additionalTextState = [&element]() -> std::optional<std::string> {
-                        if (element.additionalState)
-                            return stateToString(element.additionalState.value());
-                        return std::nullopt;
-                    }();
-
-                    return ui5::li{
-                        "description"_attr = element.description,
-                        "additional-text"_attr = element.additionalText,
-                        "additional-text-state"_attr = additionalTextState
-                    }(
-                        element.text
-                    );
-                })
+                observe(impl_->listItems),
+                [this]() -> Nui::ElementRenderer {
+                    if (impl_->listItems.empty())
+                        return Nui::nil();
+                    return impl_->table({style = "max-height: 200px;"});
+                }
             )
         ),
         div{
-            "slot"_attr = "footer",
-            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px; padding: 10px;",
+            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px;",
             tabIndex = 0,
             reference = [this](std::weak_ptr<Nui::Dom::BasicElement> footer) {
                 impl_->footer = std::move(footer);
+            },
+            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
+                // clang-format on
+                if (event.key() == "ArrowLeft" || event.key() == "ArrowUp" || event.key() == "ArrowRight" ||
+                    event.key() == "ArrowDown")
+                {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                if (event.key() == "ArrowLeft" || event.key() == "ArrowUp")
+                {
+                    auto button = event.currentTarget().call<Nui::val>("querySelector", "button:focus"s);
+
+                    if (button.isUndefined() || button.isNull())
+                        return;
+
+                    auto previous = button["previousElementSibling"];
+
+                    if (previous.isUndefined() || previous.isNull())
+                        previous = event.currentTarget().call<Nui::val>("querySelector", "button:last-child"s);
+
+                    if (previous.isUndefined() || previous.isNull())
+                        return;
+
+                    previous.call<void>("focus");
+                    return;
+                }
+                if (event.key() == "ArrowRight" || event.key() == "ArrowDown")
+                {
+                    auto button = event.currentTarget().call<Nui::val>("querySelector", "button:focus"s);
+
+                    if (button.isUndefined() || button.isNull())
+                        return;
+
+                    auto next = button["nextElementSibling"];
+
+                    if (next.isUndefined() || next.isNull())
+                        next = event.currentTarget().call<Nui::val>("querySelector", "button"s);
+
+                    if (next.isUndefined() || next.isNull())
+                        return;
+
+                    next.call<void>("focus");
+                }
+                // clang-format off
             }
         }(
-            div{style = "flex: 1;"}(),
             fragment(
                 observe(impl_->buttons),
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Cancel))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_cancel",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::Cancel);
-                            }
-                        }("Cancel");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "cancel"),
+                            .attributes = {
+                                id = impl_->id + "_cancel",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::Cancel);
+                                },
+                                style = "grid-row: 1",
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
                     }
                     return Nui::nil();
                 }
@@ -193,12 +257,17 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Ok))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_ok",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::Ok);
-                            }
-                        }("Ok");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "ok"),
+                            .attributes = {
+                                id = impl_->id + "_ok",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::Ok);
+                                },
+                                style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
                     }
                     return Nui::nil();
                 }
@@ -208,12 +277,17 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Yes))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_yes",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::Yes);
-                            }
-                        }("Yes");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "yes"),
+                            .attributes = {
+                                id = impl_->id + "_yes",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::Yes);
+                                },
+                                style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
                     }
                     return Nui::nil();
                 }
@@ -223,12 +297,17 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::No))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_no",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::No);
-                            }
-                        }("No");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "no"),
+                            .attributes = {
+                                id = impl_->id + "_no",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::No);
+                                },
+                                style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
                     }
                     return Nui::nil();
                 }
@@ -238,12 +317,17 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::All))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_all",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::All);
-                            }
-                        }("All");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "all"),
+                            .attributes = {
+                                id = impl_->id + "_all",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::All);
+                                },
+                                style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Danger
+                        });
                     }
                     return Nui::nil();
                 }
@@ -253,12 +337,17 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                 [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::None))
                     {
-                        return ui5::button{
-                            id = impl_->id + "_none",
-                            "click"_event = [this](Nui::val) {
-                                close(Button::None);
-                            }
-                        }("None");
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "none"),
+                            .attributes = {
+                                id = impl_->id + "_none",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::None);
+                                },
+                                style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
                     }
                     return Nui::nil();
                 }

@@ -12,7 +12,6 @@ Still under construction :construction:
 - [x] Implement proper handling of connection loss.
 - [x] Multi session support.
 - [x] Accessible logs.
-- [ ] ConfirmDialog List items are broken
 
 ## Operation Queue (UI)
 - [x] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
@@ -122,6 +121,8 @@ Still under construction :construction:
 - [ ] Show link target in properties window.
 - [ ] Improve arrow navigation with shift and control.
 - [ ] Scroll into view of recently selected item when using keyboard controls.
+- [ ] Mouse side keys
+- [ ] Ctrl + C / Ctrl + V for copy paste.
 
 ## Open Files & Monitoring
 - [ ] Open files with associated application.

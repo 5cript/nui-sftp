@@ -2,6 +2,14 @@ en_US:
   language: "Language"
   cancel: "Cancel"
   add: "Add"
+  confirmDialog:
+    yes: "Yes"
+    no: "No"
+    ok: "Ok"
+    all: "All"
+    none: "None"
+    cancel: "Cancel"
+    items: "Items"
   operationQueue:
     pause: "Pause"
     continue: "Continue"
