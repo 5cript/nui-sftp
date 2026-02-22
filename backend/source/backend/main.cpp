@@ -102,15 +102,15 @@ namespace
 
                     if (endsWith("css_variables.css"))
                     {
-                        return programDir / "themes" / std::filesystem::path{pathString}.parent_path().filename() /
-                            "css_variables.css";
+                        return programDir / ".." / "themes" /
+                            std::filesystem::path{pathString}.parent_path().filename() / "css_variables.css";
                     }
 
                     // make path relative to / to avoid directory traversal
                     if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf"))
-                        return programDir / "dynamic_sources" / std::filesystem::relative(pathString, "/");
+                        return programDir / std::filesystem::relative(pathString, "/");
                     else
-                        return programDir / "assets" / std::filesystem::relative(pathString, "/");
+                        return programDir / ".." / "assets" / std::filesystem::relative(pathString, "/");
                 }();
 
                 // Check if file exists and return 404 if not

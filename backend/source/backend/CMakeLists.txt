@@ -68,7 +68,6 @@ target_link_libraries(
         secure-shell
         ids
         events
-        utf8cpp
 )
 
 target_link_libraries(

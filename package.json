@@ -1,6 +1,6 @@
 {
     "description": "",
-    "name": "nui-scp",
+    "name": "nui-sftp",
     "version": "1.0.0",
     "scripts": {
         "tailwatch": "cross-env NODE_ENV=development tailwindcss --config tailwind.config.js --watch=always --output build/clang_debug/bin/liveload/tailwind.css"
