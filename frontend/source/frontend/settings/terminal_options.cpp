@@ -185,7 +185,7 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             onChange,
             valueReset(lineHeight, onChange, 1.0),
             {
-                .minValue = 0.,
+                .minValue = 1.,
                 .maxValue = 20.0,
                 .stepValue = 0.1,
             }
