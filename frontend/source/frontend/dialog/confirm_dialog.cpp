@@ -93,7 +93,24 @@ void ConfirmDialog::open(OpenOptions const& options)
     impl_->text = options.text;
     impl_->buttons = options.buttons;
     impl_->listItems = options.listItems;
-    impl_->focusButton = options.focusButton;
+    if (options.focusButton)
+        impl_->focusButton = options.focusButton;
+    else
+    {
+        // If no focus button is specified, focus the first button:
+        if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::Ok))
+            impl_->focusButton = Button::Ok;
+        else if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::Cancel))
+            impl_->focusButton = Button::Cancel;
+        else if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::Yes))
+            impl_->focusButton = Button::Yes;
+        else if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::No))
+            impl_->focusButton = Button::No;
+        else if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::All))
+            impl_->focusButton = Button::All;
+        else if (static_cast<unsigned>(options.buttons) & static_cast<unsigned>(Button::None))
+            impl_->focusButton = Button::None;
+    }
     impl_->table.clear();
     for (const auto& item : options.listItems)
     {
@@ -235,26 +252,6 @@ Nui::ElementRenderer ConfirmDialog::operator()()
             fragment(
                 observe(impl_->buttons),
                 [this]() -> Nui::ElementRenderer {
-                    if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Cancel))
-                    {
-                        return Snc::button({
-                            .text = language->get("confirmDialog", "cancel"),
-                            .attributes = {
-                                id = impl_->id + "_cancel",
-                                "click"_event = [this](Nui::val) {
-                                    close(Button::Cancel);
-                                },
-                                style = "grid-row: 1",
-                            },
-                            .styleVariant = Snc::StyleVariant::Regular
-                        });
-                    }
-                    return Nui::nil();
-                }
-            ),
-            fragment(
-                observe(impl_->buttons),
-                [this]() -> Nui::ElementRenderer {
                     if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Ok))
                     {
                         return Snc::button({
@@ -345,6 +342,26 @@ Nui::ElementRenderer ConfirmDialog::operator()()
                                     close(Button::None);
                                 },
                                 style = "grid-row: 1"
+                            },
+                            .styleVariant = Snc::StyleVariant::Regular
+                        });
+                    }
+                    return Nui::nil();
+                }
+            ),
+            fragment(
+                observe(impl_->buttons),
+                [this]() -> Nui::ElementRenderer {
+                    if (static_cast<unsigned>(impl_->buttons.value()) & static_cast<unsigned>(Button::Cancel))
+                    {
+                        return Snc::button({
+                            .text = language->get("confirmDialog", "cancel"),
+                            .attributes = {
+                                id = impl_->id + "_cancel",
+                                "click"_event = [this](Nui::val) {
+                                    close(Button::Cancel);
+                                },
+                                style = "grid-row: 1",
                             },
                             .styleVariant = Snc::StyleVariant::Regular
                         });

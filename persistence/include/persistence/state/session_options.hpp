@@ -45,8 +45,6 @@ namespace Persistence
         std::string host{};
         std::optional<int> port{std::nullopt};
         std::optional<std::string> user{std::nullopt};
-        // TODO: Remove again. This was only for testing!
-        std::optional<std::string> passwordUnsafe{std::nullopt};
         std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
         std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
         bool openSftpByDefault{true};
@@ -58,7 +56,7 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         SshSessionOptions,
         (),
-        (sshOptions, sftpOptions, host, port, user, passwordUnsafe, sshKeyPrivate, sshKeyPublic, openSftpByDefault)
+        (sshOptions, sftpOptions, host, port, user, sshKeyPrivate, sshKeyPublic, openSftpByDefault)
     )
 
     struct SessionOptions : public DefaultMissingMember
@@ -97,6 +95,8 @@ namespace Persistence
                 throw std::runtime_error("Terminal engine type not specified");
             }
         }
+
+        static SessionOptions create(std::optional<std::string> icon = std::nullopt);
     };
     BOOST_DESCRIBE_STRUCT(
         SessionOptions,
