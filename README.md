@@ -42,7 +42,6 @@ Still under construction :construction:
 - [x] SSH shell.
 - [x] Terminal UIs works.
 - [x] Terminal resizing.
-- [ ] Local shell is broken on windows and linux.
 
 ## SFTP
 - [x] Single file downloads.
@@ -107,6 +106,9 @@ Still under construction :construction:
 - [ ] Implement bulk download to archives.
 - [ ] Optimize download/upload speed of lots of files.
 - [ ] Test utf path support and implement if faulty.
+
+## Shell
+- [ ] Local shell is broken on windows and linux. There is a bigger fix needed because I need to fork at the very start of main to an intermediate process that then starts the actual app and the shell processes on linux.
 
 ## Settings UI
 - [ ] Option to disable some warning boxes.
