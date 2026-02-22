@@ -23,20 +23,8 @@ namespace Persistence
             if (!std::filesystem::exists(parentPath))
                 std::filesystem::create_directories(parentPath);
         }
-    }
 
-    void StateHolder::load(
-        std::function<void(
-            std::optional<std::string> const& error,
-            StateHolder&,
-            std::optional<std::string> const& warning
-        )> const& onLoad
-    )
-    {
-        setupPersistence();
-        const auto path = Roar::resolvePath(Constants::persistencePath);
-
-        auto makeBackup = [&path]()
+        auto makeBackup(std::filesystem::path const& path)
         {
             const auto backupFileName = [&path]()
             {
@@ -54,11 +42,23 @@ namespace Persistence
             }
             Log::info("Copied config file to backup: {}", backupFileName.string());
         };
+    }
+
+    void StateHolder::load(
+        std::function<void(
+            std::optional<std::string> const& error,
+            StateHolder&,
+            std::optional<std::string> const& warning
+        )> const& onLoad
+    )
+    {
+        setupPersistence();
+        const auto path = Roar::resolvePath(Constants::persistencePath);
 
         try
         {
             std::optional<std::string> error{std::nullopt};
-            const auto before = [&path, &makeBackup, &error]()
+            const auto before = [&path, &error]()
             {
                 try
                 {
@@ -74,21 +74,21 @@ namespace Persistence
                 {
                     Log::error("Failed to parse config file: {}", e.what());
                     error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup();
+                    makeBackup(path);
                     return nlohmann::json(nullptr);
                 }
                 catch (nlohmann::json::exception const& e)
                 {
                     Log::error("Failed to parse config file: {}", e.what());
                     error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup();
+                    makeBackup(path);
                     return nlohmann::json(nullptr);
                 }
                 catch (std::exception const& e)
                 {
                     Log::error("Failed to parse config file: {}", e.what());
                     error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup();
+                    makeBackup(path);
                     return nlohmann::json(nullptr);
                 }
             }();
@@ -96,8 +96,8 @@ namespace Persistence
             if (before.is_null())
             {
                 // Save something valid
-                const auto warning = dataFixer(nlohmann::json::object());
-                onLoad(error, *this, warning);
+                dataFixer(nlohmann::json::object());
+                onLoad(std::nullopt, *this, std::nullopt);
                 return;
             }
 
@@ -156,7 +156,8 @@ namespace Persistence
         }
 
         bool hasMissingDefaults = false;
-        if (stateCache_.termios.empty())
+        auto termiosDefault = stateCache_.termios.find("default");
+        if (termiosDefault == stateCache_.termios.end())
         {
             Log::warn("Config file misses termios, adding defaults.");
             stateCache_.termios["default"] = Termios::saneDefaults();
@@ -165,7 +166,8 @@ namespace Persistence
             hasMissingDefaults = true;
         }
 
-        if (stateCache_.terminalOptions.empty())
+        auto terminalOptionsDefault = stateCache_.terminalOptions.find("default");
+        if (terminalOptionsDefault == stateCache_.terminalOptions.end())
         {
             Log::warn("Config file misses terminal options, adding defaults.");
             stateCache_.terminalOptions["default"] = TerminalOptions{
@@ -180,6 +182,36 @@ namespace Persistence
                 },
             };
             extendWarning("Added default terminal options.");
+            mustSave = true;
+            hasMissingDefaults = true;
+        }
+
+        auto sshDefault = stateCache_.sshOptions.find("default");
+        if (sshDefault == stateCache_.sshOptions.end())
+        {
+            Log::warn("Config file misses ssh options, adding defaults.");
+            stateCache_.sshOptions["default"] = SshOptions{};
+            extendWarning("Added default ssh options.");
+            mustSave = true;
+            hasMissingDefaults = true;
+        }
+
+        auto sftpDefault = stateCache_.sftpOptions.find("default");
+        if (sftpDefault == stateCache_.sftpOptions.end())
+        {
+            Log::warn("Config file misses sftp options, adding defaults.");
+            stateCache_.sftpOptions["default"] = SftpOptions{};
+            extendWarning("Added default sftp options.");
+            mustSave = true;
+            hasMissingDefaults = true;
+        }
+
+        auto queueOptionsDefault = stateCache_.queueOptions.find("default");
+        if (queueOptionsDefault == stateCache_.queueOptions.end())
+        {
+            Log::warn("Config file misses queue options, adding defaults.");
+            stateCache_.queueOptions["default"] = QueueOptions{};
+            extendWarning("Added default queue options.");
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -203,6 +235,8 @@ namespace Persistence
                 .engine = defaultBashSessionOption(),
                 .terminalOptions = Reference{"default"},
                 .termios = Reference{"default"},
+                .queueOptions = Reference{"default"},
+
             };
             extendWarning("Added default bash terminal engine.");
 #endif

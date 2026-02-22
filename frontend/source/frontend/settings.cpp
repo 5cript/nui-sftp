@@ -22,6 +22,7 @@
 #include <frontend/settings/optional_converters.hpp>
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/subgroup.hpp>
+#include <frontend/settings/setting_group.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
@@ -51,10 +52,6 @@ struct Settings::Implementation
 {
     struct CollapsibleStates
     {
-        Nui::Observed<bool> localization{false};
-        Nui::Observed<bool> logging{false};
-        Nui::Observed<bool> userInterface{true};
-        Nui::Observed<bool> localFilesystemOptions{true};
         Nui::Observed<bool> sshOptions{true};
         Nui::Observed<bool> sftpOptions{true};
         Nui::Observed<bool> termios{true};
@@ -87,7 +84,6 @@ struct Settings::Implementation
     Nui::Observed<std::vector<Settings::SectionSelectorOptions>> sessionSelectors{};
 
     GeneralSettings generalSettings;
-    LogOptions logOptions;
     TermiosSettings termiosSettings;
     SshOptions sshOptions;
     SftpOptions sftpOptions;
@@ -118,7 +114,6 @@ struct Settings::Implementation
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
         , generalSettings{onChange, events, multiInputDialog}
-        , logOptions{onChange}
         , termiosSettings{[onChange, reloadInheritance]()
               {
                   onChange();
@@ -232,28 +227,7 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Settings);
 void Settings::applySettingsToState(Persistence::State& state)
 {
     // Uncategorized / General:
-    // None anymore right now
-
-    // Localization Options:
-    state.localizationOptions.languageCode = impl_->generalSettings.localization.language.value();
-    state.localizationOptions.dateTimeFormatString = impl_->generalSettings.localization.dateTimeFormat.value();
-
-    // Log Options
-    impl_->logOptions.applyToState(state.logOptions);
-
-    // Ui Options
-    state.uiOptions.fileGridPathBarOnTop = impl_->generalSettings.userInterface.fileGridPathBarOnTop.value();
-    state.uiOptions.fileGridExtensionIcons = impl_->generalSettings.userInterface.fileGridExtensionIcons.value();
-
-    // Local FS
-    state.localFilesystemOptions.preventDeletion =
-        impl_->generalSettings.localFilesystemOptions.preventDeletion.value();
-    state.localFilesystemOptions.preventRename = impl_->generalSettings.localFilesystemOptions.preventRename.value();
-    state.localFilesystemOptions.preventCreateFile =
-        impl_->generalSettings.localFilesystemOptions.preventCreateFile.value();
-    state.localFilesystemOptions.preventCreateDirectory =
-        impl_->generalSettings.localFilesystemOptions.preventCreateDirectory.value();
-    state.localFilesystemOptions.homeOverride = impl_->generalSettings.localFilesystemOptions.homeOverride.value();
+    impl_->generalSettings.applyToState(state);
 
     auto synchronizeGroupKeys = [](auto& map, auto const& groupKeys)
     {
@@ -339,34 +313,7 @@ void Settings::applySettingsToUi()
             }
             impl_->sessionSelectors.modify();
 
-            impl_->logOptions.loadFromState(impl_->stateHolder->stateCache().logOptions);
-            impl_->generalSettings.localization.language.value(
-                impl_->stateHolder->stateCache().localizationOptions.languageCode
-            );
-            impl_->generalSettings.localization.dateTimeFormat.value(
-                impl_->stateHolder->stateCache().localizationOptions.dateTimeFormatString
-            );
-            impl_->generalSettings.userInterface.fileGridPathBarOnTop.value(
-                impl_->stateHolder->stateCache().uiOptions.fileGridPathBarOnTop
-            );
-            impl_->generalSettings.userInterface.fileGridExtensionIcons.value(
-                impl_->stateHolder->stateCache().uiOptions.fileGridExtensionIcons
-            );
-            impl_->generalSettings.localFilesystemOptions.preventDeletion.value(
-                impl_->stateHolder->stateCache().localFilesystemOptions.preventDeletion
-            );
-            impl_->generalSettings.localFilesystemOptions.preventRename.value(
-                impl_->stateHolder->stateCache().localFilesystemOptions.preventRename
-            );
-            impl_->generalSettings.localFilesystemOptions.preventCreateFile.value(
-                impl_->stateHolder->stateCache().localFilesystemOptions.preventCreateFile
-            );
-            impl_->generalSettings.localFilesystemOptions.preventCreateDirectory.value(
-                impl_->stateHolder->stateCache().localFilesystemOptions.preventCreateDirectory
-            );
-            impl_->generalSettings.localFilesystemOptions.homeOverride.value(
-                impl_->stateHolder->stateCache().localFilesystemOptions.homeOverride.value_or("")
-            );
+            impl_->generalSettings.loadFromState(impl_->stateHolder->stateCache());
 
             const auto initialKey = [](auto const& map)
             {
@@ -696,7 +643,13 @@ Nui::ElementRenderer Settings::sections()
                 {
                     return *impl_->activeSection == Section::GeneralSettings ? "" : "display: none;";
                 }
-            )}(generalSettings()),
+            )}(impl_->generalSettings.render(
+                [this](auto& currentGroupKey, auto& groupKeys) {addGroup(currentGroupKey, groupKeys);},
+                [this](auto& currentGroupKey, auto& groupKeys) {removeGroup(currentGroupKey, groupKeys);},
+                [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
+            )),
             div{style = observe(impl_->activeSection).generate(
                 [this]() -> std::string
                 {
@@ -808,9 +761,8 @@ void Settings::addNewSession()
         [this](auto const& result)
         {
             Log::info("New session created: {}.", result.sessionName);
-            impl_->stateHolder->stateCache().sessions[result.sessionName] = Persistence::SessionOptions{
-                .icon = result.iconName,
-            };
+            impl_->stateHolder->stateCache().sessions[result.sessionName] =
+                Persistence::SessionOptions::create(result.iconName);
 
             impl_->stateHolder->save(
                 [this, result](std::optional<std::string> const& error)
@@ -1000,82 +952,6 @@ Nui::ElementRenderer Settings::side()
     // clang-format on
 }
 
-Nui::ElementRenderer Settings::generalSettings()
-{
-    using namespace Nui;
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-
-    try
-    {
-        // clang-format off
-        auto localization = fragment(
-            impl_->generalSettings.localization.language(language->getObserved("language"))//,
-            //impl_->generalSettings.localization.dateTimeFormat(language->getObserved("settings", "general", "localization", "dateTimeFormatString"))
-        );
-
-        auto userInterface = fragment(
-            impl_->generalSettings.userInterface.fileGridPathBarOnTop(
-                language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
-            ),
-            impl_->generalSettings.userInterface.fileGridExtensionIcons(
-                language->getObserved("settings", "general", "userInterface", "fileGridExtensionIcons")
-            )
-        );
-
-        auto localFilesystemOptions = fragment(
-            impl_->generalSettings.localFilesystemOptions.preventDeletion(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventDeletion")
-            ),
-            impl_->generalSettings.localFilesystemOptions.preventRename(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventRename")
-            ),
-            impl_->generalSettings.localFilesystemOptions.preventCreateFile(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateFile")
-            ),
-            impl_->generalSettings.localFilesystemOptions.preventCreateDirectory(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateDirectory")
-            ),
-            impl_->generalSettings.localFilesystemOptions.homeOverride(
-                language->getObserved("settings", "general", "localFilesystemOptions", "homeOverride")
-            )
-        );
-        // clang-format on
-
-        // clang-format off
-        return fragment(
-            group({
-                .isCollapsed = impl_->collapsibleStates.localization,
-                .content = std::move(localization),
-                .headerTitle = language->getObserved("settings", "generalSettings")
-            }),
-            group({
-                .isCollapsed = impl_->collapsibleStates.logging,
-                .content = impl_->logOptions.render(),
-                .headerTitle = language->getObserved("settings", "loggingAndErrorReportingGroupHeader")
-            }),
-            group({
-                .isCollapsed = impl_->collapsibleStates.userInterface,
-                .content = std::move(userInterface),
-                .headerTitle = language->getObserved("settings", "userInterfaceGroupHeader")
-            }),
-            group({
-                .isCollapsed = impl_->collapsibleStates.localFilesystemOptions,
-                .content = std::move(localFilesystemOptions),
-                .headerTitle = language->getObserved("settings", "localFilesystemOptionsGroupHeader")
-            })
-        );
-        // clang-format on
-    }
-    catch (std::exception const& e)
-    {
-        Log::error("Exception in Settings::generalSettings(): {}", e.what());
-        return div{}("Error loading general settings section: "s + e.what());
-    }
-}
-
 Nui::ElementRenderer Settings::inheritableSettings()
 {
     using namespace Nui;
@@ -1100,7 +976,16 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
                 .currentGroupKey = &impl_->sshOptions.groupKey,
                 .groupKeys = &impl_->sshOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sftpOptions,
@@ -1108,7 +993,16 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
                 .currentGroupKey = &impl_->sftpOptions.groupKey,
                 .groupKeys = &impl_->sftpOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.terminalOptions,
@@ -1116,7 +1010,16 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
                 .currentGroupKey = &impl_->terminalOptions.groupKey,
                 .groupKeys = &impl_->terminalOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.queueOptions,
@@ -1124,7 +1027,16 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->queueOptions.groupKey,
                 .groupKeys = &impl_->queueOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.termios,
@@ -1132,7 +1044,16 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
                 .currentGroupKey = &impl_->termiosSettings.groupKey,
                 .groupKeys = &impl_->termiosSettings.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheritable
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             })
         );
         // clang-format on
@@ -1302,7 +1223,16 @@ Nui::ElementRenderer Settings::currentSession()
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
                 .content = std::move(overarchingSettings),
-                .headerTitle = language->getObserved("settings", "sessionOptions", "basicSettings")
+                .headerTitle = language->getObserved("settings", "sessionOptions", "basicSettings"),
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sshOptions,
@@ -1310,9 +1240,18 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting,
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
-                .engineTypeFilterValue = Persistence::TerminalEngineType::ssh
+                .engineTypeFilterValue = Persistence::TerminalEngineType::ssh,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sftpOptions,
@@ -1320,9 +1259,18 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.sshSessionOptions.sftpOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sftpOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting,
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
-                .engineTypeFilterValue = Persistence::TerminalEngineType::ssh
+                .engineTypeFilterValue = Persistence::TerminalEngineType::ssh,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.terminalOptions,
@@ -1330,7 +1278,16 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.terminalOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.terminalOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.queueOptions,
@@ -1338,7 +1295,16 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.queueOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.queueOptions.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.termios,
@@ -1346,7 +1312,16 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.termios.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.termios.groupKeys,
-                .inheritanceBehavior = GroupParameters::InheritanceBehavior::Inheriting
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
             })
         );
         // clang-format on
@@ -1372,7 +1347,7 @@ void Settings::addGroup(
         {
             if (result && !result->empty())
             {
-                *currentGroupKey = *result;
+                currentGroupKey = *result;
                 if (std::find(groupKeys->begin(), groupKeys->end(), *result) == groupKeys->end())
                 {
                     groupKeys->push_back(*result);
@@ -1400,6 +1375,21 @@ void Settings::removeGroup(
     Nui::Observed<std::vector<std::string>>& groupKeys
 )
 {
+    const auto key = currentGroupKey->value_or(""s);
+    if (key.empty())
+        return;
+
+    if (key == "default")
+    {
+        impl_->confirmDialog->open({
+            .state = ConfirmDialog::State::Critical,
+            .headerText = language->get("settings", "cannotDeleteDefaultGroupKeyHeader"),
+            .text = language->get("settings", "cannotDeleteDefaultGroupKeyText"),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
+        return;
+    }
+
     impl_->confirmDialog->open({
         .state = ConfirmDialog::State::Critical,
         .headerText = language->get("settings", "confirmDeleteGroupKeyHeader"),
@@ -1418,11 +1408,11 @@ void Settings::removeGroup(
                 groupKeys.modify();
                 if (!groupKeys->empty())
                 {
-                    *currentGroupKey = (groupKeys->front());
+                    currentGroupKey = groupKeys->front();
                 }
                 else
                 {
-                    *currentGroupKey = "default"s;
+                    currentGroupKey = "default"s;
                     groupKeys->push_back("default"s);
                     groupKeys.modify();
                 }
@@ -1434,188 +1424,28 @@ void Settings::removeGroup(
     });
 }
 
-Nui::ElementRenderer Settings::group(GroupParameters&& params)
+void Settings::onChangeGroup(
+    Nui::Observed<std::optional<std::string>>& currentGroupKey,
+    std::optional<std::string> const& newValue,
+    Nui::Observed<std::vector<std::string>>&,
+    SettingGroupParameters::InheritanceBehavior inheritanceBehavior
+)
 {
-    using namespace Nui;
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-
-    try
+    const auto key = newValue.value_or(""s);
+    Log::debug("Group key changed event: {}", key);
+    if (key == "</>")
+        currentGroupKey = std::nullopt;
+    else
+        currentGroupKey = key;
+    if (inheritanceBehavior == SettingGroupParameters::InheritanceBehavior::Inheritable)
+        reloadInheritables();
+    else if (inheritanceBehavior == SettingGroupParameters::InheritanceBehavior::Inheriting)
     {
-        auto groupKeyContainer = [this,
-                                     currentGroupKey = params.currentGroupKey,
-                                     inheritanceBehavior = params.inheritanceBehavior,
-                                     groupKeys = params.groupKeys]() -> Nui::ElementRenderer
+        if (*impl_->activeSession)
         {
-            if (!currentGroupKey)
-                return Nui::nil();
-
-            auto addGroupButton = [this, inheritanceBehavior, currentGroupKey, groupKeys]() -> Nui::ElementRenderer
-            {
-                if (inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
-                    return Nui::nil();
-
-                return Snc::button({
-                    .icon = GeneratedSvgs::add(),
-                    .attributes =
-                        {
-                            onClick =
-                                [this, currentGroupKey, groupKeys]()
-                            {
-                                addGroup(*currentGroupKey, *groupKeys);
-                            },
-                        },
-                    .styleVariant = Snc::StyleVariant::Primary,
-                });
-            };
-
-            auto removeGroupButton = [this, inheritanceBehavior, currentGroupKey, groupKeys]() -> Nui::ElementRenderer
-            {
-                if (inheritanceBehavior != GroupParameters::InheritanceBehavior::Inheritable)
-                    return Nui::nil();
-
-                return Snc::button({
-                    .icon = GeneratedSvgs::delete_(),
-                    .attributes =
-                        {
-                            onClick =
-                                [this, currentGroupKey, groupKeys]()
-                            {
-                                removeGroup(*currentGroupKey, *groupKeys);
-                            },
-                        },
-                    .styleVariant = Snc::StyleVariant::Danger,
-                });
-            };
-
-            return div{
-                class_ = "settings-group-key-container"
-            }(Nui::Elements::span{}(language->getObserved("settings", "groupKey")),
-                Snc::select(
-                    Snc::SelectOptions<decltype(*currentGroupKey), decltype(*groupKeys)>{
-                        .activeOption = *currentGroupKey,
-                        .options = *groupKeys,
-                        .attributes =
-                            {
-                                disabled = observe(*groupKeys)
-                                    .generate(
-                                        [](std::vector<std::string> const& keys)
-                                        {
-                                            return keys.empty();
-                                        }
-                                    ),
-                            },
-                        .onChange =
-                            [this,
-                                currentGroupKey,
-                                inheritanceBehavior](auto const& newValue, Nui::WebApi::MouseEvent const&)
-                        {
-                            const auto key = newValue.value_or(""s);
-                            Log::debug("Group key changed event: {}", key);
-                            if (key == "</>")
-                                *currentGroupKey = std::nullopt;
-                            else
-                                *currentGroupKey = key;
-                            if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheritable)
-                                reloadInheritables();
-                            else if (inheritanceBehavior == GroupParameters::InheritanceBehavior::Inheriting)
-                            {
-                                if (*impl_->activeSession)
-                                {
-                                    applySessionToState(**impl_->activeSession);
-                                    save();
-                                }
-                                reloadInheritance();
-                            }
-                        },
-                        .activeRenderer = [](auto const& option) -> Nui::ElementRenderer
-                        {
-                            return Nui::Elements::span{}(
-                                observe(option),
-                                [&option]() -> std::string
-                                {
-                                    if (!option.value())
-                                        return "</>";
-                                    return *option.value();
-                                }
-                            );
-                        },
-                        .elementRenderer = [](auto const& option) -> Nui::ElementRenderer
-                        {
-                            return Nui::Elements::span{}(option);
-                        },
-                        .dontUpdateValue = true
-                    }
-                ),
-                addGroupButton(),
-                removeGroupButton());
-        };
-
-        auto makeSessionTypeFilteredDiv =
-            [engineTypeFilter = params.engineTypeFilter, engineTypeFilterValue = params.engineTypeFilterValue]()
-        {
-            if (engineTypeFilter)
-            {
-                return div{
-                    class_ = "settings-group",
-                    style = observe(*engineTypeFilter)
-                        .generate(
-                            [engineTypeFilterValue](Persistence::TerminalEngineType type)
-                            {
-                                return type == engineTypeFilterValue ? "" : "display: none;";
-                            }
-                        ),
-                };
-            }
-            return div{
-                class_ = "settings-group",
-            };
-        };
-
-        // clang-format off
-        return makeSessionTypeFilteredDiv()(
-            div{
-                class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
-                    return classes("settings-group-header", isCollapsed ? "collapsed" : "uncollapsed");
-                }),
-                onClick = [&isCollapsed = params.isCollapsed](){
-                    isCollapsed = !*isCollapsed;
-                }
-            }(
-                span{class_ = "settings-group-header-collapse-indicator"}(
-                    observe(params.isCollapsed),
-                    [](bool isCollapsed){
-                        if (isCollapsed)
-                            return GeneratedSvgs::navigationrightarrow();
-                        else
-                            return GeneratedSvgs::navigationdownarrow();
-                    }
-                ),
-                span{class_ = "settings-group-header-title"}(std::move(params.headerTitle))
-            ),
-            div{
-                class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
-                    return classes("settings-group-content", isCollapsed ? "collapsed" : "uncollapsed");
-                }),
-                style = Nui::Attributes::Style{
-                    "padding-top"_style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed, currentGroupKey = params.currentGroupKey]() -> std::string {
-                        if (currentGroupKey)
-                            return "0px";
-                        return *isCollapsed ? "0px" : "8px";
-                    }),
-                },
-            }(
-                groupKeyContainer(),
-                std::move(params.content)
-            )
-        );
-        // clang-format on
-    }
-    catch (std::exception const& e)
-    {
-        Log::error("Exception in Settings::group(): {}", e.what());
-        return div{}("Error loading group: "s + e.what());
+            applySessionToState(**impl_->activeSession);
+            save();
+        }
+        reloadInheritance();
     }
 }

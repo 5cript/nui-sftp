@@ -602,20 +602,6 @@ namespace SecureShell
                         }
                     }
 
-                    if (sessionOptions.passwordUnsafe)
-                    {
-                        buf = sessionOptions.passwordUnsafe.value();
-                        const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
-                        if (result == SSH_AUTH_SUCCESS)
-                        {
-                            if (pwCache)
-                                pwCache->emplace_back(
-                                    sessionOptions.user, sessionOptions.host, sessionOptions.port, buf
-                                );
-                            return (int)SSH_AUTH_SUCCESS;
-                        }
-                    }
-
                     const auto r = askPass("Password: ", buf.data(), buf.size(), 0, 0, askPassUserDataPassword);
                     if (r == 0)
                     {

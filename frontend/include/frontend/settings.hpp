@@ -7,6 +7,7 @@
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/session_options.hpp>
+#include <frontend/settings/setting_group.hpp>
 #include <utility/language.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -37,31 +38,9 @@ class Settings
   private:
     Nui::ElementRenderer side();
     Nui::ElementRenderer header();
-    Nui::ElementRenderer generalSettings();
     Nui::ElementRenderer inheritableSettings();
     Nui::ElementRenderer currentSession();
     Nui::ElementRenderer sections();
-
-    struct GroupParameters
-    {
-        enum class InheritanceBehavior
-        {
-            None,
-            Inheritable,
-            Inheriting
-        };
-
-        Nui::Observed<bool>& isCollapsed;
-        Nui::ElementRenderer content;
-        LanguageObservedText headerTitle;
-        Nui::Observed<std::optional<std::string>>* currentGroupKey = nullptr;
-        Nui::Observed<std::vector<std::string>>* groupKeys = nullptr;
-        InheritanceBehavior inheritanceBehavior = InheritanceBehavior::None;
-
-        Nui::Observed<Persistence::TerminalEngineType>* engineTypeFilter = nullptr;
-        Persistence::TerminalEngineType engineTypeFilterValue{Persistence::TerminalEngineType::ssh};
-    };
-    Nui::ElementRenderer group(GroupParameters&& params);
 
     enum class Section
     {
@@ -98,6 +77,7 @@ class Settings
     void reloadInheritables();
     void reloadInheritance();
     void deleteActiveSession();
+
     void addGroup(
         Nui::Observed<std::optional<std::string>>& currentGroupKey,
         Nui::Observed<std::vector<std::string>>& groupKeys
@@ -105,6 +85,12 @@ class Settings
     void removeGroup(
         Nui::Observed<std::optional<std::string>>& currentGroupKey,
         Nui::Observed<std::vector<std::string>>& groupKeys
+    );
+    void onChangeGroup(
+        Nui::Observed<std::optional<std::string>>& currentGroupKey,
+        std::optional<std::string> const& newValue,
+        Nui::Observed<std::vector<std::string>>& groupKeys,
+        SettingGroupParameters::InheritanceBehavior inheritanceBehavior
     );
 
   private:

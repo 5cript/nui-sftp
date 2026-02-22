@@ -42,6 +42,7 @@ target_sources(
         settings/optional_converters.cpp
         settings/sftp_options.cpp
         settings/ssh_options.cpp
+        settings/setting_group.cpp
         settings/termios_settings.cpp
         settings/terminal_options.cpp
         settings/queue_options.cpp

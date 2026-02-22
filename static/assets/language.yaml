@@ -112,6 +112,8 @@ en_US:
     groupKeyExistsText: "The entered inheritance ID already exists."
     inheritableSettingsInfoMessage: "The settings in this category can be inherited by sessions and servers. Configure some base settings to reuse across multiple sessions! Setting groups are associated by keys. Individual settings can be turned off, meaning that they will not be inherited."
     ccSettingsSubgroupTitle: "Control Characters (cc) Active?"
+    cannotDeleteDefaultGroupKeyHeader: "Cannot Delete Default Inheritance ID"
+    cannotDeleteDefaultGroupKeyText: "The default inheritance ID 'default' cannot be deleted."
     numberSetting:
       validationErrorTooSmall: "Value is too small. Minimum value is {}."
       validationErrorTooBig: "Value is too big. Maximum value is {}."

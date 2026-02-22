@@ -30,4 +30,21 @@ namespace Persistence
         option.exitTimeoutSeconds = 3;
         return option;
     }
+
+    SessionOptions SessionOptions::create(std::optional<std::string> icon)
+    {
+        // By default create an ssh session, that is the most likely to be wanted:
+        return SessionOptions{
+            .type = TerminalEngineType::ssh,
+            .icon = icon.value_or(""),
+            .engine =
+                SshSessionOptions{
+                    .sshOptions = Reference{"default"},
+                    .sftpOptions = Reference{"default"},
+                },
+            .terminalOptions = Reference{"default"},
+            .termios = Reference{"default"},
+            .queueOptions = Reference{"default"},
+        };
+    }
 }
