@@ -73,13 +73,14 @@ namespace
                         .completionTime = std::chrono::system_clock::now(),
                     };
                 },
-                [reason, operationId, error](BulkUploadOperation const&)
+                [reason, operationId, error](BulkUploadOperation const& op)
                 {
                     return OperationQueue::OperationCompleted{
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
                         .error = error,
+                        .failedEntries = op.getFailed(),
                     };
                 },
                 [reason, operationId, error](DeleteOperation const& op)
@@ -573,6 +574,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                     ? transferOptions.customDirectoryPermissions
                     : defaultOptions.directoryPermissions,
                 .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
             }
         );
 
@@ -652,19 +654,22 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 },
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions = UploadOperation::UploadOperationOptions{
-                    .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                    .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                    .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                    .inheritPermissions =
-                        transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                    .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                             : defaultOptions.filePermissions,
-                    .directoryPermissions = transferOptions.customDirectoryPermissions
-                        ? transferOptions.customDirectoryPermissions
-                        : defaultOptions.directoryPermissions,
-                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                },
+                .individualOptions =
+                    UploadOperation::UploadOperationOptions{
+                        .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
+                        .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
+                        .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
+                        .inheritPermissions =
+                            transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
+                        .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
+                                                                                 : defaultOptions.filePermissions,
+                        .directoryPermissions = transferOptions.customDirectoryPermissions
+                            ? transferOptions.customDirectoryPermissions
+                            : defaultOptions.directoryPermissions,
+                        .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                        .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
+                    },
+                .failFast = transferOptions.failFast.value_or(false),
             }
         );
 

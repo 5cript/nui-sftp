@@ -83,7 +83,6 @@ void SftpFileEngine::listDirectory(
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     Log::info("Received response for listing directory.");
-                    Nui::WebApi::Console::log(val);
 
                     if (val.hasOwnProperty("error") || !val.hasOwnProperty("entries"))
                     {

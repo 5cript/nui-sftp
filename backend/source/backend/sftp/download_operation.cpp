@@ -61,14 +61,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     Log::error("DownloadOperation: Failed to handle symlink: {}", result.error().toString());
                     return enterErrorState<WorkStatus>(result.error());
                 }
-                if (!result.value())
-                {
-                    Log::info("DownloadOperation: Symlink handled, no file to download.");
-                    state_ = Completed;
-                    // to show 100%
-                    options_.progressCallback(1, 1, 1, 0);
-                    return WorkStatus::Complete;
-                }
+                Log::info("DownloadOperation: Symlink handled, no file to download.");
+                state_ = Completed;
+                // to show 100%
+                options_.progressCallback(1, 1, 1, 0);
+                return WorkStatus::Complete;
             }
             if (options_.bigFileOptimized)
             {
@@ -189,12 +186,12 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<bool, DownloadOperation::Error> DownloadOperation::handleSymlink()
+std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
         Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.string());
-        return false;
+        return {};
     }
 
     const auto readResult = readSymlink(options_.remotePath);
@@ -216,7 +213,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::handleSymlink()
         );
         return std::unexpected(Error{.type = ErrorType::CannotCreateSymlink});
     }
-    return false;
+    return {};
 }
 
 std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
