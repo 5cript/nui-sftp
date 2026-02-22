@@ -1,4 +1,4 @@
-set(NUISCP_NPM_INSTALL_ARGS "" CACHE STRING "Arguments to pass to npm install for nui-scp")
+set(NUISCP_NPM_INSTALL_ARGS "" CACHE STRING "Arguments to pass to npm install for nui-sftp")
 
 add_npm_install(
     TARGET_NAME ${PROJECT_NAME}-npm-install

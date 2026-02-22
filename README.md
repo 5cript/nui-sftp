@@ -1,7 +1,6 @@
 # nui-sftp
 
-This project will contain a cross platform SSH and SFTP client.
-Still under construction :construction:
+This project contains a cross platform (Linux & Windows for now) SSH and SFTP client.
 
 # Todo List
 

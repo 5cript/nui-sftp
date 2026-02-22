@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(nui-scp VERSION 0.1.0)
+project(nui-sftp VERSION 0.1.0)
 
 set(NUI_FETCH_ROAR OFF CACHE BOOL "Dont fetch roar, use local copy" FORCE)
 set(NUI_FETCH_NLOHMANN_JSON OFF CACHE BOOL "Dont fetch nlohmann, use local copy" FORCE)
@@ -14,7 +14,7 @@ set(WEBKIT_PACKAGE_NAME "webkitgtk-6.0" CACHE STRING "Pkg-config package name fo
 
 option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
-option(NUI_SCP_ENABLE_TESTING "Enable testing for nui-scp" OFF)
+option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
 
 include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 
@@ -39,7 +39,7 @@ if (NOT EMSCRIPTEN)
 endif()
 
 # Nui Dependency
-add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui")
+add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui" EXCLUDE_FROM_ALL)
 
 # Add executable (sources are added later, depending on frontend/backend)
 add_executable(${PROJECT_NAME})
@@ -50,15 +50,15 @@ add_library(roar-include-only INTERFACE)
 target_include_directories(roar-include-only INTERFACE "${CMAKE_CURRENT_LIST_DIR}/dependencies/roar/include")
 
 include("${CMAKE_CURRENT_LIST_DIR}/dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
-add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/gimo")
-add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/traits")
+add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/gimo" EXCLUDE_FROM_ALL)
+add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/traits" EXCLUDE_FROM_ALL)
 add_subdirectory("${CMAKE_SOURCE_DIR}/constants/source/constants")
 add_subdirectory("${CMAKE_SOURCE_DIR}/ids/source/ids")
 add_subdirectory("${CMAKE_SOURCE_DIR}/shared_data/source/shared_data")
 add_subdirectory("${CMAKE_SOURCE_DIR}/utility/source/utility")
 add_subdirectory("${CMAKE_SOURCE_DIR}/log/source/log")
 if (NOT EMSCRIPTEN)
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies/yaml-cpp.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies/yaml-cpp.cmake" EXCLUDE_FROM_ALL)
 endif()
 add_subdirectory("${CMAKE_SOURCE_DIR}/persistence/source/persistence")
 add_subdirectory("${CMAKE_SOURCE_DIR}/events/source/events")
@@ -93,20 +93,18 @@ else()
 
     # Copy bin (for SAPUI5) files to destination for themes and languages
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources"
-        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources/index.html"
-        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/dynamic_sources/index.js"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/index.html"
+        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/index.js"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/static/assets/language.yaml" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/language.yaml"
         VERBATIM
     )
 
-    if (NUI_SCP_ENABLE_TESTING)
+    if (NUI_SFTP_ENABLE_TESTING)
         include(./_cmake/dependencies/gtest.cmake)
         enable_testing()
         add_subdirectory(ssh/test/ssh)
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
     endif()
-
-    install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 endif()
