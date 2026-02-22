@@ -136,7 +136,7 @@ namespace SecureShell
             [this, path = std::move(path), permissions]() -> std::expected<void, SftpSession::Error>
             {
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                    sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                    sftp_lstat(session_, path.generic_string().c_str()), sftp_attributes_free
                 };
                 if (!attributes)
                 {
@@ -233,7 +233,7 @@ namespace SecureShell
                 for (const auto& path : directories)
                 {
                     std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                        sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                        sftp_lstat(session_, path.generic_string().c_str()), sftp_attributes_free
                     };
 
                     if (attributes == nullptr)
@@ -302,7 +302,7 @@ namespace SecureShell
                 for (const auto& path : paths)
                 {
                     std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                        sftp_stat(session_, path.generic_string().c_str()), sftp_attributes_free
+                        sftp_lstat(session_, path.generic_string().c_str()), sftp_attributes_free
                     };
 
                     if (attributes == nullptr)
