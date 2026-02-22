@@ -1,7 +1,5 @@
 #pragma once
 
-#include <log/log.hpp>
-
 #include <vector>
 #include <type_traits>
 #include <filesystem>
@@ -96,11 +94,11 @@ namespace Utility
             }
             else
             {
-                Log::warn(
-                    "DeepDirectoryWalker: Encountered non-directory entry '{}' during walk at a point where a "
-                    "directory was expected, skipping.",
-                    fullPath(entries_[currentIndex_]).generic_string()
-                );
+                // Log::warn(
+                //     "DeepDirectoryWalker: Encountered non-directory entry '{}' during walk at a point where a "
+                //     "directory was expected, skipping.",
+                //     fullPath(entries_[currentIndex_]).generic_string()
+                // );
             }
 
             // Move over all non dirs
