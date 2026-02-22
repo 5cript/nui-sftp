@@ -11,3 +11,4 @@ themes/node_modules/*
 themes/node_modules
 todo.txt
 .clangd
+install/*
