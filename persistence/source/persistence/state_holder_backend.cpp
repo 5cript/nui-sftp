@@ -438,7 +438,7 @@ namespace Persistence
 
     void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
-        const auto path = programDirectory_ / "assets" / "language.yaml";
+        const auto path = programDirectory_ / ".." / "assets" / "language.yaml";
 
         // Convert to json:
 
