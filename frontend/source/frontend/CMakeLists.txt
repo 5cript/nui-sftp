@@ -66,12 +66,55 @@ target_sources(
         ${ui5_svgs_GENERATED_HEADERS}
 )
 
+function(set_memory64_flags)
+    cmake_parse_arguments(
+        MEM64
+        ""
+        "TARGETS"
+        ""
+        ${ARGN}
+    )
+    foreach(target IN LISTS MEM64_TARGETS)
+        if (WIN32)
+            set_target_properties(
+                ${target}
+                PROPERTIES
+                    LINK_FLAGS "-sMEMORY64=1"
+                    COMPILE_FLAGS "-sMEMORY64=1"
+            )
+        else()
+            # No support for WASM64 in webkit
+            set_target_properties(
+                ${target}
+                PROPERTIES
+                    LINK_FLAGS "-sWASM_BIGINT=1"
+            )
+        endif()
+    endforeach()
+endfunction()
+
+set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json script-nui-components)
+
+set(DEPENDANT_LINK_OPTIONS "")
+set(DEPENDANT_COMPILE_OPTIONS "")
+set(PARCEL_ARGS "")
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DEPENDANT_LINK_OPTIONS "-g1")
+    set(DEPENDANT_COMPILE_OPTIONS "-g1")
+    set(PARCEL_ARGS "--no-optimize")
+else()
+    set(DEPENDANT_LINK_OPTIONS "-O2")
+    set(DEPENDANT_COMPILE_OPTIONS "-O2")
+    set(PARCEL_ARGS "--no-source-maps")
+endif()
+
+
 nui_prepare_emscripten_target(
     NO_NPM_INSTALL
     TARGET
         ${PROJECT_NAME}
     PARCEL_ARGS
-        --no-optimize
+        ${PARCEL_ARGS}
     PREJS
         ${PREJS_FILE}
     LEAN_INDEX_HTML
@@ -179,45 +222,6 @@ target_link_libraries(
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
-
-function(set_memory64_flags)
-    cmake_parse_arguments(
-        MEM64
-        ""
-        "TARGETS"
-        ""
-        ${ARGN}
-    )
-    foreach(target IN LISTS MEM64_TARGETS)
-        if (WIN32)
-            set_target_properties(
-                ${target}
-                PROPERTIES
-                    LINK_FLAGS "-sMEMORY64=1"
-                    COMPILE_FLAGS "-sMEMORY64=1"
-            )
-        else()
-            # No support for WASM64 in webkit
-            set_target_properties(
-                ${target}
-                PROPERTIES
-                    LINK_FLAGS "-sWASM_BIGINT=1"
-            )
-        endif()
-    endforeach()
-endfunction()
-
-set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json script-nui-components)
-
-set(DEPENDANT_LINK_OPTIONS "")
-set(DEPENDANT_COMPILE_OPTIONS "")
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(DEPENDANT_LINK_OPTIONS "-g1")
-    set(DEPENDANT_COMPILE_OPTIONS "-g1")
-else()
-    set(DEPENDANT_LINK_OPTIONS "-O2")
-    set(DEPENDANT_COMPILE_OPTIONS "-O2")
-endif()
 
 add_dependencies(theme_compilation ${PROJECT_NAME}-npm-install)
 add_dependencies(${PROJECT_NAME}-parcel theme_compilation)
