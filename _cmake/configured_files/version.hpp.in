@@ -1,0 +1,6 @@
+#pragma once
+
+#define GIT_TAG "@GIT_TAG@"
+#define GIT_BRANCH "@GIT_BRANCH@"
+#define VERSION "@VERSION@"
+#define VERSION_NON_DIRTY "@VERSION_NON_DIRTY@"

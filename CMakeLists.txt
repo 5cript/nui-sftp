@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(nui-sftp VERSION 0.1.0)
+include("${CMAKE_CURRENT_LIST_DIR}/_cmake/version.cmake")
+
+project(nui-sftp VERSION "${VERSION_NON_DIRTY}" LANGUAGES CXX)
 
 set(NUI_FETCH_ROAR OFF CACHE BOOL "Dont fetch roar, use local copy" FORCE)
 set(NUI_FETCH_NLOHMANN_JSON OFF CACHE BOOL "Dont fetch nlohmann, use local copy" FORCE)
