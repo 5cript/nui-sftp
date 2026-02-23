@@ -222,6 +222,3 @@ target_link_libraries(
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
-
-add_dependencies(theme_compilation ${PROJECT_NAME}-npm-install)
-add_dependencies(${PROJECT_NAME}-parcel theme_compilation)
