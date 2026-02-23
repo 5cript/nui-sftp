@@ -1,0 +1,123 @@
+name: Windows
+
+on:
+  push:
+    branches: ["main", "feat/pipelines"]
+    tags:
+      - '^v.*'
+  pull_request:
+    branches: ["main"]
+
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: build/clang_release
+
+jobs:
+  windows-msys2:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          path-type: inherit
+          msystem: clang64
+          release: true
+          install: >-
+            make
+            libcurl
+            unzip
+            git
+            zip
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-boost
+            mingw-w64-clang-x86_64-crypto++
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-pugixml
+            mingw-w64-clang-x86_64-fmt
+            mingw-w64-clang-x86_64-libssh
+            mingw-w64-clang-x86_64-cppwinrt
+
+      - name: Workspace Path Fixup
+        run: |
+          echo "WSPACE=$(cygpath '${{ github.workspace }}')" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Test node
+        run: node --version && whereis node
+
+      - name: Run setup.sh
+        run: |
+          cd "${{ env.WSPACE }}" && bash setup.sh
+
+      - name: Configure CMake
+        run: |
+          cmake \
+            -B "${{ env.WSPACE }}/${{ env.BUILD_DIR }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_LINKER=lld \
+            -DCMAKE_CXX_EXTENSIONS=on \
+            -DNUI_ENABLE_TESTS=off \
+            -DNUI_BUILD_EXAMPLES=off \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DJSON_Diagnostics=ON \
+            -DNUI_FETCH_TRAITS=OFF \
+            -DNUI_BUILD_XML_TOOL=ON \
+
+      - name: Build
+        run: |
+          cmake --build \
+            "${{ env.WSPACE }}/${{ env.BUILD_DIR }}" \
+            --config "${{ env.BUILD_TYPE }}"
+
+      - name: Read version information
+        run: |
+          VERSION_FILE="${{ env.WSPACE }}/${{ env.BUILD_DIR }}/text/version.txt"
+          VERSION=$(sed -n '1p' "$VERSION_FILE")
+          VERSION_CLEAN=$(sed -n '2p' "$VERSION_FILE")
+          {
+            echo "VERSION=$VERSION"
+            echo "VERSION_CLEAN=$VERSION_CLEAN"
+          } >> "$GITHUB_ENV"
+
+      # Output lands in ${{ env.WSPACE }}/${{ env.BUILD_DIR }}/build/install
+      - name: Run deploy script
+        run: |
+          cd "${{ env.WSPACE }}" && bash scripts/deploy.sh
+
+      - name: Zip deployed files
+        run: |
+          cd "${{ env.WSPACE }}" && \
+          zip -r "nui-sftp-windows-x86_64_${{ env.VERSION }}.zip" "${{ env.WSPACE }}/build/install"
+
+      - name: Upload artifacts to MEGA S4
+        # if: github.ref == 'refs/heads/main'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MEGAS4ACCESS }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MEGAS4KEY }}
+          ENDPOINT: https://s3.eu-central-1.s4.mega.io
+          FILENAME: "nui-sftp-windows-x86_64_${{ env.VERSION }}.zip"
+          S3_PATH: "s3://nui-sftp-releases/windows/x86_64/"
+        run: |
+          # Check if the file exists on the remote
+          if aws s3 ls "${{ env.S3_PATH }}${{ env.FILENAME }}" --endpoint-url ${{ env.ENDPOINT }} > /dev/null 2>&1; then
+            echo "Error: File ${{ env.FILENAME }} already exists in S4. Aborting to prevent overwrite."
+            exit 1
+          fi
+
+          # If it doesnt exist, upload it
+          aws s3 cp "${{ env.FILENAME }}" "${{ env.S3_PATH }}" --endpoint-url ${{ env.ENDPOINT }}

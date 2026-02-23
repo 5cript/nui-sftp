@@ -367,10 +367,10 @@ int main(int const argc, char const* const* argv)
     };
 
     sigaction(SIGCHLD, &sa, nullptr);
-#    pragma clang diagnostic pop
-#endif
 
     setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+#    pragma clang diagnostic pop
+#endif
 
     ssh_init();
 
