@@ -1,0 +1,127 @@
+name: Ubuntu24
+
+on:
+  push:
+    branches: ["main", "feat/pipelines"]
+    tags:
+      - '^v.*'
+  pull_request:
+    branches: ["main"]
+
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: build/clang_release
+
+jobs:
+  ubuntu-24:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            zip
+            unzip
+            git
+            python3
+            cmake
+            libwebkit2gtk-4.1-dev
+            libcurl4-openssl-dev
+            libcrypto++-dev
+            libpugixml-dev
+            libssh-dev
+            libfmt-dev
+            ninja-build
+          version: 1.0
+
+      - name: Install boost
+        uses: MarkusJx/install-boost@v2.4.1
+        id: install-boost
+        with:
+          # REQUIRED: Specify the required boost version
+          # A list of supported versions can be found here:
+          # https://github.com/MarkusJx/prebuilt-boost/blob/main/versions-manifest.json
+          boost_version: 1.89.0
+          # OPTIONAL: Specify a platform version
+          platform_version: 24.04
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Test node
+        run: node --version && whereis node
+
+      - name: Run setup.sh
+        run: |
+          cd "${{ github.workspace }}" && bash setup.sh
+
+      - name: Configure CMake
+        run: |
+          cmake \
+            -B "${{ github.workspace }}/${{ env.BUILD_DIR }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_LINKER=lld \
+            -DCMAKE_CXX_EXTENSIONS=on \
+            -DNUI_ENABLE_TESTS=off \
+            -DNUI_BUILD_EXAMPLES=off \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DJSON_Diagnostics=ON \
+            -DNUI_FETCH_TRAITS=OFF \
+            -DNUI_BUILD_XML_TOOL=ON \
+        env:
+          Boost_ROOT: ${{ steps.install-boost.outputs.BOOST_ROOT }}
+
+      - name: Build
+        run: |
+          cmake --build \
+            "${{ github.workspace }}/${{ env.BUILD_DIR }}" \
+            --config "${{ env.BUILD_TYPE }}"
+
+      - name: Read version information
+        run: |
+          VERSION_FILE="${{ github.workspace }}/${{ env.BUILD_DIR }}/text/version.txt"
+          VERSION=$(sed -n '1p' "$VERSION_FILE")
+          VERSION_CLEAN=$(sed -n '2p' "$VERSION_FILE")
+          {
+            echo "VERSION=$VERSION"
+            echo "VERSION_CLEAN=$VERSION_CLEAN"
+          } >> "$GITHUB_ENV"
+
+      # Output lands in ${{ github.workspace }}/${{ env.BUILD_DIR }}/build/install
+      - name: Run deploy script
+        run: |
+          cd "${{ github.workspace }}" && bash scripts/deploy.sh
+
+      - name: Zip deployed files
+        run: |
+          cd "${{ github.workspace }}" && \
+          zip -r "nui-sftp-ubuntu-24-x86_64_${{ env.VERSION }}.zip" "${{ github.workspace }}/build/install"
+
+      - name: Upload artifacts to MEGA S4
+        # if: github.ref == 'refs/heads/main'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MEGAS4ACCESS }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MEGAS4KEY }}
+          ENDPOINT: https://s3.eu-central-1.s4.mega.io
+          FILENAME: "nui-sftp-ubuntu-24-x86_64_${{ env.VERSION }}.zip"
+          S3_PATH: "s3://nui-sftp-releases/ubuntu-24/x86_64/"
+        run: |
+          # 1. Check if the file exists on the remote S4 storage
+          # We point to the full URI: s3://bucket/path/filename.zip
+          if aws s3 ls "${{ env.S3_PATH }}${{ env.FILENAME }}" --endpoint-url ${{ env.ENDPOINT }} > /dev/null 2>&1; then
+            echo "::error::Deployment failed: ${{ env.FILENAME }} already exists in S4. Aborting to prevent overwrite."
+            exit 1
+          fi
+
+          aws s3 cp "${{ env.FILENAME }}" "${{ env.S3_PATH }}" --endpoint-url ${{ env.ENDPOINT }}
