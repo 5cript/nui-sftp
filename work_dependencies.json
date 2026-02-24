@@ -2,7 +2,7 @@
     "sources": [
         {
             "url": "https://github.com/5cript/work-dependency-cloner.git",
-            "rev": "1b62276e6c47f408601cca8bcd69bd9d0e0b3046",
+            "rev": "6451b7805ab9d327425f4f86a155e94870a570dd",
             "branch": "main",
             "name": "work-dependency-cloner"
         },
