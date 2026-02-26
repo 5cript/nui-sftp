@@ -1,12 +1,12 @@
 #include <frontend/settings/log_options.hpp>
 
-#include <svgs/activity-items.hpp>
-#include <svgs/zoom-in.hpp>
-#include <svgs/information.hpp>
-#include <svgs/alert.hpp>
-#include <svgs/error.hpp>
-#include <svgs/incident.hpp>
-#include <svgs/hide.hpp>
+#include <frontend/svgs/activity-items.hpp>
+#include <frontend/svgs/zoom-in.hpp>
+#include <frontend/svgs/information.hpp>
+#include <frontend/svgs/alert.hpp>
+#include <frontend/svgs/error.hpp>
+#include <frontend/svgs/incident.hpp>
+#include <frontend/svgs/hide.hpp>
 
 LogOptions::LogOptions(std::function<void()> const& onChange)
     : logLevel{

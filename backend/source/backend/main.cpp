@@ -177,7 +177,7 @@ Main::Main(int const, char const* const*)
     , loggerSetup_{stateHolder_}
     , window_{
           Nui::WindowOptions{
-              .title = "NuiScp"s,
+              .title = "NuiSftp"s,
 #ifdef NDEBUG
               .debug = false,
 #else

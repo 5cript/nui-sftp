@@ -8,16 +8,6 @@ add_npm_install(
     OUTPUTS ${UI5_SVGS_FULLPATH}
 )
 
-svg_to_hpp(
-    SVG_DIR "${CMAKE_BINARY_DIR}/node_modules/@ui5/webcomponents-icons/dist/v5"
-    HPP_DIR "${CMAKE_BINARY_DIR}/include/svgs"
-    NAMESPACE "GeneratedSvgs"
-    TARGET ui5_svgs
-    ABBREVIATE
-    TOOLPATH "${XML_TO_NUI_TOOL}"
-    NAMES ${UI5_SVG_FILES}
-)
-
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -63,7 +53,6 @@ target_sources(
         file_explorer/side_model.cpp
         file_explorer/remote_side_model.cpp
         file_explorer/local_side_model.cpp
-        ${ui5_svgs_GENERATED_HEADERS}
 )
 
 function(set_memory64_flags)
@@ -107,7 +96,6 @@ else()
     set(DEPENDANT_COMPILE_OPTIONS "-O2")
     set(PARCEL_ARGS "--no-source-maps")
 endif()
-
 
 nui_prepare_emscripten_target(
     NO_NPM_INSTALL

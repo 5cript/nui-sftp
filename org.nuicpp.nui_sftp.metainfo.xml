@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop">
+  <id>org.nuicpp.nui_sftp</id>
+  <name>Nui-Sftp</name>
+  <summary>A SSH/SFTP client using the NuiCpp UI Framework</summary>
+  <description>
+    <p>A SSH/SFTP client built with the NuiCpp UI Framework, providing a modern interface for managing remote files.</p>
+  </description>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>TimEbbeke</developer_name>
+  <launchable type="desktop-id">org.nuicpp.nui_sftp.desktop</launchable>
+  <url type="homepage">https://github.com/5cript/nui-sftp</url>
+  <url type="bugtracker">https://github.com/5cript/nui-sftp/issues</url>
+  <url type="vcs-browser">https://github.com/5cript/nui-sftp</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Nui Sftp Main Window</caption>
+      <image>https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/nui-sftp-session.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <!-- TODO -->
+    <!-- <release version="0.1.0" date="2026-02-26">
+      <description>
+        <p>Initial release</p>
+      </description>
+    </release> -->
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

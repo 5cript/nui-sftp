@@ -8,8 +8,8 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <traits/functions.hpp>
 
-#include <svgs/refresh.hpp>
-#include <svgs/question-mark.hpp>
+#include <frontend/svgs/refresh.hpp>
+#include <frontend/svgs/question-mark.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/text_input.hpp>

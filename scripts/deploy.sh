@@ -28,6 +28,8 @@ BUILD_DIRECTORY=$(canonicalPath "${BUILD_DIRECTORY}")
 SOURCE_DIRECTORY="${SOURCE_DIRECTORY:-${SCRIPT_DIR}/..}"
 SOURCE_DIRECTORY=$(canonicalPath "${SOURCE_DIRECTORY}")
 
+NOLINK="${NOLINK:-false}"
+
 # On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
 # Also set a variable for future reference.
 
@@ -55,7 +57,7 @@ cp -r "${BUILD_DIRECTORY}/assets/." "${INSTALL_TARGET}/assets"
 cp -r "${BUILD_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
 cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/bin"
 
-# Dont create a symlink on windows
-if [ "$IS_WINDOWS" = false ]; then
-    ln -s "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
+# Dont create a symlink on windows or if NOLINK is true
+if [ "$IS_WINDOWS" = false ] && [ "$NOLINK" = false ]; then
+    ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
 fi

@@ -7,7 +7,7 @@
 #include <ids/id.hpp>
 
 #include <script-nui-components/resizeable_table.hpp>
-#include <svgs/delete.hpp>
+#include <frontend/svgs/delete.hpp>
 
 #include <nui/event_system/listen.hpp>
 #include <nui/frontend/elements/div.hpp>

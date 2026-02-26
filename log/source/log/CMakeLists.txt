@@ -34,7 +34,7 @@ else()
             spdlog::spdlog
             nui-backend
         PRIVATE
-            roar
+            roar::no-net
             constants
     )
     target_sources(
