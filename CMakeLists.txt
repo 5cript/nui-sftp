@@ -17,6 +17,7 @@ set(WEBKIT_PACKAGE_NAME "webkitgtk-6.0" CACHE STRING "Pkg-config package name fo
 option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
+option(FLATPAK_BUILD "Inform CMake that we are building for flatpak, this will set some additional flags and dependencies" OFF)
 
 include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 
@@ -38,6 +39,10 @@ if (NOT EMSCRIPTEN)
         get_target_property(WEBKIT_INCLUDE_DIRS PkgConfig::webkit2 INTERFACE_INCLUDE_DIRECTORIES)
         message(STATUS "WebKit include directories: ${WEBKIT_INCLUDE_DIRS}")
     endif()
+endif()
+
+if (FLATPAK_BUILD)
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/flatpak.cmake")
 endif()
 
 # Nui Dependency
@@ -69,8 +74,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies.cmake")
 set(PREJS_FILE "${CMAKE_SOURCE_DIR}/frontend/source/frontend/js/module.js")
 
 if (EMSCRIPTEN)
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/svg_files.cmake")
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/svg_to_hpp.cmake")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/ui5")
     add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components")

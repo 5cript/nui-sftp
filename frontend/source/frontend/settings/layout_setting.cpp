@@ -3,8 +3,8 @@
 #include <script-nui-components/select.hpp>
 #include <script-nui-components/button.hpp>
 
-#include <svgs/add.hpp>
-#include <svgs/delete.hpp>
+#include <frontend/svgs/add.hpp>
+#include <frontend/svgs/delete.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Nui-Sftp
+Comment=A SSH/SFTP client using the NuiCpp UI Framework
+Exec=nui-sftp
+Terminal=false
+Categories=Utility;

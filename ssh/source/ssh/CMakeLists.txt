@@ -18,6 +18,8 @@ target_include_directories(
 
 target_compile_definitions(secure-shell PRIVATE -DSSH_NO_CPP_EXCEPTIONS)
 
+find_package(LIBSSH REQUIRED)
+
 target_link_libraries(
     secure-shell
     PUBLIC

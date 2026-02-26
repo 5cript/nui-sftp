@@ -6,7 +6,10 @@ add_library(
 
 target_include_directories(utility PUBLIC ${CMAKE_SOURCE_DIR}/utility/include)
 
-include("${CMAKE_CURRENT_LIST_DIR}/../../../dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
+if (EMSCRIPTEN AND FLATPAK_BUILD)
+else()
+    include("${CMAKE_CURRENT_LIST_DIR}/../../../dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
+endif()
 
 if(EMSCRIPTEN)
     # This allows for better exception handling in frontend parts.

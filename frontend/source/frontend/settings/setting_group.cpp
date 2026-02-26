@@ -2,10 +2,10 @@
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/select.hpp>
-#include <svgs/add.hpp>
-#include <svgs/delete.hpp>
-#include <svgs/navigation-right-arrow.hpp>
-#include <svgs/navigation-down-arrow.hpp>
+#include <frontend/svgs/add.hpp>
+#include <frontend/svgs/delete.hpp>
+#include <frontend/svgs/navigation-right-arrow.hpp>
+#include <frontend/svgs/navigation-down-arrow.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>

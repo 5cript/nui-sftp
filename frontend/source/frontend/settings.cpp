@@ -30,15 +30,15 @@
 #include <script-nui-components/switch.hpp>
 #include <script-nui-components/select.hpp>
 
-#include <svgs/decline.hpp>
-#include <svgs/settings.hpp>
-#include <svgs/it-system.hpp>
-#include <svgs/delete.hpp>
-#include <svgs/add.hpp>
-#include <svgs/wrench.hpp>
-#include <svgs/navigation-right-arrow.hpp>
-#include <svgs/navigation-down-arrow.hpp>
-#include <svgs/action-settings.hpp>
+#include <frontend/svgs/decline.hpp>
+#include <frontend/svgs/settings.hpp>
+#include <frontend/svgs/it-system.hpp>
+#include <frontend/svgs/delete.hpp>
+#include <frontend/svgs/add.hpp>
+#include <frontend/svgs/wrench.hpp>
+#include <frontend/svgs/navigation-right-arrow.hpp>
+#include <frontend/svgs/navigation-down-arrow.hpp>
+#include <frontend/svgs/action-settings.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
 #include <nui/frontend/api/timer.hpp>
