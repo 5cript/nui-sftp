@@ -74,7 +74,7 @@ add_custom_command(
 )
 
 add_custom_target(
-    scp-resource-copy
+    nui-sftp-resource-copy
     ALL
     DEPENDS
         "${CMAKE_BINARY_DIR}/assets/icons/folder_main.png"

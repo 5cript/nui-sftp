@@ -3,20 +3,9 @@
 set -e
 set -u
 
-function canonicalPath
-{
-    local path="$1" ; shift
-    if [ -d "$path" ]
-    then
-        echo "$(cd "$path" ; pwd)"
-    else
-        local b=$(basename "$path")
-        local p=$(dirname "$path")
-        echo "$(cd "$p" ; pwd)/$b"
-    fi
-}
-
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+source "${SCRIPT_DIR}/lib.sh"
 
 # Variables that can also be args from env
 INSTALL_TARGET="${INSTALL_TARGET:-${SCRIPT_DIR}/../build/install}"

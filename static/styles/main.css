@@ -11,15 +11,14 @@
 @import "./new_session_dialog.css";
 @import "./file_property_dialog.css";
 @import "./multi_input_dialog.css";
-@import "../../../../../nui-file-explorer/styles/file_grid.css";
-@import "../../../../../nui-file-explorer/styles/dropdown_menu.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/button.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/color_picker.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/resizeable_table.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/select.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/switch.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/switch.css";
-@import "../../../../../dependencies/5cript-nui-components/styles/text_input.css";
+@import "../../../styles/nui-file-explorer/file_grid.css";
+@import "../../../styles/nui-file-explorer/dropdown_menu.css";
+@import "../../../styles/5cript-nui-components/button.css";
+@import "../../../styles/5cript-nui-components/color_picker.css";
+@import "../../../styles/5cript-nui-components/resizeable_table.css";
+@import "../../../styles/5cript-nui-components/select.css";
+@import "../../../styles/5cript-nui-components/switch.css";
+@import "../../../styles/5cript-nui-components/text_input.css";
 
 *,
 *::before,

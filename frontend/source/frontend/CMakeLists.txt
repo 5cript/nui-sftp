@@ -82,7 +82,7 @@ function(set_memory64_flags)
     endforeach()
 endfunction()
 
-set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json script-nui-components)
+set_memory64_flags(TARGETS nui-frontend nlohmann_json::nlohmann_json script-nui-components fmt::fmt)
 
 set(DEPENDANT_LINK_OPTIONS "")
 set(DEPENDANT_COMPILE_OPTIONS "")

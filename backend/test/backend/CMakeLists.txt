@@ -13,9 +13,9 @@ target_link_libraries(
         secure-shell
         utility
         backend
-        GTest::GTest
+        GTest::gtest
         GTest::gmock_main
-        GTest::Main
+        GTest::gtest_main
 )
 
 if (WIN32)

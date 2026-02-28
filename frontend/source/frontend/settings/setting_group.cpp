@@ -181,13 +181,11 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
                 class_ = observe(params.isCollapsed).generate([](bool isCollapsed) {
                     return classes("settings-group-content", isCollapsed ? "collapsed" : "uncollapsed");
                 }),
-                style = Nui::Attributes::Style{
-                    "padding-top"_style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed, currentGroupKey = params.currentGroupKey]() -> std::string {
-                        if (currentGroupKey)
-                            return "0px";
-                        return *isCollapsed ? "0px" : "8px";
-                    }),
-                },
+                style = observe(params.isCollapsed).generate([isCollapsed = &params.isCollapsed, currentGroupKey = params.currentGroupKey]() -> std::string {
+                    if (currentGroupKey)
+                        return "padding-top: 0px;";
+                    return fmt::format("padding-top: {};", *isCollapsed ? "0px" : "8px");
+                }),
             }(
                 groupKeyContainer(),
                 std::move(params.content)

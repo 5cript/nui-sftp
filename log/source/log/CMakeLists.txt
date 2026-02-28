@@ -11,20 +11,9 @@ if (EMSCRIPTEN)
         PUBLIC
             core-target
             utility
-            fmt
+            fmt::fmt-header-only
             nui-frontend
     )
-    if (WIN32)
-        target_compile_options(fmt PRIVATE -sMEMORY64=1)
-        target_link_options(fmt PRIVATE -sMEMORY64=1)
-    else()
-        # No support for WASM64 in webkit
-        target_link_options(
-            fmt
-            PRIVATE
-                -sWASM_BIGINT=1
-        )
-    endif()
 else()
     target_link_libraries(
         log

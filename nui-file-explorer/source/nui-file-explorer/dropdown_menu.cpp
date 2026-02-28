@@ -7,6 +7,8 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
+#include <fmt/format.h>
+
 namespace NuiFileExplorer
 {
     struct DropdownMenu::Implementation
@@ -21,7 +23,8 @@ namespace NuiFileExplorer
             std::vector<std::string> items,
             std::function<void(std::string const&)> callback,
             std::function<void()> onOpen,
-            std::string title = {})
+            std::string title = {}
+        )
             : items{std::move(items)}
             , onSelectCallback{std::move(callback)}
             , onOpen{std::move(onOpen)}
@@ -34,13 +37,15 @@ namespace NuiFileExplorer
         std::vector<std::string> items,
         std::function<void(std::string const&)> callback,
         std::function<void()> onOpen,
-        std::string title)
+        std::string title
+    )
         : impl_{
               std::make_unique<Implementation>(
                   std::move(items),
                   std::move(callback),
                   std::move(onOpen),
-                  std::move(title)),
+                  std::move(title)
+              ),
           }
     {}
 
@@ -62,13 +67,17 @@ namespace NuiFileExplorer
         using Nui::Elements::div;
 
         attributes.emplace_back(class_ = "nui-file-grid-head-dropdown");
-        attributes.emplace_back(onClick = [this](Nui::val event) {
-            // open or close the dropdown
-            impl_->isOpen = !impl_->isOpen.value();
-            if (impl_->isOpen)
-                impl_->onOpen();
-            event.call<void>("stopPropagation");
-        });
+        attributes.emplace_back(
+            onClick =
+                [this](Nui::val event)
+            {
+                // open or close the dropdown
+                impl_->isOpen = !impl_->isOpen.value();
+                if (impl_->isOpen)
+                    impl_->onOpen();
+                event.call<void>("stopPropagation");
+            }
+        );
 
         // clang-format off
         return div{
@@ -88,12 +97,12 @@ namespace NuiFileExplorer
             ),
             div{
                 class_ = "nui-file-grid-head-dropdown-content",
-                style = Style{
-                    "display"_style = observe(impl_->isOpen).generate([this]() {
-                        return impl_->isOpen ? "block" : "none";
-                    }),
-                    "top"_style = "100%",
-                }
+                style = observe(impl_->isOpen).generate([this]() {
+                    return fmt::format(
+                        "display: {}; top: 100%;",
+                        impl_->isOpen.value() ? "block" : "none"
+                    );
+                })
             }(
                 impl_->items.map([this](long long, auto const& item) -> Nui::ElementRenderer {
                     return div{

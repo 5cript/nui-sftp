@@ -6,11 +6,6 @@ add_library(
 
 target_include_directories(utility PUBLIC ${CMAKE_SOURCE_DIR}/utility/include)
 
-if (EMSCRIPTEN AND FLATPAK_BUILD)
-else()
-    include("${CMAKE_CURRENT_LIST_DIR}/../../../dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
-endif()
-
 if(EMSCRIPTEN)
     # This allows for better exception handling in frontend parts.
     target_link_libraries(utility PUBLIC nui-frontend)
@@ -22,6 +17,7 @@ else()
     )
 
     find_package(Boost CONFIG 1.89.0 REQUIRED COMPONENTS process)
+    find_package(fmt CONFIG REQUIRED)
 
     find_program(NODE node)
     find_program(NPM npm)
@@ -37,6 +33,6 @@ target_link_libraries(utility PUBLIC
     core-target
     nlohmann_json::nlohmann_json
     gimo::gimo
-    fmt
+    fmt::fmt-header-only
     events
 )

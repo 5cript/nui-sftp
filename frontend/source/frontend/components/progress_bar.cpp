@@ -128,27 +128,26 @@ namespace Components
         using fmt::format;
 
         // clang-format off
-    return div{
-        class_ = "progress-bar",
-        style = Style {
-            "height"_style = impl_->height,
-        },
-    }(
-        // bar fill
-        div{
-            style = Style{
-                "width"_style = observe(impl_->progress, impl_->maxObserved).generate([this]() {
-                    return format("{:.2f}%", percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value()));
-                }),
-                "height"_style = impl_->height,
-                "background-color"_style = impl_->backgroundColor
-            },
-        }(),
-        // text
-        div{}(impl_->text),
-        // shine animation
-        div{}()
-    );
+        return div{
+            class_ = "progress-bar",
+            style = fmt::format("height: {};", impl_->height)
+        }(
+            // bar fill
+            div{
+                style = observe(impl_->progress, impl_->maxObserved, impl_->backgroundColor).generate([this]() {
+                    return format(
+                        "width: {:.2f}%; height: {}; background-color: {};",
+                        percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value()),
+                        impl_->height,
+                        impl_->backgroundColor.value()
+                    );
+                })
+            }(),
+            // text
+            div{}(impl_->text),
+            // shine animation
+            div{}()
+        );
         // clang-format on
     }
 

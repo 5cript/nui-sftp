@@ -12,9 +12,9 @@ target_link_libraries(
     PUBLIC
         utility
         shared-data
-        GTest::GTest
+        GTest::gtest
         GTest::gmock_main
-        GTest::Main
+        GTest::gtest_main
         Boost::filesystem
 )
 

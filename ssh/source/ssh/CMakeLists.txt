@@ -19,6 +19,7 @@ target_include_directories(
 target_compile_definitions(secure-shell PRIVATE -DSSH_NO_CPP_EXCEPTIONS)
 
 find_package(LIBSSH REQUIRED)
+find_package(fmt CONFIG REQUIRED)
 
 target_link_libraries(
     secure-shell
@@ -26,6 +27,6 @@ target_link_libraries(
         ssh
         ids
         persistence
-        fmt
+        fmt::fmt
         shared-data
 )

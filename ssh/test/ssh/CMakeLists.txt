@@ -6,14 +6,15 @@ add_executable(
 )
 
 find_package(Boost CONFIG REQUIRED COMPONENTS filesystem process)
+find_package(GTest CONFIG REQUIRED)
 
 target_link_libraries(
     nui-sftp-ssh-test
     PUBLIC
         utility
         secure-shell
-        GTest::GTest
-        GTest::Main
+        GTest::gtest
+        GTest::gtest_main
         Boost::filesystem
         Boost::process
 )

@@ -224,13 +224,9 @@ auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
         style = "width: 100%; height: auto; display: block",
     }(
         div{
-            style = Style {
-                "display"_style = observe(impl_->isInLostConnectionState).generate(
-                    [this]() {
-                        return impl_->isInLostConnectionState.value() ? "flex" : "none";
-                    }
-                )
-            },
+            style = observe(impl_->isInLostConnectionState).generate([this](){
+                return fmt::format("display: {};", impl_->isInLostConnectionState.value() ? "flex" : "none");
+            }),
             class_ = "session-connection-lost-overlay",
         }(
             span{}(language->getObserved("sessionFrontend", "connectionLost"))
@@ -813,13 +809,9 @@ auto Session::makeOperationQueueElement() -> Nui::ElementRenderer
         style = "width: 100%; height: auto; display: block",
     }(
         div{
-            style = Style {
-                "display"_style = observe(impl_->isInLostConnectionState).generate(
-                    [this]() {
-                        return impl_->isInLostConnectionState.value() ? "flex" : "none";
-                    }
-                )
-            },
+            style = observe(impl_->isInLostConnectionState).generate([this](){
+                return fmt::format("display: {};", impl_->isInLostConnectionState.value() ? "flex" : "none");
+            }),
             class_ = "session-connection-lost-overlay",
         }(
             span{}(language->getObserved("sessionFrontend", "connectionLost"))

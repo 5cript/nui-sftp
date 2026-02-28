@@ -4,9 +4,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/_cmake/version.cmake")
 
 project(nui-sftp VERSION "${VERSION_NON_DIRTY}" LANGUAGES CXX)
 
-set(NUI_FETCH_ROAR OFF CACHE BOOL "Dont fetch roar, use local copy" FORCE)
-set(NUI_FETCH_NLOHMANN_JSON OFF CACHE BOOL "Dont fetch nlohmann, use local copy" FORCE)
-set(ROAR_EXTERNAL_NLOHMANN_JSON ON CACHE BOOL "Use an external nlohmann_json library (provide it manually)" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Dont build shared spdlog" FORCE)
 set(NUI_FILE_EXPLORER_MEMORY64 ON CACHE BOOL "Enable MEMORY64 for nui-file-explorer" FORCE)
 set(JSON_Diagnostics ON CACHE BOOL "Enable json diagnostics" FORCE)
@@ -80,10 +77,14 @@ if (EMSCRIPTEN)
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
 else()
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/resource_copy.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/copy_styles_to_build_dir.cmake")
+
+    if (NOT ${NUI_FETCH_ROAR})
+        add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
+    endif()
+
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
-
-    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
     # add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/process")
 
     # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
