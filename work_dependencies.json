@@ -8,13 +8,13 @@
         },
         {
             "url": "https://github.com/NuiCpp/Nui.git",
-            "rev": "861bb98f8348d6fcaf1662d5b402ae2b68d11d43",
+            "rev": "8afc649c72fc863937fc56b5b23a9f1d9810447d",
             "branch": "main",
             "name": "Nui"
         },
         {
             "url": "https://github.com/5cript/roar.git",
-            "rev": "230e4b92f3212f0d77d1b77b50d0efa85d257be8",
+            "rev": "a787bce9c8132f4c860bc9e55bff742fd1a3276f",
             "branch": "main",
             "name": "roar"
         },
@@ -23,12 +23,6 @@
             "rev": "16377a6d496b31a9272f9a079c060fba15258bcc",
             "branch": "main",
             "name": "gimo"
-        },
-        {
-            "url": "https://github.com/5cript/process.git",
-            "rev": "2125a779b0e4d3b91684a917d3814296853691d1",
-            "branch": "import-boost",
-            "name": "process"
         },
         {
             "url": "https://github.com/NuiCpp/traits.git",
@@ -44,7 +38,7 @@
         },
         {
             "url": "https://github.com/5cript/5cript-nui-components.git",
-            "rev": "08a94e4f453855c07d174619726d33938ba0fecf",
+            "rev": "fb33b5f751eed174b930329fbecf52138e63c0cf",
             "branch": "main",
             "name": "5cript-nui-components"
         }

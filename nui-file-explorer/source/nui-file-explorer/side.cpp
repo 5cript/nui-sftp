@@ -545,13 +545,9 @@ namespace NuiFileExplorer
                     return "nui-file-explorer-suggestions-overlay top";
                 return "nui-file-explorer-suggestions-overlay bottom";
             }(),
-            style = Style{
-                "display"_style = observe(impl_->pathBoxSuggestions).generate(
-                    [this]() -> std::string {
-                        return (impl_->pathBoxSuggestions.value().empty()) ? "none" : "flex";
-                    }
-                ),
-            },
+            style = observe(impl_->pathBoxSuggestions).generate([this](){
+                return fmt::format("display: {};", impl_->pathBoxSuggestions.value().empty() ? "none" : "flex");
+            })
         }(
             impl_->pathBoxSuggestions.map([this](long long index, auto const& hit) {
                 const auto submit = [this, hit]() {

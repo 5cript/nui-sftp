@@ -21,25 +21,17 @@ inline Nui::ElementRenderer iconPanel(IconPanelOptions const& options)
     using Nui::Elements::div;
     using Nui::Attributes::class_;
     using Nui::Attributes::style;
-    using Nui::Attributes::Style;
     using namespace Nui::Attributes::Literals;
 
     return div{
         class_ = "icon-panel",
-        style = Style{
-            "background-color"_style = fmt::format(
-                "color-mix(in srgb, {} {}%, black {}%)",
-                options.color,
-                options.colorMixinPercent,
-                100 - options.colorMixinPercent
-            ),
-            "border"_style = [withBorder = options.withBorder]() -> std::optional<std::string>
-            {
-                if (withBorder)
-                    return "1px solid var(--sapNeutralBorderColor)";
-                return std::nullopt;
-            }(),
-            "padding"_style = fmt::format("{}px", options.padding),
-        }
+        style = fmt::format(
+            "background-color: color-mix(in srgb, {} {}%, black {}%);{}padding: {}px;",
+            options.color,
+            options.colorMixinPercent,
+            100 - options.colorMixinPercent,
+            options.withBorder ? "border: 1px solid var(--sapNeutralBorderColor);" : "",
+            options.padding
+        ),
     }(std::move(options.icon));
 }

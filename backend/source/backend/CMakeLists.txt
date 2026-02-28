@@ -56,7 +56,6 @@ target_link_libraries(
     backend
     PUBLIC
         nui-backend
-        mplex
         efsw-static
         Boost::filesystem
         Boost::process
@@ -78,7 +77,7 @@ target_link_libraries(
 
 nui_set_target_output_directories(${PROJECT_NAME})
 
-add_dependencies(backend scp-resource-copy)
+add_dependencies(backend nui-sftp-resource-copy)
 
 set(BROWSER_ENGINE "")
 if (WIN32)
@@ -102,19 +101,19 @@ nui_add_emscripten_target(
         #-DCMAKE_BUILD_TYPE=Debug
         -DCMAKE_BUILD_TYPE=Release
         -DNUI_FETCH_TRAITS=Off
-        -DNUI_FETCH_BOOST_DESCRIBE=${NUI_FETCH_BOOST_DESCRIBE}
-        -DNUI_FETCH_BOOST_MP11=${NUI_FETCH_BOOST_MP11}
-        -DNUI_FETCH_BOOST_PREPROCESSOR=${NUI_FETCH_BOOST_PREPROCESSOR}
-        -DNUI_FETCH_MPLEX=${NUI_FETCH_MPLEX}
-        -DNUI_FETCH_NLOHMANN_JSON=${NUI_FETCH_NLOHMANN_JSON}
-        -DNUI_FIND_NLOHMANN_JSON=${NUI_FIND_NLOHMANN_JSON}
-        -DNUI_FETCH_INTERVAL_TREE=${NUI_FETCH_INTERVAL_TREE}
-        -DNUI_FETCH_FMT=${NUI_FETCH_FMT}
-        -DNUI_FIND_FMT=${NUI_FIND_FMT}
+        -DNUI_FETCH_BOOST_DESCRIBE=ON
+        -DNUI_FETCH_BOOST_MP11=ON
+        -DNUI_FETCH_BOOST_PREPROCESSOR=ON
+        -DNUI_FETCH_NLOHMANN_JSON=ON
+        -DNUI_FIND_NLOHMANN_JSON=OFF
+        -DNUI_FETCH_INTERVAL_TREE=ON
+        -DNUI_FETCH_FMT=ON
+        -DNUI_FIND_FMT=OFF
         -DBROWSER_ENGINE=${BROWSER_ENGINE}
-        -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
+        # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
         -DFLATPAK_BUILD=${FLATPAK_BUILD}
         -DFLATPAK_INCLUDE_DIR=${FLATPAK_INCLUDE_DIR}
 )
 
-add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
+# add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
+add_dependencies(${PROJECT_NAME}-emscripten nui-sftp-style-copy)

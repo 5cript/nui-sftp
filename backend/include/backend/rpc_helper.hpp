@@ -8,13 +8,13 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <traits/functions.hpp>
-#include <mplex/tuple/pop_front.hpp>
 
 #include <string>
 #include <concepts>
 #include <ranges>
 #include <memory>
 #include <chrono>
+#include <tuple>
 
 // TODO: split and document this file!
 namespace RpcHelper
@@ -37,6 +37,25 @@ namespace RpcHelper
 
         template <typename>
         struct DebugPrintType;
+
+        template <typename T>
+        struct pop_front
+        {};
+
+        template <typename T, typename... List>
+        struct pop_front<std::tuple<T, List...>>
+        {
+            using type = std::tuple<List...>;
+        };
+
+        template <>
+        struct pop_front<std::tuple<>>
+        {
+            using type = std::tuple<>;
+        };
+
+        template <typename TupleT>
+        using pop_front_t = typename pop_front<TupleT>::type;
     }
 
     class RpcInCorrectThread
@@ -55,16 +74,19 @@ namespace RpcHelper
 
         void operator()(nlohmann::json&& json) const
         {
-            wnd_->runInJavascriptThread([this, json = std::move(json)]() {
-                try
+            wnd_->runInJavascriptThread(
+                [this, json = std::move(json)]()
                 {
-                    hub_->callRemote(responseId_, json);
+                    try
+                    {
+                        hub_->callRemote(responseId_, json);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        Log::error("Failed to call rpc respond '{}': {}", responseId_, e.what());
+                    }
                 }
-                catch (const std::exception& e)
-                {
-                    Log::error("Failed to call rpc respond '{}': {}", responseId_, e.what());
-                }
-            });
+            );
         }
 
       protected:
@@ -96,16 +118,19 @@ namespace RpcHelper
             }
             called_ = true;
 
-            wnd_->runInJavascriptThread([hub = hub_, responseId = std::move(responseId_), json = std::move(json)]() {
-                try
+            wnd_->runInJavascriptThread(
+                [hub = hub_, responseId = std::move(responseId_), json = std::move(json)]()
                 {
-                    hub->callRemote(responseId, json);
+                    try
+                    {
+                        hub->callRemote(responseId, json);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
+                    }
                 }
-                catch (const std::exception& e)
-                {
-                    Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
-                }
-            });
+            );
         }
 
         void error(std::string const& message) const
@@ -117,16 +142,19 @@ namespace RpcHelper
             }
             called_ = true;
 
-            wnd_->runInJavascriptThread([hub = hub_, responseId = std::move(responseId_), message]() {
-                try
+            wnd_->runInJavascriptThread(
+                [hub = hub_, responseId = std::move(responseId_), message]()
                 {
-                    hub->callRemote(responseId, {{"success", false}, {"error", message}});
+                    try
+                    {
+                        hub->callRemote(responseId, {{"success", false}, {"error", message}});
+                    }
+                    catch (const std::exception& e)
+                    {
+                        Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
+                    }
                 }
-                catch (const std::exception& e)
-                {
-                    Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
-                }
-            });
+            );
         }
 
       private:
@@ -163,7 +191,8 @@ namespace RpcHelper
         {
             std::vector<std::string> keyChain{};
 
-            auto onFail = [this, &keyChain]() {
+            auto onFail = [this, &keyChain]()
+            {
                 keyChain.pop_back();
                 rpcOnce_({
                     {
@@ -171,7 +200,8 @@ namespace RpcHelper
                         fmt::format(
                             "Missing parameter to function '{}': {}",
                             functionName_,
-                            keyChain | std::views::join | std::ranges::to<std::string>()),
+                            keyChain | std::views::join | std::ranges::to<std::string>()
+                        ),
                     },
                 });
                 return false;
@@ -180,7 +210,8 @@ namespace RpcHelper
             auto iter = json_.find(key);
             auto currentEnd = end(json_);
 
-            auto checkOnce = [&iter, &keyChain, &onFail, &currentEnd](std::string_view key) {
+            auto checkOnce = [&iter, &keyChain, &onFail, &currentEnd](std::string_view key)
+            {
                 keyChain.push_back(std::string{key});
                 keyChain.push_back(".");
                 if (iter == currentEnd)
@@ -189,7 +220,8 @@ namespace RpcHelper
                 return true;
             };
 
-            auto findNext = [&iter, &checkOnce](std::string_view key) {
+            auto findNext = [&iter, &checkOnce](std::string_view key)
+            {
                 iter = iter->find(key);
                 return checkOnce(key);
             };
@@ -202,7 +234,8 @@ namespace RpcHelper
     auto rpcSafe(RpcOnce&& rpcOnce, FunctionT&& func)
     {
         return [rpcOnce = std::make_shared<RpcOnce>(std::move(rpcOnce)),
-                func = std::forward<FunctionT>(func)](auto&&... args) mutable {
+                   func = std::forward<FunctionT>(func)](auto&&... args) mutable
+        {
             try
             {
                 if constexpr (std::is_invocable_v<FunctionT, RpcOnce&&, decltype(args)...>)
@@ -234,7 +267,8 @@ namespace RpcHelper
             boost::asio::any_io_executor executor,
             std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
             Nui::Window& wnd,
-            Nui::RpcHub& hub)
+            Nui::RpcHub& hub
+        )
             : executor_{executor}
             , strand_{std::move(strand)}
             , wnd_{&wnd}
@@ -252,32 +286,41 @@ namespace RpcHelper
         void registerOnStrand(std::string_view functionName, FunctionT&& func)
         {
             // (RpcReply&&, Param1, Param2, ...) => (Param1, Param2, ...)
-            using ArgsTuple = mplex::pop_front_t<typename Traits::FunctionTraits<std::decay_t<FunctionT>>::ArgsTuple>;
+            using ArgsTuple = Detail::pop_front_t<typename Traits::FunctionTraits<std::decay_t<FunctionT>>::ArgsTuple>;
 
             // Call lambda with template arguments FunctionT, Param1, Param2, ... and no parameters.
-            Detail::CallOperatorApplyTypesOnly<ArgsTuple>::apply([this,
-                                                                  functionName = std::string{functionName},
-                                                                  func = std::forward<FunctionT>(
-                                                                      func)]<typename... ParameterTs>() mutable {
-                // Register function that is wrapped in a strand execute call:
-                registeredFunctions_.emplace_back(hub_->autoRegisterFunction(
-                    functionName,
-                    [this, func = std::move(func), functionName](std::string responseId, ParameterTs&&... parameters) {
-                        strand_->execute([responseId = std::move(responseId),
-                                          ... parameters = std::forward<ParameterTs>(parameters),
-                                          func,
-                                          wnd = wnd_,
-                                          hub = hub_]() mutable {
-                            // Threadsafe do:
-                            RpcHelper::rpcSafe(
+            Detail::CallOperatorApplyTypesOnly<ArgsTuple>::apply(
+                [this,
+                    functionName = std::string{functionName},
+                    func = std::forward<FunctionT>(func)]<typename... ParameterTs>() mutable
+                {
+                    // Register function that is wrapped in a strand execute call:
+                    registeredFunctions_.emplace_back(hub_->autoRegisterFunction(
+                        functionName,
+                        [this,
+                            func = std::move(func),
+                            functionName](std::string responseId, ParameterTs&&... parameters)
+                        {
+                            strand_->execute(
+                                [responseId = std::move(responseId),
+                                    ... parameters = std::forward<ParameterTs>(parameters),
+                                    func,
+                                    wnd = wnd_,
+                                    hub = hub_]() mutable
+                                {
+                                    // Threadsafe do:
+                                    RpcHelper::rpcSafe(
                                 RpcHelper::RpcOnce{*wnd, *hub, std::move(responseId)},
                                 [&parameters..., &func](RpcOnce&& reply) mutable {
                                     // Call actual function
                                     func(std::move(reply), std::forward<ParameterTs>(parameters)...);
                                 })();
-                        });
-                    }));
-            });
+                                }
+                            );
+                        }
+                    ));
+                }
+            );
         }
 
         class Proxy
@@ -318,13 +361,16 @@ namespace RpcHelper
         void within_strand_do_delayed(auto&& func, std::chrono::steady_clock::duration delay)
         {
             timer_.expires_after(delay);
-            timer_.async_wait([func = std::forward<decltype(func)>(func)](auto const& ec) {
-                if (ec)
-                    Log::info("Timer canceled in within_strand_do_delayed: {}", ec.message());
+            timer_.async_wait(
+                [func = std::forward<decltype(func)>(func)](auto const& ec)
+                {
+                    if (ec)
+                        Log::info("Timer canceled in within_strand_do_delayed: {}", ec.message());
 
-                // Run func anyway, if its because of a shutdown, it will stop early.
-                func();
-            });
+                    // Run func anyway, if its because of a shutdown, it will stop early.
+                    func();
+                }
+            );
         }
 
       protected:

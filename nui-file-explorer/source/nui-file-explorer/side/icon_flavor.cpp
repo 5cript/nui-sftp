@@ -227,11 +227,9 @@ namespace NuiFileExplorer
             }(),
             div{
                 class_ = "nui-file-grid-icons-grid",
-                style = Style{
-                    "grid-template-columns"_style = observe(impl().iconSize, impl().iconSpacing).generate([this]() {
-                        return fmt::format("repeat(auto-fit, {}px)", impl().iconSize.value() + impl().iconSpacing.value());
-                    })
-                },
+                style = observe(impl().iconSize, impl().iconSpacing).generate([this]() {
+                    return fmt::format("grid-template-columns: repeat(auto-fit, {}px);", impl().iconSize.value() + impl().iconSpacing.value());
+                }),
                 "drop"_event = [this](Nui::WebApi::DragEvent dropEvent) {
                     onDrop(std::move(dropEvent), std::nullopt);
                 },

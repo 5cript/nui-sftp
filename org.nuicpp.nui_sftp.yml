@@ -49,16 +49,6 @@ modules:
         url: https://git.libssh.org/projects/libssh.git/
         tag: libssh-0.11.4
 
-  - name: mplex
-    buildsystem: simple
-    build-commands:
-      - mkdir -p /app/include
-      - cp -r include/mplex /app/include/mplex
-    sources:
-      - type: git
-        url: https://github.com/5cript/mplex.git
-        tag: v0.1.0
-
   - name: interval-tree
     buildsystem: simple
     build-commands:
@@ -90,8 +80,8 @@ modules:
       - cp -r ./include /app/include
     sources:
       - type: archive
-        url: https://github.com/WebAssembly/binaryen/releases/download/version_126/binaryen-version_126-x86_64-linux.tar.gz
-        sha256: e487e0eac1f02a6739816c617270b033e5d3f8ca90439301fd0286460322fd76
+        url: https://github.com/WebAssembly/binaryen/releases/download/version_124/binaryen-version_124-x86_64-linux.tar.gz
+        sha256: 0290c3779fedf592b8da0ded3032ff55c41a2b7bfa2d6bf7b7bac6f0e6e28963
 
   - name: fmt
     buildsystem: simple
@@ -137,7 +127,6 @@ modules:
           -DNUI_BUILD_XML_TOOL=ON
           -DNUI_FETCH_TRAITS=OFF
           -DNUI_FETCH_BOOST_PREPROCESSOR=OFF
-          -DNUI_FETCH_MPLEX=OFF
           -DNUI_FETCH_INTERVAL_TREE=OFF
           -DNUI_FETCH_BOOST_DESCRIBE=OFF
           -DNUI_FETCH_BOOST_MP11=OFF
