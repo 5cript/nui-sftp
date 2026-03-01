@@ -1,0 +1,110 @@
+name: Archlinux Build & Frontend
+
+on:
+  push:
+    branches: ["main", "feat/pipelines"]
+    tags:
+      - '^v.*'
+  pull_request:
+    branches: ["main"]
+
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: build/clang_release
+
+jobs:
+  archlinux:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+      # Dont need I think
+      # options: --privileged
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            cmake \
+            ninja \
+            clang \
+            lld \
+            git \
+            zip \
+            python \
+            nodejs \
+            webkitgtk-6.0 \
+            curl \
+            crypto++ \
+            libssh \
+            fmt \
+            boost \
+            aws-cli-v2 \
+            nlohmann-json
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Test node
+        run: node --version && whereis node
+
+      - name: Run setup.sh
+        run: |
+          bash setup.sh
+
+      - name: Configure CMake
+        run: |
+          cmake \
+            -B "${{ env.BUILD_DIR }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_LINKER=lld \
+            -DCMAKE_CXX_EXTENSIONS=on \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DJSON_Diagnostics=ON \
+            -DNUI_FETCH_TRAITS=OFF \
+
+      - name: Build
+        run: |
+          cmake --build \
+            "${{ env.BUILD_DIR }}" \
+            --config "${{ env.BUILD_TYPE }}"
+
+      - name: Read version information
+        run: |
+          cat ${{ env.BUILD_DIR }}/text/version.txt
+          VERSION_FILE="${{ env.BUILD_DIR }}/text/version.txt"
+          VERSION=$(sed -n '1p' "$VERSION_FILE")
+          VERSION_CLEAN=$(sed -n '2p' "$VERSION_FILE")
+          {
+            echo "VERSION=$VERSION"
+            echo "VERSION_CLEAN=$VERSION_CLEAN"
+          } >> "$GITHUB_ENV"
+
+      - name: Zip frontend
+        run: |
+          cd "${{ env.BUILD_DIR }}" && zip -r "nui-sftp-linux-frontend_${{ env.VERSION }}.zip" "frontend"
+
+      - name: Upload artifacts to MEGA S4
+        # if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MEGAS4ACCESS }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MEGAS4KEY }}
+          ENDPOINT: https://s3.eu-central-1.s4.mega.io
+          FILENAME: "nui-sftp-linux-frontend_${{ env.VERSION }}.zip"
+          S3_PATH: "s3://nui-sftp-releases/linux-frontend/"
+        run: |
+          # Check if the file exists on the remote
+          if aws s3 ls "${{ env.S3_PATH }}${{ env.FILENAME }}" --endpoint-url ${{ env.ENDPOINT }} > /dev/null 2>&1; then
+            echo "Error: File ${{ env.FILENAME }} already exists in S4. Aborting to prevent overwrite."
+            exit 1
+          fi
+
+          # If it doesnt exist, upload it
+          aws s3 cp "${{ env.BUILD_DIR }}/${{ env.FILENAME }}" "${{ env.S3_PATH }}" --endpoint-url ${{ env.ENDPOINT }}
+
