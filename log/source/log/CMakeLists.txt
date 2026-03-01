@@ -3,6 +3,7 @@ add_library(
     STATIC
         log.cpp
 )
+
 target_include_directories(log PUBLIC "${CMAKE_SOURCE_DIR}/log/include")
 
 if (EMSCRIPTEN)
@@ -11,7 +12,7 @@ if (EMSCRIPTEN)
         PUBLIC
             core-target
             utility
-            fmt::fmt-header-only
+            fmt::fmt
             nui-frontend
     )
 else()
@@ -20,6 +21,7 @@ else()
         PUBLIC
             core-target
             utility
+            fmt::fmt
             spdlog::spdlog
             nui-backend
         PRIVATE
