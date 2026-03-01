@@ -15,6 +15,7 @@ option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
 option(FLATPAK_BUILD "Inform CMake that we are building for flatpak, this will set some additional flags and dependencies" OFF)
+option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak, because using emscripten there is hell" OFF)
 
 include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 
@@ -85,7 +86,6 @@ else()
 
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
-    # add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/process")
 
     # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
     # And there is no need on linux.
@@ -96,11 +96,14 @@ else()
         )
     endif()
 
-    # Copy bin (for SAPUI5) files to destination for themes and languages
+    # Copy web files to destination.
+    if (NOT OMIT_FRONTEND_BUILD)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../frontend"
+            VERBATIM
+        )
+    endif()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/index.html"
-        COMMAND ${CMAKE_COMMAND} -E rm "$<TARGET_FILE_DIR:${PROJECT_NAME}>/index.js"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/static/assets/language.yaml" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../assets/language.yaml"
         VERBATIM
     )

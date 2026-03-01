@@ -1,14 +1,15 @@
 add_library(
     backend
     STATIC
+        session_manager.cpp
+        session.cpp
+        resources.cpp
+        rpc_filesystem.cpp
+        rpc_system.cpp
         password/password_prompter.cpp
         process/process.cpp
         process/process_store.cpp
         process/environment.cpp
-        session_manager.cpp
-        session.cpp
-        rpc_filesystem.cpp
-        rpc_system.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
@@ -88,32 +89,35 @@ else()
     set(BROWSER_ENGINE "webkitgtk")
 endif()
 
-# Creates a target that is compiled through emscripten. This target becomes the frontend part.
-nui_add_emscripten_target(
-    TARGET
-        ${PROJECT_NAME}
-    PREJS
-        ${PREJS_FILE}
-    SOURCE_DIR
-        ${CMAKE_SOURCE_DIR}
-    CMAKE_OPTIONS
-        # I recommend to work with a release build by default because debug builds get big fast.
-        #-DCMAKE_BUILD_TYPE=Debug
-        -DCMAKE_BUILD_TYPE=Release
-        -DNUI_FETCH_TRAITS=Off
-        -DNUI_FETCH_BOOST_DESCRIBE=ON
-        -DNUI_FETCH_BOOST_MP11=ON
-        -DNUI_FETCH_BOOST_PREPROCESSOR=ON
-        -DNUI_FETCH_NLOHMANN_JSON=ON
-        -DNUI_FIND_NLOHMANN_JSON=OFF
-        -DNUI_FETCH_INTERVAL_TREE=ON
-        -DNUI_FETCH_FMT=ON
-        -DNUI_FIND_FMT=OFF
-        -DBROWSER_ENGINE=${BROWSER_ENGINE}
-        # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
-        -DFLATPAK_BUILD=${FLATPAK_BUILD}
-        -DFLATPAK_INCLUDE_DIR=${FLATPAK_INCLUDE_DIR}
-)
+if (NOT OMIT_FRONTEND_BUILD)
+    # Creates a target that is compiled through emscripten. This target becomes the frontend part.
+    nui_add_emscripten_target(
+        TARGET
+            ${PROJECT_NAME}
+        PREJS
+            ${PREJS_FILE}
+        SOURCE_DIR
+            ${CMAKE_SOURCE_DIR}
+        DISABLE_BIN2HPP
+        CMAKE_OPTIONS
+            # I recommend to work with a release build by default because debug builds get big fast.
+            #-DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_BUILD_TYPE=Release
+            -DNUI_FETCH_TRAITS=Off
+            -DNUI_FETCH_BOOST_DESCRIBE=ON
+            -DNUI_FETCH_BOOST_MP11=ON
+            -DNUI_FETCH_BOOST_PREPROCESSOR=ON
+            -DNUI_FETCH_NLOHMANN_JSON=ON
+            -DNUI_FIND_NLOHMANN_JSON=OFF
+            -DNUI_FETCH_INTERVAL_TREE=ON
+            -DNUI_FETCH_FMT=ON
+            -DNUI_FIND_FMT=OFF
+            -DBROWSER_ENGINE=${BROWSER_ENGINE}
+            # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
+            -DFLATPAK_BUILD=${FLATPAK_BUILD}
+            -DFLATPAK_INCLUDE_DIR=${FLATPAK_INCLUDE_DIR}
+    )
 
-# add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
-add_dependencies(${PROJECT_NAME}-emscripten nui-sftp-style-copy)
+    # add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
+    add_dependencies(${PROJECT_NAME}-emscripten nui-sftp-style-copy)
+endif()
