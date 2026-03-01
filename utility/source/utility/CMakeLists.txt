@@ -33,6 +33,6 @@ target_link_libraries(utility PUBLIC
     core-target
     nlohmann_json::nlohmann_json
     gimo::gimo
-    fmt::fmt-header-only
+    fmt::fmt
     events
 )

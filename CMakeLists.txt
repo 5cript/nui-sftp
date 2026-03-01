@@ -4,6 +4,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/_cmake/version.cmake")
 
 project(nui-sftp VERSION "${VERSION_NON_DIRTY}" LANGUAGES CXX)
 
+set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "Use an external fmt library (provide it manually)" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Dont build shared spdlog" FORCE)
 set(NUI_FILE_EXPLORER_MEMORY64 ON CACHE BOOL "Enable MEMORY64 for nui-file-explorer" FORCE)
 set(JSON_Diagnostics ON CACHE BOOL "Enable json diagnostics" FORCE)
@@ -55,6 +56,7 @@ add_library(roar-include-only INTERFACE)
 target_include_directories(roar-include-only INTERFACE "${CMAKE_CURRENT_LIST_DIR}/dependencies/roar/include")
 
 include("${CMAKE_CURRENT_LIST_DIR}/dependencies/Nui/cmake/dependencies/nlohmann_json.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/dependencies/Nui/cmake/dependencies/fmt.cmake")
 add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/gimo" EXCLUDE_FROM_ALL)
 add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/traits" EXCLUDE_FROM_ALL)
 add_subdirectory("${CMAKE_SOURCE_DIR}/constants/source/constants")
