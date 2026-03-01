@@ -33,6 +33,7 @@ jobs:
             lld \
             git \
             zip \
+            tar \
             python \
             nodejs \
             webkitgtk-6.0 \
@@ -88,7 +89,7 @@ jobs:
 
       - name: Zip frontend
         run: |
-          cd "${{ env.BUILD_DIR }}" && zip -r "nui-sftp-linux-frontend_${{ env.VERSION }}.zip" "frontend"
+          cd "${{ env.BUILD_DIR }}" && tar -czf "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz" frontend
 
       - name: Upload artifacts to MEGA S4
         # if: startsWith(github.ref, 'refs/tags/v')
@@ -96,7 +97,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.MEGAS4ACCESS }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MEGAS4KEY }}
           ENDPOINT: https://s3.eu-central-1.s4.mega.io
-          FILENAME: "nui-sftp-linux-frontend_${{ env.VERSION }}.zip"
+          FILENAME: "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
           S3_PATH: "s3://nui-sftp-releases/linux-frontend/"
         run: |
           # Check if the file exists on the remote
