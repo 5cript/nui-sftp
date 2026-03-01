@@ -12,7 +12,7 @@ namespace
 bool isCanonical(std::filesystem::path const& path)
 {
     // iterate segments and look for "." and ".."
-    for (auto& segment : path)
+    for (auto const& segment : path)
     {
         if (segment == "." || segment == "..")
             return false;
