@@ -8,6 +8,12 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 source "${SCRIPT_DIR}/lib.sh"
 
 # Variables that can also be args from env
+
+#### INSTALL_TARGET
+# The location where the application resources etc are installed
+# Some good locations are:
+# - Arch: /opt/nui-sftp
+# - Flatpak: /app
 INSTALL_TARGET="${INSTALL_TARGET:-${SCRIPT_DIR}/../build/install}"
 INSTALL_TARGET=$(canonicalPath "${INSTALL_TARGET}")
 
@@ -37,6 +43,7 @@ echo -e "Installing to \e[32m${INSTALL_TARGET}\e[0m"
 # Create the install directory if it doesn't exist
 mkdir -p "${INSTALL_TARGET}"
 mkdir -p "${INSTALL_TARGET}/bin"
+mkdir -p "${INSTALL_TARGET}/frontend"
 mkdir -p "${INSTALL_TARGET}/assets"
 mkdir -p "${INSTALL_TARGET}/themes"
 mkdir -p "${INSTALL_TARGET}/themes/dark"
@@ -44,7 +51,7 @@ mkdir -p "${INSTALL_TARGET}/themes/dark"
 cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}"
 cp -r "${BUILD_DIRECTORY}/assets/." "${INSTALL_TARGET}/assets"
 cp -r "${BUILD_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
-cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/bin"
+cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/frontend"
 
 # Dont create a symlink on windows or if NOLINK is true
 if [ "$IS_WINDOWS" = false ] && [ "$NOLINK" = false ]; then
