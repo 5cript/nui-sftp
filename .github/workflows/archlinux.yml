@@ -3,7 +3,7 @@ name: Archlinux Build & Frontend
 on:
   push:
     tags:
-      - '^v.*'
+      - "^v.*"
   pull_request:
     branches: ["main"]
 
@@ -20,8 +20,6 @@ jobs:
       # options: --privileged
 
     steps:
-      - uses: actions/checkout@v6
-
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
@@ -44,6 +42,11 @@ jobs:
             aws-cli-v2 \
             nlohmann-json
 
+      - uses: actions/checkout@v6
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -57,6 +60,7 @@ jobs:
 
       - name: Configure CMake
         run: |
+          git config --global --add safe.directory "$(pwd)"
           cmake \
             -B "${{ env.BUILD_DIR }}" \
             -G Ninja \
@@ -107,4 +111,3 @@ jobs:
 
           # If it doesnt exist, upload it
           aws s3 cp "${{ env.BUILD_DIR }}/${{ env.FILENAME }}" "${{ env.S3_PATH }}" --endpoint-url ${{ env.ENDPOINT }}
-
