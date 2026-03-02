@@ -2,6 +2,7 @@ find_package(Git REQUIRED)
 execute_process(
     COMMAND
         "${GIT_EXECUTABLE}" rev-list --tags --max-count=1
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE
         REV_LIST
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -9,6 +10,7 @@ execute_process(
 execute_process(
     COMMAND
         "${GIT_EXECUTABLE}" describe --tags --dirty
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE
         VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -16,6 +18,7 @@ execute_process(
 execute_process(
     COMMAND
         "${GIT_EXECUTABLE}" describe --tags ${REV_LIST}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE
         VERSION_NON_DIRTY
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -34,6 +37,7 @@ if("${VERSION}" STREQUAL "")
   set(GIT_BRANCH "N/A")
   set(VERSION "0.0.0")
   set(VERSION_NON_DIRTY "0.0.0")
+  message(WARNING "Git information not found, using default version 0.0.0")
 else()
   execute_process(
     COMMAND ${GIT_EXECUTABLE} describe --exact-match --tags OUTPUT_VARIABLE GIT_TAG ERROR_QUIET)
@@ -44,6 +48,10 @@ else()
   string(STRIP "${GIT_BRANCH}" GIT_BRANCH)
   string(STRIP "${VERSION}" VERSION)
   string(STRIP "${VERSION_NON_DIRTY}" VERSION_NON_DIRTY)
+  message(STATUS "Git tag: ${GIT_TAG}")
+  message(STATUS "Git branch: ${GIT_BRANCH}")
+  message(STATUS "Version: ${VERSION}")
+  message(STATUS "Version (non-dirty): ${VERSION_NON_DIRTY}")
 endif()
 
 configure_file(
