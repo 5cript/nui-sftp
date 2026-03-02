@@ -2,7 +2,6 @@ name: Archlinux Build & Frontend
 
 on:
   push:
-    branches: ["main", "feat/pipelines"]
     tags:
       - '^v.*'
   pull_request:
