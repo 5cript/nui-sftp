@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 include("${CMAKE_CURRENT_LIST_DIR}/_cmake/version.cmake")
 
-project(nui-sftp VERSION "${VERSION_NON_DIRTY}" LANGUAGES CXX)
+project(nui-sftp VERSION "${PROJECT_VERSION}" LANGUAGES CXX)
 
 set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "Use an external fmt library (provide it manually)" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Dont build shared spdlog" FORCE)
