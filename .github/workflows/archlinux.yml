@@ -3,7 +3,7 @@ name: Archlinux Build & Frontend
 on:
   push:
     tags:
-      - "^v.*"
+      - "v*"
   pull_request:
     branches: ["main"]
 
