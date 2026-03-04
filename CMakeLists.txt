@@ -20,6 +20,7 @@ option(FLATPAK_BUILD "Inform CMake that we are building for flatpak, this will s
 option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak, because using emscripten there is hell" OFF)
 option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
+option(FETCH_EFSW "Fetch efsw" ON)
 
 if (OMIT_FRONTEND_BUILD)
     set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
