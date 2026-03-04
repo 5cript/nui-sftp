@@ -18,6 +18,8 @@ option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
 option(FLATPAK_BUILD "Inform CMake that we are building for flatpak, this will set some additional flags and dependencies" OFF)
 option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak, because using emscripten there is hell" OFF)
+option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
+option(FETCH_SPDLOG "Fetch spdlog" ON)
 
 if (OMIT_FRONTEND_BUILD)
     set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
