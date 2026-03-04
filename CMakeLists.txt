@@ -21,6 +21,7 @@ option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak,
 option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
 option(FETCH_EFSW "Fetch efsw" ON)
+option(FETCH_ICONS "Fetch icons" ON)
 
 if (OMIT_FRONTEND_BUILD)
     set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
