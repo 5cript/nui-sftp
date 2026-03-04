@@ -1,9 +1,6 @@
 # When this file is included its a flatpak build
 
-if(EMSCRIPTEN)
-    # add_subdirectory("${CMAKE_CURRENT_BINARY_DIR}/flatpakdeps/nlohmann_json" EXCLUDE_FROM_ALL)
-    # add_subdirectory("${CMAKE_CURRENT_BINARY_DIR}/flatpakdeps/fmt" EXCLUDE_FROM_ALL)
-else()
+if(NOT EMSCRIPTEN)
     find_package(nlohmann_json REQUIRED)
     find_package(fmt REQUIRED)
 
@@ -11,4 +8,6 @@ else()
     add_library(interval-tree INTERFACE IMPORTED GLOBAL)
     add_library(boost_describe INTERFACE IMPORTED GLOBAL)
     add_library(boost_mp11 INTERFACE IMPORTED GLOBAL)
+
+    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/portable-file-dialogs" EXCLUDE_FROM_ALL)
 endif()
