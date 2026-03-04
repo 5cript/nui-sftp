@@ -12,6 +12,7 @@ set(NUI_JSON_DIAGNOSTICS ON CACHE BOOL "Enable json diagnostics for nlohmann_jso
 set(WEBKIT_PATH "" CACHE PATH "Path to custom built WebKit, if empty, will use system WebKit")
 set(WEBKIT_PACKAGE_NAME "webkitgtk-6.0" CACHE STRING "Pkg-config package name for WebKit, used if WEBKIT_PATH is set")
 
+option(FETCH_YAML_CPP "Fetch yaml-cpp" ON)
 option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
