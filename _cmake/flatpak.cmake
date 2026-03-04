@@ -10,4 +10,5 @@ if(NOT EMSCRIPTEN)
     add_library(boost_mp11 INTERFACE IMPORTED GLOBAL)
 
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/portable-file-dialogs" EXCLUDE_FROM_ALL)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/webview" EXCLUDE_FROM_ALL)
 endif()
