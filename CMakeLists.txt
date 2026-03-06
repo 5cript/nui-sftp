@@ -16,12 +16,16 @@ option(FETCH_YAML_CPP "Fetch yaml-cpp" ON)
 option(BUILD_SHARED_LIBS "Do not build shared libraries" OFF)
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 option(NUI_SFTP_ENABLE_TESTING "Enable testing for nui-sftp" OFF)
-option(FLATPAK_BUILD "Inform CMake that we are building for flatpak, this will set some additional flags and dependencies" OFF)
+option(OFFLINE_BUILD "Inform CMake that we are building for offline environments (flatpak, yocto), this will set some additional flags and dependencies" OFF)
 option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak, because using emscripten there is hell" OFF)
 option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
 option(FETCH_EFSW "Fetch efsw" ON)
 option(FETCH_ICONS "Fetch icons" ON)
+
+if (OFFLINE_BUILD)
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/offline_build.cmake")
+endif()
 
 if (OMIT_FRONTEND_BUILD)
     set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
@@ -47,10 +51,6 @@ if (NOT EMSCRIPTEN)
         get_target_property(WEBKIT_INCLUDE_DIRS PkgConfig::webkit2 INTERFACE_INCLUDE_DIRECTORIES)
         message(STATUS "WebKit include directories: ${WEBKIT_INCLUDE_DIRS}")
     endif()
-endif()
-
-if (FLATPAK_BUILD)
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/flatpak.cmake")
 endif()
 
 # Nui Dependency

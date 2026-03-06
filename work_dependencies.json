@@ -41,6 +41,48 @@
             "rev": "fb33b5f751eed174b930329fbecf52138e63c0cf",
             "branch": "main",
             "name": "5cript-nui-components"
+        },
+        {
+            "url": "https://github.com/5cript/portable-file-dialogs.git",
+            "rev": "13ac8d8655514486d0d700ea7063dcb05f8363da",
+            "branch": "main",
+            "name": "portable-file-dialogs"
+        },
+        {
+            "url": "https://github.com/5cript/webview.git",
+            "rev": "1dc3cbda951de8de0ff2ae5cc286b070d61f972d",
+            "branch": "main",
+            "name": "webview"
+        },
+        {
+            "url": "https://github.com/jbeder/yaml-cpp.git",
+            "rev": "89ff142b991af432b5d7a7cee55282f082a7e629",
+            "branch": "main",
+            "name": "yaml-cpp"
+        },
+        {
+            "url": "https://github.com/rapidfuzz/rapidfuzz-cpp.git",
+            "rev": "b8ce411e91e01599d0697ad307933e05ddf3a723",
+            "branch": "main",
+            "name": "rapidfuzz"
+        },
+        {
+            "url": "https://github.com/gabime/spdlog.git",
+            "rev": "v1.17.0",
+            "branch": "main",
+            "name": "spdlog"
+        },
+        {
+            "url": "https://github.com/SpartanJ/efsw.git",
+            "rev": "87abe599995d5646f5d83cf2e3a225bd73148b3a",
+            "branch": "main",
+            "name": "efsw"
+        },
+        {
+            "url": "https://github.com/5cript/promise-cpp.git",
+            "rev": "bfad5bdd58f29465741858d826338e5b4ca65826",
+            "branch": "main",
+            "name": "promise-cpp"
         }
     ]
 }
