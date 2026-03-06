@@ -115,7 +115,6 @@ if (NOT OMIT_FRONTEND_BUILD)
             -DBROWSER_ENGINE=${BROWSER_ENGINE}
             # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
             -DOFFLINE_BUILD=${OFFLINE_BUILD}
-            -DFLATPAK_INCLUDE_DIR=${FLATPAK_INCLUDE_DIR}
     )
 
     # add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
