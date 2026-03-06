@@ -1,5 +1,6 @@
 if (FETCH_RAPIDFUZZ)
     include(FetchContent)
+    # If you edit here, update work_dependencies.json
     FetchContent_Declare(
         rapidfuzz
         GIT_REPOSITORY https://github.com/rapidfuzz/rapidfuzz-cpp.git

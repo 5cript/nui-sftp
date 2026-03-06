@@ -1,5 +1,6 @@
 if (FETCH_EFSW)
     include(FetchContent)
+    # If you edit here, update work_dependencies.json
     FetchContent_Declare(
         efsw
         GIT_REPOSITORY https://github.com/SpartanJ/efsw.git

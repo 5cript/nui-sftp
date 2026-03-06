@@ -1,6 +1,7 @@
 if (FETCH_YAML_CPP)
   include(FetchContent)
 
+  # If you edit here, update work_dependencies.json
   FetchContent_Declare(
     yaml-cpp
     GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
