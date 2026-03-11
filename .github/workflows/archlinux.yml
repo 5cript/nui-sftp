@@ -94,6 +94,13 @@ jobs:
         run: |
           cd "${{ env.BUILD_DIR }}" && tar -czf "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz" frontend
 
+      - name: Upload Artifact to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ env.VERSION }}" "${{ env.WSPACE }}/nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
+
       - name: Upload artifacts to MEGA S4
         if: startsWith(github.ref, 'refs/tags/v')
         env:
