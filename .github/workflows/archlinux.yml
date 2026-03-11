@@ -100,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "v${{ env.VERSION }}" "${{ env.WSPACE }}/nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
+          gh release upload "v${{ env.VERSION }}" "${{ env.BUILD_DIR }}/nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
 
       - name: Upload artifacts to MEGA S4
         if: startsWith(github.ref, 'refs/tags/v')
