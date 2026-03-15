@@ -5,7 +5,7 @@
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
 
-#include <ui5/components/tab_container.hpp>
+#include <script-nui-components/tabs.hpp>
 
 #include <nui/frontend/api/console.hpp>
 #include <nui/frontend/elements.hpp>
@@ -24,8 +24,8 @@ struct SessionArea::Implementation
     FilePropertyDialog* filePropertyDialog;
     Toolbar* toolbar;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
-    Nui::Observed<std::optional<int>> selected;
     Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
+    ScriptNuiComponents::Tabs tabs;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -42,20 +42,14 @@ struct SessionArea::Implementation
         , filePropertyDialog{filePropertyDialog}
         , toolbar{toolbar}
         , sessions{}
-        , selected{std::nullopt}
         , dropHandlerUnregister_{}
+        , tabs{}
     {}
 };
 
 void SessionArea::removeActiveSession()
 {
-    if (!impl_->selected->has_value())
-    {
-        Log::error("SessionArea::removeActiveSession: No active session to remove (selected is nullopt)");
-        return;
-    }
-
-    removeSession(impl_->selected->value());
+    removeSession(impl_->tabs.selectedId());
 }
 
 SessionArea::SessionArea(
@@ -69,6 +63,24 @@ SessionArea::SessionArea(
     : impl_{std::make_unique<
           Implementation>(stateHolder, events, newItemAskDialog, confirmDialog, filePropertyDialog, toolbar)}
 {
+    impl_->tabs.onClose(
+        [this](int id)
+        {
+            // Confirm Dialog?
+            removeSession(id);
+            return false;
+        }
+    );
+
+    impl_->tabs.onSelect(
+        [this](int tabId) -> bool
+        {
+            Nui::WebApi::Console::log("Tab with id '{}' selected.", tabId);
+            setSelected(tabId);
+            return false;
+        }
+    );
+
     listen(
         events->onNewSession,
         [this](std::string const& name) -> void
@@ -108,18 +120,20 @@ void SessionArea::registerRpc()
             Log::info("Process with id '{}' terminated.", processId);
 
             std::size_t index = 0;
+            int tabId = -1;
             for (auto const& session : impl_->sessions.value())
             {
                 if (session->getProcessIdIfExecutingEngine().value_or("") == processId)
                 {
                     Log::info("Process with id '{}' found in session '{}'.", processId, session->name());
+                    tabId = session->tabId();
                     break;
                 }
                 ++index;
             }
 
             if (index < impl_->sessions.size())
-                removeSession(index);
+                removeSession(tabId);
             else
             {
                 Log::error("Process with id '{}' not found in any session.", processId);
@@ -155,53 +169,64 @@ void SessionArea::registerRpc()
     );
 }
 
-void SessionArea::removeSession(int index)
+void SessionArea::removeSession(int tabId)
 {
-    if (index < 0 || index >= static_cast<int>(impl_->sessions.size()))
+    const auto indexOpt = findSessionIndexByTabId(tabId);
+    if (!indexOpt)
     {
-        Log::critical("Session index out of bounds: {}", index);
+        Log::error("Session index out of bounds: {}", tabId);
         return;
     }
+    const auto index = *indexOpt;
 
     Log::info("Removing session: {}", impl_->sessions.value()[index]->name());
 
     if (impl_->sessions.value()[index]->visible() && impl_->sessions.size() > 1)
-        setSelected(0);
+        setSelected(impl_->tabs.firstTabId());
 
     impl_->sessions.value()[index]->shutdown(
-        [this, index]()
+        [this, index, tabId]()
         {
             impl_->sessions.erase(impl_->sessions.begin() + index);
+            impl_->tabs.remove(tabId);
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
 }
 
-void SessionArea::setSelected(int newIndex)
+void SessionArea::setSelected(int tabId)
 {
-    [this, newIndex]()
+    const int previousSelected = impl_->tabs.selectedId();
+    auto sync = Nui::ScopeExit{[]() noexcept
+        {
+            Nui::globalEventContext.sync();
+        }};
+
+    if (previousSelected != -1)
     {
-        if (!impl_->selected->has_value())
-        {
-            Log::info("Setting selected session to index: {}", newIndex);
-            impl_->sessions.value()[newIndex]->visible(true);
-            impl_->selected = newIndex;
-            return;
-        }
-
-        const auto oldIndex = impl_->selected->value();
-        if (oldIndex >= 0 && oldIndex < static_cast<int>(impl_->sessions.size()))
-        {
-            Log::info("Changing selected session from index '{}' to index '{}'", oldIndex, newIndex);
-            impl_->sessions.value()[oldIndex]->visible(false);
-            impl_->sessions.value()[newIndex]->visible(true);
-            impl_->selected = newIndex;
-            return;
-        }
+        const auto previousSessionIndex = findSessionIndexByTabId(previousSelected);
+        if (previousSessionIndex)
+            impl_->sessions.value()[*previousSessionIndex]->visible(false);
+    }
+    impl_->tabs.select(tabId);
+    const auto newIndex = findSessionIndexByTabId(tabId);
+    if (!newIndex)
+    {
+        Log::error("Tab with id '{}' not found for selection.", tabId);
         return;
-    }();
+    }
+    Log::info("Selected session: {}", *newIndex);
+    impl_->sessions.value()[*newIndex]->visible(true);
+}
 
-    Nui::globalEventContext.executeActiveEventsImmediately();
+std::optional<std::size_t> SessionArea::findSessionIndexByTabId(int tabId) const
+{
+    for (size_t i = 0; i != impl_->sessions.size(); ++i)
+    {
+        if (impl_->sessions.value()[i]->tabId() == tabId)
+            return i;
+    }
+    return std::nullopt;
 }
 
 void SessionArea::addSession(std::string const& name)
@@ -214,7 +239,10 @@ void SessionArea::addSession(std::string const& name)
         [this, name](bool success, Persistence::State const& state)
         {
             if (!success)
+            {
+                Log::error("Failed to load state while adding session '{}'", name);
                 return;
+            }
 
             auto iter = state.sessions.find(name);
             if (iter == end(state.sessions))
@@ -225,7 +253,9 @@ void SessionArea::addSession(std::string const& name)
 
             auto [engineKey, engine] = *iter;
 
-            Log::info("Adding session: {} with layout {}", name, impl_->toolbar->selectedLayout());
+            const auto tabId = impl_->tabs.add(name, true);
+            Log::info("Adding session: {} with layout {}. Tab ID: {}", name, impl_->toolbar->selectedLayout(), tabId);
+
             impl_->sessions.emplace_back(
                 std::make_unique<Session>(
                     impl_->stateHolder,
@@ -239,20 +269,9 @@ void SessionArea::addSession(std::string const& name)
                     impl_->filePropertyDialog,
                     [this](Session const* ptr)
                     {
-                        auto const index = std::distance(
-                            begin(impl_->sessions.value()),
-                            std::find_if(
-                                begin(impl_->sessions.value()),
-                                end(impl_->sessions.value()),
-                                [ptr](auto const& session)
-                                {
-                                    return session.get() == ptr;
-                                }
-                            )
-                        );
-                        removeSession(index);
+                        removeSession(ptr->tabId());
                     },
-                    [this](std::string const& desiredTitle) -> std::string
+                    [this](Session const* ptr, std::string const& desiredTitle) -> std::string
                     {
                         std::string disambiguatedTitle = desiredTitle;
                         int suffix = 1;
@@ -263,7 +282,8 @@ void SessionArea::addSession(std::string const& name)
                             titleExists = false;
                             for (auto const& session : impl_->sessions.value())
                             {
-                                if (session->name() == disambiguatedTitle)
+                                if (auto tabTitle = session->tabTitle().lock();
+                                    tabTitle && tabTitle->value() == disambiguatedTitle)
                                 {
                                     titleExists = true;
                                     disambiguatedTitle = desiredTitle + " ("s + std::to_string(suffix) + ")"s;
@@ -273,13 +293,26 @@ void SessionArea::addSession(std::string const& name)
                             }
                         } while (titleExists);
 
+                        impl_->tabs.modifyTabById(
+                            ptr->tabId(),
+                            [&disambiguatedTitle](ScriptNuiComponents::Tabs::Tab* tab)
+                            {
+                                if (!tab)
+                                {
+                                    Log::error("Tab not found for modifying title.");
+                                    return;
+                                }
+                                tab->title = disambiguatedTitle;
+                            }
+                        );
                         return disambiguatedTitle;
                     },
-                    impl_->sessions.size() == 0
+                    impl_->sessions.size() == 0,
+                    tabId
                 )
             );
 
-            setSelected(static_cast<int>(impl_->sessions.size()) - 1);
+            setSelected(tabId);
         },
         "Cannot add session."
     );
@@ -295,9 +328,17 @@ std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
 
 Session* SessionArea::getActiveSession()
 {
-    if (impl_->selected.value() && *impl_->selected.value() >= 0 &&
-        *impl_->selected.value() < static_cast<int>(impl_->sessions.size()))
-        return impl_->sessions.value()[*impl_->selected.value()].get();
+    return nullptr;
+
+    const auto selected = impl_->tabs.selectedId();
+    if (selected == -1)
+        return nullptr;
+
+    for (auto const& session : impl_->sessions.value())
+    {
+        if (session->tabId() == selected)
+            return session.get();
+    }
     return nullptr;
 }
 
@@ -332,29 +373,14 @@ Nui::ElementRenderer SessionArea::operator()()
         return div{
             class_ = "session-area"
         }(
-            ui5::tabcontainer{
-                style = "width: 100%; display: block",
-                class_ = "session-area-tabs",
-                "tab-select"_event = [this](Nui::val event){
-                    const auto index = event["detail"]["tabIndex"].as<int>();
-                    setSelected(index);
-                },
-                "fixed"_prop = true
-            }(
-                range(impl_->sessions),
-                [this](long long i, auto& session) -> Nui::ElementRenderer {
-                    // tabs dont actually reside here:
-                    return ui5::tab{
-                        "text"_prop = session->tabTitle(),
-                        "selected"_prop = observe(impl_->selected).generate([i](std::optional<int> index){
-                            if (index.has_value())
-                                return *index == i;
-                            return false;
-                        }),
-                        "moveable"_prop = true
-                    }();
-                }
-            ),
+            impl_->tabs({
+                style =
+                    "margin-bottom: 2px;"
+                    "box-shadow: 1px 4px 10px 0px rgba(0,0,0,1);"
+                    "min-height: 30px;"
+                    "box-sizing: content-box;"
+                    "padding: 3px 5px;"
+            }),
             div{
                 style = "position: relative; width: 100%; height: calc(100% - 30px); display: block",
                 class_ = "session-area-content"

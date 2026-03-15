@@ -34,8 +34,9 @@ class Session
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         std::function<void(Session const*)> closeSelf,
-        std::function<std::string(std::string const&)> disambiguateTitle,
-        bool visible
+        std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle,
+        bool visible,
+        int tabId
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Session);
 
@@ -61,6 +62,7 @@ class Session
     auto makeOperationQueueElement() -> Nui::ElementRenderer;
 
     std::optional<nlohmann::json> getLayout() const;
+    int tabId() const;
 
     /**
      * @brief Used on windows to handle files dropped onto the session area.
