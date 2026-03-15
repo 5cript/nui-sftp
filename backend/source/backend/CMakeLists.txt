@@ -117,6 +117,12 @@ if (NOT OMIT_FRONTEND_BUILD)
             -DOFFLINE_BUILD=${OFFLINE_BUILD}
     )
 
+    target_sources(
+        ${PROJECT_NAME}
+        PRIVATE
+            "${CMAKE_BINARY_DIR}/module_nui-sftp/bin/index.html"
+    )
+
     # add_dependencies(${PROJECT_NAME}-emscripten xml-to-nui)
     add_dependencies(${PROJECT_NAME}-emscripten nui-sftp-style-copy)
 endif()
