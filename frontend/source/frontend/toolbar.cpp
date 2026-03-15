@@ -7,12 +7,12 @@
 #include <events/app_event_context.hpp>
 #include <constants/layouts.hpp>
 
-#include <ui5/components/toolbar.hpp>
-#include <ui5/components/toolbar_button.hpp>
-#include <ui5/components/toolbar_select.hpp>
-#include <ui5/components/toolbar_select_option.hpp>
-#include <ui5/components/toolbar_spacer.hpp>
-#include <ui5/components/select.hpp>
+#include <script-nui-components/select.hpp>
+#include <script-nui-components/button.hpp>
+
+#include <frontend/svgs/add.hpp>
+#include <frontend/svgs/decline.hpp>
+#include <frontend/svgs/settings.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -24,9 +24,10 @@ struct Toolbar::Implementation
     FrontendEvents* events;
     SessionArea* sessionArea;
     ConfirmDialog* confirmDialog;
+    Nui::Observed<std::string> activeTerminalEngine{};
+    Nui::Observed<std::string> selectedLayout{};
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
-    std::string selectedLayout;
 
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
         : stateHolder{stateHolder}
@@ -34,7 +35,6 @@ struct Toolbar::Implementation
         , confirmDialog{confirmDialog}
         , terminalEngines{}
         , layouts{}
-        , selectedLayout{}
     {
         Log::info("Toolbar::Implementation()");
     }
@@ -73,8 +73,10 @@ void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
                 Log::info("Updating terminal engines list.");
                 auto proxy = terminalEngines.modify();
                 terminalEngines = std::move(engines);
-
-                events->onNewSession.value() = terminalEngines.value().front();
+            }
+            if (!terminalEngines.value().empty())
+            {
+                activeTerminalEngine = terminalEngines.value().front();
             }
             Nui::globalEventContext.executeActiveEventsImmediately();
             onDone();
@@ -121,7 +123,7 @@ void Toolbar::reloadLayouts()
     impl_->selectedLayout = "";
     impl_->layouts.value().clear();
     impl_->layouts.value().push_back(std::string{Constants::defaultLayoutName});
-    if (const auto iter = impl_->stateHolder->stateCache().sessions.find(impl_->events->onNewSession.value());
+    if (const auto iter = impl_->stateHolder->stateCache().sessions.find(impl_->activeTerminalEngine.value());
         iter != impl_->stateHolder->stateCache().sessions.end())
     {
         if (iter->second.layouts)
@@ -145,73 +147,68 @@ Nui::ElementRenderer Toolbar::operator()()
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
     using Nui::Elements::div; // because of the global div.
+    namespace Snc = ScriptNuiComponents;
 
     // clang-format off
     return div{class_ = "toolbar"}(
-        ui5::toolbar{
-            "alignContent"_prop = "Start",
-            "design"_prop = "Solid"
-        }(
-            ui5::toolbar_select{
-                "change"_event = [this](Nui::val event) {
-                    impl_->events->onNewSession.assignWithoutUpdate(
-                        event["detail"]["selectedOption"]["textContent"].as<std::string>());
-
-                    reloadLayouts();
-                }
-            }(
-                range(impl_->terminalEngines),
-                [](long long, auto& engine) -> Nui::ElementRenderer {
-                    return ui5::toolbar_select_option{}(engine);
-                }
-            ),
-            ui5::toolbar_select{
-                "change"_event = [this](Nui::val event) {
-                    Log::info("Selected layout: {}", event["detail"]["selectedOption"]["textContent"].as<std::string>());
-                    impl_->selectedLayout = event["detail"]["selectedOption"]["textContent"].as<std::string>();
-                },
+        Snc::select(Snc::SelectOptions<decltype(impl_->activeTerminalEngine), decltype(impl_->terminalEngines)>{
+            .activeOption = impl_->activeTerminalEngine,
+            .options = impl_->terminalEngines,
+            .onChange = [this](auto const& newValue, Nui::WebApi::MouseEvent const&) {
+                reloadLayouts();
+            }
+        }),
+        Snc::select(Snc::SelectOptions<decltype(impl_->selectedLayout), decltype(impl_->layouts)>{
+            .activeOption = impl_->selectedLayout,
+            .options = impl_->layouts,
+            .attributes = {
                 !(reference.onMaterialize([this](auto){
                     connectLayoutsChanged();
                 }))
-            }(
-                range(impl_->layouts),
-                [](long long, auto& layout) -> Nui::ElementRenderer {
-                    return ui5::toolbar_select_option{}(layout);
-                }
-            ),
-            ui5::toolbar_button{
-                "text"_prop = language->getObserved("toolbar", "newSession"),
-                "icon"_prop = "add",
-                "click"_event = [this](Nui::val) {
+            }
+        }),
+        Snc::button(Snc::ButtonOptions<std::string>{
+            .text = language->get("toolbar", "newSession"),
+            .icon = GeneratedSvgs::add(),
+            .attributes = {
+                onClick = [this]() {
+                    impl_->events->onNewSession = impl_->activeTerminalEngine.value();
                     impl_->events->onNewSession.modifyNow();
-                }
-            }(),
-            ui5::toolbar_button{
-                "text"_prop = language->getObserved("toolbar", "endSession"),
-                "icon"_prop = "decline",
-                "click"_event = [this](Nui::val) {
+                },
+            },
+        }),
+        Snc::button(Snc::ButtonOptions<std::string>{
+            .text = language->get("toolbar", "endSession"),
+            .icon = GeneratedSvgs::decline(),
+            .attributes = {
+                onClick = [this]() {
                     if (impl_->sessionArea) {
                         impl_->sessionArea->removeActiveSession();
                     } else {
                         Log::error("Toolbar::EndSession: sessionArea is not set.");
                     }
-                }
-            }(),
-            ui5::toolbar_spacer{}(),
-            ui5::toolbar_button{
-                "icon"_prop = "settings",
-                "click"_event = [this](Nui::val) {
+                },
+            },
+        }),
+        // spacer:
+        div{
+            style = "flex-grow: 1"
+        }(),
+        Snc::button(Snc::ButtonOptions<std::string>{
+            .icon = GeneratedSvgs::settings(),
+            .attributes = {
+                onClick = [this]() {
                     impl_->events->settingsOpen = true;
-                }
-            }()
-        )
+                },
+            },
+        })
     );
     // clang-format on
 }
 
 std::string Toolbar::selectedLayout() const
 {
-    return impl_->selectedLayout;
+    return impl_->selectedLayout.value();
 }
 
 void Toolbar::sessionArea(SessionArea& sessionArea)
