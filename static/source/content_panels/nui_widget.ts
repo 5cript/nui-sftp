@@ -17,6 +17,7 @@ class NuiWidget extends Widget {
     }
 
     protected onAfterDetach(msg: Message): void {
+        console.log(`NuiWidget ${this.layoutId} detached, calling deleter`);
         this.deleter();
     }
 };

@@ -9,6 +9,9 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/select.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/switch.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/text_input.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dialog.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/nui-file-explorer"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/dropdown_menu.css" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/dropdown_menu.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
@@ -18,6 +21,9 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/select.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/switch.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/text_input.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dialog.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dialog.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
         DEPENDS
             "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/dropdown_menu.css"
             "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
@@ -27,6 +33,9 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dialog.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"
     )
 
     add_custom_target(
@@ -41,5 +50,8 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/select.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/switch.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/text_input.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dialog.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
     )
 endif()

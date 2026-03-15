@@ -127,7 +127,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
                         .dontUpdateValue = true
                     }
                 ),
-                ScriptNuiComponents::button(ScriptNuiComponents::ButtonOptions{
+                ScriptNuiComponents::button(ScriptNuiComponents::ButtonOptions<std::string>{
                     .text = language->get("settings", "pathSetting", "browseButton"),
                     .attributes = {
                         observeEngagedToBool(disabled),
