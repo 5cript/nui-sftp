@@ -15,9 +15,12 @@
 @import "../../../styles/nui-file-explorer/dropdown_menu.css";
 @import "../../../styles/5cript-nui-components/button.css";
 @import "../../../styles/5cript-nui-components/color_picker.css";
+@import "../../../styles/5cript-nui-components/dialog.css";
+@import "../../../styles/5cript-nui-components/popup_menu.css";
 @import "../../../styles/5cript-nui-components/resizeable_table.css";
 @import "../../../styles/5cript-nui-components/select.css";
 @import "../../../styles/5cript-nui-components/switch.css";
+@import "../../../styles/5cript-nui-components/tabs.css";
 @import "../../../styles/5cript-nui-components/text_input.css";
 
 *,

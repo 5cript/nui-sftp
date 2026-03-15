@@ -211,8 +211,8 @@ class OperationCard : public OperationCardInterface
                         .state = ConfirmDialog::State::Negative,
                         .headerText = "",
                         .text = makeError(),
-                        .listItems = transformedItems,
                         .buttons = ConfirmDialog::Button::Ok,
+                        .listItems = transformedItems,
                     });
                 },
                 style = observe(state_).generate([this](){

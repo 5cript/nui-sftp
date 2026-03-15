@@ -98,7 +98,6 @@ class Session
 
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
-    Nui::ElementRenderer addTabMenu();
     void onConnectionLoss();
     void onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input);
     void saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents);

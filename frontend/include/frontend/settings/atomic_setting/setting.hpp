@@ -256,9 +256,11 @@ class Setting
     {
         using namespace Nui::Attributes;
         using namespace Nui::Elements;
+        using namespace std::string_literals;
 
         return ScriptNuiComponents::button(
-            ScriptNuiComponents::ButtonOptions{
+            ScriptNuiComponents::ButtonOptions<std::string>{
+                .text = ""s,
                 .icon = GeneratedSvgs::refresh(),
                 .attributes =
                     {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
@@ -276,11 +278,13 @@ class Setting
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        using namespace std::string_literals;
 
         const auto idString = Ids::generateId().id();
 
         return ScriptNuiComponents::button(
-            ScriptNuiComponents::ButtonOptions{
+            ScriptNuiComponents::ButtonOptions<std::string>{
+                .text = ""s,
                 .icon = GeneratedSvgs::questionmark(),
                 .attributes =
                     {alt = helpText_,

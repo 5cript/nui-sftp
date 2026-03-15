@@ -6,7 +6,7 @@
     height: 100%;
 }
 
-.terminal-session>div {
+.terminal-session>div:not(.script-nui-popup-menu-container) {
     height: 100%;
     width: 100%;
 }

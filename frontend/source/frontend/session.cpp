@@ -16,7 +16,7 @@
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
-#include <ui5/components/menu.hpp>
+#include <script-nui-components/popup_menu.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -55,6 +55,9 @@ struct Session::Implementation
     Persistence::SessionOptions engineOptions;
     Nui::Observed<Persistence::TerminalOptions> options;
 
+    // Add Tab Context Menu
+    ScriptNuiComponents::PopupMenu tabAddMenu{};
+
     // Dialogs:
     InputDialog* inputDialog;
     ConfirmDialog* confirmDialog;
@@ -85,10 +88,6 @@ struct Session::Implementation
     Nui::Observed<bool> isInLostConnectionState{false};
     std::function<void()> onShutdownComplete{};
     std::vector<std::string> savedTerminalContents{};
-
-    // Add Tab Context Menu
-    std::weak_ptr<Nui::Dom::BasicElement> tabAddMenu;
-    Nui::Observed<std::optional<std::string>> addButtonId{std::nullopt};
 
     std::function<std::string(std::string const&)> disambiguateTitle;
 
@@ -136,6 +135,105 @@ struct Session::Implementation
     {
         fileGrid.leftModel().dropMetadata(sessionLayoutId);
         fileGrid.rightModel().dropMetadata(sessionLayoutId);
+
+        using namespace ScriptNuiComponents;
+        using namespace std::string_literals;
+
+        tabAddMenu.setItems({
+            PopupMenu::sectionHeader("New Tab"),
+            PopupMenu::item(
+                language->get("sessionFrontend", "terminal"),
+                {},
+                [this]()
+                {
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "terminal"s);
+                    tabAddMenu.close();
+                }
+            ),
+            PopupMenu::item(
+                language->get("sessionFrontend", "fileExplorer"),
+                {},
+                [this]()
+                {
+                    tabAddMenu.close();
+                    // There can only be one!
+                    if (fileExplorerElement.value())
+                        return;
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-explorer"s);
+                }
+            ),
+            PopupMenu::item(
+                language->get("sessionFrontend", "operationQueue"),
+                {},
+                [this]()
+                {
+                    tabAddMenu.close();
+                    // There can only be one!
+                    if (operationQueueElement.value())
+                        return;
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "operation-queue"s);
+                }
+            ),
+            PopupMenu::item(
+                language->get("sessionFrontend", "sessionOptions"),
+                {},
+                [this]()
+                {
+                    tabAddMenu.close();
+                    // There can only be one!
+                    if (sessionOptionsElement.value())
+                        return;
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "session-options"s);
+                }
+            ),
+        });
+
+        Nui::listen(
+            sessionOptionsElement,
+            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
+            {
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "sessionOptions"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                    {
+                        if (mi)
+                            mi->disabled = dis;
+                    }
+                );
+            }
+        );
+        Nui::listen(
+            fileExplorerElement,
+            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
+            {
+                Nui::WebApi::Console::log("fileExplorerElement changed.");
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "fileExplorer"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                    {
+                        if (mi)
+                        {
+                            Nui::WebApi::Console::log("Menu item found, modifying disabled to " + std::to_string(dis));
+                            mi->disabled = dis;
+                        }
+                    }
+                );
+            }
+        );
+        Nui::listen(
+            operationQueueElement,
+            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
+            {
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "operationQueue"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                    {
+                        if (mi)
+                            mi->disabled = dis;
+                    }
+                );
+            }
+        );
     }
 };
 
@@ -458,69 +556,6 @@ void Session::createExecutingEngine()
 Session::~Session() = default;
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(Session);
-
-Nui::ElementRenderer Session::addTabMenu()
-{
-    // clang-format off
-    return ui5::menu{
-        reference = [this](std::weak_ptr<Nui::Dom::BasicElement> element) {
-            impl_->tabAddMenu = std::move(element);
-        },
-        "header-text"_prop = "Add Tab",
-        "id"_prop = "sessionTabMenu_" + impl_->sessionLayoutId,
-        "opener"_prop = impl_->addButtonId,
-        "item-click"_event = [this](Nui::val event){
-
-            const auto type = event["detail"]["item"]["dataset"]["componenttype"].as<std::string>();
-            if (auto menu = impl_->tabAddMenu.lock(); menu)
-            {
-                menu->val().set("open", false);
-            }
-            Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", type);
-        }
-    }(
-        observe(impl_->fileExplorerElement, impl_->operationQueueElement, impl_->sessionOptionsElement),
-        [this](){
-            return fragment(
-                ui5::menu_item{
-                    "text"_prop = language->getObserved("sessionFrontend", "terminal"),
-                    "data-componenttype"_attr = "terminal"
-                }(),
-                [&, this]() -> Nui::ElementRenderer {
-                    // There can only be one!
-                    if (impl_->fileExplorerElement.value())
-                        return Nui::nil();
-
-                    return ui5::menu_item{
-                        "text"_prop = language->getObserved("sessionFrontend", "fileExplorer"),
-                        "data-componenttype"_attr = "file-explorer"
-                    }();
-                }(),
-                [this]() -> Nui::ElementRenderer {
-                    // There can only be one!
-                    if (impl_->operationQueueElement.value())
-                        return Nui::nil();
-
-                    return ui5::menu_item{
-                        "text"_prop = language->getObserved("sessionFrontend", "operationQueue"),
-                        "data-componenttype"_attr = "operation-queue"
-                    }();
-                }(),
-                [this]() -> Nui::ElementRenderer {
-                    // There can only be one!
-                    if (impl_->sessionOptionsElement.value())
-                        return Nui::nil();
-
-                    return ui5::menu_item{
-                        "text"_prop = language->getObserved("sessionFrontend", "sessionOptions"),
-                        "data-componenttype"_attr = "session-options"
-                    }();
-                }()
-            );
-        }
-    );
-    // clang-format on
-}
 
 void Session::openLocalFilesystem()
 {
@@ -871,6 +906,8 @@ void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
 
 void Session::initializeLayout()
 {
+    Nui::WebApi::Console::log("Initializing session layout");
+
     Nui::val element;
     if (auto host = impl_->layoutHost.lock(); host)
     {
@@ -987,6 +1024,7 @@ void Session::initializeLayout()
                     Log::warn("There is no file explorer to remove");
                     return Nui::val::undefined();
                 }
+                Nui::WebApi::Console::log("Removing file explorer element");
                 impl_->fileExplorerElement.value().reset();
                 impl_->fileExplorerElement.modifyNow();
                 return Nui::val::undefined();
@@ -1067,17 +1105,8 @@ void Session::initializeLayout()
                 {
                     Log::error("openAddContextMenu needs to be called with a string argument");
                 }
-                if (auto menu = impl_->tabAddMenu.lock(); menu)
-                {
-                    Log::info("Opening menu");
-                    impl_->addButtonId = val.as<std::string>();
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                    menu->val().set("open", true);
-                }
-                else
-                {
-                    Log::error("Tab add menu is not available");
-                }
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                impl_->tabAddMenu.openNextTo(val.as<std::string>());
             },
             std::placeholders::_1
         )
@@ -1120,7 +1149,7 @@ Nui::ElementRenderer Session::operator()()
             return impl_->inertEverything.value() ? "true"s : std::optional<std::string>{std::nullopt};
         })
     }(
-        addTabMenu()
+        impl_->tabAddMenu()
     );
     // clang-format on
 }
