@@ -587,12 +587,7 @@ Nui::ElementRenderer Settings::operator()()
                     }
                 ),
             }(
-                Nui::Elements::span{}(language->get("settings", "loadingSettings")) //,
-                // ui5::busy_indicator{
-                //     "size"_prop = "L",
-                //     "active"_prop = observe(impl_->initialLoadDone).generate([](bool done) { return !done; }),
-                //     "delay"_prop = 1,
-                // }()
+                Nui::Elements::span{}(language->get("settings", "loadingSettings"))
             ),
             impl_->newSessionDialog(),
             div{
@@ -714,9 +709,6 @@ Nui::ElementRenderer Settings::header()
                     return inProgress ? "visibility: visible;" : "visibility: hidden;";
                 })
             }(
-                // ui5::busy_indicator{
-                //     "size"_prop = "M",
-                // }(),
                 span{}(language->getObserved("settings", "saving"))
             ),
             Snc::button({
