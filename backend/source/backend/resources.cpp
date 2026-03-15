@@ -47,7 +47,12 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
 
         // make path relative to / to avoid directory traversal
         if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
+        {
+#ifndef NDEBUG
+            return resourceDir / "module_nui-sftp/bin" / std::filesystem::relative(urlPathString, "/");
+#endif
             return resourceDir / "frontend" / std::filesystem::relative(urlPathString, "/");
+        }
         else
             return resourceDir / "assets" / std::filesystem::relative(urlPathString, "/");
 

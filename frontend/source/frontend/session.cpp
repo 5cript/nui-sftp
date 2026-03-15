@@ -49,6 +49,7 @@ struct Session::Implementation
     std::string sessionLayoutId;
     std::function<void(Session const*)> closeSelf;
     Nui::Observed<bool> isVisible;
+    int tabId;
     Persistence::UiOptions uiOptions;
 
     // Session Options Tab
@@ -89,7 +90,7 @@ struct Session::Implementation
     std::function<void()> onShutdownComplete{};
     std::vector<std::string> savedTerminalContents{};
 
-    std::function<std::string(std::string const&)> disambiguateTitle;
+    std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -102,8 +103,9 @@ struct Session::Implementation
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         std::function<void(Session const*)> closeSelf,
-        std::function<std::string(std::string const&)> disambiguateTitle,
-        bool visible)
+        std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle,
+        bool visible,
+        int tabId)
         : stateHolder{stateHolder}
         , events{events}
         , initialName{std::move(initialName)}
@@ -111,6 +113,7 @@ struct Session::Implementation
         , sessionLayoutId{Nui::val::global("generateId")().as<std::string>()}
         , closeSelf{std::move(closeSelf)}
         , isVisible{visible}
+        , tabId{tabId}
         , uiOptions{uiOptions}
         , engineOptions{std::move(engineOptions)}
         , options{this->engineOptions.terminalOptions.value()}
@@ -192,12 +195,17 @@ struct Session::Implementation
             sessionOptionsElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "sessionOptions"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                sessionOptionsElement.eventContext().delayToAfterProcessing(
+                    [this, elem]()
                     {
-                        if (mi)
-                            mi->disabled = dis;
+                        tabAddMenu.modifyItemByLabel(
+                            language->get("sessionFrontend", "sessionOptions"),
+                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                            {
+                                if (mi)
+                                    mi->disabled = dis;
+                            }
+                        );
                     }
                 );
             }
@@ -207,15 +215,22 @@ struct Session::Implementation
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
                 Nui::WebApi::Console::log("fileExplorerElement changed.");
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "fileExplorer"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                fileExplorerElement.eventContext().delayToAfterProcessing(
+                    [this, elem]()
                     {
-                        if (mi)
-                        {
-                            Nui::WebApi::Console::log("Menu item found, modifying disabled to " + std::to_string(dis));
-                            mi->disabled = dis;
-                        }
+                        tabAddMenu.modifyItemByLabel(
+                            language->get("sessionFrontend", "fileExplorer"),
+                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                            {
+                                if (mi)
+                                {
+                                    Nui::WebApi::Console::log(
+                                        "Menu item found, modifying disabled to " + std::to_string(dis)
+                                    );
+                                    mi->disabled = dis;
+                                }
+                            }
+                        );
                     }
                 );
             }
@@ -224,18 +239,30 @@ struct Session::Implementation
             operationQueueElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "operationQueue"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                Nui::WebApi::Console::log("operationQueueElement changed.");
+
+                operationQueueElement.eventContext().delayToAfterProcessing(
+                    [this, elem]()
                     {
-                        if (mi)
-                            mi->disabled = dis;
+                        tabAddMenu.modifyItemByLabel(
+                            language->get("sessionFrontend", "operationQueue"),
+                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                            {
+                                if (mi)
+                                    mi->disabled = dis;
+                            }
+                        );
                     }
                 );
             }
         );
     }
 };
+
+int Session::tabId() const
+{
+    return impl_->tabId;
+}
 
 std::string Session::layoutId() const
 {
@@ -345,8 +372,9 @@ Session::Session(
     ConfirmDialog* confirmDialog,
     FilePropertyDialog* filePropertyDialog,
     std::function<void(Session const*)> closeSelf,
-    std::function<std::string(std::string const&)> disambiguateTitle,
-    bool visible
+    std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle,
+    bool visible,
+    int tabId
 )
     : impl_{std::make_unique<Implementation>(
           stateHolder,
@@ -360,7 +388,8 @@ Session::Session(
           filePropertyDialog,
           std::move(closeSelf),
           std::move(disambiguateTitle),
-          visible
+          visible,
+          tabId
       )}
 {
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
@@ -540,7 +569,7 @@ void Session::createExecutingEngine()
                 [this](std::string const& cmdline)
             {
                 Log::info("Tab title changed: {}", cmdline);
-                *impl_->tabTitle = impl_->disambiguateTitle(cmdline);
+                *impl_->tabTitle = impl_->disambiguateTitle(this, cmdline);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
         }),
@@ -664,7 +693,7 @@ void Session::onOpenSession(bool success, std::string const& info)
                     // assume ipv6 when finding ':' in host
                     if (host.find(":") != std::string::npos)
                         host = "[" + host + "]";
-                    *impl_->tabTitle = impl_->disambiguateTitle(user + "@" + host + ":" + std::to_string(port));
+                    *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
 
                     openSftp(user);
                 }

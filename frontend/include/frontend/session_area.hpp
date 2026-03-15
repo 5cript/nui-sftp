@@ -27,8 +27,8 @@ class SessionArea
 
     void addSession(std::string const& name);
     void registerRpc();
-    void removeSession(int index);
-    void setSelected(int newIndex);
+    void removeSession(int tabId);
+    void setSelected(int tabId);
     void removeActiveSession();
 
     Session* getActiveSession();
@@ -36,6 +36,8 @@ class SessionArea
     Session* getSessionByLayoutId(std::string const& layoutId);
 
   private:
+    std::optional<std::size_t> findSessionIndexByTabId(int tabId) const;
+
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
 };
