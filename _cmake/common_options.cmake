@@ -12,7 +12,7 @@ if (EMSCRIPTEN)
         target_link_options(core-target INTERFACE -sMEMORY64=1)
     else()
         # No support for WASM64 in webkit
-        target_compile_options(core-target INTERFACE -sWASM_BIGINT=1)
+        target_link_options(core-target INTERFACE -sWASM_BIGINT=1)
     endif()
     target_link_options(core-target INTERFACE "-fexceptions")
 endif()
