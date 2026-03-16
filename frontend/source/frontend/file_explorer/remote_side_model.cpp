@@ -542,7 +542,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                     .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
                     .text = language->get("remoteSideModel", "allowOverwritingFile"),
                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
-                        ConfirmDialog::Button::None,
+                        ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
                     .focusButton = ConfirmDialog::Button::No,
                     .listItems = {{.text = item.second.path.generic_string(), .description = "File already exists"}},
                     .onClose = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](

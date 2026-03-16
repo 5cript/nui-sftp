@@ -593,7 +593,7 @@ void LocalSideModel::uploadItemsConfirmed(
                         .headerText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
                         .text = language->get("localSideModel", "fileAlreadyExistsOverwrite"),
                         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
-                            ConfirmDialog::Button::None,
+                            ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
                         .focusButton = ConfirmDialog::Button::No,
                         .listItems =
                             {{.text = item.second.path.generic_string(), .description = "File already exists"}},
