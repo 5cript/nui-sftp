@@ -34,7 +34,7 @@ RemoteSideModel::RemoteSideModel(
                       {
                           Log::error("Failed to list files from remote side: {}", info);
                           confirmDialog_->open({
-                              .state = ConfirmDialog::State::Negative,
+                              .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                               .headerText = "",
                               .text = info,
                               .buttons = ConfirmDialog::Button::Ok,
@@ -117,7 +117,7 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         {
                             Log::error("Failed to create directory: {}", info);
                             confirmDialog_->open({
-                                .state = ConfirmDialog::State::Negative,
+                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = "",
                                 .text = info,
                                 .buttons = ConfirmDialog::Button::Ok,
@@ -157,7 +157,7 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                         {
                             Log::error("Failed to create file: {}", info);
                             confirmDialog_->open({
-                                .state = ConfirmDialog::State::Negative,
+                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = "",
                                 .text = info,
                                 .buttons = ConfirmDialog::Button::Ok,
@@ -181,7 +181,7 @@ void RemoteSideModel::onError(std::string const& error)
 {
     Log::error("File grid error (remote side): {}", error);
     confirmDialog_->open({
-        .state = ConfirmDialog::State::Negative,
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
         .headerText = language->get("remoteSideModel", "fileGridError"),
         .text = error,
         .buttons = ConfirmDialog::Button::Ok,
@@ -204,7 +204,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
     const auto dir = nonEmpties[currentNonEmpty];
 
     confirmDialog_->open(
-        {.state = ConfirmDialog::State::Critical,
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
             .headerText = language->get("remoteSideModel", "nonEmptyDirectoriesFound"),
             .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.string()),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::None |
@@ -215,9 +215,9 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
                            nonEmpties = std::move(nonEmpties),
                            filesAndEmptyDirs = std::move(filesAndEmptyDirs),
                            currentNonEmpty,
-                           dir](ConfirmDialog::Button button) mutable
+                           dir](std::optional<ConfirmDialog::Button> button) mutable
             {
-                if (button == ConfirmDialog::Button::Yes)
+                if (button && button == ConfirmDialog::Button::Yes)
                 {
                     confirmedToDelete.push_back(dir);
                     askNonEmptyDirectoryDeletions(
@@ -229,7 +229,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
                     return;
                 }
 
-                if (button == ConfirmDialog::Button::All)
+                if (button && button == ConfirmDialog::Button::All)
                 {
                     confirmedToDelete.push_back(dir);
                     for (; currentNonEmpty + 1 < nonEmpties.size(); ++currentNonEmpty)
@@ -240,7 +240,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
                     return;
                 }
 
-                if (button == ConfirmDialog::Button::No)
+                if (button && button == ConfirmDialog::Button::No)
                 {
                     askNonEmptyDirectoryDeletions(
                         std::move(confirmedToDelete),
@@ -251,7 +251,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
                     return;
                 }
 
-                if (button == ConfirmDialog::Button::None)
+                if (button && button == ConfirmDialog::Button::None)
                 {
                     enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
                     return;
@@ -280,7 +280,7 @@ void RemoteSideModel::enqueueDeletes(
                 {
                     Log::error("Failed to create delete operations: {}", info);
                     confirmDialog_->open({
-                        .state = ConfirmDialog::State::Negative,
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
                         .text = fmt::format(
                             fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
@@ -303,7 +303,7 @@ void RemoteSideModel::enqueueDeletes(
                             {
                                 Log::error("Failed to create delete operations: {}", info);
                                 confirmDialog_->open({
-                                    .state = ConfirmDialog::State::Negative,
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                     .headerText = language->get("remoteSideModel", "deleteFailed"),
                                     .text = fmt::format(
                                         fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
@@ -332,7 +332,7 @@ void RemoteSideModel::enqueueDeletes(
                 {
                     Log::error("Failed to create delete operations: {}", info);
                     confirmDialog_->open({
-                        .state = ConfirmDialog::State::Negative,
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                         .headerText = language->get("remoteSideModel", "deleteFailed"),
                         .text = fmt::format(
                             fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
@@ -381,15 +381,15 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     }
 
     confirmDialog_->open(
-        {.state = ConfirmDialog::State::Information,
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
             .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
-            .onClose = [this, items](ConfirmDialog::Button button)
+            .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
             {
-                if (button != ConfirmDialog::Button::Yes)
+                if (!button || button != ConfirmDialog::Button::Yes)
                 {
                     Log::info("Delete items cancelled");
                     return;
@@ -416,7 +416,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                         {
                             Log::error("Failed to delete files");
                             confirmDialog_->open({
-                                .state = ConfirmDialog::State::Negative,
+                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = language->get("remoteSideModel", "deleteFailed"),
                                 .text = fmt::format(
                                     fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")), info
@@ -456,7 +456,7 @@ void RemoteSideModel::enqueueSingleDownload(
             {
                 Log::error("Failed to create download operation: {}", info);
                 confirmDialog_->open({
-                    .state = ConfirmDialog::State::Negative,
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("remoteSideModel", "downloadFailed"),
                     .text = fmt::format(
                         fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
@@ -507,7 +507,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         {
             Log::error("Invalid response from RpcFilesystem::exists");
             confirmDialog_->open({
-                .state = ConfirmDialog::State::Negative,
+                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                 .headerText = language->get("remoteSideModel", "checkFileExistenceFailed"),
                 .text = language->get("remoteSideModel", "invalidResponseFromBackend"),
                 .buttons = ConfirmDialog::Button::Ok,
@@ -522,7 +522,7 @@ void RemoteSideModel::downloadItemsConfirmed(
             const auto error = response["error"].as<std::string>();
             Log::error("Failed to check file existence: {}", error);
             confirmDialog_->open({
-                .state = ConfirmDialog::State::Negative,
+                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                 .headerText = language->get("remoteSideModel", "checkFileExistenceFailed"),
                 .text =
                     fmt::format(fmt::runtime(language->get("remoteSideModel", "invalidResponseFromBackend")), error),
@@ -538,7 +538,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         {
             Log::info("File already exists: {}", item.second.path.generic_string());
             confirmDialog_->open(
-                {.state = ConfirmDialog::State::Information,
+                {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
                     .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
                     .text = language->get("remoteSideModel", "allowOverwritingFile"),
                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
@@ -546,10 +546,10 @@ void RemoteSideModel::downloadItemsConfirmed(
                     .focusButton = ConfirmDialog::Button::No,
                     .listItems = {{.text = item.second.path.generic_string(), .description = "File already exists"}},
                     .onClose = [this, downloadItems = std::move(downloadItems), index, overwriteNever, overwriteAlways](
-                                   ConfirmDialog::Button button
+                                   std::optional<ConfirmDialog::Button> button
                                ) mutable
                     {
-                        if (button == ConfirmDialog::Button::Yes)
+                        if (button && button == ConfirmDialog::Button::Yes)
                         {
                             enqueueSingleDownload(
                                 downloadItems[index].first,
@@ -561,7 +561,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                                 std::move(downloadItems), index + 1, overwriteNever, overwriteAlways
                             );
                         }
-                        else if (button == ConfirmDialog::Button::No)
+                        else if (button && button == ConfirmDialog::Button::No)
                         {
                             Log::info(
                                 "Skipping download of existing file: {}",
@@ -571,7 +571,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                                 std::move(downloadItems), index + 1, overwriteNever, overwriteAlways
                             );
                         }
-                        else if (button == ConfirmDialog::Button::All)
+                        else if (button && button == ConfirmDialog::Button::All)
                         {
                             Log::info("Overwriting all existing files from now on.");
                             enqueueSingleDownload(
@@ -582,11 +582,16 @@ void RemoteSideModel::downloadItemsConfirmed(
                             );
                             downloadItemsConfirmed(std::move(downloadItems), index + 1, overwriteNever, true);
                         }
-                        else if (button == ConfirmDialog::Button::None)
+                        else if (button && button == ConfirmDialog::Button::None)
                         {
                             Log::info("Skipping all existing files from now on.");
                             downloadItemsConfirmed(std::move(downloadItems), index + 1, true, overwriteAlways);
                         }
+
+                        Log::info(
+                            "User cancelled download of existing file: {}",
+                            downloadItems[index].second.path.generic_string()
+                        );
                     }}
             );
             return;
@@ -665,15 +670,15 @@ void RemoteSideModel::onTransfer(
     }
 
     confirmDialog_->open(
-        {.state = ConfirmDialog::State::Information,
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
             .headerText = "Download Items?",
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
-            .onClose = [this, items, destinationDir](ConfirmDialog::Button button)
+            .onClose = [this, items, destinationDir](std::optional<ConfirmDialog::Button> button)
             {
-                if (button != ConfirmDialog::Button::Yes)
+                if (!button || *button != ConfirmDialog::Button::Yes)
                 {
                     Log::info("Download items cancelled");
                     return;
@@ -738,7 +743,7 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
                             info
                         );
                         confirmDialog_->open({
-                            .state = ConfirmDialog::State::Negative,
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = "",
                             .text = fmt::format(
                                 fmt::runtime(language->get("remoteSideModel", "failedToRenameItem")),

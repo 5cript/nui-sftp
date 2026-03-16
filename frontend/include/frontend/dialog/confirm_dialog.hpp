@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nui/frontend/element_renderer.hpp>
+#include <script-nui-components/dialog.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <memory>
@@ -11,16 +12,7 @@ class ConfirmDialog
     ConfirmDialog(std::string id);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(ConfirmDialog);
 
-    enum class Button : unsigned
-    {
-        Unknown = 0b0000'0000,
-        Cancel = 0b0000'0001,
-        Ok = 0b0000'0010,
-        Yes = 0b0000'0100,
-        No = 0b0000'1000,
-        All = 0b0001'0000,
-        None = 0b0010'0000,
-    };
+    using Button = ScriptNuiComponents::Dialog::Button;
 
     friend auto operator|(Button lhs, Button rhs)
     {
@@ -40,7 +32,7 @@ class ConfirmDialog
 
     struct OpenOptions
     {
-        State state = State::Information;
+        ScriptNuiComponents::StyleVariant styleVariant = ScriptNuiComponents::StyleVariant::Regular;
         std::string headerText = "";
         std::string text = "";
         Button buttons = Button::Ok;
@@ -53,13 +45,13 @@ class ConfirmDialog
             std::optional<State> additionalState = std::nullopt;
         };
         std::vector<ListElement> listItems = {};
-        std::function<void(Button buttonPressed)> onClose = [](auto) {};
+        std::function<void(std::optional<Button> buttonPressed)> onClose = [](auto) {};
     };
 
     void open(OpenOptions const& options);
 
   private:
-    void close(Button button);
+    Nui::ElementRenderer dialogBody();
 
   private:
     struct Implementation;

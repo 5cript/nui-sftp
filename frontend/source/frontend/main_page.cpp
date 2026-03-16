@@ -77,7 +77,7 @@ void MainPage::onSetupComplete()
                 if (!warning.empty())
                 {
                     impl_->confirmDialog.open({
-                        .state = ConfirmDialog::State::Critical,
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                         .headerText = language->get("persistence", "warningLoadingState"),
                         .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
                         .buttons = ConfirmDialog::Button::Ok,

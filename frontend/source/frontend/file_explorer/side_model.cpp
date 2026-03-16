@@ -41,7 +41,7 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
     {
         Log::error("Failed to list directory");
         confirmDialog_->open({
-            .state = ConfirmDialog::State::Negative,
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sideModel", "failedToListDirectory"),
             .text = fmt::format(
                 fmt::runtime(language->get("sideModel", "failedToListDirectoryText")), currentPath_->generic_string()

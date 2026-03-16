@@ -204,9 +204,9 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
             .headerText = "Cancel Operation",
             .text = fmt::format("Are you sure you want to cancel the operation?"),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .onClose = [doCancel](ConfirmDialog::Button buttonPressed)
+            .onClose = [doCancel](std::optional<ConfirmDialog::Button> optButton)
             {
-                if (buttonPressed == ConfirmDialog::Button::Yes)
+                if (optButton && *optButton == ConfirmDialog::Button::Yes)
                     doCancel();
             },
         });
@@ -862,7 +862,7 @@ void OperationQueue::changeAutoClean(bool doClean)
                     if (error)
                     {
                         impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Negative,
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = "Error saving state",
                             .text = fmt::format("An error occurred while saving the application state: {}.", *error),
                             .buttons = ConfirmDialog::Button::Ok,

@@ -105,7 +105,7 @@ nui_prepare_emscripten_target(
         ${PARCEL_ARGS}
     PREJS
         ${PREJS_FILE}
-    LEAN_INDEX_HTML
+    LEAN_INDEX_HTML_NO_INDEX_JS
     NPM_INSTALL_ARGS
         ${NUISCP_NPM_INSTALL_ARGS}
     EMSCRIPTEN_LINK_OPTIONS
@@ -123,6 +123,7 @@ nui_prepare_emscripten_target(
     NPM_EXTRA_OUTPUTS
         ${UI5_SVGS_FULLPATH}
     OBSERVED_BUNDLE_FILES
+        "${CMAKE_SOURCE_DIR}/static/index.html"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"

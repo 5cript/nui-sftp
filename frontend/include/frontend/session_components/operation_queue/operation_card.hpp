@@ -208,7 +208,7 @@ class OperationCard : public OperationCardInterface
                     }
 
                     confirmDialog_->open(ConfirmDialog::OpenOptions{
-                        .state = ConfirmDialog::State::Negative,
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                         .headerText = "",
                         .text = makeError(),
                         .buttons = ConfirmDialog::Button::Ok,
