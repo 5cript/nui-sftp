@@ -59,7 +59,7 @@ header.opq-controls {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 0 5px;
+    padding: 8px;
     border-top: 1px solid var(--opq-border);
 
     &>ui5-switch::part(slider) {

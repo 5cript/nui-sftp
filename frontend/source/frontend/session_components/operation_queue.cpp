@@ -20,8 +20,8 @@
 #include <nui/rpc.hpp>
 #include <fmt/format.h>
 
-#include <ui5/components/switch.hpp>
-#include <ui5/components/button.hpp>
+#include <script-nui-components/button.hpp>
+#include <script-nui-components/switch.hpp>
 
 #include <chrono>
 #include <string_view>
@@ -40,6 +40,7 @@ struct OperationQueue::Implementation
     RemoteSideModel* remoteModel;
 
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
+    Nui::Observed<std::string> pausedText{language->get("operationQueue", "continue")};
     Nui::Observed<bool> paused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
@@ -64,7 +65,22 @@ struct OperationQueue::Implementation
         , onUpdate{}
         , operations{}
         , autoCleanTimer{}
-    {}
+    {
+        Nui::listen(
+            paused,
+            [this](bool paused)
+            {
+                this->paused.eventContext().delayToAfterProcessing(
+                    [this, paused]()
+                    {
+                        pausedText = paused ? language->get("operationQueue", "continue")
+                                            : language->get("operationQueue", "pause");
+                        pausedText.eventContext().sync();
+                    }
+                );
+            }
+        );
+    }
 };
 
 OperationQueue::OperationQueue(
@@ -786,12 +802,85 @@ void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused>
     }
 }
 
+void OperationQueue::togglePause()
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
+        [this, requestToPauseUnpauseWas = !impl_->paused.value()](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (result)
+            {
+                Log::info("{} operation queue successfully", requestToPauseUnpauseWas ? "Paused" : "Unpaused");
+                impl_->paused = !impl_->paused.value();
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+            else
+                Log::error(
+                    "Failed to {} operation queue: {}",
+                    requestToPauseUnpauseWas ? "pause" : "unpause",
+                    result.error.value()
+                );
+        },
+        !impl_->paused.value()
+    );
+}
+
+void OperationQueue::askBackendToCancelAll()
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
+        [this](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (result)
+            {
+                Log::info("Operation queue all was canceled");
+                cancelAll();
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+            else
+                Log::error("Failed to cancel all operation queue: {}", result.error.value());
+        }
+    );
+}
+
+void OperationQueue::changeAutoClean(bool doClean)
+{
+    *impl_->autoClean = doClean;
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const&)
+        {
+            if (!success)
+                return;
+
+            auto iter = impl_->stateHolder->stateCache().sessions.find(name);
+            iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
+            impl_->stateHolder->save(
+                [this](std::optional<std::string> const& error)
+                {
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .state = ConfirmDialog::State::Negative,
+                            .headerText = "Error saving state",
+                            .text = fmt::format("An error occurred while saving the application state: {}.", *error),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
+                }
+            );
+        }
+    );
+}
+
 Nui::ElementRenderer OperationQueue::operator()()
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
     using Nui::Elements::div;
     using Nui::Elements::span;
+    namespace Snc = ScriptNuiComponents;
 
     auto makeSummaryText = [this]() -> std::string
     {
@@ -808,56 +897,33 @@ Nui::ElementRenderer OperationQueue::operator()()
         header{
             class_ = "opq-controls"
         }(
-            ui5::button{
-                tabIndex = "0",
-                "icon"_prop = observe(impl_->paused).generate([](bool paused){
-                    if (paused)
-                        return "media-play";
-                    return "pause";
-                }),
-                "click"_event = [this](){
-                    Nui::RpcClient::callWithBackChannel(
-                        fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
-                        [this, requestToPauseUnpauseWas = !impl_->paused.value()](SharedData::ErrorOrSuccess<> const& result)
+            Snc::button(Snc::ButtonOptions<decltype(impl_->pausedText)>{
+                .text = impl_->pausedText,
+                .icon = [this]() -> Nui::ElementRenderer {
+                    return fragment(
+                        observe(impl_->paused).generate([](bool paused)
                         {
-                            if (result) {
-                                Log::info("{} operation queue successfully", requestToPauseUnpauseWas ? "Paused" : "Unpaused");
-                                impl_->paused = !impl_->paused.value();
-                                Nui::globalEventContext.executeActiveEventsImmediately();
-                            }
-                            else
-                                Log::error("Failed to {} operation queue: {}", requestToPauseUnpauseWas ? "pause" : "unpause", result.error.value());
-                        },
-                        !impl_->paused.value()
+                            if (paused)
+                                return Svgs::play();
+                            return Svgs::pause();
+                        })
                     );
-                }
-            }(
-                observe(impl_->paused).generate([this]() -> std::string {
-                    if (!impl_->paused.value())
-                        return language->get("operationQueue", "pause");
-                    return language->get("operationQueue", "continue");
-                })
-            ),
-            ui5::button{
-                tabIndex = "0",
-                "click"_event = [this](){
-                    Nui::RpcClient::callWithBackChannel(
-                        fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
-                        [this](SharedData::ErrorOrSuccess<> const& result)
-                        {
-                            if (result) {
-                                Log::info("Operation queue all was canceled");
-                                cancelAll();
-                                Nui::globalEventContext.executeActiveEventsImmediately();
-                            }
-                            else
-                                Log::error("Failed to cancel all operation queue: {}", result.error.value());
-                        }
-                    );
-                }
-            }(
-                language->getObserved("operationQueue", "cancelAll")
-            ),
+                }(),
+                .attributes = {
+                    onClick = [this](){
+                        togglePause();
+                    }
+                },
+            }),
+            Snc::button(Snc::ButtonOptions<std::string>{
+                .text = language->get("operationQueue", "cancelAll"),
+                .attributes = {
+                    onClick = [this](){
+                        askBackendToCancelAll();
+                    },
+                    style = "align-self: stretch"
+                },
+            }),
             div{
                 class_ = "opq-summary"
             }(
@@ -877,36 +943,13 @@ Nui::ElementRenderer OperationQueue::operator()()
         div{
             class_ = "opq-footer"
         }(
-            ui5::switch_{
-                "checked"_prop = impl_->autoClean,
-                "design"_prop = "Graphical",
-                "change"_event = [this](Nui::val event) {
-                    *impl_->autoClean = event["target"]["checked"].as<bool>();
-                    loadState(
-                        *impl_->stateHolder,
-                        impl_->confirmDialog,
-                        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const&) {
-                            if (!success)
-                                return;
-
-                            auto iter = impl_->stateHolder->stateCache().sessions.find(name);
-                            iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
-                            impl_->stateHolder->save([this](std::optional<std::string> const& error) {
-                                if (error) {
-                                    impl_->confirmDialog->open({
-                                        .state = ConfirmDialog::State::Negative,
-                                        .headerText = "Error saving state",
-                                        .text = fmt::format(
-                                            "An error occurred while saving the application state: {}.",
-                                            *error
-                                        ),
-                                        .buttons = ConfirmDialog::Button::Ok,
-                                    });
-                                }
-                            });
-                    });
-                }
-            }(),
+            Snc::switch_(Snc::SwitchOptions<decltype(impl_->autoClean)>{
+                .isChecked = impl_->autoClean,
+                .onChange = [this](bool doClean, auto const&) {
+                    changeAutoClean(doClean);
+                },
+                .dontUpdateValue = true
+            }),
             div{
                 style = "font-size: 14px; color: var(--muted);"
             }(language->getObserved("operationQueue", "autoCleanCompleted"))

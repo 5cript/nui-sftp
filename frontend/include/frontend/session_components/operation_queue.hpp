@@ -84,6 +84,9 @@ class OperationQueue
     template <typename OperationCard>
     void cancelOperation(OperationCard const& operation);
     void cancelAll();
+    void togglePause();
+    void askBackendToCancelAll();
+    void changeAutoClean(bool doClean);
 
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onDownloadProgress(SharedData::TransferProgress const& progress);
