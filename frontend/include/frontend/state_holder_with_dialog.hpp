@@ -22,7 +22,7 @@ inline void loadState(
                 const std::string extraMessage = extraErrorMessage.value_or("");
 
                 confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = "Error loading state",
                     .text = fmt::format(
                         "An error occurred while loading the application state: {}\n{}\nDefault state will be used.",
@@ -37,7 +37,7 @@ inline void loadState(
             if (warning)
             {
                 confirmDialog->open({
-                    .state = ConfirmDialog::State::Critical,
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                     .headerText = "Warning loading state",
                     .text = fmt::format(
                         "The application state was loaded with warnings:\n{}\nPlease check your configuration.",

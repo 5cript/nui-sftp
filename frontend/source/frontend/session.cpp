@@ -280,7 +280,7 @@ void Session::onDrop(
         // confirm dialog: not implemented
         Log::warn("Dropping files on local side is not implemented.");
         impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Negative,
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "dropNotImplementedTitle"),
             .text = language->get("sessionFrontend", "dropNotImplementedText"),
             .buttons = ConfirmDialog::Button::Ok,
@@ -446,7 +446,7 @@ void Session::setupFileGrid()
         {
             Log::error("File grid error: {}", message);
             impl_->confirmDialog->open({
-                .state = ConfirmDialog::State::Negative,
+                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                 .headerText = "File Grid Error",
                 .text = message,
                 .buttons = ConfirmDialog::Button::Ok,
@@ -611,7 +611,7 @@ void Session::openLocalFilesystem()
             {
                 Log::error("Invalid response from RpcFilesystem::getHome: missing 'path'");
                 impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = "Get Home Directory Failed",
                     .text = "Invalid response from backend: missing 'path'",
                     .buttons = ConfirmDialog::Button::Ok,
@@ -660,7 +660,7 @@ void Session::onOpenSession(bool success, std::string const& info)
     if (!success)
     {
         impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Negative,
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "sessionCreationFailedHeader"),
             .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "sessionCreationFailedText")), info),
             .buttons = ConfirmDialog::Button::Ok,
@@ -711,7 +711,7 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
     {
         Log::error("Failed to open channel: {}", info);
         impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Negative,
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "channelCreationFailedHeader"),
             .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "channelCreationFailedText")), info),
             .buttons = ConfirmDialog::Button::Ok,
@@ -1146,7 +1146,7 @@ void Session::initializeLayout()
     {
         Log::error("Failed to add panel to content panel manager");
         impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Negative,
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "layoutCreationFailedHeader"),
             .text = language->get("sessionFrontend", "layoutCreationFailedText"),
             .buttons = ConfirmDialog::Button::Ok,

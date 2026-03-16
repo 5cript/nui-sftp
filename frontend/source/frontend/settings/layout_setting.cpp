@@ -69,7 +69,7 @@ Nui::ElementRenderer LayoutSetting::operator()()
                             {
                                 // Key already exists:
                                 confirmDialog_->open({
-                                    .state = ConfirmDialog::State::Negative,
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                     .headerText = language->get("settings", "layoutSetting", "addLayoutKeyErrorHeader"),
                                     .text = language->get("settings", "layoutSetting", "addLayoutKeyErrorText"),
                                     .buttons = ConfirmDialog::Button::Ok,
@@ -87,7 +87,7 @@ Nui::ElementRenderer LayoutSetting::operator()()
                             else
                             {
                                 confirmDialog_->open({
-                                    .state = ConfirmDialog::State::Negative,
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                     .headerText = language->get("settings", "layoutSetting", "saveLayoutErrorHeader"),
                                     .text = language->get("settings", "layoutSetting", "saveLayoutErrorText"),
                                     .buttons = ConfirmDialog::Button::Ok,
@@ -110,7 +110,7 @@ Nui::ElementRenderer LayoutSetting::operator()()
                     const auto keyToRemove = *selected_;
 
                     confirmDialog_->open({
-                        .state = ConfirmDialog::State::Critical,
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                         .headerText = language->get("settings", "layoutSetting", "removeLayoutKeyConfirmHeader"),
                         .text = fmt::format(
                             fmt::runtime(
@@ -119,8 +119,13 @@ Nui::ElementRenderer LayoutSetting::operator()()
                             keyToRemove
                         ),
                         .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                        .onClose = [this, keyToRemove](ConfirmDialog::Button button)
+                        .onClose = [this, keyToRemove](std::optional<ConfirmDialog::Button> optButton)
                         {
+                            if (!optButton)
+                                return;
+
+                            const auto button = *optButton;
+
                             if (button != ConfirmDialog::Button::Ok)
                                 return;
 

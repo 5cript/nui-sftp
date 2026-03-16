@@ -519,7 +519,7 @@ void Settings::save()
             if (error)
             {
                 impl_->confirmDialog->open({
-                    .state = ConfirmDialog::State::Negative,
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("settings", "errorSavingSettingsHeader"),
                     .text =
                         fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error),
@@ -718,7 +718,7 @@ Nui::ElementRenderer Settings::header()
                         impl_->events->settingsOpen = false;
                         // Warning that most settings currently require a restart:
                         impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Critical,
+                            .styleVariant = Snc::StyleVariant::Danger,
                             .headerText = language->get("settings", "settingsClosedHeader"),
                             .text = language->get("settings", "settingsClosedText"),
                             .buttons = ConfirmDialog::Button::Ok,
@@ -762,7 +762,7 @@ void Settings::addNewSession()
                     if (error)
                     {
                         impl_->confirmDialog->open({
-                            .state = ConfirmDialog::State::Negative,
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = language->get("settings", "errorSavingSettingsHeader"),
                             .text = fmt::format(
                                 fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
@@ -1064,13 +1064,18 @@ void Settings::deleteActiveSession()
 
     const auto sessionId = **impl_->activeSession;
     impl_->confirmDialog->open(
-        {.state = ConfirmDialog::State::Critical,
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
             .headerText = language->get("settings", "deleteSessionConfirmHeader"),
             .text =
                 fmt::format(fmt::runtime(language->get("settings", "deleteSessionConfirmText") + ": {}"), sessionId),
             .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-            .onClose = [this, sessionId](ConfirmDialog::Button button)
+            .onClose = [this, sessionId](std::optional<ConfirmDialog::Button> optButton)
             {
+                if (!optButton)
+                    return;
+
+                const auto button = *optButton;
+
                 if (button != ConfirmDialog::Button::Ok)
                     return;
 
@@ -1081,7 +1086,7 @@ void Settings::deleteActiveSession()
                         if (error)
                         {
                             impl_->confirmDialog->open({
-                                .state = ConfirmDialog::State::Negative,
+                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = language->get("settings", "errorSavingSettingsHeader"),
                                 .text = fmt::format(
                                     fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
@@ -1352,7 +1357,7 @@ void Settings::addGroup(
                 {
                     // Key already exists, do nothing or show a message if needed
                     impl_->confirmDialog->open({
-                        .state = ConfirmDialog::State::Critical,
+                        .styleVariant = Snc::StyleVariant::Warning,
                         .headerText = language->get("settings", "groupKeyExistsHeader"),
                         .text = language->get("settings", "groupKeyExistsText"),
                         .buttons = ConfirmDialog::Button::Ok,
@@ -1374,7 +1379,7 @@ void Settings::removeGroup(
     if (key == "default")
     {
         impl_->confirmDialog->open({
-            .state = ConfirmDialog::State::Critical,
+            .styleVariant = Snc::StyleVariant::Warning,
             .headerText = language->get("settings", "cannotDeleteDefaultGroupKeyHeader"),
             .text = language->get("settings", "cannotDeleteDefaultGroupKeyText"),
             .buttons = ConfirmDialog::Button::Ok,
@@ -1383,12 +1388,17 @@ void Settings::removeGroup(
     }
 
     impl_->confirmDialog->open({
-        .state = ConfirmDialog::State::Critical,
+        .styleVariant = Snc::StyleVariant::Warning,
         .headerText = language->get("settings", "confirmDeleteGroupKeyHeader"),
         .text = language->get("settings", "confirmDeleteGroupKeyText"),
         .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-        .onClose = [this, &currentGroupKey, &groupKeys](ConfirmDialog::Button btn)
+        .onClose = [this, &currentGroupKey, &groupKeys](std::optional<ConfirmDialog::Button> optButton)
         {
+            if (!optButton)
+                return;
+
+            const auto btn = *optButton;
+
             if (!*currentGroupKey)
                 return;
 
