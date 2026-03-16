@@ -154,7 +154,7 @@ Nui::ElementRenderer Toolbar::operator()()
         Snc::select(Snc::SelectOptions<decltype(impl_->activeTerminalEngine), decltype(impl_->terminalEngines)>{
             .activeOption = impl_->activeTerminalEngine,
             .options = impl_->terminalEngines,
-            .onChange = [this](auto const& newValue, Nui::WebApi::MouseEvent const&) {
+            .onChange = [this](auto const&, Nui::WebApi::MouseEvent const&) {
                 reloadLayouts();
             }
         }),
