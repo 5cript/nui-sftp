@@ -64,13 +64,16 @@ void ConfirmDialog::open(OpenOptions const& options)
         impl_->table.addRow({item.text});
     }
     impl_->text = options.text;
-    impl_->dialog->open({
-        .styleVariant = options.styleVariant,
-        .headerText = options.headerText,
-        .buttons = options.buttons,
-        .initialFocus = options.focusButton,
-        .onClose = options.onClose,
-    });
+    impl_->dialog->open(
+        {.styleVariant = options.styleVariant,
+            .headerText = options.headerText,
+            .buttons = options.buttons,
+            .initialFocus = options.focusButton,
+            .onClose = options.onClose,
+            .modal = true,
+            .mayCloseWithoutButton = (options.buttons & ScriptNuiComponents::Dialog::Button::Cancel) !=
+                ScriptNuiComponents::Dialog::Button::Unknown}
+    );
 }
 
 Nui::ElementRenderer ConfirmDialog::dialogBody()
