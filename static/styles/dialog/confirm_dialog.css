@@ -1,0 +1,8 @@
+.confirm-dialog-text {
+    background-color: var(--background-color-fields);
+    color: var(--color-fields);
+}
+
+.confirm-dialog {
+    --script-nui-table-cell-background: var(--background-color);
+}

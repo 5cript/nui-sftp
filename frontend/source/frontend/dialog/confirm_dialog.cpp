@@ -7,8 +7,6 @@
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/resizeable_table.hpp>
 
-#include <ui5/components/text_area.hpp>
-
 #include <script-nui-components/dialog.hpp>
 
 #include <nui/rpc.hpp>
@@ -24,16 +22,13 @@ struct ConfirmDialog::Implementation
 {
     std::string id;
     std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
-    std::function<void(Button)> onClose;
     Snc::ResizableTable table;
-    // Nui::Observed<State> state;
     Nui::Observed<std::string> text;
-    Nui::Observed<std::vector<OpenOptions::ListElement>> listItems;
+    Nui::Observed<bool> listItemsPresent{false};
 
-    Implementation(ConfirmDialog& owner, std::string id)
+    Implementation(std::string id)
         : id{std::move(id)}
         , dialog{}
-        , onClose{}
         , table{
               Snc::ResizableTable::HeaderRow{
                   // Resizeable with dynamic width:
@@ -48,7 +43,7 @@ struct ConfirmDialog::Implementation
 };
 
 ConfirmDialog::ConfirmDialog(std::string id)
-    : impl_{std::make_unique<Implementation>(*this, std::move(id))}
+    : impl_{std::make_unique<Implementation>(std::move(id))}
 {
     impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
 }
@@ -57,7 +52,7 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(ConfirmDialog);
 
 void ConfirmDialog::open(OpenOptions const& options)
 {
-    impl_->listItems = options.listItems;
+    impl_->listItemsPresent = !options.listItems.empty();
     impl_->table.clear();
     for (const auto& item : options.listItems)
     {
@@ -83,20 +78,21 @@ Nui::ElementRenderer ConfirmDialog::dialogBody()
     using Nui::Elements::div;
 
     // clang-format off
-    return section{}(
-        ui5::textarea{
-            "value"_prop = impl_->text,
-            "readonly"_prop = true,
-            "growing"_prop = true,
-            "growMaxRows"_prop = 25,
-            style = "width: 100%; height: 200px; margin-bottom: 10px;"
-        }(),
+    return section{
+        class_ = "confirm-dialog",
+    }(
+        textarea{
+            class_ = "confirm-dialog-text",
+            "readonly"_attr = true,
+            "rows"_attr = 10,
+            style = "width: 100%; height: 200px; margin-bottom: 10px; resize: auto;"
+        }(impl_->text),
         div{
             style = "margin-bottom: 10px;"
         }(
-            observe(impl_->listItems),
-            [this]() -> Nui::ElementRenderer {
-                if (impl_->listItems.empty())
+            observe(impl_->listItemsPresent),
+            [this](bool present) -> Nui::ElementRenderer {
+                if (!present)
                     return Nui::nil();
                 return impl_->table({style = "max-height: 200px;"});
             }
