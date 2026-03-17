@@ -4,10 +4,8 @@
 #include <frontend/components/ui5/list.hpp>
 #include <log/log.hpp>
 
-#include <ui5/components/dialog.hpp>
-#include <ui5/components/button.hpp>
-#include <ui5/components/label.hpp>
-#include <ui5/components/input.hpp>
+#include <script-nui-components/dialog.hpp>
+#include <script-nui-components/text_input.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -16,16 +14,197 @@
 
 #include <utility/format_bytes.hpp>
 
+using namespace Nui::Elements;
+using namespace Nui::Attributes;
+namespace Snc = ScriptNuiComponents;
+
 struct FilePropertyDialog::Implementation
 {
     std::string id;
-    std::weak_ptr<Nui::Dom::BasicElement> dialog;
     Nui::Observed<SharedData::DirectoryEntry> entry;
+    Snc::Dialog dialog;
 
     Implementation(std::string id)
         : id{std::move(id)}
-        , dialog{}
         , entry{}
+        , dialog{
+              "FilePropertyDialog_" + [](){
+                static int counter;
+                return std::to_string(counter++);
+              }(),
+              Nui::Elements::section{
+                  class_ = "file-property-dialog-content",
+              }(Nui::Elements::div{}(
+                    Nui::Elements::span{}("Path"),
+                    Snc::textInput(
+                        Snc::TextInputOptions{
+                            .value = observe(entry)
+                                .generate(
+                                    [](SharedData::DirectoryEntry const& entry)
+                                    {
+                                        return entry.path.generic_string();
+                                    }
+                                ),
+                            .attributes =
+                                {
+                                    readOnly = true,
+                                }
+                        }
+                    )
+                ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Size"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return fmt::format(
+                                          "{} ({} bytes)",
+                                          Utility::formatBytes(entry.size),
+                                          entry.size
+                                      );
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Type"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return fileTypeToString(entry.type);
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Permissions"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return entry.lsStyleTypePermsUserGroup();
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Creation Date"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return entry.readableCreateTime();
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Last Modified"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return entry.readableMTime();
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Access Time"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return entry.readableATime();
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("User"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return fmt::format(
+                                          "{} (id: {})", entry.owner, entry.uid
+                                      );
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Group"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return fmt::format(
+                                          "{} (id: {})", entry.group, entry.gid
+                                      );
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  ),
+                  Nui::Elements::div{}(
+                      Nui::Elements::span{}("Access Control List"),
+                      Snc::textInput(Snc::TextInputOptions{
+                          .value = observe(entry)
+                              .generate(
+                                  [](SharedData::DirectoryEntry const& entry)
+                                  {
+                                      return entry.acl;
+                                  }
+                              ),
+                          .attributes =
+                              {
+                                  readOnly = true,
+                              }
+                      })
+                  )),
+          }
     {}
 };
 
@@ -38,22 +217,16 @@ void FilePropertyDialog::open(SharedData::DirectoryEntry const& entry)
     impl_->entry = entry;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        diag->val().set("open", true);
-    }
+    using namespace Snc;
+
+    impl_->dialog.open({
+        .styleVariant = StyleVariant::Regular,
+        .initialFocus = Dialog::Button::Ok,
+        .mayCloseWithoutButton = true,
+    });
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(FilePropertyDialog);
-
-void FilePropertyDialog::close()
-{
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        Log::info("Closing dialog");
-        diag->val().set("open", false);
-    }
-}
 
 Nui::ElementRenderer FilePropertyDialog::operator()()
 {
@@ -62,119 +235,6 @@ Nui::ElementRenderer FilePropertyDialog::operator()()
     using Nui::Elements::div;
 
     // clang-format off
-    return ui5::dialog{
-        id = "FilePropertyDialog_" + impl_->id,
-        "state"_prop = "Information",
-        "headerText"_prop = observe(impl_->entry).generate([this](){
-            return "Properties of " + impl_->entry.value().path.filename().generic_string();
-        }),
-        reference = impl_->dialog,
-    }(
-        section{
-            class_ = "file-property-dialog-content",
-        }(
-            div{}(
-                ui5::label{}("Path"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().path.generic_string();
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Size"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return fmt::format("{} ({} bytes)", Utility::formatBytes(impl_->entry.value().size), impl_->entry.value().size);
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Type"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return fileTypeToString(impl_->entry.value().type);
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Permissions"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().lsStyleTypePermsUserGroup();
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Creation Date"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().readableCreateTime();
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Last Modified"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().readableMTime();
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Access Time"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().readableATime();
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("User"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return fmt::format("{} (id: {})", impl_->entry.value().owner, impl_->entry.value().uid);
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Group"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return fmt::format("{} (id: {})", impl_->entry.value().group, impl_->entry.value().gid);
-                    }),
-                    "readonly"_prop = true,
-                }()
-            ),
-            div{}(
-                ui5::label{}("Access Control List"),
-                ui5::input{
-                    "value"_prop = observe(impl_->entry).generate([this]() {
-                        return impl_->entry.value().acl;
-                    }),
-                    "readonly"_prop = true,
-                }()
-            )
-        ),
-        div{
-            "slot"_attr = "footer",
-            style="display: flex; justify-content: flex-end; width: 100%; align-items: center; gap: 10px; padding: 10px;"
-        }(
-            div{style = "flex: 1;"}(),
-            ui5::button{
-                "click"_event = [this](Nui::val) {
-                    close();
-                }
-            }("Ok")
-        )
-    );
+    return impl_->dialog();
     // clang-format on
 }

@@ -1,6 +1,6 @@
 .file-property-dialog-content {
     display: grid;
-    grid-template-columns: min-content 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 8px 1rem;
 
     /* direct descendant divs do subgrid */
@@ -9,7 +9,7 @@
         grid-template-columns: subgrid;
         gap: inherit;
 
-        >ui5-input {
+        >input {
             width: 400px;
         }
     }
