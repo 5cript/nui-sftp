@@ -18,9 +18,6 @@ class FilePropertyDialog
     void open(SharedData::DirectoryEntry const& entry);
 
   private:
-    void close();
-
-  private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
 };
