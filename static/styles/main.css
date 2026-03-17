@@ -8,9 +8,10 @@
 @import "./operation_queue.css";
 @import "./icon_panel.css";
 @import "./settings.css";
-@import "./new_session_dialog.css";
-@import "./file_property_dialog.css";
-@import "./multi_input_dialog.css";
+@import "./dialog/new_session_dialog.css";
+@import "./dialog/file_property_dialog.css";
+@import "./dialog/multi_input_dialog.css";
+@import "./dialog/confirm_dialog.css";
 @import "../../../styles/nui-file-explorer/file_grid.css";
 @import "../../../styles/nui-file-explorer/dropdown_menu.css";
 @import "../../../styles/5cript-nui-components/button.css";
