@@ -1,5 +1,6 @@
 .nui-file-grid-head-dropdown-text {
     padding: 10px 20px;
+    font-size: var(--nui-file-grid-dropdown-content-font-size);
 }
 
 .nui-file-grid-head-dropdown {

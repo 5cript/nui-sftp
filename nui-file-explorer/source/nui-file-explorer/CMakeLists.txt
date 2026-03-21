@@ -23,6 +23,8 @@ set_source_files_properties(
 
 target_link_libraries(
     nui-file-explorer
+    PUBLIC
+        script-nui-components
     PRIVATE
         nui-frontend
         utility
@@ -38,15 +40,15 @@ target_include_directories(
 
 if (NUI_FILE_EXPLORER_MEMORY64)
     if (WIN32)
-        target_compile_options(nui-file-explorer PRIVATE 
+        target_compile_options(nui-file-explorer PRIVATE
             -sMEMORY64=1
         )
-        target_link_options(nui-file-explorer PRIVATE 
+        target_link_options(nui-file-explorer PRIVATE
             -sMEMORY64=1
         )
     else()
         # No support for WASM64 in webkit
-        target_link_options(nui-file-explorer PRIVATE 
+        target_link_options(nui-file-explorer PRIVATE
             -sWASM_BIGINT=1
         )
     endif()

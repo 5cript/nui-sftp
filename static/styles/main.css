@@ -52,10 +52,36 @@
     --color-fields: var(--color);
     --border-color-fields: #505050;
     --foreground-border-color: #505050;
+    /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
+    --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
 
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;
     --script-nui-components-switch-thumb-color: var(--color-fields);
+
+    --nui-file-grid-background-color: var(--background-color);
+    --nui-file-grid-item-highlight: rgba(255, 255, 255, 0.3);
+    --nui-file-grid-border-color: var(--border-color-fields);
+    --nui-file-grid-filter-background: var(--darker-background);
+    --nui-file-grid-filter-color: var(--color);
+    --nui-file-grid-border-radius: 0px;
+    --nui-file-grid-arrow-color: var(--color);
+    --nui-file-grid-head-font-size: var(--font-size);
+    --nui-file-grid-button-background: var(--background-color);
+    --nui-file-grid-border-width: 1px;
+    --nui-file-grid-dropdown-background: var(--darker-background);
+    --nui-file-grid-dropdown-content-background: var(--darker-background);
+    --nui-file-grid-dropdown-color: var(--color);
+    --nui-file-grid-dropdown-item-color: var(--color);
+    --nui-file-grid-dropdown-content-font-size: var(--font-size);
+    --nui-file-grid-context-menu-background: var(--background-color);
+    --nui-file-grid-table-header-background: var(--background-color);
+    --nui-file-grid-table-header-color: var(--color);
+    --nui-file-grid-table-cell-background: var(--background-color);
+    --nui-file-grid-table-cell-color: var(--color);
+    --nui-file-grid-context-menu-item-hover-background: var(--background-color);
+    --nui-file-grid-context-menu-item-hover-color: var(--color);
+    --nui-file-grid-table-sort-highlight: var(--color);
 }
 
 :root[data-theme="light"] {
@@ -84,33 +110,6 @@ body {
     margin: 0;
     background-color: var(--background-color);
     color: var(--color);
-    /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
-    --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
-
-    --nui-file-grid-background-color: var(--background-color);
-    --nui-file-grid-item-highlight: rgba(255, 255, 255, 0.3);
-    --nui-file-grid-border-color: var(--border-color-fields);
-    --nui-file-grid-filter-background:
-        color-mix(in srgb, var(--background-color) 80%, white 20%);
-    --nui-file-grid-filter-color: var(--color);
-    --nui-file-grid-border-radius: 8px;
-    --nui-file-grid-arrow-color: var(--color);
-    --nui-file-grid-head-font-size: var(--font-size);
-    --nui-file-grid-button-background: var(--background-color);
-    --nui-file-grid-border-width: 1px;
-    --nui-file-grid-dropdown-background: var(--background-color);
-    --nui-file-grid-dropdown-content-background: var(--background-color);
-    --nui-file-grid-dropdown-color: var(--color);
-    --nui-file-grid-dropdown-item-color: var(--color);
-    --nui-file-grid-dropdown-content-font-size: var(--font-size);
-    --nui-file-grid-context-menu-background: var(--background-color);
-    --nui-file-grid-table-header-background: var(--background-color);
-    --nui-file-grid-table-header-color: var(--color);
-    --nui-file-grid-table-cell-background: var(--background-color);
-    --nui-file-grid-table-cell-color: var(--color);
-    --nui-file-grid-context-menu-item-hover-background: var(--background-color);
-    --nui-file-grid-context-menu-item-hover-color: var(--color);
-    --nui-file-grid-table-sort-highlight: var(--color);
 
     --opq-card: #0b1220;
     --opq-muted: #98a2b3;
