@@ -99,6 +99,9 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
                     fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName))
                 );
             },
+            .makeId = [](){
+                return Nui::val::global("generateId")().as<std::string>();
+            }
         })
     );
     // clang-format on

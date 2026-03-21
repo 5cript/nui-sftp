@@ -128,6 +128,11 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
                         {
                             return Nui::Elements::span{}(option);
                         },
+                        .makeId =
+                            []()
+                        {
+                            return Nui::val::global("generateId")().as<std::string>();
+                        },
                         .dontUpdateValue = true
                     }
                 ),
