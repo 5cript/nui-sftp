@@ -40,11 +40,11 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
 
                     return fragment(
                         span{}(std::move(title).value()),
-                        ScriptNuiComponents::switch_(ScriptNuiComponents::SwitchOptions<decltype(*engagedStatus)>{
+                        ScriptNuiComponents::switch_({
                             .isChecked = *engagedStatus,
                             .onChange = [onChange = std::move(onChange)](bool, Nui::WebApi::MouseEvent const&){
                                 onChange();
-                            }
+                            },
                         })
                     );
                 }()

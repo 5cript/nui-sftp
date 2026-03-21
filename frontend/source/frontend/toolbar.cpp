@@ -167,7 +167,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 }))
             }
         }),
-        Snc::button(Snc::ButtonOptions<std::string>{
+        Snc::button({
             .text = language->get("toolbar", "newSession"),
             .icon = GeneratedSvgs::add(),
             .attributes = {
@@ -177,7 +177,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 },
             },
         }),
-        Snc::button(Snc::ButtonOptions<std::string>{
+        Snc::button({
             .text = language->get("toolbar", "endSession"),
             .icon = GeneratedSvgs::decline(),
             .attributes = {
@@ -194,7 +194,7 @@ Nui::ElementRenderer Toolbar::operator()()
         div{
             style = "flex-grow: 1"
         }(),
-        Snc::button(Snc::ButtonOptions<std::string>{
+        Snc::button({
             .icon = GeneratedSvgs::settings(),
             .attributes = {
                 onClick = [this]() {

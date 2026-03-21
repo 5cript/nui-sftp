@@ -116,18 +116,17 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
             div{
                 class_ = "setting-path"
             }(
-                ScriptNuiComponents::textInput(
-                    ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
+                ScriptNuiComponents::textInput({
                         .value = stateWithInheritance_,
                         .attributes = {observeEngagedToBool(disabled)},
                         .onChange = [this](auto const& state, Nui::WebApi::Event const&){
                             this->value(std::filesystem::path{state});
                             onChange_();
                         },
-                        .dontUpdateValue = true
+                        .dontUpdateValue = true,
                     }
                 ),
-                ScriptNuiComponents::button(ScriptNuiComponents::ButtonOptions<std::string>{
+                ScriptNuiComponents::button({
                     .text = language->get("settings", "pathSetting", "browseButton"),
                     .attributes = {
                         observeEngagedToBool(disabled),

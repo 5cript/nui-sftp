@@ -38,8 +38,7 @@ class BoolSetting : public Setting<Disengageable, bool>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ScriptNuiComponents::switch_(
-                ScriptNuiComponents::SwitchOptions<decltype(stateWithInheritance_)>{
+            ScriptNuiComponents::switch_({
                     .isChecked = stateWithInheritance_,
                     .attributes = {
                         observeEngagedToBool(disabled)

@@ -897,7 +897,7 @@ Nui::ElementRenderer OperationQueue::operator()()
         header{
             class_ = "opq-controls"
         }(
-            Snc::button(Snc::ButtonOptions<decltype(impl_->pausedText)>{
+            Snc::button({
                 .text = impl_->pausedText,
                 .icon = [this]() -> Nui::ElementRenderer {
                     return fragment(
@@ -915,8 +915,8 @@ Nui::ElementRenderer OperationQueue::operator()()
                     }
                 },
             }),
-            Snc::button(Snc::ButtonOptions<std::string>{
-                .text = language->get("operationQueue", "cancelAll"),
+            Snc::button({
+                .text = language->getObserved("operationQueue", "cancelAll"),
                 .attributes = {
                     onClick = [this](){
                         askBackendToCancelAll();
@@ -943,12 +943,12 @@ Nui::ElementRenderer OperationQueue::operator()()
         div{
             class_ = "opq-footer"
         }(
-            Snc::switch_(Snc::SwitchOptions<decltype(impl_->autoClean)>{
+            Snc::switch_({
                 .isChecked = impl_->autoClean,
                 .onChange = [this](bool doClean, auto const&) {
                     changeAutoClean(doClean);
                 },
-                .dontUpdateValue = true
+                .dontUpdateValue = true,
             }),
             div{
                 style = "font-size: 14px; color: var(--muted);"

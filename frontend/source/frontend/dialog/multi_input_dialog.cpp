@@ -108,8 +108,8 @@ Nui::ElementRenderer MultiInputDialog::operator()()
 
                 return div{class_ = "multi-input-dialog-field"}(
                     span{}(field.label),
-                    Snc::textInput(
-                        Snc::TextInputOptions<std::string>{
+                    Snc::textInput({
+                            .value = "",
                             .attributes = {
                                 "data-key"_attr = field.key,
                                 id = fmt::format("MultiInputDialogInput_{}_{}", impl_->id, field.key),
@@ -151,7 +151,7 @@ Nui::ElementRenderer MultiInputDialog::operator()()
                                 Nui::WebApi::Console::log("Input changed for field {}: {}", field.key, value);
                                 impl_->values[field.key] = value;
                             },
-                            .dontUpdateValue = true
+                            .dontUpdateValue = true,
                         }
                     )
                 );
@@ -164,8 +164,7 @@ Nui::ElementRenderer MultiInputDialog::operator()()
                 dialogButtonContainerKeydown(event);
             },
         }(
-            Snc::button(
-                Snc::ButtonOptions<std::string>{
+            Snc::button({
                     .text = "OK",
                     .attributes = std::vector<Nui::Attribute>{
                         onClick = [this](Nui::WebApi::Event event){
@@ -178,8 +177,7 @@ Nui::ElementRenderer MultiInputDialog::operator()()
                     .styleVariant = Snc::StyleVariant::Primary,
                 }
             ),
-            Snc::button(
-                Snc::ButtonOptions<std::string>{
+            Snc::button({
                     .text = "Cancel",
                     .attributes = std::vector<Nui::Attribute>{
                         onClick = [this](Nui::WebApi::Event event){

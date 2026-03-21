@@ -51,7 +51,7 @@ class ColorSetting : public Setting<Disengageable, std::string>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ScriptNuiComponents::colorPicker(ScriptNuiComponents::ColorPickerOptions<decltype(stateWithInheritance_)>{
+            ScriptNuiComponents::colorPicker({
                 .value = stateWithInheritance_,
                 .attributes = {
                     observeEngagedToBool(disabled),

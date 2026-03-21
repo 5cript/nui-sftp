@@ -199,20 +199,18 @@ class Setting
         else
         {
             return Nui::Elements::fragment(
-                ScriptNuiComponents::switch_(
-                    ScriptNuiComponents::SwitchOptions<decltype(engaged_)>{
-                        .isChecked = engaged_,
-                        .onChange =
-                            [this](bool, Nui::WebApi::MouseEvent const&)
-                        {
-                            Nui::WebApi::Console::log(
-                                "Setting: Engaged state changed to {}, triggering onChange.", engaged_.value()
-                            );
-                            updateStateWithInheritance();
-                            onChange_();
-                        }
-                    }
-                ),
+                ScriptNuiComponents::switch_({
+                    .isChecked = engaged_,
+                    .onChange =
+                        [this](bool, Nui::WebApi::MouseEvent const&)
+                    {
+                        Nui::WebApi::Console::log(
+                            "Setting: Engaged state changed to {}, triggering onChange.", engaged_.value()
+                        );
+                        updateStateWithInheritance();
+                        onChange_();
+                    },
+                }),
                 div{class_ = "setting-disengageable"}(
                     span{
                         style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
@@ -258,20 +256,18 @@ class Setting
         using namespace Nui::Elements;
         using namespace std::string_literals;
 
-        return ScriptNuiComponents::button(
-            ScriptNuiComponents::ButtonOptions<std::string>{
-                .text = ""s,
-                .icon = GeneratedSvgs::refresh(),
-                .attributes =
-                    {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
-                        onClick =
-                            [this]()
-                        {
-                            resetAction_();
-                        }},
-                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
-            }
-        );
+        return ScriptNuiComponents::button({
+            .text = ""s,
+            .icon = GeneratedSvgs::refresh(),
+            .attributes =
+                {alt = language->getObserved("settings", "setting", "resetToDefaultValue"),
+                    onClick =
+                        [this]()
+                    {
+                        resetAction_();
+                    }},
+            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+        });
     }
 
     Nui::ElementRenderer help()
@@ -282,21 +278,19 @@ class Setting
 
         const auto idString = Ids::generateId().id();
 
-        return ScriptNuiComponents::button(
-            ScriptNuiComponents::ButtonOptions<std::string>{
-                .text = ""s,
-                .icon = GeneratedSvgs::questionmark(),
-                .attributes =
-                    {alt = helpText_,
-                        onClick =
-                            [this]()
-                        {
-                            // TODO: Replace with proper popover instead of alert
-                            Nui::val::global("alert")(helpText_.value());
-                        }},
-                .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
-            }
-        );
+        return ScriptNuiComponents::button({
+            .text = ""s,
+            .icon = GeneratedSvgs::questionmark(),
+            .attributes =
+                {alt = helpText_,
+                    onClick =
+                        [this]()
+                    {
+                        // TODO: Replace with proper popover instead of alert
+                        Nui::val::global("alert")(helpText_.value());
+                    }},
+            .styleVariant = ScriptNuiComponents::StyleVariant::Transparent,
+        });
     }
 
     bool valueIsValid() const
