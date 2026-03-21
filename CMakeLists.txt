@@ -86,22 +86,6 @@ if (EMSCRIPTEN)
     add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components")
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
-
-    message(STATUS "Copy from ${CMAKE_CURRENT_BINARY_DIR}/bin to ${CMAKE_CURRENT_BINARY_DIR}/../frontend")
-    add_custom_command(
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/../frontend/index.html" "${CMAKE_CURRENT_BINARY_DIR}/../frontend/index.js"
-        # Delete previous output
-        COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/../frontend"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_BINARY_DIR}/bin" "${CMAKE_CURRENT_BINARY_DIR}/../frontend"
-        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/bin/index.html"
-    )
-
-    add_custom_target(
-        copy_web_files ALL
-        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/../frontend/index.html" "${CMAKE_CURRENT_BINARY_DIR}/../frontend/index.js"
-        COMMENT "Copying web files to frontend directory..."
-    )
-    add_dependencies(copy_web_files ${PROJECT_NAME})
 else()
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/resource_copy.cmake")
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/copy_styles_to_build_dir.cmake")
@@ -127,6 +111,14 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/static/assets/language.yaml" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../assets/language.yaml"
         VERBATIM
     )
+
+    # Copy module bin to frontend.
+    if (NOT OMIT_FRONTEND_BUILD)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../frontend"
+            VERBATIM
+        )
+    endif()
 
     if (NUI_SFTP_ENABLE_TESTING)
         include(./_cmake/dependencies/gtest.cmake)
