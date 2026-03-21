@@ -35,6 +35,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
     using SettingBase::onChange_;
     using SettingBase::reset;
     using SettingBase::help;
+    using SettingBase::value;
     using SettingBase::observeEngagedToBool;
 
     PathSetting(
@@ -66,13 +67,26 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
                 },
                 [this](std::optional<std::vector<std::filesystem::path>> results)
                 {
+                    // Print results:
+                    if (results)
+                    {
+                        for (const auto& path : *results)
+                        {
+                            Log::info("Selected path: {}", path.string());
+                        }
+                    }
+                    else
+                    {
+                        Log::info("Dialog was closed without selecting a path.");
+                    }
+
                     if (!results) // The dialog was closed without selecting a file
                         return;
                     if (results->empty()) // nothing was selected, but the dialog was closed with ok.
                         return;
 
                     // Use the first selected path
-                    state_ = results->at(0).string();
+                    SettingBase::value(results->at(0));
                     Nui::globalEventContext.executeActiveEventsImmediately();
                     onChange_();
                 }
@@ -96,7 +110,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
                         return;
 
                     // Use the first selected path
-                    state_ = results->at(0).string();
+                    SettingBase::value(results->at(0));
                     Nui::globalEventContext.executeActiveEventsImmediately();
                     onChange_();
                 }
@@ -120,7 +134,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
                         .value = stateWithInheritance_,
                         .attributes = {observeEngagedToBool(disabled)},
                         .onChange = [this](auto const& state, Nui::WebApi::Event const&){
-                            this->value(std::filesystem::path{state});
+                            SettingBase::value(std::filesystem::path{state});
                             onChange_();
                         },
                         .dontUpdateValue = true,
