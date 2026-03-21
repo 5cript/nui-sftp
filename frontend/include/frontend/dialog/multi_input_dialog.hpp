@@ -34,8 +34,7 @@ class MultiInputDialog
     void open(OpenOptions const& options);
 
   private:
-    void closeDialog(std::optional<std::unordered_map<std::string, std::string>> const& values);
-    void confirm();
+    Nui::ElementRenderer dialogBody();
 
   private:
     struct Implementation;
