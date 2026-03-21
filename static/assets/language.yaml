@@ -10,6 +10,11 @@ en_US:
     none: "None"
     cancel: "Cancel"
     items: "Items"
+  newSessionDialog:
+    title: "Create New Session"
+    validationMessage: "Please fill in all required fields."
+    iconLabel: "Session Icon:"
+    sessionNameLabel: "Session Name:"
   operationQueue:
     pause: "Pause"
     continue: "Continue"

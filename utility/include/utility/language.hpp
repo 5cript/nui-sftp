@@ -4,6 +4,7 @@
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
+#include <nui/event_system/listen.hpp>
 
 #include <nlohmann/json.hpp>
 #include <fmt/format.h>
@@ -100,6 +101,17 @@ class LanguageProvider
             return *fallback;
         }
         return *res;
+    }
+
+    auto listenToLanguageChange(std::function<void(std::string const&)> onChange) const
+    {
+        return Nui::smartListen(
+            events_->onLanguageChanged,
+            [onChange = std::move(onChange)](std::string const& newLang)
+            {
+                onChange(newLang);
+            }
+        );
     }
 
   private:
