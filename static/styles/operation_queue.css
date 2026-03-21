@@ -61,10 +61,6 @@ header.opq-controls {
     gap: 12px;
     padding: 8px;
     border-top: 1px solid var(--opq-border);
-
-    &>ui5-switch::part(slider) {
-        height: 24px;
-    }
 }
 
 .opq-card {
@@ -176,8 +172,8 @@ header.opq-controls {
     position: absolute;
     z-index: 5;
     border: solid 2px var(--opq-accent);
-    background-color: var(--brighterBackground);
-    color: var(--subduedText);
+    background-color: var(--brighter-background);
+    color: var(--subdued-text);
     padding: 5px;
     border-radius: 8px;
 }
@@ -234,8 +230,8 @@ header.opq-controls {
     position: absolute;
     z-index: 5;
     border: solid 2px var(--opq-accent);
-    background-color: var(--brighterBackground);
-    color: var(--subduedText);
+    background-color: var(--brighter-background);
+    color: var(--subdued-text);
     padding: 5px;
     border-radius: 8px;
 }

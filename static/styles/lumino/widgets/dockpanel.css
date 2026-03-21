@@ -26,7 +26,7 @@
 
 .lm-DockPanel-handle {
     z-index: 2;
-    background-color: var(--resizeHandleColor);
+    background-color: var(--resize-handle-color);
 }
 
 .lm-DockPanel-handle.lm-mod-hidden {

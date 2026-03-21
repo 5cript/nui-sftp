@@ -1,3 +1,4 @@
+#include <frontend/icon_from_name.hpp>
 #include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/session_icon_options.hpp>
@@ -82,7 +83,22 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
         span{}(language->getObserved("newSessionDialog", "iconLabel")),
         Snc::select(Snc::SelectOptions<decltype(impl_->icon), std::vector<std::string>>{
             .activeOption = impl_->icon,
-            .options = std::move(iconOptions)
+            .options = std::move(iconOptions),
+            .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
+            {
+                return div{style = "display: flex; align-items: center; gap: 5px;"}(
+                    observe(stateful),
+                    [](std::string const& iconName){
+                        return fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName));
+                    }
+                );
+            },
+            .elementRenderer = [](std::string const& iconName) -> Nui::ElementRenderer
+            {
+                return div{style = "display: flex; align-items: center; gap: 5px;"}(
+                    fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName))
+                );
+            },
         })
     );
     // clang-format on

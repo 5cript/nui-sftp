@@ -1,7 +1,4 @@
 #include <frontend/dialog/file_property_dialog.hpp>
-#include <frontend/components/ui5/text.hpp>
-#include <ui5/components/text_area.hpp>
-#include <frontend/components/ui5/list.hpp>
 #include <log/log.hpp>
 
 #include <script-nui-components/dialog.hpp>

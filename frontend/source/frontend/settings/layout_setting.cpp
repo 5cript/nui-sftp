@@ -35,7 +35,7 @@ Nui::ElementRenderer LayoutSetting::operator()()
     return div{class_ = "layout-setting-container"}
     (
         span{
-            style = "color: var(--sapTextColor); margin-right: 10px"
+            style = "color: var(--color); margin-right: 10px"
         }(language->getObserved("settings", "layoutSetting", "layoutKeysLabel")),
         div{class_ = "layout-setting-controls"}(
             Snc::select(Snc::SelectOptions<decltype(selected_), decltype(state_)>{

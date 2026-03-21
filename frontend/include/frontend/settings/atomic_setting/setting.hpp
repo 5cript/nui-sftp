@@ -193,7 +193,7 @@ class Setting
         if constexpr (!Disengageable)
         {
             return div{class_ = "setting-fixed"}(span{
-                style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
+                style = "color: var(--color); margin-right: 10px", "showColon"_prop = true
             }(std::forward<decltype(label)>(label)));
         }
         else
@@ -213,10 +213,10 @@ class Setting
                 }),
                 div{class_ = "setting-disengageable"}(
                     span{
-                        style = "color: var(--sapTextColor); margin-right: 10px", "showColon"_prop = true
+                        style = "color: var(--color); margin-right: 10px", "showColon"_prop = true
                     }(std::forward<decltype(label)>(label)),
                     span{
-                        style = "color: var(--subduedText);",
+                        style = "color: var(--subdued-text);",
                     }(observe(engaged_, inheritanceStatus_)
                             .generate(
                                 [](bool engaged, InheritanceStatus status)

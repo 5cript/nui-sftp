@@ -21,13 +21,13 @@
     min-width: 0;
     min-height: 0;
     align-items: flex-end;
-    border-bottom: 1px solid var(--sapTextColor);
+    border-bottom: 1px solid var(--color);
 }
 
 .lm-TabBar-tab {
     padding: 0px 10px;
-    background: var(--sapBackgroundColor);
-    border: 1px solid var(--sapTextColor);
+    background: var(--background-color);
+    border: 1px solid var(--color);
     border-radius: 4px 4px 0 0;
     border-bottom: none;
     font:
@@ -52,11 +52,11 @@
 }
 
 .lm-TabBar-tab.lm-mod-current {
-    background: var(--sapBackgroundColor);
+    background: var(--background-color);
 }
 
 .lm-TabBar-tab:hover:not(.lm-mod-current) {
-    background: var(--brighterBackground);
+    background: var(--brighter-background);
 }
 
 .lm-TabBar-tab:first-child {
@@ -81,7 +81,7 @@
 
 .lm-TabBar .lm-TabBar-addButton {
     padding: 0px 6px;
-    border-bottom: 1px solid var(--sapTextColor);
+    border-bottom: 1px solid var(--color);
 }
 
 .lm-TabBar-tab.lm-mod-closable>.lm-TabBar-tabCloseIcon:before {

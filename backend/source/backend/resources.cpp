@@ -37,14 +37,6 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
 
     const auto path = [&]() -> std::optional<std::filesystem::path>
     {
-        // UI5 Themes.
-        // TODO: Remove
-        if (endsWith("css_variables.css"))
-        {
-            return resourceDir / "themes" / std::filesystem::path{urlPathString}.parent_path().filename() /
-                "css_variables.css";
-        }
-
         // make path relative to / to avoid directory traversal
         if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
         {

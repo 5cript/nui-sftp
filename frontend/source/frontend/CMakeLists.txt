@@ -5,7 +5,6 @@ add_npm_install(
     NPM_EXECUTABLE "${NUI_NPM}"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     INSTALL_ARGS ${NUISCP_NPM_INSTALL_ARGS}
-    OUTPUTS ${UI5_SVGS_FULLPATH}
 )
 
 target_sources(
@@ -120,8 +119,6 @@ nui_prepare_emscripten_target(
         ${DEPENDANT_COMPILE_OPTIONS}
     CXX_STANDARD
         23
-    NPM_EXTRA_OUTPUTS
-        ${UI5_SVGS_FULLPATH}
     OBSERVED_BUNDLE_FILES
         "${CMAKE_SOURCE_DIR}/static/index.html"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
@@ -202,7 +199,6 @@ target_link_libraries(
         core-target
         nui-frontend
         nui-file-explorer
-        ui5
         roar-include-only
         shared-data
         utility

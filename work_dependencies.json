@@ -2,13 +2,13 @@
     "sources": [
         {
             "url": "https://github.com/5cript/work-dependency-cloner.git",
-            "rev": "6451b7805ab9d327425f4f86a155e94870a570dd",
+            "rev": "5c8b8457fddf9e1df8544e2df70acea36fd23559",
             "branch": "main",
             "name": "work-dependency-cloner"
         },
         {
             "url": "https://github.com/NuiCpp/Nui.git",
-            "rev": "b235c47e2bd849607eb6e6f2e9159ac1d9080657",
+            "rev": "562c36a58020980f1e4814f9a5716f010f34ee7f",
             "branch": "main",
             "name": "Nui"
         },
@@ -31,14 +31,8 @@
             "name": "traits"
         },
         {
-            "url": "https://github.com/NuiCpp/ui5.git",
-            "rev": "a514318f9110f7e77574abd283ef0c5ecf634f40",
-            "branch": "feat/modernization",
-            "name": "ui5"
-        },
-        {
             "url": "https://github.com/5cript/5cript-nui-components.git",
-            "rev": "9ad336990c249e8a13517e113a15f77a8a6d109b",
+            "rev": "dbc91218a45016b6acc21c59a83c31823ca8316b",
             "branch": "main",
             "name": "5cript-nui-components"
         },

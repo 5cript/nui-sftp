@@ -64,12 +64,12 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
     &.uncollapsed {
-        /*box-shadow: inset 0 -4px 8px color-mix(in srgb, var(--sapBrandColor) 30%, transparent 70%);*/
+        /*box-shadow: inset 0 -4px 8px color-mix(in srgb, var(--theme-color) 30%, transparent 70%);*/
     }
 
     &.collapsed {
         background-color: color-mix(in srgb, #404040 50%, black 50%);
-        /* border: 1px solid var(--brighterBackground); */
+        /* border: 1px solid var(--brighter-background); */
     }
 
     position: relative;
@@ -104,7 +104,7 @@
     letter-spacing: 0.5px;
     text-transform: uppercase;
     font-size: 0.75rem;
-    color: var(--sapBrandColor, #90d26d);
+    color: var(--theme-color, #90d26d);
 }
 
 .settings-group-header-collapse-indicator {
@@ -114,7 +114,7 @@
     width: 16px;
 
     & path {
-        fill: var(--color);
+        fill: var(--theme-color);
     }
 }
 
@@ -122,8 +122,8 @@
     grid-column: span 5;
     margin-bottom: 4px;
     padding: 4px 8px;
-    background-color: var(--sapBackgroundColor);
-    border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
+    background-color: var(--background-color);
+    border-bottom: 1px solid var(--foreground-border-color);
     font-size: 0.9rem;
     color: gray;
     display: flex;
@@ -153,7 +153,7 @@
     grid-template-columns: max-content max-content 1fr max-content max-content;
     row-gap: 4px;
     margin: 0 16px;
-    border: 1px solid var(--sapContent_ForegroundBorderColor);
+    border: 1px solid var(--foreground-border-color);
     border-radius: 16px;
     padding: 8px 0;
 
