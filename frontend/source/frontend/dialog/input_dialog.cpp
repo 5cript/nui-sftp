@@ -4,9 +4,8 @@
 
 #include <script-nui-components/button.hpp>
 
-#include <ui5/components/dialog.hpp>
-#include <ui5/components/input.hpp>
-#include <ui5/components/label.hpp>
+#include <script-nui-components/dialog.hpp>
+#include <script-nui-components/text_input.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -16,135 +15,98 @@
 struct InputDialog::Implementation
 {
     std::string id;
-    std::weak_ptr<Nui::Dom::BasicElement> dialog;
-    std::weak_ptr<Nui::Dom::BasicElement> input;
+    std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
+    Nui::Observed<std::string> inputText;
     std::function<void(std::optional<std::string> const&)> onConfirm;
-    Nui::Observed<std::string> headerText;
-    Nui::Observed<bool> isPassword;
-    Nui::Observed<std::string> whatFor;
+    std::string headerText{};
+    Nui::Observed<bool> isPassword{false};
+    Nui::Observed<std::string> whatFor{};
 
     Implementation(std::string id)
         : id{std::move(id)}
         , dialog{}
-        , input{}
         , onConfirm{}
     {}
 };
 
 InputDialog::InputDialog(std::string id)
     : impl_{std::make_unique<Implementation>(id)}
-{}
+{
+    impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
+}
+
+Nui::ElementRenderer InputDialog::dialogBody()
+{
+    namespace Snc = ScriptNuiComponents;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // clang-format off
+    return section{class_ = "input-dialog"}(
+        span{}(
+            observe(impl_->whatFor),
+            [this]() -> Nui::ElementRenderer {
+                if (impl_->whatFor.empty())
+                    return Nui::nil();
+                return Nui::Elements::text{fmt::format("{}:", impl_->whatFor.value())}();
+            }
+        ),
+        Snc::textInput({
+            .value = impl_->inputText,
+            .attributes = {
+                id = fmt::format("{}-input", impl_->id),
+                type = observe(impl_->isPassword).generate([this](){
+                    return impl_->isPassword.value() ? "Password" : "Text";
+                }),
+                "keyup"_event = [this](Nui::WebApi::KeyboardEvent event){
+                    dialogButtonContainerKeydown(event);
+                    if (event.key() == "Enter") {
+                        impl_->dialog->close();
+                        impl_->onConfirm(impl_->inputText.value());
+                    }
+                }
+            }
+        })
+    );
+    // clang-format on
+}
 
 void InputDialog::open(OpenOptions const& options)
 {
+    namespace Snc = ScriptNuiComponents;
+
     impl_->onConfirm = options.onConfirm;
     impl_->headerText = options.headerText;
     impl_->isPassword = options.isPassword;
     impl_->whatFor = options.whatFor;
+    impl_->inputText.clear();
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    if (auto input = impl_->input.lock())
-    {
-        input->val().set("value", "");
-    }
+    impl_->dialog->open({
+        .headerText = impl_->headerText,
+        .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,
+        .initialFocus = fmt::format("{}-input", impl_->id),
+        .onClose =
+            [this](std::optional<Snc::Dialog::Button> button)
+        {
+            if (!impl_->onConfirm)
+                return;
 
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        diag->val().set("header-text", options.whatFor + ": " + options.prompt);
-        diag->val().set("open", true);
-    }
+            if (button && *button == Snc::Dialog::Button::Ok)
+                impl_->onConfirm(impl_->inputText.value());
+            else
+                impl_->onConfirm(std::nullopt);
+        },
+        .modal = true,
+        .mayCloseWithoutButton = false,
+    });
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(InputDialog);
 
-void InputDialog::closeDialog(std::optional<std::string> const& value)
-{
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        Log::info("Closing dialog");
-        diag->val().set("open", false);
-    }
-    if (impl_->onConfirm)
-        impl_->onConfirm(value);
-}
-
-void InputDialog::confirm()
-{
-    Log::info("Confirm clicked");
-    if (auto input = impl_->input.lock())
-    {
-        closeDialog(input->val()["value"].as<std::string>());
-        input->val().set("value", "");
-    }
-    else
-        closeDialog(std::nullopt);
-}
-
 Nui::ElementRenderer InputDialog::operator()()
 {
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-
-    // clang-format off
-    return ui5::dialog{
-        id = "InputDialog_" + impl_->id,
-        "headerText"_prop = impl_->headerText,
-        reference = impl_->dialog,
-        "initialFocus"_prop = "InputDialogInput_" + impl_->id,
-    }(
-        section{class_ = "prompter-form"}(
-            ui5::label{id = "InputDialogLabel_" + impl_->id, "for"_prop = "InputDialogInput_" + impl_->id}(
-                observe(impl_->whatFor),
-                [this](){
-                    return impl_->whatFor.value() + ":";
-                }
-            ),
-            ui5::input{
-                id = "InputDialogInput_" + impl_->id,
-                "type"_prop = observe(impl_->isPassword).generate([this](){
-                    if (impl_->isPassword.value())
-                        return "Password";
-                    return "Text";
-                }),
-                reference = impl_->input,
-                "keyup"_event = [this](Nui::val event){
-                    if (event["key"].as<std::string>() == "Enter")
-                        confirm();
-                }
-            }()
-        ),
-        div{
-            "slot"_attr = "footer",
-            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px; padding: 5px",
-            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
-                dialogButtonContainerKeydown(event);
-            },
-        }(
-            ScriptNuiComponents::button({
-                .text = "Ok",
-                .attributes = std::vector<Nui::Attribute>{
-                    onClick = [this](Nui::WebApi::Event event){
-                        event.stopPropagation();
-                        confirm();
-                    },
-                    style = "grid-row: 1",
-                    tabIndex = 0
-                },
-                .styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            }),
-            ScriptNuiComponents::button({
-                .text = "Cancel",
-                .attributes = std::vector<Nui::Attribute>{
-                    onClick = [this](Nui::WebApi::Event event){
-                        event.stopPropagation();
-                        closeDialog(std::nullopt);
-                    },
-                    style = "grid-row: 1"
-                },
-                .styleVariant = ScriptNuiComponents::StyleVariant::Regular,
-            })
-        )
-    );
-    // clang-format on
+    return (*impl_->dialog)();
 }

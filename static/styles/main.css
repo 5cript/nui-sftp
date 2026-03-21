@@ -12,8 +12,10 @@
 @import "./dialog/file_property_dialog.css";
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";
+@import "./dialog/input_dialog.css";
 @import "../../../styles/nui-file-explorer/file_grid.css";
 @import "../../../styles/nui-file-explorer/dropdown_menu.css";
+@import "../../../styles/5cript-nui-components/themes/light.css";
 @import "../../../styles/5cript-nui-components/button.css";
 @import "../../../styles/5cript-nui-components/color_picker.css";
 @import "../../../styles/5cript-nui-components/dialog.css";
@@ -23,6 +25,7 @@
 @import "../../../styles/5cript-nui-components/switch.css";
 @import "../../../styles/5cript-nui-components/tabs.css";
 @import "../../../styles/5cript-nui-components/text_input.css";
+@import "../../../styles/5cript-nui-components/message_strip.css";
 
 *,
 *::before,
@@ -57,27 +60,6 @@
     --background-color-fields: #b9b9b9;
     --color: black;
     --color-fields: var(--color);
-
-    /* Switch */
-    --script-nui-components-switch-color-active: #008000;
-    --script-nui-components-switch-color-inactive: #b9b9b9;
-    --script-nui-components-switch-thumb-color: #383838;
-
-    --script-nui-components-field-color: var(--color-fields);
-    --script-nui-components-field-background-color: var(--background-color-fields);
-    --script-nui-components-field-border-color: color-mix(in srgb, var(--color-fields) 50%, white);
-
-    --script-nui-components-button-color-regular: var(--background-color-fields);
-    --script-nui-components-button-color: var(--color-fields);
-}
-
-.prompter-form {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-evenly;
-    align-items: flex-start;
-    margin: 1rem 2rem;
-    gap: 10px;
 }
 
 .login-form>div {

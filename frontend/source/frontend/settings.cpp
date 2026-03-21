@@ -29,6 +29,7 @@
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/switch.hpp>
 #include <script-nui-components/select.hpp>
+#include <script-nui-components/message_strip.hpp>
 
 #include <frontend/svgs/decline.hpp>
 #include <frontend/svgs/settings.hpp>
@@ -956,12 +957,10 @@ Nui::ElementRenderer Settings::inheritableSettings()
     {
         // clang-format off
         return fragment(
-            // ui5::message_strip{
-            //     "design"_prop = "Information",
-            //     "hideCloseButton"_prop = true,
-            // }(
-            //     language->getObserved("settings", "inheritableSettingsInfoMessage")
-            // ),
+            Snc::messageStrip({
+                .text = language->getObserved("settings", "inheritableSettingsInfoMessage"),
+                .styleVariant = Snc::StyleVariant::Primary,
+            }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sshOptions,
                 .content = impl_->sshOptions.render(),
@@ -1211,12 +1210,10 @@ Nui::ElementRenderer Settings::currentSession()
         );
 
         return fragment(
-            // ui5::message_strip{
-            //     "design"_prop = "Information",
-            //     "hideCloseButton"_prop = true,
-            // }(
-            //     language->getObserved("settings", "inheritableSettingsInfoMessage")
-            // ),
+            Snc::messageStrip({
+                .text = language->getObserved("settings", "inheritableSettingsInfoMessage"),
+                .styleVariant = Snc::StyleVariant::Primary,
+            }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
                 .content = std::move(overarchingSettings),

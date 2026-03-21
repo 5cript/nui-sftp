@@ -135,6 +135,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/multi_input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/new_session_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/confirm_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/dialog/input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/operation_queue.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"

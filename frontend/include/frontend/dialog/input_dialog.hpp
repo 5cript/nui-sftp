@@ -24,8 +24,7 @@ class InputDialog
     void open(OpenOptions const& options);
 
   private:
-    void closeDialog(std::optional<std::string> const& password);
-    void confirm();
+    Nui::ElementRenderer dialogBody();
 
   private:
     struct Implementation;
