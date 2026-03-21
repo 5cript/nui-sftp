@@ -3,11 +3,11 @@
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
-#include <script-nui-components/text_input.hpp>
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/dialog.hpp>
+#include <script-nui-components/text_input.hpp>
 
 #include <nui/frontend/api/keyboard_event.hpp>
-#include <ui5/components/dialog.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
@@ -15,10 +15,9 @@
 struct MultiInputDialog::Implementation
 {
     std::string id;
-    std::weak_ptr<Nui::Dom::BasicElement> dialog;
+    std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
     std::function<void(std::optional<std::unordered_map<std::string, std::string>> const&)> onConfirm;
     Nui::Observed<std::vector<InputField>> inputFields{};
-    Nui::Observed<std::string> headerText{};
     std::unordered_map<std::string, std::string> values;
 
     Implementation(std::string id)
@@ -30,53 +29,11 @@ struct MultiInputDialog::Implementation
 
 MultiInputDialog::MultiInputDialog(std::string id)
     : impl_{std::make_unique<Implementation>(id)}
-{}
-
-void MultiInputDialog::open(OpenOptions const& options)
 {
-    impl_->onConfirm = options.onConfirm;
-    impl_->headerText = options.headerText;
-    impl_->inputFields = options.inputFields;
-    Nui::globalEventContext.executeActiveEventsImmediately();
-
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        diag->val().set("header-text", options.headerText);
-        diag->val().set("open", true);
-        // Focus first input field:
-        if (!options.inputFields.empty())
-        {
-            const auto firstFieldSelector = fmt::format("[data-key=\"{}\"]", impl_->inputFields.value().front().key);
-            Nui::WebApi::Console::log("Focusing first input field with selector: {}", firstFieldSelector);
-            if (auto firstInput = diag->val().call<Nui::val>("querySelector", firstFieldSelector);
-                !firstInput.isNull() && !firstInput.isUndefined())
-            {
-                firstInput.call<void>("focus");
-            }
-        }
-    }
+    impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
 }
 
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(MultiInputDialog);
-
-void MultiInputDialog::closeDialog(std::optional<std::unordered_map<std::string, std::string>> const& values)
-{
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        Log::info("Closing dialog");
-        diag->val().set("open", false);
-    }
-    if (impl_->onConfirm)
-        impl_->onConfirm(values);
-}
-
-void MultiInputDialog::confirm()
-{
-    closeDialog(impl_->values);
-    impl_->values.clear();
-}
-
-Nui::ElementRenderer MultiInputDialog::operator()()
+Nui::ElementRenderer MultiInputDialog::dialogBody()
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
@@ -85,111 +42,104 @@ Nui::ElementRenderer MultiInputDialog::operator()()
     namespace Snc = ScriptNuiComponents;
 
     // clang-format off
-    return ui5::dialog{
-        id = "MultiInputDialog_" + impl_->id,
-        "headerText"_prop = impl_->headerText,
-        reference = impl_->dialog,
-        "initialFocus"_prop = observe(impl_->inputFields).generate([this]() -> std::string {
-            if (impl_->inputFields.value().empty())
-            {
-                return "";
-            }
-            return fmt::format("MultiInputDialogInput_{}_{}", impl_->id, impl_->inputFields.value().front().key);
-        })
-    }(
-        section{
-            class_ = "multi-input-dialog-section",
-            tabIndex = 0
-        }(
-            Nui::range(impl_->inputFields),
-            [this](long long i, InputField const& field) -> Nui::ElementRenderer
-            {
-                const auto fieldsSize = static_cast<long long>(impl_->inputFields.value().size());
+    return section{class_ = "multi-input-dialog-section"}(
+        Nui::range(impl_->inputFields),
+        [this](long long i, InputField const& field) -> Nui::ElementRenderer
+        {
+            const auto fieldsSize = static_cast<long long>(impl_->inputFields.value().size());
 
-                return div{class_ = "multi-input-dialog-field"}(
-                    span{}(field.label),
-                    Snc::textInput({
-                            .value = "",
-                            .attributes = {
-                                "data-key"_attr = field.key,
-                                id = fmt::format("MultiInputDialogInput_{}_{}", impl_->id, field.key),
-                                onKeyDown = [this, i, fieldsSize, key = field.key](Nui::WebApi::KeyboardEvent event)
+            return div{class_ = "multi-input-dialog-field"}(
+                span{}(field.label),
+                Snc::textInput({
+                    .value = "",
+                    .attributes = {
+                        "data-key"_attr = field.key,
+                        id = fmt::format("MultiInputDialogInput_{}_{}", impl_->id, field.key),
+                        onKeyDown = [this, i, fieldsSize, key = field.key](Nui::WebApi::KeyboardEvent event)
+                        {
+                            if (event.key() != "Enter")
+                                return;
+
+                            event.preventDefault();
+
+                            impl_->values[key] = event.target()["value"].as<std::string>();
+
+                            if (i == fieldsSize - 1)
+                            {
+                                impl_->dialog->close();
+                                impl_->onConfirm(impl_->values);
+                                impl_->values.clear();
+                                return;
+                            }
+                            // Focus next input field
+                            if (i < fieldsSize - 1)
+                            {
+                                const auto nextFieldId = fmt::format(
+                                    "MultiInputDialogInput_{}_{}", impl_->id, impl_->inputFields.value()[i + 1].key);
+                                auto doc = Nui::val::global("document");
+                                if (auto nextInput = doc.call<Nui::val>("getElementById", nextFieldId);
+                                    !nextInput.isNull() && !nextInput.isUndefined())
                                 {
-                                    using namespace std::string_literals;
-                                    if (event.key() != "Enter")
-                                        return;
-
-                                    event.preventDefault();
-
-                                    // Set value for the current field
-                                    impl_->values[key] = event.target()["value"].as<std::string>();
-
-                                    if (i == fieldsSize - 1)
-                                    {
-                                        confirm();
-                                        return;
-                                    }
-                                    // Focus next input field
-                                    if (i < fieldsSize - 1)
-                                    {
-                                        const auto nextFieldSelector = fmt::format("[data-key=\"{}\"]", impl_->inputFields.value()[i + 1].key);
-                                        if (auto diag = impl_->dialog.lock(); diag)
-                                        {
-                                            if (auto nextInput = diag->val().call<Nui::val>("querySelector", nextFieldSelector); !nextInput.isNull() && !nextInput.isUndefined())
-                                            {
-                                                nextInput.call<void>("focus");
-                                            }
-                                            else
-                                            {
-                                                Nui::WebApi::Console::error("Could not find next input field with selector: {}", nextFieldSelector);
-                                            }
-                                        }
-                                    }
+                                    nextInput.call<void>("focus");
                                 }
-                            },
-                            .onChange = [this, field](std::string const& value, auto const&){
-                                Nui::WebApi::Console::log("Input changed for field {}: {}", field.key, value);
-                                impl_->values[field.key] = value;
-                            },
-                            .dontUpdateValue = true,
+                                else
+                                {
+                                    Nui::WebApi::Console::error(
+                                        "Could not find next input field with id: {}", nextFieldId);
+                                }
+                            }
                         }
-                    )
-                );
-            }
-        ),
-        div{
-            "slot"_attr = "footer",
-            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px; padding: 5px",
-            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
-                dialogButtonContainerKeydown(event);
-            },
-        }(
-            Snc::button({
-                    .text = "OK",
-                    .attributes = std::vector<Nui::Attribute>{
-                        onClick = [this](Nui::WebApi::Event event){
-                            event.stopPropagation();
-                            confirm();
-                        },
-                        style = "grid-row: 1",
-                        tabIndex = 0
                     },
-                    .styleVariant = Snc::StyleVariant::Primary,
-                }
-            ),
-            Snc::button({
-                    .text = "Cancel",
-                    .attributes = std::vector<Nui::Attribute>{
-                        onClick = [this](Nui::WebApi::Event event){
-                            event.stopPropagation();
-                            closeDialog(std::nullopt);
-                        },
-                        style = "grid-row: 1"
+                    .onChange = [this, field](std::string const& value, auto const&) {
+                        Nui::WebApi::Console::log("Input changed for field {}: {}", field.key, value);
+                        impl_->values[field.key] = value;
                     },
-                    .styleVariant = Snc::StyleVariant::Regular,
-                }
-            )
-        )
+                    .dontUpdateValue = true,
+                })
+            );
+        }
     );
     // clang-format on
+}
+
+void MultiInputDialog::open(OpenOptions const& options)
+{
+    namespace Snc = ScriptNuiComponents;
+
+    impl_->onConfirm = options.onConfirm;
+    impl_->inputFields = options.inputFields;
+    impl_->values.clear();
+    Nui::globalEventContext.executeActiveEventsImmediately();
+
+    const std::string initialFocus = options.inputFields.empty()
+        ? ""
+        : fmt::format("MultiInputDialogInput_{}_{}", impl_->id, options.inputFields.front().key);
+
+    impl_->dialog->open({
+        .headerText = options.headerText,
+        .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,
+        .initialFocus = initialFocus,
+        .onClose =
+            [this](std::optional<Snc::Dialog::Button> button)
+        {
+            if (!impl_->onConfirm)
+                return;
+
+            if (button && *button == Snc::Dialog::Button::Ok)
+                impl_->onConfirm(impl_->values);
+            else
+                impl_->onConfirm(std::nullopt);
+
+            impl_->values.clear();
+        },
+        .modal = true,
+        .mayCloseWithoutButton = false,
+    });
+}
+
+ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(MultiInputDialog);
+
+Nui::ElementRenderer MultiInputDialog::operator()()
+{
+    return (*impl_->dialog)();
 }
