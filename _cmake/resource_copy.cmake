@@ -36,7 +36,6 @@ add_custom_command(
         "${CMAKE_BINARY_DIR}/assets/icons/swift.png"
         "${CMAKE_BINARY_DIR}/assets/icons/rust.png"
         "${CMAKE_BINARY_DIR}/assets/icons/python.png"
-        "${CMAKE_BINARY_DIR}/themes/dark/css_variables.css"
     COMMAND ${CMAKE_COMMAND} -E copy "${BASE_ICONS_DIR}/os_folders/windows/11/folder_main.png" "${CMAKE_BINARY_DIR}/assets/icons/folder_main.png"
     COMMAND ${CMAKE_COMMAND} -E copy "${BASE_ICONS_DIR}/masks/Others/hard-drive.png" "${CMAKE_BINARY_DIR}/assets/icons/hard_drive.png"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/../static/assets/file.png" "${CMAKE_BINARY_DIR}/assets/icons/file.png"
@@ -55,7 +54,6 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy "${BASE_ICONS_DIR}/masks/Development/noun-swift-file-3001056.png" "${CMAKE_BINARY_DIR}/assets/icons/swift.png"
     COMMAND ${CMAKE_COMMAND} -E copy "${BASE_ICONS_DIR}/masks/Development/Rust_programming_language.png" "${CMAKE_BINARY_DIR}/assets/icons/rust.png"
     COMMAND ${CMAKE_COMMAND} -E copy "${BASE_ICONS_DIR}/masks/Development/noun-python-1375869.png" "${CMAKE_BINARY_DIR}/assets/icons/python.png"
-    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/../themes/dark/css_variables.css" "${CMAKE_BINARY_DIR}/themes/dark/css_variables.css"
     DEPENDS
         "${BASE_ICONS_DIR}/os_folders/windows/11/folder_main.png"
         "${CMAKE_CURRENT_LIST_DIR}/../static/assets/file.png"
@@ -75,7 +73,6 @@ add_custom_command(
         "${BASE_ICONS_DIR}/masks/Development/noun-swift-file-3001056.png"
         "${BASE_ICONS_DIR}/masks/Development/Rust_programming_language.png"
         "${BASE_ICONS_DIR}/masks/Development/noun-python-1375869.png"
-        "${CMAKE_CURRENT_LIST_DIR}/../themes/dark/css_variables.css"
 )
 
 add_custom_target(

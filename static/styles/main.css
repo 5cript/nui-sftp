@@ -43,11 +43,15 @@
     --script-nui-components-field-theme-color: var(--theme-color);
 
     /* Dark / Light */
-    --background-color: var(--sapBackgroundColor);
+    --resize-handle-color: #707070;
+    --brighter-background: #404040;
+    --subdued-text: #888888;
+    --background-color: #303030;
     --background-color-fields: #202020;
     --color: #dddddd;
     --color-fields: var(--color);
     --border-color-fields: #505050;
+    --foreground-border-color: #505050;
 
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;
@@ -78,38 +82,35 @@ body {
     height: 100dvh;
     width: 100%;
     margin: 0;
-    background-color: var(--sapBackgroundColor);
-    color: var(--sapTextColor);
+    background-color: var(--background-color);
+    color: var(--color);
     /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
-    --resizeHandleColor: #707070;
-    --brighterBackground: #404040;
-    --subduedText: #888888;
-    --darkerBackground: color-mix(in srgb, var(--sapBackgroundColor) 80%, black 20%);
+    --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
 
-    --nui-file-grid-background-color: var(--sapBackgroundColor);
+    --nui-file-grid-background-color: var(--background-color);
     --nui-file-grid-item-highlight: rgba(255, 255, 255, 0.3);
-    --nui-file-grid-border-color: var(--sapButton_BorderColor);
+    --nui-file-grid-border-color: var(--border-color-fields);
     --nui-file-grid-filter-background:
-        color-mix(in srgb, var(--sapBackgroundColor) 80%, white 20%);
-    --nui-file-grid-filter-color: var(--sapTextColor);
+        color-mix(in srgb, var(--background-color) 80%, white 20%);
+    --nui-file-grid-filter-color: var(--color);
     --nui-file-grid-border-radius: 8px;
-    --nui-file-grid-arrow-color: var(--sapTextColor);
-    --nui-file-grid-head-font-size: var(--sapFontSize);
-    --nui-file-grid-button-background: var(--sapButton_Background);
+    --nui-file-grid-arrow-color: var(--color);
+    --nui-file-grid-head-font-size: var(--font-size);
+    --nui-file-grid-button-background: var(--background-color);
     --nui-file-grid-border-width: 1px;
-    --nui-file-grid-dropdown-background: var(--sapBackgroundColor);
-    --nui-file-grid-dropdown-content-background: var(--sapGroup_ContentBackground);
-    --nui-file-grid-dropdown-color: var(--sapButton_TextColor);
-    --nui-file-grid-dropdown-item-color: var(--sapTextColor);
-    --nui-file-grid-dropdown-content-font-size: var(--sapFontLargeSize);
-    --nui-file-grid-context-menu-background: var(--sapGroup_ContentBackground);
-    --nui-file-grid-table-header-background: var(--sapButton_Background);
-    --nui-file-grid-table-header-color: var(--sapButton_TextColor);
-    --nui-file-grid-table-cell-background: var(--sapGroup_ContentBackground);
-    --nui-file-grid-table-cell-color: var(--sapTextColor);
-    --nui-file-grid-context-menu-item-hover-background: var(--sapButton_Hover_Background);
-    --nui-file-grid-context-menu-item-hover-color: var(--sapButton_Hover_Text);
-    --nui-file-grid-table-sort-highlight: var(--sapHighlightColor);
+    --nui-file-grid-dropdown-background: var(--background-color);
+    --nui-file-grid-dropdown-content-background: var(--background-color);
+    --nui-file-grid-dropdown-color: var(--color);
+    --nui-file-grid-dropdown-item-color: var(--color);
+    --nui-file-grid-dropdown-content-font-size: var(--font-size);
+    --nui-file-grid-context-menu-background: var(--background-color);
+    --nui-file-grid-table-header-background: var(--background-color);
+    --nui-file-grid-table-header-color: var(--color);
+    --nui-file-grid-table-cell-background: var(--background-color);
+    --nui-file-grid-table-cell-color: var(--color);
+    --nui-file-grid-context-menu-item-hover-background: var(--background-color);
+    --nui-file-grid-context-menu-item-hover-color: var(--color);
+    --nui-file-grid-table-sort-highlight: var(--color);
 
     --opq-card: #0b1220;
     --opq-muted: #98a2b3;

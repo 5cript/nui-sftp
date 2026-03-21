@@ -13,7 +13,6 @@ This project contains a cross platform (Linux & Windows for now) SSH and SFTP cl
 - [x] Accessible logs.
 
 ## Operation Queue (UI)
-- [x] Style buttons to be in line with ui5 buttons (but dont use them? because their performance is bad)
 - [x] Better header footer borders
 - [x] MUCH smaller list items.
 - [x] MUCH smaller icons.

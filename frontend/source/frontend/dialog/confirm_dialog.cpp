@@ -1,6 +1,5 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
-#include <frontend/components/ui5/text.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 

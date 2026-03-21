@@ -31,7 +31,7 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
         }(
             div{
                 class_ = "settings-subgroup-header",
-                style = params.engagedStatus ? "border: 1px solid var(--sapContent_ForegroundBorderColor); background-color: var(--darkerBackground)" : ""
+                style = params.engagedStatus ? "border: 1px solid #404040; background-color: var(--darker-background)" : ""
             }(
                 // switch to enable/disable entire subgroup:
                 [engagedStatus = params.engagedStatus, title = std::move(params.groupTitle), onChange = std::move(params.onChange)]() mutable -> Nui::ElementRenderer {

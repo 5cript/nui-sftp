@@ -700,7 +700,7 @@ Nui::ElementRenderer Settings::header()
         }(
             iconPanel({
                 .icon = GeneratedSvgs::actionsettings(),
-                .color = "var(--sapBrandColor)",
+                .color = "var(--theme-color)",
                 .withBorder = true
             }),
             div{class_ = "title"}(language->getObserved("settings", "title")),
@@ -867,7 +867,7 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                     [icon = options.icon, active]() -> Nui::ElementRenderer {
                         return iconPanel({
                             .icon = icon,
-                            .color = active ? "var(--sapBrandColor)" : "#404040",
+                            .color = active ? "var(--theme-color)" : "#404040",
                             .withBorder = true
                         });
                     }(),

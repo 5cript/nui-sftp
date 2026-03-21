@@ -30,7 +30,7 @@ inline Nui::ElementRenderer iconPanel(IconPanelOptions const& options)
             options.color,
             options.colorMixinPercent,
             100 - options.colorMixinPercent,
-            options.withBorder ? "border: 1px solid var(--sapNeutralBorderColor);" : "",
+            options.withBorder ? "border: 1px solid #707070;" : "",
             options.padding
         ),
     }(std::move(options.icon));

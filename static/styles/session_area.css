@@ -14,5 +14,4 @@
 
 .session-area-tabs::part(tabstrip) {
     padding: 0;
-    --_ui5-v1-24-7_tc_headeritem_padding: 5px;
 }
