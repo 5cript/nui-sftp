@@ -50,6 +50,9 @@ Nui::ElementRenderer LayoutSetting::operator()()
                 {
                     onChange_();
                 },
+                .makeId = [](){
+                    return Nui::val::global("generateId")().as<std::string>();
+                }
             }),
             Snc::button({
                 .text = language->get("settings", "layoutSetting", "saveCurrentLayout"),

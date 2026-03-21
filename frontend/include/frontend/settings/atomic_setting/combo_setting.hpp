@@ -151,7 +151,10 @@ class ComboSetting : public Setting<Disengageable, ValueType>
                     {
                         return renderOption(option);
                     },
-                    .dontUpdateValue = true
+                    .dontUpdateValue = true,
+                    .makeId = [](){
+                        return Nui::val::global("generateId")().as<std::string>();
+                    }
                 }
             ),
             //div{}("ComboSetting not implemented yet"),// TODO implement select component and use it here instead of this placeholder

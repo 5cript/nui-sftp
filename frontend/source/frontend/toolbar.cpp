@@ -156,6 +156,9 @@ Nui::ElementRenderer Toolbar::operator()()
             .options = impl_->terminalEngines,
             .onChange = [this](auto const&, Nui::WebApi::MouseEvent const&) {
                 reloadLayouts();
+            },
+            .makeId = [](){
+                return Nui::val::global("generateId")().as<std::string>();
             }
         }),
         Snc::select(Snc::SelectOptions<decltype(impl_->selectedLayout), decltype(impl_->layouts)>{
@@ -165,6 +168,9 @@ Nui::ElementRenderer Toolbar::operator()()
                 !(reference.onMaterialize([this](auto){
                     connectLayoutsChanged();
                 }))
+            },
+            .makeId = [](){
+                return Nui::val::global("generateId")().as<std::string>();
             }
         }),
         Snc::button({
