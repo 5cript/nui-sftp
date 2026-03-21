@@ -37,7 +37,7 @@ class TextSetting : public Setting<Disengageable, std::string>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            ScriptNuiComponents::textInput(ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
+            ScriptNuiComponents::textInput({
                 .value = stateWithInheritance_,
                 .attributes = {observeEngagedToBool(disabled)},
                 .onChange = [this](auto const& state, Nui::WebApi::Event const&){

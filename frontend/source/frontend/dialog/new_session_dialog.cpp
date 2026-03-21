@@ -164,8 +164,7 @@ Nui::ElementRenderer NewSessionDialog::operator()()
                 dialogButtonContainerKeydown(event);
             },
         }(
-            Snc::button(
-                Snc::ButtonOptions<std::string>{
+            Snc::button({
                     .text = "OK",
                     .attributes = std::vector<Nui::Attribute>{
                         onClick = [this](Nui::WebApi::Event event){
@@ -178,8 +177,7 @@ Nui::ElementRenderer NewSessionDialog::operator()()
                     .styleVariant = Snc::StyleVariant::Primary,
                 }
             ),
-            Snc::button(
-                Snc::ButtonOptions<std::string>{
+            Snc::button({
                     .text = "Cancel",
                     .attributes = std::vector<Nui::Attribute>{
                         onClick = [this](Nui::WebApi::Event event){

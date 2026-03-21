@@ -207,43 +207,41 @@ class NumberSetting : public Setting<Disengageable, ValueType>
         // if (args_.asRangeType)
         //     type = "range";
 
-        return ScriptNuiComponents::textInput(
-            ScriptNuiComponents::TextInputOptions<decltype(stateWithInheritance_)>{
-                .value = stateWithInheritance_,
-                .attributes =
-                    {
-                        observeEngagedToBool(disabled),
-                        pattern = validationPattern,
-                        onKeyUp =
-                            [this](Nui::WebApi::KeyboardEvent event)
-                        {
-                            const auto valid = checkValidity(event.target()["value"].as<std::string>());
-                            event.target().call<void>("setCustomValidity", valid);
-                            event.target().call<void>("reportValidity");
-                        },
-                        Nui::Attributes::type = type,
-                    },
-                .onChange =
-                    [this, type](auto const& state, Nui::WebApi::Event const& event)
+        return ScriptNuiComponents::textInput({
+            .value = stateWithInheritance_,
+            .attributes =
                 {
-                    const auto valueUnsanitized = convertValue(state);
-                    // this->value(
-                    //     std::clamp(
-                    //         valueUnsanitized,
-                    //         args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
-                    //         args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
-                    //     )
-                    // );
-                    this->valueIsValid_ = event.target().call<bool>("checkValidity");
-                    if (this->valueIsValid_)
+                    observeEngagedToBool(disabled),
+                    pattern = validationPattern,
+                    onKeyUp =
+                        [this](Nui::WebApi::KeyboardEvent event)
                     {
-                        this->value(valueUnsanitized);
-                    }
-                    onChange_();
+                        const auto valid = checkValidity(event.target()["value"].as<std::string>());
+                        event.target().call<void>("setCustomValidity", valid);
+                        event.target().call<void>("reportValidity");
+                    },
+                    Nui::Attributes::type = type,
                 },
-                .dontUpdateValue = true
-            }
-        );
+            .onChange =
+                [this, type](auto const& state, Nui::WebApi::Event const& event)
+            {
+                const auto valueUnsanitized = convertValue(state);
+                // this->value(
+                //     std::clamp(
+                //         valueUnsanitized,
+                //         args_.minValue.value_or(std::numeric_limits<ValueType>::lowest()),
+                //         args_.maxValue.value_or(std::numeric_limits<ValueType>::max())
+                //     )
+                // );
+                this->valueIsValid_ = event.target().call<bool>("checkValidity");
+                if (this->valueIsValid_)
+                {
+                    this->value(valueUnsanitized);
+                }
+                onChange_();
+            },
+            .dontUpdateValue = true,
+        });
     }
 
   private:
