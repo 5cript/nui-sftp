@@ -21,9 +21,8 @@ class NewSessionDialog
     void open(std::function<void(ConfirmResult const&)> onConfirm);
 
   private:
-    void closeDialog(std::optional<ConfirmResult> const& result);
-    void checkInputValue();
-    void confirm();
+    Nui::ElementRenderer dialogBody();
+    void checkInputValue(std::string const&);
 
   private:
     struct Implementation;

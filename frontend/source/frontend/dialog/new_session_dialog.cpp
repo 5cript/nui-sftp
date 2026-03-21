@@ -2,14 +2,14 @@
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/session_icon_options.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/dialog.hpp>
+#include <script-nui-components/text_input.hpp>
+#include <script-nui-components/select.hpp>
 
 #include <nui/rpc.hpp>
-#include <ui5/components/dialog.hpp>
-#include <ui5/components/input.hpp>
-#include <ui5/components/label.hpp>
-#include <ui5/components/select.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
@@ -23,173 +23,122 @@ struct NewSessionDialog::Implementation
     static constexpr std::string_view defaultName = "";
 
     std::string id;
-    std::weak_ptr<Nui::Dom::BasicElement> dialog;
-    std::weak_ptr<Nui::Dom::BasicElement> input;
+    std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
+    Nui::Observed<std::string> sessionName{std::string{defaultName}};
+    Nui::Observed<ScriptNuiComponents::ValueState> nameValid{ScriptNuiComponents::ValueState::Valid};
+    Nui::Observed<std::string> icon{"laptop"};
+    Nui::Observed<std::string> validationMessage{
+        "Session name must be 1-5000 characters long and cannot contain \\ or / or \" characters."
+    };
     std::function<void(NewSessionDialog::ConfirmResult const&)> onConfirm;
-    Nui::Observed<bool> nameValid{false};
-    std::string icon{"laptop"};
 
     Implementation(std::string id)
         : id{std::move(id)}
         , dialog{}
-        , input{}
-        , onConfirm{}
     {}
 };
 
 NewSessionDialog::NewSessionDialog(std::string id)
     : impl_{std::make_unique<Implementation>(id)}
-{}
-
-void NewSessionDialog::open(std::function<void(ConfirmResult const&)> onConfirm)
 {
-    impl_->onConfirm = onConfirm;
+    impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
 
-    if (auto input = impl_->input.lock())
-    {
-        input->val().set("value", std::string{Implementation::defaultName});
-        impl_->nameValid = true;
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
-    if (auto diag = impl_->dialog.lock(); diag)
-    {
-        diag->val().set("open", true);
-    }
+    language->listenToLanguageChange(
+        [this](std::string const&)
+        {
+            impl_->validationMessage = language->get("newSessionDialog", "validationMessage");
+        }
+    );
 }
 
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(NewSessionDialog);
-
-void NewSessionDialog::closeDialog(std::optional<ConfirmResult> const& result)
-{
-    if (auto diag = impl_->dialog.lock(); diag)
-        diag->val().set("open", false);
-
-    if (impl_->onConfirm && result && impl_->nameValid.value())
-        impl_->onConfirm(*result);
-}
-
-void NewSessionDialog::confirm()
-{
-    if (auto input = impl_->input.lock())
-    {
-        closeDialog(
-            ConfirmResult{
-                .sessionName = input->val()["value"].as<std::string>(),
-                .iconName = impl_->icon,
-            }
-        );
-        input->val().set("value", std::string{Implementation::defaultName});
-    }
-    else
-        closeDialog(std::nullopt);
-}
-
-void NewSessionDialog::checkInputValue()
-{
-    if (auto input = impl_->input.lock())
-    {
-        const auto value = input->val()["value"].as<std::string>();
-        std::regex validator(R"(^[^\\"]{1,5000}$)");
-        impl_->nameValid = std::regex_match(value, validator);
-    }
-}
-
-Nui::ElementRenderer NewSessionDialog::operator()()
+Nui::ElementRenderer NewSessionDialog::dialogBody()
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
     using Nui::Elements::div;
+    using Nui::Elements::span;
 
-    auto makeOption = [](std::string_view icon)
-    {
-        return ui5::option{"icon"_prop = icon, "data-icon"_attr = icon}();
-    };
+    std::vector<std::string> iconOptions(std::begin(sessionIconOptions), std::end(sessionIconOptions));
 
     // clang-format off
-    return ui5::dialog{
-        id = "InputDialog_" + impl_->id,
-        "headerText"_prop = "Create New Session",
-        reference = impl_->dialog,
-        "initialFocus"_prop = "NewSessionDialogInput_" + impl_->id,
-    }(
-        section{class_ = "new-session-section"}(
-            ui5::label{id = "NewSessionDialogLabel_" + impl_->id, "for"_prop = "NewSessionDialogInput_" + impl_->id}(
-                "Session name: "
-            ),
-            ui5::input{
-                id = "NewSessionDialogInput_" + impl_->id,
-                "type"_prop = "Text",
-                "valueState"_prop = observe(impl_->nameValid).generate([](bool valid){
-                    if (valid)
-                        return "None";
-                    return "Negative";
-                }),
-                reference = impl_->input,
-                "keyup"_event = [this](Nui::val event){
-                    if (event["key"].as<std::string>() == "Enter")
-                        return confirm();
-                    checkInputValue();
+    return section{class_ = "new-session-section"}(
+        span{}(language->getObserved("newSessionDialog", "sessionNameLabel")),
+        Snc::textInput({
+            .value = impl_->sessionName,
+            .attributes = {
+                id = fmt::format("NewSessionDialogInput_{}", impl_->id),
+                type = "Text",
+                "keyup"_event = [this](Nui::WebApi::KeyboardEvent event) {
+                    const auto target = event.target();
+                    checkInputValue(target["value"].as<std::string>());
                 }
-            }(
-                div{
-                    "slot"_attr = "valueStateMessage",
-                    "slot"_prop = "valueStateMessage"
-                }("Session name must be 1-5000 characters long and cannot contain \\ or \" characters.")
-            ),
-            ui5::label{id = "NewSessionDialogLabel2_" + impl_->id, "for"_prop = "NewSessionDialogInput2_" + impl_->id}(
-                "Icon: "
-            ),
-            ui5::select{
-                id = "NewSessionDialogInput2_" + impl_->id,
-                "type"_prop = "Text",
-                "change"_event = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    Nui::WebApi::Console::log(event);
-                    impl_->icon = event["detail"]["selectedOption"]["dataset"]["icon"].as<std::string>();
-                }
-            }(
-                [&makeOption]{
-                    std::vector<Nui::ElementRenderer> options;
-                    for (auto icon : sessionIconOptions)
-                        options.push_back(makeOption(icon));
-                    return options;
-                }()
-            )
-        ),
-        div{
-            "slot"_attr = "footer",
-            style="display: inline-grid; width: 100%; grid-auto-columns: 1fr; gap: 10px; padding: 5px",
-            "keydown"_event = [](Nui::WebApi::KeyboardEvent event) {
-                dialogButtonContainerKeydown(event);
             },
-        }(
-            Snc::button({
-                    .text = "OK",
-                    .attributes = std::vector<Nui::Attribute>{
-                        onClick = [this](Nui::WebApi::Event event){
-                            event.stopPropagation();
-                            confirm();
-                        },
-                        style = "grid-row: 1",
-                        tabIndex = 0
-                    },
-                    .styleVariant = Snc::StyleVariant::Primary,
-                }
-            ),
-            Snc::button({
-                    .text = "Cancel",
-                    .attributes = std::vector<Nui::Attribute>{
-                        onClick = [this](Nui::WebApi::Event event){
-                            event.stopPropagation();
-                            closeDialog(std::nullopt);
-                        },
-                        style = "grid-row: 1"
-                    },
-                    .styleVariant = Snc::StyleVariant::Regular,
-                }
-            )
-        )
+            .onChange = [this](std::string const& value, auto const&) {
+                checkInputValue(value);
+            },
+            .valueState = &impl_->nameValid,
+            .validationMessage = &impl_->validationMessage,
+        }),
+        span{}(language->getObserved("newSessionDialog", "iconLabel")),
+        Snc::select(Snc::SelectOptions<decltype(impl_->icon), std::vector<std::string>>{
+            .activeOption = impl_->icon,
+            .options = std::move(iconOptions)
+        })
     );
     // clang-format on
+}
+
+void NewSessionDialog::open(std::function<void(ConfirmResult const&)> onConfirm)
+{
+    impl_->onConfirm = onConfirm;
+    impl_->sessionName = std::string{Implementation::defaultName};
+    impl_->nameValid = ScriptNuiComponents::ValueState::Valid;
+    impl_->icon = "laptop";
+    Nui::globalEventContext.executeActiveEventsImmediately();
+
+    impl_->dialog->open({
+        .headerText = language->get("newSessionDialog", "title"),
+        .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,
+        .initialFocus = fmt::format("NewSessionDialogInput_{}", impl_->id),
+        .onClose =
+            [this](std::optional<Snc::Dialog::Button> button)
+        {
+            if (!impl_->onConfirm)
+                return;
+
+            if (button && *button == Snc::Dialog::Button::Ok &&
+                impl_->nameValid.value() == ScriptNuiComponents::ValueState::Valid)
+            {
+                impl_->onConfirm(
+                    ConfirmResult{
+                        .sessionName = impl_->sessionName.value(),
+                        .iconName = impl_->icon.value(),
+                    }
+                );
+            }
+        },
+        .modal = true,
+        .mayCloseWithoutButton = false,
+    });
+}
+
+void NewSessionDialog::checkInputValue(std::string const& value)
+{
+    std::regex validator(R"(^[^\\"\\\\/]{1,5000}$)");
+    impl_->nameValid = std::regex_match(value, validator) ? ScriptNuiComponents::ValueState::Valid
+                                                          : ScriptNuiComponents::ValueState::Invalid;
+    Nui::WebApi::Console::log(
+        fmt::format(
+            "Checking session name validity: \"{}\" is {}",
+            value,
+            impl_->nameValid.value() == ScriptNuiComponents::ValueState::Valid ? "valid" : "invalid"
+        )
+    );
+}
+
+ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(NewSessionDialog);
+
+Nui::ElementRenderer NewSessionDialog::operator()()
+{
+    return (*impl_->dialog)();
 }

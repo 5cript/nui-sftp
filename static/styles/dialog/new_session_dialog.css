@@ -4,5 +4,5 @@
     grid-template-columns: max-content 1fr;
     grid-template-rows: 1fr 1fr;
     align-items: center;
-    column-gap: 10px;
+    gap: 10px;
 }
