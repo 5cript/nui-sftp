@@ -80,6 +80,10 @@ jobs:
             "${{ env.BUILD_DIR }}" \
             --config "${{ env.BUILD_TYPE }}"
 
+      - name: Run Deploy
+        run: |
+          bash script/deploy.sh
+
       - name: Read version information
         run: |
           cat ${{ env.BUILD_DIR }}/text/version.txt
