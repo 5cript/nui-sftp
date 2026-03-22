@@ -2,7 +2,51 @@
 
 This project contains a cross platform (Linux & Windows for now) SSH and SFTP client.
 
-# Todo List
+![AppImage](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/nui-sftp-session.png)
+
+# Installation
+
+First go to the releases section https://github.com/5cript/nui-sftp/releases This is where you can find the latest releases of the app. (Not every release might have packages attached to it, pick the latest one with packages).
+
+## Windows
+
+Download the windows zip and extract it somewhere. If you want an installer, create an issue so I know that there is demand.
+
+## GNU/Linux
+
+### ArchLinux
+
+You can install the flatpak or install via makepkg
+```bash
+git clone https://github.com/5cript/nui-sftp-deploy.git
+cd nui-sftp-deploy
+makepkg -si
+```
+to uninstall:
+```bash
+sudo pacman -R nui-sftp
+```
+
+This project will be submitted to the AUR at a later date.
+
+### All Other Distributions
+
+For other distributions a flatpak is provided. Currently not in the official flathub, but that will come eventually.
+Download the flatpak from a release and install it like so:
+```bash
+# Make sure to pass the correct file name!
+flatpak install nui-sftp-flatpak-x86_64_0.1.1.flatpak
+```
+
+## Apple Computers
+
+macOS is currently not supported. Create an issue if you want to see support for it.
+
+## Other
+
+There will not be support for any other system and that will not change in the near future even if asked for. (Mobile Devices or BSD).
+
+# Features / Todo List
 
 ## General UI
 - [x] Layouting.
@@ -90,7 +134,7 @@ This project contains a cross platform (Linux & Windows for now) SSH and SFTP cl
 - GSSAPI auth: Will make work when a need arises
 - KeypassXc database integration: lots of work for tiny use cases. Its a cool idea for later.
 
-# Not Release 1 Features
+# Later
 
 ## General UI
 - [ ] Custom top bar with moveability and minimize, maximize, close buttons.
@@ -129,3 +173,4 @@ This project contains a cross platform (Linux & Windows for now) SSH and SFTP cl
 # Known Problems
 
 - Cannot use mouse side keys for history navigation (yet) because of a bug in webkit show them as "button 0".
+- On WebKit Systems (Linux), the drag and drop from the desktop only supports single files and folders, not a list of items, because WebKit removed the functionality entirely because of an unfixed security issue.
