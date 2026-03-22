@@ -134,7 +134,7 @@ namespace NuiFileExplorer
             const bool selected = (inRange(i) && ctrlRemove_.count(i) == 0) || ctrlAdd_.count(i) > 0;
             vec[i].isSelected(selected);
         }
-        items_->modifyNow();
+        Nui::globalEventContext.sync();
     }
 
     // =========================================================================
@@ -154,7 +154,7 @@ namespace NuiFileExplorer
         loseTrackToAllSelections();
         for (auto& item : items_->value())
             item.isSelected(false);
-        items_->modifyNow();
+        Nui::globalEventContext.sync();
     }
 
     void SelectionManager::selectAll()
