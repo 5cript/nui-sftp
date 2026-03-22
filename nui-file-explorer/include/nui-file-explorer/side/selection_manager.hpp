@@ -7,178 +7,259 @@
 #include <nui/frontend/api/keyboard_event.hpp>
 
 #include <vector>
+#include <set>
 #include <memory>
 #include <optional>
+#include <functional>
 
 namespace NuiFileExplorer
 {
+    /// Manages item selection for both icon and table flavors.
+    ///
+    /// Two-layer model
+    /// ---------------
+    ///   Layer 1 — Range layer  (anchor_ + flag_)
+    ///     The contiguous shift-selection.  Shift+click and Shift+Arrow only ever
+    ///     touch this layer.  A plain click sets anchor_ and clears flag_ (single-
+    ///     item range).  Everything between anchor_ and flag_ (inclusive, min/max
+    ///     order) is "in range".
+    ///
+    ///   Layer 2 — Ctrl mask  (ctrlAdd_ + ctrlRemove_)
+    ///     An additive/subtractive mask applied on top of the range.
+    ///     ctrlAdd_    – items that are selected regardless of the range.
+    ///     ctrlRemove_ – items that are punched out of the range.
+    ///     Ctrl+click dispatches to one of four cases (see onItemClicked).
+    ///     This layer is NEVER touched by shift or plain-arrow operations.
+    ///
+    ///   Visible selection = (range(anchor_, flag_) − ctrlRemove_) ∪ ctrlAdd_
+    ///
+    /// Box-select (drag rectangle in icon flavor)
+    /// ------------------------------------------
+    ///   Plain drag   → clears both ctrl sets, sets anchor_/flag_ to cover the
+    ///                  bounding-box items.  Call selectRange(begin, end).
+    ///   Ctrl+drag    → leaves anchor_/flag_ alone, inserts intersecting items
+    ///                  into ctrlAdd_.  Call ctrlAddRange(begin, end).
+    ///
+    /// Keyboard navigation — no wrapping, clamped at boundaries
+    /// ---------------------------------------------------------
+    ///   Arrow (no modifier)  → clear both ctrl sets, clear flag_, move anchor_
+    ///                          one step; clamps at 0 / last item.
+    ///   Shift+Arrow          → move flag_ one step; clamps at 0 / last item.
+    ///                          Special boundary fill:
+    ///                            Shift+Down at last row → extend flag_ to the
+    ///                              last item (rightward fill to end of row).
+    ///                            Shift+Up at row 0 → extend flag_ to index 0
+    ///                              (leftward fill to start of row).
+    ///                          Both ctrl sets are untouched.
+    ///   Ctrl+A               → select all (clear ctrl sets, anchor_=0,
+    ///                          flag_=last).
     class SelectionManager
     {
       public:
-        constexpr static std::size_t maxSelectableSearchAttempts = 5;
-
         SelectionManager(Nui::Observed<std::vector<ItemWithInternals>>& items, Flavor flavor);
 
-        /// Does not iterate the items to deselect all.
-        void loseTrackToAllSelections();
-
+        // ------------------------------------------------------------------ basic ops
+        void loseTrackToAllSelections(); ///< Forget tracking without touching DOM state.
         void deselectAll();
         void selectAll();
-        bool select(std::size_t index);
+        void select(std::size_t index);
         void deselect(std::size_t index);
         void toggle(std::size_t index);
         void select(ItemWithInternals const& item);
         void select(std::filesystem::path const& path);
         void deselect(ItemWithInternals const& item);
         void toggle(ItemWithInternals const& item);
+
+        // ------------------------------------------------------------------ queries
         std::size_t selectedCount() const;
         bool isSelected(std::size_t index) const;
         bool isAnySelected() const;
-        void setGrid(std::size_t width, std::size_t height);
-        void setFlavor(Flavor flavor);
-
-        void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event);
-
-        /// Returns true if the event was consumed.
-        bool onKeyboardEvent(Nui::WebApi::KeyboardEvent const& event);
-
-        void selectRange(std::size_t begin, std::size_t endInclusive);
-
         std::vector<Item> selectedItems() const;
         std::set<std::filesystem::path> selectedPaths() const;
 
+        // ------------------------------------------------------------------ layout
+        void setGrid(std::size_t columns, std::size_t rows);
+        void setFlavor(Flavor flavor);
+
+        // ------------------------------------------------------------------ scroll
+        /// Register a callback that scrolls the item at the given flat index into
+        /// view.  Called automatically after every user-driven selection change
+        /// (click, keyboard) with the "active index": flag_ if live, else anchor_.
+        /// Not called by selectAll / deselectAll / selectRange / ctrlAddRange.
+        void setScrollIntoViewCallback(std::function<void(std::size_t)> callback);
+
+        // ------------------------------------------------------------------ interaction
+        void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event);
+
+        /// Returns true if the keyboard event was consumed.
+        bool onKeyboardEvent(Nui::WebApi::KeyboardEvent const& event);
+
+        // ------------------------------------------------------------------ range helpers (public for icon_flavor
+        // drag-box)
+
+        /// Plain box-drag: replace range layer, clear ctrl mask.
+        void selectRange(std::size_t begin, std::size_t endInclusive);
+
+        /// Ctrl+box-drag: add items into ctrlAdd_ without touching the range layer.
+        void ctrlAddRange(std::size_t begin, std::size_t endInclusive);
+
       private:
-        class GridPosition
+        // ============================================================= Grid helper
+        /// Abstracts an M×N grid whose last row may be incomplete.
+        /// All navigation is flat-index based.  Steps clamp — no wrapping.
+        ///
+        /// ArrowDown/Up boundary fill
+        /// --------------------------
+        ///   stepDown when already on the last row:
+        ///     Returns itemCount_-1, filling selection to the end of the partial row.
+        ///   stepUp when already on row 0:
+        ///     Returns 0, filling selection to the start of the row.
+        ///
+        /// Table flavor: columns_ is treated as 1; Down/Up are ±1 clamped;
+        /// Right/Left are aliases for Down/Up.
+        class Grid
         {
           public:
-            using CoordinateType = std::make_signed<std::size_t>::type;
-
-            GridPosition(SelectionManager const& manager, std::size_t index)
-                : manager_{&manager}
-                , row_{manager_->currentFlavor_ == Flavor::Icons ? static_cast<CoordinateType>(index / std::max(std::size_t{1}, manager_->gridColumns_)) : static_cast<CoordinateType>(index)}
-                , col_{
-                      manager_->currentFlavor_ == Flavor::Icons
-                          ? static_cast<CoordinateType>(index % std::max(std::size_t{1}, manager_->gridColumns_))
-                          : 0
-                  }
+            Grid() = default;
+            Grid(std::size_t columns, std::size_t rows, std::size_t itemCount, Flavor flavor)
+                : columns_{std::max(std::size_t{1}, columns)}
+                , rows_{std::max(std::size_t{1}, rows)}
+                , itemCount_{itemCount}
+                , flavor_{flavor}
             {}
 
-            GridPosition(SelectionManager const& manager, CoordinateType row, CoordinateType col)
-                : manager_{&manager}
-                , row_{row}
-                , col_{col}
-            {}
+            std::size_t columns() const
+            {
+                return columns_;
+            }
+            std::size_t rows() const
+            {
+                return rows_;
+            }
+            std::size_t items() const
+            {
+                return itemCount_;
+            }
 
-            bool operator==(GridPosition const& other) const
+            /// Number of filled cells in the last row (1 … columns_).
+            std::size_t itemsInLastRow() const
             {
-                return normalRow() == other.normalRow() && normalCol() == other.normalCol();
+                if (itemCount_ == 0)
+                    return 0;
+                const auto r = itemCount_ % columns_;
+                return r == 0 ? columns_ : r;
             }
-            std::size_t toIndex() const
-            {
-                return static_cast<std::size_t>(
-                    normalized().row_ * static_cast<CoordinateType>(manager_->gridColumns_) + normalized().col_
-                );
-            }
-            /// Returns whether or not there is a valid item at this position.
-            bool isValid() const
-            {
-                const auto norm = normalized();
-                return norm.row_ >= 0 && norm.col_ >= 0 && static_cast<std::size_t>(norm.row_) < manager_->gridRows_ &&
-                    static_cast<std::size_t>(norm.col_) < manager_->gridColumns_;
-            }
-            /// Gird positions can become virtual by having negative coordinates or coordinates beyond the grid size.
-            GridPosition normalized() const
-            {
-                return GridPosition{*manager_, normalRow(), normalCol()};
-            }
-            CoordinateType normalRow() const
-            {
-                const auto rows = static_cast<CoordinateType>(manager_->gridRows_);
-                if (rows <= 0)
-                    return row_;
 
-                auto row = row_;
-
-                row %= rows;
-                if (row < 0)
-                    row += rows;
-                return row;
-            }
-            CoordinateType normalCol() const
+            bool isTableFlavor() const
             {
-                const auto cols = static_cast<CoordinateType>(manager_->gridColumns_);
-                if (cols < 0)
-                    return col_;
-
-                auto col = col_;
-
-                col %= cols;
-                if (col < 0)
-                    col += cols;
-                return col;
+                return flavor_ == Flavor::Table;
             }
-            void up()
-            {
-                if (static_cast<CoordinateType>(manager_->gridRows_) <= 1)
-                    return;
 
-                --row_;
+            /// Move one step right; clamps at last item.
+            std::size_t stepRight(std::size_t idx) const
+            {
+                if (itemCount_ == 0)
+                    return 0;
+                if (isTableFlavor())
+                    return stepDown(idx);
+                return std::min(idx + 1, itemCount_ - 1);
+            }
 
-                // check if were are in the last row now, and outside the regular items range, if so go up one more.
-                if (normalRow() == static_cast<CoordinateType>(manager_->gridRows_) - 1 &&
-                    normalCol() >= static_cast<CoordinateType>(manager_->itemsInLastRow()))
-                    --row_;
-            }
-            void down()
+            /// Move one step left; clamps at 0.
+            std::size_t stepLeft(std::size_t idx) const
             {
-                if (static_cast<CoordinateType>(manager_->gridRows_) <= 1)
-                    return;
+                if (itemCount_ == 0)
+                    return 0;
+                if (isTableFlavor())
+                    return stepUp(idx);
+                return idx > 0 ? idx - 1 : 0;
+            }
 
-                ++row_;
+            /// Move one step down (next row, same column).
+            /// Boundary fill: if already on the last row, return itemCount_-1.
+            std::size_t stepDown(std::size_t idx) const
+            {
+                if (itemCount_ == 0)
+                    return 0;
+                if (isTableFlavor())
+                    return std::min(idx + 1, itemCount_ - 1);
 
-                // check if were are in the last row now, and outside the regular items range, if so go down one more.
-                if (normalRow() == static_cast<CoordinateType>(manager_->gridRows_) - 1 &&
-                    normalCol() >= static_cast<CoordinateType>(manager_->itemsInLastRow()))
-                    ++row_;
+                const auto next = idx + columns_;
+                if (next < itemCount_)
+                    return next;
+
+                // On the last row — fill rightward to the last item.
+                return itemCount_ - 1;
             }
-            bool isUnselected() const
+
+            /// Move one step up (previous row, same column).
+            /// Boundary fill: if already on row 0, return 0.
+            std::size_t stepUp(std::size_t idx) const
             {
-                if (!isValid())
-                    return false;
-                return manager_->isIndexUnselected(toIndex());
-            }
-            bool isSelected() const
-            {
-                if (!isValid())
-                    return false;
-                return manager_->isSelected(toIndex());
-            }
-            bool isWrapped() const
-            {
-                return row_ < 0 || col_ < 0;
+                if (itemCount_ == 0)
+                    return 0;
+                if (isTableFlavor())
+                    return idx > 0 ? idx - 1 : 0;
+
+                if (idx >= columns_)
+                    return idx - columns_;
+
+                // On row 0 — fill leftward to index 0.
+                return 0;
             }
 
           private:
-            SelectionManager const* manager_;
-            CoordinateType row_;
-            CoordinateType col_;
+            std::size_t columns_{1};
+            std::size_t rows_{1};
+            std::size_t itemCount_{0};
+            Flavor flavor_{Flavor::Table};
         };
 
-        std::optional<std::size_t> findFirstSelectable() const;
-        std::optional<std::size_t> findLastSelectable() const;
-        std::optional<std::size_t> findNextSelectable(std::size_t index) const;
-        std::optional<std::size_t> findPreviousSelectable(std::size_t index) const;
-        bool isIndexUnselected(std::make_signed_t<std::size_t> index) const;
-        bool isIndexUnselected(std::size_t index) const;
-        GridPosition calculateGridPositionFromIndex(std::size_t index) const;
-        std::size_t itemsInLastRow() const;
+        // ============================================================= helpers
+        Grid makeGrid() const;
+
+        /// Rebuild visual isSelected() for every item from the two-layer model.
+        /// selected[i] = (inRange(i) && !ctrlRemove_.count(i)) || ctrlAdd_.count(i)
+        void rebuildSelection();
+
+        /// Whether index i falls inside [min(anchor_,flag_), max(anchor_,flag_)].
+        bool inRange(std::size_t i) const;
+
+        static void rangeMinMax(std::size_t a, std::size_t b, std::size_t& lo, std::size_t& hi);
+
+        std::optional<std::size_t> itemIndex(ItemWithInternals const& item) const;
+        std::optional<std::size_t> itemIndex(std::filesystem::path const& path) const;
+
+        bool isSelectablePath(std::size_t idx) const;
+
+        /// Apply one navigation step to 'from' according to the event key.
+        std::size_t navigate(std::size_t from, Nui::WebApi::KeyboardEvent const& event) const;
+
+        /// Returns flag_ if active, else anchor_.  nullopt if nothing is selected.
+        std::optional<std::size_t> activeIndex() const;
+
+        /// Fires scrollIntoView_ for the current activeIndex if it differs from
+        /// lastScrolledIndex_ and scrollIntoView_ is set.
+        void maybeScrollActiveIntoView();
 
       private:
         Nui::Observed<std::vector<ItemWithInternals>>* items_;
-        std::set<std::size_t> selectedIndices_;
-        std::optional<std::size_t> currentSelectionStart_{std::nullopt};
+
+        // Layer 1 — range
+        std::optional<std::size_t> anchor_; ///< Fixed end of the shift-range / last plain click.
+        std::optional<std::size_t> flag_; ///< Moving end; nullopt = single-item range at anchor_.
+
+        // Layer 2 — ctrl mask
+        std::set<std::size_t> ctrlAdd_; ///< Selected regardless of the range.
+        std::set<std::size_t> ctrlRemove_; ///< Punched out of the range.
+
+        // Grid layout (updated by setGrid / setFlavor)
         Flavor currentFlavor_;
         std::size_t gridColumns_{1};
         std::size_t gridRows_{1};
+
+        // Scroll-into-view
+        std::function<void(std::size_t)> scrollIntoView_{};
+        std::optional<std::size_t> lastScrolledIndex_{};
     };
 }

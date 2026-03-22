@@ -272,6 +272,25 @@ namespace NuiFileExplorer
         SideImplementation(SideSettings settings, std::unique_ptr<ISideModel> model)
             : settings{std::move(settings)}
             , model{std::move(model)}
-        {}
+        {
+            selectionManager.setScrollIntoViewCallback(
+                [this](std::size_t idx)
+                {
+                    using namespace std::string_literals;
+
+                    auto elem = items.value()[idx].element.lock();
+                    if (elem)
+                    {
+                        auto options = Nui::val::object();
+                        options.set("behavior", "auto"s);
+                        options.set("block", "nearest"s);
+                        options.set("inline", "nearest"s);
+                        options.set("container", "nearest"s);
+                        options.set("scrollMode", "if-needed"s);
+                        elem->val().call<void>("scrollIntoView", options);
+                    }
+                }
+            );
+        }
     };
 }

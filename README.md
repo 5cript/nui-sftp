@@ -118,8 +118,8 @@ This project contains a cross platform (Linux & Windows for now) SSH and SFTP cl
   - [ ] Image preview (image as icon?)
   - [ ] Text preview
 - [ ] Show link target in properties window.
-- [ ] Improve arrow navigation with shift and control.
-- [ ] Scroll into view of recently selected item when using keyboard controls.
+- [X] Improve arrow navigation with shift and control.
+- [X] Scroll into view of recently selected item when using keyboard controls.
 - [ ] Mouse side keys
 - [ ] Ctrl + C / Ctrl + V for copy paste.
 
