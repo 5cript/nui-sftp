@@ -29,6 +29,11 @@ namespace NuiFileExplorer
             return selected_->value();
         }
 
+        void isSelected(bool value)
+        {
+            *selected_ = value;
+        }
+
         explicit ItemWithInternals(Item const& item)
             : item{item}
             , element{}
