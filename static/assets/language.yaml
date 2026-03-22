@@ -63,6 +63,7 @@ en_US:
     renameFailed: "Rename Failed"
     externalDropWebkitWarningTitle: "External Drop Is Faulty"
     externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
+    uploadSingleConfirmText: "Are you sure you want to upload this item '{}' to {}?"
     uploadConfirmTitle: "Upload Items?"
     deleteFilesFailedTitle: "Delete Files Failed"
     createFileFailedTitle: "Create File Failed"

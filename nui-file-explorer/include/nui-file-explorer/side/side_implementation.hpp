@@ -19,6 +19,8 @@ using namespace std::string_literals;
 
 namespace NuiFileExplorer
 {
+    class Side;
+
     enum class SortCriterion
     {
         Name,
@@ -34,6 +36,7 @@ namespace NuiFileExplorer
         constexpr static std::string_view tableGridTemplateColumnsHiddenValue = "25px";
 
         SideSettings settings;
+        Side* otherSide{nullptr};
         std::unique_ptr<ISideModel> model;
 
         Nui::Observed<std::vector<ItemWithInternals>> items{};
@@ -53,6 +56,8 @@ namespace NuiFileExplorer
         Nui::Observed<std::vector<std::filesystem::path>> pathBoxSuggestions{};
         std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
         std::weak_ptr<Nui::Dom::BasicElement> pathBoxElement{};
+
+        std::vector<Item> copiedFiles{};
 
         DropdownMenu newItemMenu{
             {

@@ -55,6 +55,7 @@ namespace NuiFileExplorer
     {
         iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
         tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
+        impl_->otherSide = &otherSide;
     }
     Side::~Side() = default;
     Side::Side(Side&&) = default;
@@ -101,6 +102,30 @@ namespace NuiFileExplorer
         {
             impl_->model->goBack();
             return;
+        }
+        if (event.key() == "c" && event.ctrlKey())
+        {
+            const auto selectedItems = this->selectedItems();
+            if (!selectedItems.empty())
+                impl_->copiedFiles = selectedItems;
+            return;
+        }
+        if (event.key() == "v" && event.ctrlKey())
+        {
+            if (impl_->otherSide)
+            {
+                const auto& copiedFiles = impl_->otherSide->impl_->copiedFiles;
+                if (!copiedFiles.empty())
+                {
+                    // If only a single item is selected and its a directory, set that as the target subdir for the
+                    // transfer. Otherwise, transfer to the current directory.
+                    std::optional<std::filesystem::path> targetSubdir = std::nullopt;
+                    auto selectedItems = this->selectedItems();
+                    if (selectedItems.size() == 1 && selectedItems.front().isDirectory())
+                        targetSubdir = selectedItems.front().path.filename();
+                    impl_->otherSide->model().onTransfer(copiedFiles, targetSubdir);
+                }
+            }
         }
 
         if (!impl_->selectionManager.onKeyboardEvent(event))
@@ -180,7 +205,7 @@ namespace NuiFileExplorer
     {
         const auto& items = impl_->model->items();
 
-        auto selectedPaths = impl_->selectionManager.selectedPaths();
+        const auto selectedPaths = impl_->selectionManager.selectedPaths();
         impl_->selectionManager.loseTrackToAllSelections();
 
         std::set<std::filesystem::path> pathSet;

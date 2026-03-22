@@ -54,7 +54,9 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
                     class_ = "opq-transfer-text",
                     alt = fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
                 }(
-                    fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
+                    type_ == SharedData::OperationType::Download
+                        ? fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
+                        : fmt::format("{} -> {}", localPath_.generic_string(), remotePath_.generic_string())
                 ),
                 div{
                     class_ = "opq-bytes-per-second"
