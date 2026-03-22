@@ -82,7 +82,7 @@ jobs:
 
       - name: Run Deploy
         run: |
-          bash script/deploy.sh
+          bash scripts/deploy.sh
 
       - name: Read version information
         run: |

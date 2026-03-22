@@ -88,4 +88,4 @@ jobs:
 
       - name: Run Deploy
         run: |
-          cd "${{ env.WSPACE }}" && bash script/deploy.sh
+          cd "${{ env.WSPACE }}" && bash scripts/deploy.sh
