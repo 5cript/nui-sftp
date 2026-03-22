@@ -120,9 +120,12 @@ This project contains a cross platform (Linux & Windows for now) SSH and SFTP cl
 - [ ] Show link target in properties window.
 - [X] Improve arrow navigation with shift and control.
 - [X] Scroll into view of recently selected item when using keyboard controls.
-- [ ] Mouse side keys
-- [ ] Ctrl + C / Ctrl + V for copy paste.
+- [X] Ctrl + C / Ctrl + V for copy paste.
 
 ## Open Files & Monitoring
 - [ ] Open files with associated application.
 - [ ] Monitor changes on open files. Add monitoring tab for that and add auto upload option.
+
+# Known Problems
+
+- Cannot use mouse side keys for history navigation (yet) because of a bug in webkit show them as "button 0".
