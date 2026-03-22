@@ -328,8 +328,6 @@ std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
 
 Session* SessionArea::getActiveSession()
 {
-    return nullptr;
-
     const auto selected = impl_->tabs.selectedId();
     if (selected == -1)
         return nullptr;
