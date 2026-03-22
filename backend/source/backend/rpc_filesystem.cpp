@@ -290,7 +290,8 @@ void RpcFilesystem::registerCreateDirectory()
                 const auto directoryPath = parameters["path"].get<std::string>();
 
                 std::error_code ec;
-                if (!std::filesystem::create_directory(directoryPath, ec))
+                std::filesystem::create_directory(directoryPath, ec);
+                if (ec)
                 {
                     Log::error("Failed to create directory '{}': {}", directoryPath, ec.message());
                     return reply.error(ec.message());
