@@ -85,3 +85,7 @@ jobs:
           cmake --build \
             "${{ env.WSPACE }}/${{ env.BUILD_DIR }}" \
             --config "${{ env.BUILD_TYPE }}"
+
+      - name: Run Deploy
+        run: |
+          cd "${{ env.WSPACE }}" && bash script/deploy.sh
