@@ -2,6 +2,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
+#include <frontend/events/frontend_events.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
@@ -13,6 +14,9 @@
 #include <frontend/svgs/add.hpp>
 #include <frontend/svgs/decline.hpp>
 #include <frontend/svgs/settings.hpp>
+#include <ui5-sap-icons/icons/light-mode.hpp>
+#include <ui5-sap-icons/icons/dark-mode.hpp>
+#include <ui5-sap-icons/icons/question-mark.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -24,15 +28,22 @@ struct Toolbar::Implementation
     FrontendEvents* events;
     SessionArea* sessionArea;
     ConfirmDialog* confirmDialog;
+    ThemeController* themeController;
     Nui::Observed<std::string> activeTerminalEngine{};
     Nui::Observed<std::string> selectedLayout{};
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
 
-    Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
+    Implementation(
+        Persistence::StateHolder* stateHolder,
+        FrontendEvents* events,
+        ConfirmDialog* confirmDialog,
+        ThemeController& themeController
+    )
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{confirmDialog}
+        , themeController{&themeController}
         , terminalEngines{}
         , layouts{}
     {
@@ -84,8 +95,13 @@ void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
     );
 }
 
-Toolbar::Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
-    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog))
+Toolbar::Toolbar(
+    Persistence::StateHolder* stateHolder,
+    FrontendEvents* events,
+    ConfirmDialog* confirmDialog,
+    ThemeController& themeController
+)
+    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog, themeController))
 {
     Log::info("Toolbar::Toolbar");
     impl_->updateSessionsList(
@@ -200,6 +216,36 @@ Nui::ElementRenderer Toolbar::operator()()
         div{
             style = "flex-grow: 1"
         }(),
+        Snc::button({
+            .icon = [this]() -> Nui::ElementRenderer {
+                return Nui::Elements::fragment(
+                    observe(impl_->events->darkLightMode),
+                    [this](){
+                        if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Dark) {
+                            return Ui5Icons::light_mode();
+                        }
+
+                        if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Light) {
+                            return Ui5Icons::dark_mode();
+                        }
+
+                        return Ui5Icons::question_mark();
+                    }
+                );
+            }(),
+            .attributes = {
+                onClick = [this]() {
+                    if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Dark) {
+                        impl_->events->darkLightMode = SharedData::DarkLightMode::Light;
+                    } else if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Light) {
+                        impl_->events->darkLightMode = SharedData::DarkLightMode::Dark;
+                    } else {
+                        const auto preferred = impl_->themeController->getPreferredMode();
+                        impl_->events->darkLightMode = preferred == SharedData::DarkLightMode::Dark ? SharedData::DarkLightMode::Light : SharedData::DarkLightMode::Dark;
+                    }
+                },
+            },
+        }),
         Snc::button({
             .icon = GeneratedSvgs::settings(),
             .attributes = {

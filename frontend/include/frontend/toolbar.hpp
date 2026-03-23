@@ -2,6 +2,7 @@
 
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/theme_controller.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -12,7 +13,12 @@ class SessionArea;
 class Toolbar
 {
   public:
-    Toolbar(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog);
+    Toolbar(
+        Persistence::StateHolder* stateHolder,
+        FrontendEvents* events,
+        ConfirmDialog* confirmDialog,
+        ThemeController& themeController
+    );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Toolbar);
 
     void sessionArea(SessionArea& sessionArea);

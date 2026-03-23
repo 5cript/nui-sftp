@@ -1,6 +1,7 @@
 #pragma once
 
 #include <persistence/state_holder.hpp>
+#include <frontend/theme_controller.hpp>
 #include <frontend/events/frontend_events.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -10,7 +11,7 @@
 class MainPage
 {
   public:
-    MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events);
+    MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(MainPage);
 
     Nui::ElementRenderer render();

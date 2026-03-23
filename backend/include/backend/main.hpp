@@ -6,7 +6,9 @@
 #include <backend/rpc_filesystem.hpp>
 #include <backend/rpc_system.hpp>
 #include <backend/password/password_prompter.hpp>
+#include <backend/theme_finder.hpp>
 #include <ssh/async/processing_thread.hpp>
+#include <events/app_wide_events.hpp>
 
 #include <boost/asio/steady_timer.hpp>
 #include <nui/core.hpp>
@@ -56,6 +58,8 @@ class Main
     boost::asio::steady_timer childSignalTimer_;
     // for display later in UI
     std::string initialPersistenceLoadWarning_;
+    AppWideEvents events_;
+    ThemeFinder themeFinder_;
     std::once_flag rpcAliveOnce_;
 
     struct PlatformSpecifics;

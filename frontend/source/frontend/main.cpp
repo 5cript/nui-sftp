@@ -1,4 +1,5 @@
 #include <frontend/main_page.hpp>
+#include <frontend/theme_controller.hpp>
 #include <utility/language.hpp>
 #include <persistence/state_holder.hpp>
 #include <log/log.hpp>
@@ -7,9 +8,6 @@
 #include <nui/frontend/api/timer.hpp>
 #include <nui/window.hpp>
 #include <nui/frontend/api/console.hpp>
-
-// #define NUI_ENABLE_LIVE_RELOAD
-// #include <nui/frontend/live_styling.hpp>
 
 #include <nui/frontend/dom/dom.hpp>
 #include <nui/frontend/elements.hpp>
@@ -21,6 +19,7 @@ std::unique_ptr<LanguageProvider> language{nullptr};
 
 static std::unique_ptr<Persistence::StateHolder> persistence{};
 static std::unique_ptr<FrontendEvents> frontendEvents{};
+static std::unique_ptr<ThemeController> themeController{};
 static std::unique_ptr<MainPage> mainPage{};
 static std::unique_ptr<Nui::Dom::Dom> dom{};
 
@@ -49,6 +48,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
             {
                 Log::info("State loaded, setting up frontend.");
                 frontendEvents = std::make_unique<FrontendEvents>();
+                themeController = std::make_unique<ThemeController>(*frontendEvents);
                 frontendEvents->onLanguageChanged = persistence->stateCache().localizationOptions.languageCode;
 
                 persistence->loadLanguageFile(
@@ -71,13 +71,22 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 
                             Log::info("Language file loaded.");
                             Log::info("Creating main page.");
-                            mainPage = std::make_unique<MainPage>(persistence.get(), frontendEvents.get());
+                            mainPage =
+                                std::make_unique<MainPage>(persistence.get(), frontendEvents.get(), *themeController);
 
                             Log::info("Creating DOM.");
                             dom = std::make_unique<Nui::Dom::Dom>();
 
                             Log::info("Rendering main page into DOM.");
-                            dom->setBody(Nui::Elements::body{}(mainPage->render()));
+                            dom->setBody(
+                                Nui::Elements::body{
+                                    !(Nui::Attributes::reference =
+                                            [](auto const&)
+                                        {
+                                            themeController->applyMode(themeController->getPreferredMode());
+                                        })
+                                }(mainPage->render())
+                            );
 
                             Log::info("Calling setup completion function");
                             mainPage->onSetupComplete();

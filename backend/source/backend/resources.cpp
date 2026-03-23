@@ -1,5 +1,10 @@
 #include <backend/resources.hpp>
+#include <roar/filesystem/special_paths.hpp>
 #include <log/log.hpp>
+
+#ifndef SOURCE_DIR
+#    define SOURCE_DIR resourceDir
+#endif
 
 namespace
 {
@@ -27,6 +32,21 @@ bool pointsToWithinDir(std::filesystem::path const& relativeRoot, std::filesyste
     return absPath.string().starts_with(relativeRoot.string());
 }
 
+std::vector<std::filesystem::path> getThemeDirs(std::filesystem::path const& relativeRoot)
+{
+#ifndef NDEBUG
+    return {
+        std::filesystem::path{SOURCE_DIR} / "themes",
+        Roar::resolvePath(std::filesystem::path{"%state_home2%"} / "themes"),
+    };
+#else
+    return {
+        relativeRoot / "themes",
+        Roar::resolvePath(std::filesystem::path{"%state_home2%"} / "themes"),
+    };
+#endif
+}
+
 std::optional<std::filesystem::path>
 mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPathString)
 {
@@ -38,15 +58,34 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
     const auto path = [&]() -> std::optional<std::filesystem::path>
     {
         // make path relative to / to avoid directory traversal
+        const auto relative = std::filesystem::relative(urlPathString, "/");
+
+        if (endsWith(".css") && relative.parent_path().filename() == "themes")
+        {
+#ifndef NDEBUG
+            std::error_code ec;
+            const auto canonical = std::filesystem::canonical(SOURCE_DIR / relative, ec);
+            if (ec && !std::filesystem::exists(SOURCE_DIR / relative))
+                return Roar::resolvePath("%state_home2%" / relative);
+            return SOURCE_DIR / relative;
+#else
+            std::error_code ec;
+            const auto canonical = std::filesystem::canonical(resourceDir / relative, ec);
+            if (ec && !std::filesystem::exists(resourceDir / relative))
+                return Roar::resolvePath("%state_home2%" / relative);
+            return resourceDir / relative;
+#endif
+        }
+
         if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
         {
 #ifndef NDEBUG
-            return resourceDir / "module_nui-sftp/bin" / std::filesystem::relative(urlPathString, "/");
+            return resourceDir / "module_nui-sftp/bin" / relative;
 #endif
-            return resourceDir / "frontend" / std::filesystem::relative(urlPathString, "/");
+            return resourceDir / "frontend" / relative;
         }
         else
-            return resourceDir / "assets" / std::filesystem::relative(urlPathString, "/");
+            return resourceDir / "assets" / relative;
 
         return std::nullopt;
     }();
