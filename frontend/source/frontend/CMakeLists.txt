@@ -19,6 +19,7 @@ target_sources(
         settings.cpp
         color.cpp
         icon_from_name.cpp
+        theme_controller.cpp
         dialog/input_dialog.cpp
         dialog/multi_input_dialog.cpp
         dialog/password_prompter.cpp

@@ -13,7 +13,7 @@
 #include <optional>
 
 #ifdef NUI_FRONTEND
-#    include <nui/frontend/event_system/observed_value.hpp>
+#    include <nui/event_system/observed_value.hpp>
 #endif
 
 namespace Persistence

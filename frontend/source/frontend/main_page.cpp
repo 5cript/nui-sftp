@@ -31,7 +31,7 @@ struct MainPage::Implementation
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
 
-    Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events)
+    Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{"ConfirmDialog"}
@@ -40,7 +40,7 @@ struct MainPage::Implementation
         , prompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
-        , toolbar{stateHolder, events, &confirmDialog}
+        , toolbar{stateHolder, events, &confirmDialog, themeController}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
@@ -58,8 +58,8 @@ struct MainPage::Implementation
     }
 };
 
-MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events)
-    : impl_{std::make_unique<Implementation>(stateHolder, events)}
+MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
+    : impl_{std::make_unique<Implementation>(stateHolder, events, themeController)}
 {
     Log::info("MainPage::MainPage()");
 }

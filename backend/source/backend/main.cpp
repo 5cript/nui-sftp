@@ -190,6 +190,8 @@ Main::Main(int const, char const* const*)
     , prompter_{hub_}
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
     , childSignalTimer_{window_.getExecutor()}
+    , events_{hub_}
+    , themeFinder_{programDir_.parent_path(), events_}
     , platformSpecifics_{std::make_unique<PlatformSpecifics>(window_, hub_)}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);

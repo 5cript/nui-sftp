@@ -41,9 +41,7 @@ class LanguageProvider
     }
 
     template <typename... Args>
-    Nui::
-        ObservedValueCombinatorWithGenerator<std::function<std::string(std::string const&)>, Nui::Observed<std::string>>
-        getObserved(Args&&... args)
+    auto getObserved(Args&&... args)
     {
         std::vector<std::pair<std::string, std::string>> lookupTable;
         std::transform(
@@ -120,7 +118,8 @@ class LanguageProvider
     std::vector<std::string> languageKeys_{};
 };
 
-using LanguageObservedText = Nui::
-    ObservedValueCombinatorWithGenerator<std::function<std::string(std::string const&)>, Nui::Observed<std::string>>;
+using LanguageObservedText = Nui::ObservedValueCombinatorWithGenerator<
+    std::function<std::string(std::string const&)>,
+    decltype(AppWideEvents::onLanguageChanged)>;
 
 extern std::unique_ptr<LanguageProvider> language;

@@ -48,7 +48,13 @@ find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS filesystem process)
 
 target_include_directories(backend PUBLIC "${CMAKE_SOURCE_DIR}/backend/include")
 
-target_compile_definitions(backend PUBLIC -DSSH_NO_CPP_EXCEPTIONS)
+target_compile_definitions(
+    backend
+    PUBLIC
+        -DSSH_NO_CPP_EXCEPTIONS
+    PRIVATE
+        -DSOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/libssh.cmake")
 
