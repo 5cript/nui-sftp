@@ -1,6 +1,8 @@
 #pragma once
 
 #include <persistence/state_core.hpp>
+#include <shared_data/theme.hpp>
+#include <constants/persistence.hpp>
 
 #include <map>
 #include <string>
@@ -9,6 +11,9 @@ namespace Persistence
 {
     struct UiOptions : public DefaultMissingMember
     {
+        std::string theme{Constants::defaultThemeName};
+        SharedData::DarkLightMode darkLightMode{SharedData::DarkLightMode::System};
+        bool showHiddenFiles{false};
         bool fileGridPathBarOnTop{false};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/cpp.png"},
@@ -33,5 +38,9 @@ namespace Persistence
             {".py", "icons/python.png"},
         };
     };
-    BOOST_DESCRIBE_STRUCT(UiOptions, (), (fileGridPathBarOnTop, fileGridExtensionIcons))
+    BOOST_DESCRIBE_STRUCT(
+        UiOptions,
+        (),
+        (theme, darkLightMode, showHiddenFiles, fileGridPathBarOnTop, fileGridExtensionIcons)
+    )
 }

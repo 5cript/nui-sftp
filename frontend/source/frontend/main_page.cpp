@@ -116,7 +116,6 @@ Nui::ElementRenderer MainPage::render()
         impl_->multiInputDialog(),
         impl_->settings(),
         div{
-            style = "background-color: var(--background-color); color: var(--color);",
             class_ = "main-page",
         }(
             impl_->toolbar(),

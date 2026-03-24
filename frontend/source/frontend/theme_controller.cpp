@@ -1,6 +1,9 @@
 #include <frontend/theme_controller.hpp>
 #include <nui/frontend/val.hpp>
 #include <nui/frontend/api/console.hpp>
+#include <constants/persistence.hpp>
+#include <log/log.hpp>
+#include <build_environment.hpp>
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -13,22 +16,27 @@ ThemeController::ThemeController(FrontendEvents& events)
               events.darkLightMode,
               [this](SharedData::DarkLightMode setting)
               {
+                  Log::info(
+                      "ThemeController: dark/light mode change event received, new value: " +
+                      std::to_string(static_cast<int>(setting))
+                  );
                   applyModeImpl(setting);
               }
           )
       )
     , themeNameListener_(
           Nui::smartListen(
-              events.themeName,
+              events.selectedTheme,
               [this](const std::string& name)
               {
+                  Log::info("ThemeController: theme change event received, new value: " + name);
                   applyThemeNameImpl(name);
               }
           )
       )
 {
-    applyModeImpl(getPreferredMode());
-    applyThemeNameImpl(events.themeName.value());
+    applyModeImpl(events.darkLightMode.value());
+    applyThemeNameImpl(events.selectedTheme.value());
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +58,7 @@ void ThemeController::applyModeImpl(SharedData::DarkLightMode setting)
     const auto root = Nui::val::global("document")["documentElement"];
     if (root.isUndefined())
     {
-        Nui::WebApi::Console::warn("Cannot apply light/dark: document root is undefined.");
+        Log::warn("Cannot apply light/dark: document root is undefined.");
         return;
     }
 
@@ -68,7 +76,7 @@ void ThemeController::applyModeImpl(SharedData::DarkLightMode setting)
         return "failed";
     }();
 
-    Nui::WebApi::Console::log("Applying theme: " + themeValue);
+    Log::info("Applying theme: " + themeValue);
     Nui::val::global("document")["documentElement"]["dataset"].set("theme", themeValue);
 }
 
@@ -108,7 +116,7 @@ std::string ThemeController::sanitizeThemeName(const std::string& name)
     {
         if (c == '/' || c == '\\' || c == '.' || c == ':' || c == '?' || c == '#' || c == '%' || c == '\0')
         {
-            Nui::WebApi::Console::warn("ThemeController: rejected character in theme name.");
+            Log::warn("ThemeController: rejected character in theme name.");
             return {};
         }
     }
@@ -136,9 +144,10 @@ void ThemeController::applyThemeNameImpl(const std::string& name)
 {
     using namespace std::string_literals;
 
-    // "default" (the initial value) or empty string both mean: no custom theme
-    if (name.empty() || name == "default")
+    // the default theme or empty string both mean: no custom theme
+    if (name.empty() || name == Constants::defaultThemeName)
     {
+        Log::info("Unloading custom theme, reverting to default.");
         unloadCustomThemeImpl();
         return;
     }
@@ -146,23 +155,25 @@ void ThemeController::applyThemeNameImpl(const std::string& name)
     const std::string sanitized = sanitizeThemeName(name);
     if (sanitized.empty())
     {
-        Nui::WebApi::Console::warn("ThemeController::applyThemeNameImpl: invalid theme name rejected.");
+        Log::warn("ThemeController::applyThemeNameImpl: invalid theme name rejected.");
         return;
     }
 
     // Skip reload if the same theme is already active
-    if (activeCustomTheme_.has_value() && *activeCustomTheme_ == sanitized)
+    Log::info("Build Type on Theme Switch: " + std::string{BACKEND_BUILD_TYPE});
+    if (activeCustomTheme_.has_value() && *activeCustomTheme_ == sanitized &&
+        std::string_view{BACKEND_BUILD_TYPE} != "Debug")
         return;
 
     unloadCustomThemeImpl();
 
-    const std::string url = "nui://app.example/theme/" + sanitized + ".css";
+    std::string url = "nui://app.example/themes/" + sanitized + ".css?t=" + std::to_string(std::time(nullptr));
 
     auto doc = Nui::val::global("document");
     auto head = doc["head"];
     if (head.isUndefined())
     {
-        Nui::WebApi::Console::warn("ThemeController::applyThemeNameImpl: <head> not found.");
+        Log::warn("ThemeController::applyThemeNameImpl: <head> not found.");
         return;
     }
 
@@ -175,14 +186,14 @@ void ThemeController::applyThemeNameImpl(const std::string& name)
     doc["documentElement"]["dataset"].set("customTheme", sanitized);
     activeCustomTheme_ = sanitized;
 
-    Nui::WebApi::Console::log("Loaded custom theme: " + sanitized + " from " + url);
+    Log::info("Loaded custom theme: " + sanitized + " from " + url);
 }
 
 // Public convenience — mirrors applyMode() in style
 void ThemeController::applyThemeName(const std::string& name)
 {
-    events_->themeName = name;
-    events_->themeName.eventContext().sync();
+    events_->selectedTheme = name;
+    events_->selectedTheme.eventContext().sync();
 }
 
 std::optional<std::string> ThemeController::getActiveCustomTheme() const

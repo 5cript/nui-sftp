@@ -40,6 +40,63 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
         },
     }
     , userInterface{
+        .theme = ComboSetting<std::string, std::string>{
+            { std::string{Constants::defaultThemeName} },
+            language->getObserved("settings", "general", "userInterface", "themeHelpText"),
+            [this, events, onChange]()
+            {
+                events->selectedTheme = userInterface.theme.value();
+                events->selectedTheme.modifyNow();
+                onChange();
+            },
+            [this, events, onChange]()
+            {
+                userInterface.theme.value(std::string{Constants::defaultThemeName});
+                events->selectedTheme = userInterface.theme.value();
+                events->selectedTheme.modifyNow();
+                onChange();
+            },
+        },
+        .darkLightMode = ComboSetting<SharedData::DarkLightMode, std::string>{
+            { SharedData::DarkLightMode::System, SharedData::DarkLightMode::Dark, SharedData::DarkLightMode::Light },
+            language->getObserved("settings", "general", "userInterface", "darkLightModeHelpText"),
+            [this, events, onChange]() {
+                Log::info("User changed dark/light mode setting in UI, new value: " + std::to_string(static_cast<int>(userInterface.darkLightMode.value())));
+                events->darkLightMode = userInterface.darkLightMode.value();
+                events->darkLightMode.eventContext().sync();
+            },
+            [this, events, onChange]() {
+                userInterface.darkLightMode.value(Persistence::UiOptions{}.darkLightMode);
+                {
+                    darkLightEventOriginatesHere = true;
+                    events->darkLightMode = userInterface.darkLightMode.value();
+                    events->darkLightMode.eventContext().sync();
+                    darkLightEventOriginatesHere = false;
+                }
+                onChange();
+            },
+            [](SharedData::DarkLightMode mode) -> std::string
+            {
+                switch (mode) {
+                    case SharedData::DarkLightMode::System:
+                        return language->get("settings", "general", "userInterface", "darkLightModeSystem");
+                    case SharedData::DarkLightMode::Dark:
+                        return language->get("settings", "general", "userInterface", "darkLightModeDark");
+                    case SharedData::DarkLightMode::Light:
+                        return language->get("settings", "general", "userInterface", "darkLightModeLight");
+                }
+                return "???";
+            },
+        },
+        .showHiddenFiles = BoolSetting<>{
+            language->getObserved("settings", "general", "userInterface", "showHiddenFilesHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                userInterface.showHiddenFiles.value(Persistence::UiOptions{}.showHiddenFiles);
+                onChange();
+            },
+        },
         .fileGridPathBarOnTop = BoolSetting<>{
             language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTopHelpText"),
             onChange,
@@ -119,7 +176,40 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
         },
     }
     , logOptions(onChange)
+    , availableThemesListener{
+        Nui::smartListen(
+            events->availableThemes,
+            [this, onChange](auto const& themes)
+            {
+                updateThemes(themes);
+                onChange();
+            }
+        )
+    }
+    , darkLightModeListener{
+        Nui::smartListen(
+            events->darkLightMode,
+            [this, onChange](auto value)
+            {
+                if (!darkLightEventOriginatesHere)
+                    this->userInterface.darkLightMode.value(value);
+            }
+        )
+    }
 {}
+
+void GeneralSettings::updateThemes(std::vector<std::filesystem::path> paths)
+{
+    std::vector<std::string> themeNames{{std::string{Constants::defaultThemeName}}};
+    for (auto const& themePath : paths)
+    {
+        const auto name = themePath.filename().stem().string();
+        if (name == Constants::defaultThemeName)
+            continue;
+        themeNames.push_back(name);
+    }
+    userInterface.theme.options(themeNames);
+}
 
 void GeneralSettings::applyToState(Persistence::State& state) const
 {
@@ -128,6 +218,9 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.localizationOptions.dateTimeFormatString = localization.dateTimeFormat.value();
 
     // Ui Options
+    state.uiOptions.theme = userInterface.theme.value();
+    state.uiOptions.darkLightMode = userInterface.darkLightMode.value();
+    state.uiOptions.showHiddenFiles = userInterface.showHiddenFiles.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
 
@@ -147,6 +240,9 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     localization.dateTimeFormat.value(state.localizationOptions.dateTimeFormatString);
 
     // Ui Options
+    userInterface.theme.value(state.uiOptions.theme);
+    userInterface.darkLightMode.value(state.uiOptions.darkLightMode);
+    userInterface.showHiddenFiles.value(state.uiOptions.showHiddenFiles);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
 
@@ -195,6 +291,9 @@ Nui::ElementRenderer GeneralSettings::render(
         );
 
         auto userInterfaceUi = fragment(
+            userInterface.theme(language->getObserved("settings", "general", "userInterface", "theme")),
+            userInterface.darkLightMode(language->getObserved("settings", "general", "userInterface", "darkLightMode")),
+            userInterface.showHiddenFiles(language->getObserved("settings", "general", "userInterface", "showHiddenFiles")),
             userInterface.fileGridPathBarOnTop(
                 language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
             ),

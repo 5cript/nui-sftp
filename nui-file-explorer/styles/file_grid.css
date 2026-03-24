@@ -3,6 +3,7 @@
     display: flex;
     flex-direction: column;
     user-select: none;
+    color: var(--nui-file-grid-color, var(--color, #efefef));
 }
 
 .nui-file-grid-selection-box {
@@ -48,7 +49,7 @@
 }
 
 .nui-file-grid-background {
-    background-image:
+    --background-image:
         radial-gradient(at 56% 8%, hsla(323, 64%, 77%, 1) 0px, transparent 50%),
         radial-gradient(at 88% 7%, hsla(186, 94%, 76%, 1) 0px, transparent 50%),
         radial-gradient(at 67% 1%, hsla(321, 80%, 79%, 1) 0px, transparent 50%),
@@ -56,6 +57,8 @@
         radial-gradient(at 22% 33%, hsla(314, 83%, 65%, 1) 0px, transparent 50%),
         radial-gradient(at 7% 91%, hsla(200, 78%, 70%, 1) 0px, transparent 50%),
         radial-gradient(at 19% 86%, hsla(137, 62%, 74%, 1) 0px, transparent 50%);
+
+    background-image: var(--background-image);
 
     /* Darken overlay to improve contrast (doesn't affect child elements) */
     background-color: rgba(0, 0, 0, 0.55);
@@ -108,7 +111,6 @@
     padding: 12px 0;
     text-align: center;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
 
     border-radius: 14px;
 
@@ -130,7 +132,7 @@
     overflow: hidden;
 
     &[data-type="Symbolic Link"] {
-        color: rgb(0, 242, 255);
+        color: var(--nui-file-grid-symbolic-link-color, rgb(0, 242, 255));
 
         &>div::before {
             content: "⤷";
@@ -344,7 +346,7 @@
 }
 
 .nui-file-grid-table-row {
-    background-color: var(--nui-file-grid-table-cell-background, #303030);
+    background-color: var(--nui-file-grid-table-cell-background, var(--nui-file-grid-background-color));
     color: var(--nui-file-grid-table-cell-color, #efefef);
     overflow: hidden;
     padding-top: 2px;
@@ -360,8 +362,8 @@
 
     &:nth-of-type(2n) {
         background-color: color-mix(in srgb,
-                var(--nui-file-grid-table-cell-background, #303030) 95%,
-                #fff 5%);
+                var(--nui-file-grid-table-cell-background, var(--nui-file-grid-background-color)) var(--nui-file-grid-brightness-mixin-percent, 80%),
+                var(--nui-file-grid-brightness-mixin));
     }
 
     &:hover:nth-of-type(2n) {
@@ -378,43 +380,50 @@
 
     background-color:
         color-mix(in srgb,
-            var(--nui-file-grid-table-cell-background, #303030) 80%,
-            #000 20%);
+            var(--nui-file-grid-table-cell-background, var(--nui-file-grid-background-color)) 80%,
+            var(--nui-file-grid-brightness-mixin) 20%);
 
     filter: saturate(75%) brightness(90%);
 }
 
 .nui-file-grid-table-row.drop-hovered {
-    background-color: #3d2cd6;
+    background-color: var(--nui-file-grid-item-highlight, #3d2cd6);
 }
 
 .nui-file-grid-table-row.is-muted:hover {
     background-color:
         color-mix(in srgb,
-            var(--nui-file-grid-table-cell-background, #303030) 70%,
-            #000 30%);
+            var(--nui-file-grid-table-cell-background, var(--nui-file-grid-background-color)) 70%,
+            var(--nui-file-grid-brightness-mixin) 30%);
 }
 
 .nui-file-grid-table-row.is-highlighted {
     position: relative;
     background-color:
         color-mix(in srgb,
-            var(--nui-file-grid-item-highlight) 85%,
-            #000 15%);
+            var(--nui-file-grid-item-highlight) calc(100% - var(--nui-file-grid-brightness-mixin-percent, 50%)),
+            var(--nui-file-grid-brightness-mixin) var(--nui-file-grid-brightness-mixin-percent));
 }
 
 .nui-file-grid-table-row.is-highlighted:hover {
+    --mixin-percent-deviation: 12%;
+    --mixin-percent: calc(var(--nui-file-grid-brightness-mixin-percent, 50%) + var(--mixin-percent-deviation));
+
     background-color:
         color-mix(in srgb,
-            var(--nui-file-grid-item-highlight) 92%,
-            #fff 8%);
+            var(--nui-file-grid-item-highlight) var(--mixin-percent),
+            var(--nui-file-grid-brightness-mixin) calc(100% - var(--mixin-percent)));
+
 }
 
 .nui-file-grid-table-row.is-highlighted.selected {
+    --mixin-percent-deviation: 19%;
+    --mixin-percent: calc(var(--nui-file-grid-brightness-mixin-percent, 50%) + var(--mixin-percent-deviation));
+
     background-color:
         color-mix(in srgb,
-            var(--nui-file-grid-item-highlight) 99%,
-            #fff 12%);
+            var(--nui-file-grid-item-highlight) var(--mixin-percent),
+            var(--nui-file-grid-brightness-mixin) calc(100% - var(--mixin-percent)));
 }
 
 .nui-file-grid-table-row.is-highlighted::before {
@@ -489,7 +498,7 @@
     }
 
     &[data-type="Symbolic Link"] {
-        color: rgb(0, 242, 255);
+        color: var(--nui-file-grid-symbolic-link-color, rgb(0, 242, 255));
 
         &>span::before {
             content: "⤷";
@@ -587,6 +596,6 @@
 
     &:hover,
     &:focus {
-        background-color: #6a5af8;
+        background-color: var(--nui-file-grid-item-highlight, #3d2cd6);
     }
 }

@@ -6,6 +6,7 @@ add_library(
         resources.cpp
         rpc_filesystem.cpp
         rpc_system.cpp
+        theme_finder.cpp
         password/password_prompter.cpp
         process/process.cpp
         process/process_store.cpp
@@ -18,6 +19,7 @@ add_library(
         sftp/bulk_download_operation.cpp
         sftp/bulk_upload_operation.cpp
         sftp/delete_operation.cpp
+        "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
 )
 
 if (WIN32)
@@ -52,8 +54,6 @@ target_compile_definitions(
     backend
     PUBLIC
         -DSSH_NO_CPP_EXCEPTIONS
-    PRIVATE
-        -DSOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/libssh.cmake")
@@ -121,6 +121,7 @@ if (NOT OMIT_FRONTEND_BUILD)
             -DBROWSER_ENGINE=${BROWSER_ENGINE}
             # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
             -DOFFLINE_BUILD=${OFFLINE_BUILD}
+            -DBACKEND_BUILD_TYPE=${BACKEND_BUILD_TYPE}
     )
 
     target_sources(

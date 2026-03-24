@@ -8,6 +8,7 @@
 
 #include <backend/process/process_store.hpp>
 #include <backend/resources.hpp>
+#include <roar/filesystem/special_paths.hpp>
 
 #include <nui/core.hpp>
 #include <nui/rpc.hpp>
@@ -29,6 +30,10 @@
 
 #ifdef __linux__
 #    include <signal.h>
+#endif
+
+#ifndef NDEBUG
+#    include <build_environment.hpp>
 #endif
 
 using namespace std::string_literals;
@@ -103,7 +108,13 @@ namespace
                 }
                 const auto file = *fileOpt;
 
-                if (!pointsToWithinDir(resourceDir, file))
+                if (
+                    !pointsToWithinDir(resourceDir, file) &&
+                    !pointsToWithinDir(Roar::resolvePath("%state_home2%"), file)
+#ifndef NDEBUG
+                    && !pointsToWithinDir(SOURCE_DIR, file)
+#endif
+                )
                 {
                     Log::error("Path points outside of program directory: '{}'", file.string());
                     return makeResponse(404, "Not Found", "Not Found");

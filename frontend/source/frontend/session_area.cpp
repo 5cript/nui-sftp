@@ -372,12 +372,7 @@ Nui::ElementRenderer SessionArea::operator()()
             class_ = "session-area"
         }(
             impl_->tabs({
-                style =
-                    "margin-bottom: 2px;"
-                    "box-shadow: 1px 4px 10px 0px rgba(0,0,0,1);"
-                    "min-height: 30px;"
-                    "box-sizing: content-box;"
-                    "padding: 3px 5px;"
+                "data-class"_attr = "session-area-tabs",
             }),
             div{
                 style = "position: relative; width: 100%; height: calc(100% - 30px); display: block",

@@ -8,15 +8,7 @@
 class ThemeFinder
 {
   public:
-    ThemeFinder(std::filesystem::path const& relativeRoot, AppWideEvents& events)
-        : themeReloadListener_{Nui::smartListen(
-              events.onReloadThemes,
-              [&events, relativeRoot](bool)
-              {
-                  events.availableThemes = findAvailableThemes(relativeRoot);
-              }
-          )}
-    {}
+    ThemeFinder(std::filesystem::path const& relativeRoot, AppWideEvents& events);
 
   private:
     static std::vector<std::filesystem::path> findAvailableThemes(std::filesystem::path const& relativeRoot);

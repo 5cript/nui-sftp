@@ -92,6 +92,11 @@ class ComboSetting : public Setting<Disengageable, ValueType>
             });
     }
 
+    void options(std::vector<ValueType> const& newOptions)
+    {
+        availableStates_ = newOptions;
+    }
+
     Nui::ElementRenderer renderOption(ValueType const& option)
     {
         using Nui::Elements::span;
@@ -165,7 +170,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
     }
 
   private:
-    std::vector<ValueType> availableStates_;
+    Nui::Observed<std::vector<ValueType>> availableStates_;
     std::function<TransformedType(ValueType const&)> valueTransformer_;
     std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer_;
 };
