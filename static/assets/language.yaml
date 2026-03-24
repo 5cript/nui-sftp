@@ -491,6 +491,15 @@ en_US:
       loggingAndErrorReporting:
         logLevelHelpText: "The log level determines the verbosity of the application's logging output."
       userInterface:
+        themeHelpText: "The overall theme of the application's user interface. A theme is not the light/dark mode. A theme provides a cohesive set of colors for the user interface, including but not limited to light/dark mode."
+        darkLightModeHelpText: "Whether to use dark or light mode for the user interface. This is a sub-setting of the theme, which means that the theme can provide different colors for dark and light mode."
+        darkLightModeSystem: "Follow System"
+        darkLightModeDark: "Dark"
+        darkLightModeLight: "Light"
+        showHiddenFilesHelpText: "When enabled, hidden files (those starting with a dot) will be shown in the file explorer."
+        showHiddenFiles: "Show Hidden Files"
+        theme: "Theme"
+        darkLightMode: "Dark/Light Mode"
         fileGridPathBarOnTopHelpText: "If enabled, the path bar in the file grid view will be displayed at the top instead of the bottom."
         fileGridPathBarOnTop: "FileGrid path bar on top"
         fileGridExtensionIconsKeyName: "File Extension"

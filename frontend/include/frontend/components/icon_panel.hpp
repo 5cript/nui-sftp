@@ -14,7 +14,7 @@ struct IconPanelOptions
     std::string color;
     int padding = 12;
     bool withBorder = false;
-    int colorMixinPercent = 50;
+    std::string colorMixinPercent = "var(--brightness-mixin-percent)";
 };
 inline Nui::ElementRenderer iconPanel(IconPanelOptions const& options)
 {
@@ -26,11 +26,11 @@ inline Nui::ElementRenderer iconPanel(IconPanelOptions const& options)
     return div{
         class_ = "icon-panel",
         style = fmt::format(
-            "background-color: color-mix(in srgb, {} {}%, black {}%);{}padding: {}px;",
+            "background-color: color-mix(in srgb, {} {}, var(--brightness-mixin) {});{}padding: {}px;",
             options.color,
             options.colorMixinPercent,
-            100 - options.colorMixinPercent,
-            options.withBorder ? "border: 1px solid #707070;" : "",
+            "calc(100% - " + options.colorMixinPercent + ")",
+            options.withBorder ? "border: 1px solid var(--border-color-fields);" : "",
             options.padding
         ),
     }(std::move(options.icon));

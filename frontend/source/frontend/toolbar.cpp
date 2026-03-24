@@ -243,6 +243,26 @@ Nui::ElementRenderer Toolbar::operator()()
                         const auto preferred = impl_->themeController->getPreferredMode();
                         impl_->events->darkLightMode = preferred == SharedData::DarkLightMode::Dark ? SharedData::DarkLightMode::Light : SharedData::DarkLightMode::Dark;
                     }
+                    // reload theme
+                    impl_->events->selectedTheme.modify();
+
+                    impl_->stateHolder->stateCache().uiOptions.darkLightMode = impl_->events->darkLightMode.value();
+                    impl_->stateHolder->save(
+                        [this](std::optional<std::string> const& error)
+                        {
+                            if (error)
+                            {
+                                impl_->confirmDialog->open({
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                    .headerText = language->get("toolbar", "errorSavingSettingsHeader"),
+                                    .text = fmt::format(
+                                        fmt::runtime(language->get("toolbar", "errorSavingSettings") + ": {}"), *error
+                                    ),
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                            }
+                        }
+                    );
                 },
             },
         }),

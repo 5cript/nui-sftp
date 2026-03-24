@@ -99,6 +99,8 @@ struct Settings::Implementation
     Nui::Observed<bool> wasInitiallyLoaded{false};
     Nui::Observed<bool> initialLoadDone{false};
 
+    Nui::ListenRemover<decltype(FrontendEvents::settingsOpen)> settingsOpenListener{};
+
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
@@ -197,7 +199,7 @@ Settings::Settings(
         true
     );
 
-    listen(
+    impl_->settingsOpenListener = Nui::smartListen(
         impl_->events->settingsOpen,
         [this](bool open)
         {
@@ -293,6 +295,7 @@ void Settings::applySettingsToState(Persistence::State& state)
 
 void Settings::applySettingsToUi()
 {
+    impl_->events->onReloadThemes.modifyNow();
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
@@ -867,7 +870,7 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                     [icon = options.icon, active]() -> Nui::ElementRenderer {
                         return iconPanel({
                             .icon = icon,
-                            .color = active ? "var(--theme-color)" : "#404040",
+                            .color = active ? "var(--theme-color)" : "var(--background-color)",
                             .withBorder = true
                         });
                     }(),

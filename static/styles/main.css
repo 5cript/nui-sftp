@@ -39,8 +39,16 @@
     font-size: 16px;
     --theme-color: #90d26d;
 
+    /* Icon Panel */
+    --brightness-mixin: black;
+    --brightness-mixin-percent: 50%;
+    --anti-brightness-mixin: white;
+    --anti-brightness-mixin-percent: 80%;
+
     /* Fields */
     --script-nui-components-field-theme-color: var(--theme-color);
+
+    --settings-group-header-title-color: var(--theme-color);
 
     /* Dark / Light */
     --resize-handle-color: #707070;
@@ -59,20 +67,22 @@
     --script-nui-components-switch-color-inactive: #8e8e8e;
     --script-nui-components-switch-thumb-color: var(--color-fields);
 
+    --nui-file-grid-color: var(--color);
     --nui-file-grid-background-color: var(--background-color);
-    --nui-file-grid-item-highlight: rgba(255, 255, 255, 0.3);
+    --nui-file-grid-brightness-mixin: var(--brightness-mixin);
+    --nui-file-grid-brightness-mixin-percent: 80%;
     --nui-file-grid-border-color: var(--border-color-fields);
-    --nui-file-grid-filter-background: var(--darker-background);
-    --nui-file-grid-filter-color: var(--color);
+    --nui-file-grid-filter-background: var(--background-color-fields);
+    --nui-file-grid-filter-color: var(--color-fields);
     --nui-file-grid-border-radius: 0px;
     --nui-file-grid-arrow-color: var(--color);
     --nui-file-grid-head-font-size: var(--font-size);
     --nui-file-grid-button-background: var(--background-color);
     --nui-file-grid-border-width: 1px;
-    --nui-file-grid-dropdown-background: var(--darker-background);
-    --nui-file-grid-dropdown-content-background: var(--darker-background);
-    --nui-file-grid-dropdown-color: var(--color);
-    --nui-file-grid-dropdown-item-color: var(--color);
+    --nui-file-grid-dropdown-background: var(--background-color-fields);
+    --nui-file-grid-dropdown-content-background: var(--background-color-fields);
+    --nui-file-grid-dropdown-color: var(--color-fields);
+    --nui-file-grid-dropdown-item-color: var(--color-fields);
     --nui-file-grid-dropdown-content-font-size: var(--font-size);
     --nui-file-grid-context-menu-background: var(--background-color);
     --nui-file-grid-table-header-background: var(--background-color);
@@ -82,14 +92,38 @@
     --nui-file-grid-context-menu-item-hover-background: var(--background-color);
     --nui-file-grid-context-menu-item-hover-color: var(--color);
     --nui-file-grid-table-sort-highlight: var(--color);
+
+    --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
+    --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
 }
 
 :root[data-theme="light"] {
     /* Dark / Light */
-    --background-color: #eeeeee;
-    --background-color-fields: #b9b9b9;
+    --background-color: #e0e0e0;
+    --background-color-fields: #cdcdcd;
     --color: black;
     --color-fields: var(--color);
+    --border-color-fields: #9f9f9f;
+
+    /* Anything that wants to be slightly off the configured color */
+    --brightness-mixin: white;
+    --brightness-mixin-percent: 80%;
+    --anti-brightness-mixin: black;
+    --anti-brightness-mixin-percent: 60%;
+
+    --settings-group-header-title-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
+
+    & .script-nui-tab-bar[data-class="session-area-tabs"] {
+        box-shadow: 1px 4px 10px 0px rgb(199, 199, 199);
+    }
+
+    & .nui-file-grid-background {
+        background-color: var(--background-color);
+    }
+
+    --nui-file-grid-color: var(--color);
+    --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
+    --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
 }
 
 .login-form>div {

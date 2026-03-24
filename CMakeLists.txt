@@ -31,6 +31,14 @@ if (OMIT_FRONTEND_BUILD)
     set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
 endif()
 
+if (NOT EMSCRIPTEN)
+    set(BACKEND_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_LIST_DIR}/_cmake/configured_files/build_environment.hpp.in"
+    "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
+)
+
 include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 
 # Webkit from custom build

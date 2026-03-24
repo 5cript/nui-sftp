@@ -1,5 +1,4 @@
 .settings-group {
-    background: rgba(43, 43, 43, 0.6);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -49,6 +48,10 @@
 }
 
 .settings-group-header {
+    --head-mix-percent: 20%;
+    --head-mixed-color: color-mix(in srgb, var(--theme-color) var(--head-mix-percent), var(--brightness-mixin) calc(100% - var(--head-mix-percent)));
+    --background-collapsed: color-mix(in srgb, var(--darker-background) 50%, var(--brightness-mixin) 50%);
+
     padding: 8px 12px;
 
     cursor: pointer;
@@ -59,7 +62,7 @@
     user-select: none;
     transition: background-color 0.3s ease;
 
-    background: linear-gradient(90deg, rgba(144, 210, 109, 0.1) 0%, rgba(0, 0, 0, 0) 100%);
+    background: linear-gradient(90deg, var(--head-mixed-color) 0%, var(--background-collapsed) 100%);
     padding: 1.2rem 1.5rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
@@ -68,8 +71,7 @@
     }
 
     &.collapsed {
-        background-color: color-mix(in srgb, #404040 50%, black 50%);
-        /* border: 1px solid var(--brighter-background); */
+        background: var(--background-collapsed);
     }
 
     position: relative;
@@ -78,14 +80,16 @@
     transform 0.2s ease;
 
     &:hover {
+        --theme-transparent: color-mix(in srgb, var(--theme-color) 20%, transparent);
+        --theme-transparent-2: color-mix(in srgb, var(--theme-color) 8%, transparent);
         background: linear-gradient(90deg,
-                rgba(144, 210, 109, 0.22) 0%,
-                rgba(144, 210, 109, 0.08) 40%,
-                rgba(0, 0, 0, 0) 100%);
+                var(--theme-transparent) 0%,
+                var(--theme-transparent-2) 40%,
+                color-mix(in srgb, var(--darker-background) 20%, transparent) 100%);
 
         box-shadow:
-            inset 0 0 0 1px rgba(144, 210, 109, 0.35),
-            0 6px 14px rgba(0, 0, 0, 0.35);
+            inset 0 0 0 1px var(--theme-transparent),
+            0 6px 14px var(--brightness-mixin);
 
         transform: translateY(-1px);
     }
@@ -104,7 +108,7 @@
     letter-spacing: 0.5px;
     text-transform: uppercase;
     font-size: 0.75rem;
-    color: var(--theme-color, #90d26d);
+    color: var(--settings-group-header-title-color, #90d26d);
 }
 
 .settings-group-header-collapse-indicator {
@@ -114,7 +118,7 @@
     width: 16px;
 
     & path {
-        fill: var(--theme-color);
+        fill: var(--settings-group-header-title-color, #90d26d);
     }
 }
 

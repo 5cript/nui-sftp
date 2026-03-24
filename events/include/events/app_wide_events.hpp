@@ -1,6 +1,7 @@
 #pragma once
 
 #include <events/app_event_context.hpp>
+#include <constants/persistence.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/event_system/tags.hpp>
@@ -13,13 +14,17 @@
 struct AppWideEvents
 {
     Nui::Observed<std::string, SYNCHRONIZE> onLanguageChanged{"en_US"};
-    Nui::Observed<std::vector<std::filesystem::path>, SYNCHRONIZE> availableThemes{{"default"}};
+    Nui::Observed<std::vector<std::filesystem::path>, SYNCHRONIZE> availableThemes{
+        {std::string{Constants::defaultThemeName}}
+    };
     Nui::Observed<bool, SYNCHRONIZE> onReloadThemes{false};
 
+  private:
     Nui::Synchronizer<decltype(onLanguageChanged)> languageChangeSync;
     Nui::Synchronizer<decltype(availableThemes)> availableThemesSync;
     Nui::Synchronizer<decltype(onReloadThemes)> reloadThemesSync;
 
+  public:
 #ifdef NUI_FRONTEND
     AppWideEvents()
         : languageChangeSync{onLanguageChanged}

@@ -1,9 +1,9 @@
 #include <backend/resources.hpp>
 #include <roar/filesystem/special_paths.hpp>
 #include <log/log.hpp>
-
-#ifndef SOURCE_DIR
-#    define SOURCE_DIR resourceDir
+#include <constants/persistence.hpp>
+#ifndef NDEBUG
+#    include <build_environment.hpp>
 #endif
 
 namespace
@@ -37,12 +37,16 @@ std::vector<std::filesystem::path> getThemeDirs(std::filesystem::path const& rel
 #ifndef NDEBUG
     return {
         std::filesystem::path{SOURCE_DIR} / "themes",
-        Roar::resolvePath(std::filesystem::path{"%state_home2%"} / "themes"),
+        Roar::resolvePath(
+            std::filesystem::path{"%state_home2%"} / std::filesystem::path{Constants::appName} / "themes"
+        ),
     };
 #else
     return {
         relativeRoot / "themes",
-        Roar::resolvePath(std::filesystem::path{"%state_home2%"} / "themes"),
+        Roar::resolvePath(
+            std::filesystem::path{"%state_home2%"} / std::filesystem::path{Constants::appName} / "themes"
+        ),
     };
 #endif
 }
@@ -66,13 +70,13 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
             std::error_code ec;
             const auto canonical = std::filesystem::canonical(SOURCE_DIR / relative, ec);
             if (ec && !std::filesystem::exists(SOURCE_DIR / relative))
-                return Roar::resolvePath("%state_home2%" / relative);
+                return Roar::resolvePath("%state_home2%" / std::filesystem::path{Constants::appName} / relative);
             return SOURCE_DIR / relative;
 #else
             std::error_code ec;
             const auto canonical = std::filesystem::canonical(resourceDir / relative, ec);
             if (ec && !std::filesystem::exists(resourceDir / relative))
-                return Roar::resolvePath("%state_home2%" / relative);
+                return Roar::resolvePath("%state_home2%" / std::filesystem::path{Constants::appName} / relative);
             return resourceDir / relative;
 #endif
         }

@@ -1,8 +1,8 @@
 .toolbar {
     grid-area: Toolbar;
     display: flex;
-    border-bottom: 1px solid black;
-    background-color: #202020;
+    border-bottom: 1px solid var(--border-color-fields);
+    background-color: var(--background-color);
     gap: 5px;
     padding: 5px;
 

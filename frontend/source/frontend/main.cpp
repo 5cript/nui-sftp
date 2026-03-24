@@ -48,8 +48,11 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
             {
                 Log::info("State loaded, setting up frontend.");
                 frontendEvents = std::make_unique<FrontendEvents>();
+                frontendEvents->onLanguageChanged.value() = persistence->stateCache().localizationOptions.languageCode;
+                frontendEvents->selectedTheme.value() = persistence->stateCache().uiOptions.theme;
+                frontendEvents->darkLightMode.value() = persistence->stateCache().uiOptions.darkLightMode;
+
                 themeController = std::make_unique<ThemeController>(*frontendEvents);
-                frontendEvents->onLanguageChanged = persistence->stateCache().localizationOptions.languageCode;
 
                 persistence->loadLanguageFile(
                     [](std::optional<nlohmann::json> lang)
@@ -78,15 +81,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
                             dom = std::make_unique<Nui::Dom::Dom>();
 
                             Log::info("Rendering main page into DOM.");
-                            dom->setBody(
-                                Nui::Elements::body{
-                                    !(Nui::Attributes::reference =
-                                            [](auto const&)
-                                        {
-                                            themeController->applyMode(themeController->getPreferredMode());
-                                        })
-                                }(mainPage->render())
-                            );
+                            dom->setBody(Nui::Elements::body{}(mainPage->render()));
 
                             Log::info("Calling setup completion function");
                             mainPage->onSetupComplete();
