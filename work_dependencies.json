@@ -8,13 +8,13 @@
         },
         {
             "url": "https://github.com/NuiCpp/Nui.git",
-            "rev": "v3.0.0",
+            "rev": "v3.1.0",
             "branch": "main",
             "name": "Nui"
         },
         {
             "url": "https://github.com/5cript/roar.git",
-            "rev": "a787bce9c8132f4c860bc9e55bff742fd1a3276f",
+            "rev": "52acf8675404d6e370a4f7f6ce8e78d507b18e5d",
             "branch": "main",
             "name": "roar"
         },
