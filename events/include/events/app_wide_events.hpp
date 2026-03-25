@@ -13,11 +13,11 @@
 
 struct AppWideEvents
 {
-    Nui::Observed<std::string, SYNCHRONIZE> onLanguageChanged{"en_US"};
-    Nui::Observed<std::vector<std::filesystem::path>, SYNCHRONIZE> availableThemes{
+    Nui::Observed<std::string, NUI_SYNCHRONIZE> onLanguageChanged{"en_US"};
+    Nui::Observed<std::vector<std::filesystem::path>, NUI_SYNCHRONIZE> availableThemes{
         {std::string{Constants::defaultThemeName}}
     };
-    Nui::Observed<bool, SYNCHRONIZE> onReloadThemes{false};
+    Nui::Observed<bool, NUI_SYNCHRONIZE> onReloadThemes{false};
 
   private:
     Nui::Synchronizer<decltype(onLanguageChanged)> languageChangeSync;
