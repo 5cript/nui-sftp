@@ -30,7 +30,7 @@ void SshChannel::open(
             {
                 if (val.hasOwnProperty("data"))
                 {
-                    const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
+                    const std::string data = Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>();
                     if (stdoutHandler_)
                         stdoutHandler_(data);
                 }
@@ -45,7 +45,7 @@ void SshChannel::open(
             {
                 if (val.hasOwnProperty("data"))
                 {
-                    const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
+                    const std::string data = Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>();
                     if (stderrHandler_)
                         stderrHandler_(data);
                 }
