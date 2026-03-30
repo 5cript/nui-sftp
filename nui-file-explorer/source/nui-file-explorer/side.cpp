@@ -547,12 +547,12 @@ namespace NuiFileExplorer
 
     void Side::onPathBoxSuggestionHit(std::filesystem::path const& path)
     {
-        impl_->pathBoxSuggestions.clear();
         impl_->model->navigateTo(path);
         if (auto box = impl_->pathBoxElement.lock(); box)
         {
             box->val().call<void>("focus");
         }
+        impl_->pathBoxSuggestions.clear();
     }
 
     Nui::ElementRenderer Side::pathBarSuggestions()
@@ -614,6 +614,10 @@ namespace NuiFileExplorer
                                 return;
 
                             element->val().call<void>("focus");
+                            auto options = Nui::val::object();
+                            options.set("block", "nearest"s);
+                            element->val().call<void>("scrollIntoView", options);
+                            event.preventDefault();
                         }
                     },
                 }(

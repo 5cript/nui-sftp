@@ -87,7 +87,7 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
             .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
             {
                 return div{style = "display: flex; align-items: center; gap: 5px;"}(
-                    observe(stateful),
+                    observe(stateful.get()),
                     [](std::string const& iconName){
                         return fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName));
                     }
