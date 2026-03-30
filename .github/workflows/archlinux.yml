@@ -37,6 +37,7 @@ jobs:
             libssh \
             fmt \
             boost \
+            boost-libs \
             aws-cli-v2 \
             github-cli \
             nlohmann-json
