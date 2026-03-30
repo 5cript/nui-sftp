@@ -210,7 +210,8 @@ namespace Persistence
                 .usePasswordAuth = true,
                 .logVerbosity = SshLogVerbosity::Off,
                 .strictHostKeyCheck = true,
-                .connectTimeoutSeconds = 5
+                .connectTimeoutSeconds = 5,
+                .localeEnv = "en_US.UTF-8",
             };
             extendWarning("Added default ssh options.");
             mustSave = true;

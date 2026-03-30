@@ -3,6 +3,7 @@
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/sftp_error.hpp>
 #include <persistence/state/session_options.hpp>
+#include <persistence/state/termios.hpp>
 #include <ssh/channel.hpp>
 
 #include <libssh/libsshpp.hpp>
@@ -60,7 +61,10 @@ namespace SecureShell
         struct PtyCreationOptions
         {
             std::optional<std::map<std::string, std::string>> environment = std::nullopt;
+            // Set locale environment variable as string when set
+            std::optional<std::string> localeEnv = std::nullopt;
             std::string terminalType = "xterm-256color";
+            Persistence::Termios termios;
             int columns = 80;
             int rows = 24;
             bool requestShell = true;

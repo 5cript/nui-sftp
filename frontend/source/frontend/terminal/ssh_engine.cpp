@@ -51,7 +51,7 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
     }
 
     Nui::val obj = Nui::val::object();
-    obj.set("engineOptions", asVal(impl_->settings.engineOptions));
+    obj.set("engineOptions", asVal(std::get<Persistence::SshSessionOptions>(impl_->settings.sessionOptions.engine)));
 
     Nui::RpcClient::callWithBackChannel(
         "SessionManager::connect",
@@ -128,7 +128,8 @@ void SshTerminalEngine::createChannelImpl(
     }
 
     Nui::val obj = Nui::val::object();
-    obj.set("engineOptions", asVal(impl_->settings.engineOptions));
+    obj.set("engineOptions", asVal(std::get<Persistence::SshSessionOptions>(impl_->settings.sessionOptions.engine)));
+    obj.set("termios", asVal(impl_->settings.sessionOptions.termios.value()));
     obj.set("fileMode", fileMode);
 
     Log::info("Creating {} channel for session '{}'", fileMode ? "sftp" : "pty", impl_->sshSessionId.value());

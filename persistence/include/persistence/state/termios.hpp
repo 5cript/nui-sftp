@@ -206,6 +206,13 @@ namespace Persistence
 
         void useDefaultsFrom(Termios const& other);
         static Termios saneDefaults();
+
+        /**
+         * @brief RFC4254 Section 8
+         *
+         * @return std::string
+         */
+        std::vector<unsigned char> toSshPtyMode() const;
     };
     void to_json(nlohmann::json& j, Termios::InputFlags const& inputFlags);
     void from_json(nlohmann::json const& j, Termios::InputFlags& inputFlags);

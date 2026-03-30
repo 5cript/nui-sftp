@@ -35,6 +35,7 @@ struct SshOptions : public GroupKeys
     NumberSetting<int, true> connectTimeoutSeconds;
     NumberSetting<int, true> connectTimeoutUSeconds;
     MapSetting<true> environment;
+    TextSetting<true> localeEnv;
     ListSetting<true> identities;
 
     SshOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog);

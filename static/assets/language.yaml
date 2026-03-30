@@ -237,6 +237,7 @@ en_US:
       connectTimeoutSecondsHelpText: "The connection timeout duration in seconds."
       connectTimeoutUSecondsHelpText: "The connection timeout duration in microseconds."
       environmentHelpText: "Environment variables to set for the SSH session."
+      localeEnvHelpText: "When enabled, the LC_* environment variable is set to the given value"
 
       identities: "SSH Identities"
       sshDirectory: "SSH Directory"
@@ -260,6 +261,7 @@ en_US:
       identityAgent: "SSH Agent Socket"
       connectTimeoutSeconds: "Connection Timeout (Seconds)"
       connectTimeoutUSeconds: "Connection Timeout (Microseconds)"
+      localeEnv: "LC_ALL Environment Variable"
       environment: "Environment"
     sftpOptions:
       downloadOptionsSubgroupTitle: "Download Options"
@@ -711,6 +713,7 @@ de_DE:
       connectTimeoutSecondsHelpText: "Die Zeitüberschreitung für den Verbindungsaufbau in Sekunden."
       connectTimeoutUSecondsHelpText: "Die Zeitüberschreitung für den Verbindungsaufbau in Mikrosekunden."
       environmentHelpText: "Umgebungsvariablen, die für die SSH Sitzung festgelegt werden sollen."
+      localeEnvHelpText: "Wenn aktiviert, wird die LC_* Umgebungsvariable auf den angegebenen Wert gesetzt."
 
       identities: "SSH Identitäten"
       sshDirectory: "SSH Verzeichnis"
@@ -735,6 +738,7 @@ de_DE:
       connectTimeoutSeconds: "Verbindungs Timeout (Sekunden)"
       connectTimeoutUSeconds: "Verbindungs Timeout (Mikrosekunden)"
       environment: "Umgebungsvariablen (Environment)"
+      localeEnv: "LC_ALL Umgebungsvariable"
     sftpOptions:
       downloadOptionsSubgroupTitle: "Download Optionen"
       uploadOptionsSubgroupTitle: "Upload Optionen"

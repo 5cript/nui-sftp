@@ -113,20 +113,35 @@ namespace SecureShell
                             return channel.openSession();
                         return 0;
                     },
-                    [&channel, &environment = options.environment]()
+                    [&channel, &environment = options.environment, &localeEnv = options.localeEnv]()
                     {
-                        if (!environment.has_value())
-                            return 0;
-                        for (auto const& [key, value] : *environment)
+                        if (environment.has_value())
                         {
-                            if (channel.requestEnv(key.c_str(), value.c_str()) != 0)
-                                return -1;
+                            for (auto const& [key, value] : *environment)
+                            {
+                                if (channel.requestEnv(key.c_str(), value.c_str()) != 0)
+                                    return -1;
+                            }
+                        }
+                        if (localeEnv.has_value())
+                        {
+                            if (!environment || environment->find("LANG") == environment->end())
+                                std::ignore = channel.requestEnv("LANG", localeEnv->c_str());
+                            if (!environment || environment->find("LC_ALL") == environment->end())
+                                std::ignore = channel.requestEnv("LC_ALL", localeEnv->c_str());
                         }
                         return 0;
                     },
                     [&channel, &options]()
                     {
-                        return channel.requestPty(options.terminalType.c_str(), options.columns, options.rows);
+                        const auto requestModes = options.termios.toSshPtyMode();
+                        return channel.requestPty(
+                            options.terminalType.c_str(),
+                            options.columns,
+                            options.rows,
+                            requestModes.data(),
+                            requestModes.size()
+                        );
                     },
                     [&channel, &options]()
                     {

@@ -15,6 +15,116 @@ namespace Persistence
             return value.has_value() ? value.value() : false;
         }
 #endif
+
+        enum class PtyModeOpcode : std::uint8_t
+        {
+            PTY_MODE_TTY_OP_END = 0,
+
+            // Control characters
+            PTY_MODE_VINTR = 1,
+            PTY_MODE_VQUIT = 2,
+            PTY_MODE_VERASE = 3,
+            PTY_MODE_VKILL = 4,
+            PTY_MODE_VEOF = 5,
+            PTY_MODE_VEOL = 6,
+            PTY_MODE_VEOL2 = 7,
+            PTY_MODE_VSTART = 8,
+            PTY_MODE_VSTOP = 9,
+            PTY_MODE_VSUSP = 10,
+            PTY_MODE_VDSUSP = 11,
+            PTY_MODE_VREPRINT = 12,
+            PTY_MODE_VWERASE = 13,
+            PTY_MODE_VLNEXT = 14,
+            PTY_MODE_VFLUSH = 15,
+            PTY_MODE_VSWTCH = 16,
+            PTY_MODE_VSTATUS = 17,
+            PTY_MODE_VDISCARD = 18,
+
+            // Input flags
+            PTY_MODE_IGNPAR = 30,
+            PTY_MODE_PARMRK = 31,
+            PTY_MODE_INPCK = 32,
+            PTY_MODE_ISTRIP = 33,
+            PTY_MODE_INLCR = 34,
+            PTY_MODE_IGNCR = 35,
+            PTY_MODE_ICRNL = 36,
+            PTY_MODE_IUCLC = 37,
+            PTY_MODE_IXON = 38,
+            PTY_MODE_IXANY = 39,
+            PTY_MODE_IXOFF = 40,
+            PTY_MODE_IMAXBEL = 41,
+            PTY_MODE_IUTF8 = 42,
+
+            // Local flags
+            PTY_MODE_ISIG = 50,
+            PTY_MODE_ICANON = 51,
+            PTY_MODE_XCASE = 52,
+            PTY_MODE_ECHO = 53,
+            PTY_MODE_ECHOE = 54,
+            PTY_MODE_ECHOK = 55,
+            PTY_MODE_ECHONL = 56,
+            PTY_MODE_NOFLSH = 57,
+            PTY_MODE_TOSTOP = 58,
+            PTY_MODE_IEXTEN = 59,
+            PTY_MODE_ECHOCTL = 60,
+            PTY_MODE_ECHOKE = 61,
+            PTY_MODE_PENDIN = 62,
+
+            // Output flags
+            PTY_MODE_OPOST = 70,
+            PTY_MODE_OLCUC = 71,
+            PTY_MODE_ONLCR = 72,
+            PTY_MODE_OCRNL = 73,
+            PTY_MODE_ONOCR = 74,
+            PTY_MODE_ONLRET = 75,
+
+            // Control flags
+            PTY_MODE_CS7 = 90,
+            PTY_MODE_CS8 = 91,
+            PTY_MODE_PARENB = 92,
+            PTY_MODE_PARODD = 93,
+
+            // Speeds
+            PTY_MODE_TTY_OP_ISPEED = 128,
+            PTY_MODE_TTY_OP_OSPEED = 129
+        };
+
+        void append(std::vector<unsigned char>& buf, PtyModeOpcode opcode, std::uint32_t value)
+        {
+            buf.push_back(static_cast<unsigned char>(opcode));
+
+            buf.push_back(
+                static_cast<unsigned char>(
+                    (value & static_cast<std::uint32_t>(0xFF000000)) >> static_cast<std::uint32_t>(24)
+                )
+            );
+            buf.push_back(
+                static_cast<unsigned char>(
+                    (value & static_cast<std::uint32_t>(0x00FF0000)) >> static_cast<std::uint32_t>(16)
+                )
+            );
+            buf.push_back(
+                static_cast<unsigned char>(
+                    (value & static_cast<std::uint32_t>(0x0000FF00)) >> static_cast<std::uint32_t>(8)
+                )
+            );
+            buf.push_back(
+                static_cast<unsigned char>(
+                    (value & static_cast<std::uint32_t>(0x000000FF)) >> static_cast<std::uint32_t>(0)
+                )
+            );
+        }
+
+        std::uint32_t boolToUint(std::optional<bool> const& v)
+        {
+            return (v.has_value() && *v) ? 1u : 0u;
+        }
+
+        std::uint32_t ccOrDisabled(unsigned char v)
+        {
+            // RFC: 255 means disabled
+            return v == 0 ? 255u : static_cast<std::uint32_t>(v);
+        }
     }
 
     unsigned int Termios::InputFlags::assemble() const
@@ -565,5 +675,113 @@ namespace Persistence
         termios.iSpeed = 0;
         termios.oSpeed = 0;
         return termios;
+    }
+
+    std::vector<unsigned char> Termios::toSshPtyMode() const
+    {
+        std::vector<unsigned char> modes;
+
+        //
+        // === Control characters ===
+        //
+        if (cc)
+        {
+            append(modes, PtyModeOpcode::PTY_MODE_VINTR, ccOrDisabled(cc->VINTR_)); // VINTR
+            append(modes, PtyModeOpcode::PTY_MODE_VQUIT, ccOrDisabled(cc->VQUIT_)); // VQUIT
+            append(modes, PtyModeOpcode::PTY_MODE_VERASE, ccOrDisabled(cc->VERASE_)); // VERASE
+            append(modes, PtyModeOpcode::PTY_MODE_VKILL, ccOrDisabled(cc->VKILL_)); // VKILL
+            append(modes, PtyModeOpcode::PTY_MODE_VEOF, ccOrDisabled(cc->VEOF_)); // VEOF
+            append(modes, PtyModeOpcode::PTY_MODE_VEOL, ccOrDisabled(cc->VEOL_)); // VEOL
+            append(modes, PtyModeOpcode::PTY_MODE_VEOL2, ccOrDisabled(cc->VEOL2_)); // VEOL2
+            append(modes, PtyModeOpcode::PTY_MODE_VSTART, ccOrDisabled(cc->VSTART_)); // VSTART
+            append(modes, PtyModeOpcode::PTY_MODE_VSTOP, ccOrDisabled(cc->VSTOP_)); // VSTOP
+            append(modes, PtyModeOpcode::PTY_MODE_VSUSP, ccOrDisabled(cc->VSUSP_)); // VSUSP
+            append(modes, PtyModeOpcode::PTY_MODE_VREPRINT, ccOrDisabled(cc->VREPRINT_)); // VREPRINT
+            append(modes, PtyModeOpcode::PTY_MODE_VWERASE, ccOrDisabled(cc->VWERASE_)); // VWERASE
+            append(modes, PtyModeOpcode::PTY_MODE_VLNEXT, ccOrDisabled(cc->VLNEXT_)); // VLNEXT
+            append(modes, PtyModeOpcode::PTY_MODE_VDISCARD, ccOrDisabled(cc->VDISCARD_)); // VDISCARD
+        }
+
+        //
+        // === Input flags ===
+        //
+        auto const& in = inputFlags;
+
+        append(modes, PtyModeOpcode::PTY_MODE_IGNPAR, boolToUint(in.IGNPAR_)); // IGNPAR
+        append(modes, PtyModeOpcode::PTY_MODE_PARMRK, boolToUint(in.PARMRK_));
+        append(modes, PtyModeOpcode::PTY_MODE_INPCK, boolToUint(in.INPCK_));
+        append(modes, PtyModeOpcode::PTY_MODE_ISTRIP, boolToUint(in.ISTRIP_));
+        append(modes, PtyModeOpcode::PTY_MODE_INLCR, boolToUint(in.INLCR_));
+        append(modes, PtyModeOpcode::PTY_MODE_IGNCR, boolToUint(in.IGNCR_));
+        append(modes, PtyModeOpcode::PTY_MODE_ICRNL, boolToUint(in.ICRNL_));
+        append(modes, PtyModeOpcode::PTY_MODE_IUCLC, boolToUint(in.IUCLC_));
+        append(modes, PtyModeOpcode::PTY_MODE_IXON, boolToUint(in.IXON_));
+        append(modes, PtyModeOpcode::PTY_MODE_IXANY, boolToUint(in.IXANY_));
+        append(modes, PtyModeOpcode::PTY_MODE_IXOFF, boolToUint(in.IXOFF_));
+        append(modes, PtyModeOpcode::PTY_MODE_IMAXBEL, boolToUint(in.IMAXBEL_));
+        append(modes, PtyModeOpcode::PTY_MODE_IUTF8, boolToUint(in.IUTF8_));
+
+        //
+        // === Local flags ===
+        //
+        auto const& lf = localFlags;
+
+        append(modes, PtyModeOpcode::PTY_MODE_ISIG, boolToUint(lf.ISIG_));
+        append(modes, PtyModeOpcode::PTY_MODE_ICANON, boolToUint(lf.ICANON_));
+        append(modes, PtyModeOpcode::PTY_MODE_XCASE, boolToUint(lf.XCASE_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHO, boolToUint(lf.ECHO_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHOE, boolToUint(lf.ECHOE_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHOK, boolToUint(lf.ECHOK_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHONL, boolToUint(lf.ECHONL_));
+        append(modes, PtyModeOpcode::PTY_MODE_NOFLSH, boolToUint(lf.NOFLSH_));
+        append(modes, PtyModeOpcode::PTY_MODE_TOSTOP, boolToUint(lf.TOSTOP_));
+        append(modes, PtyModeOpcode::PTY_MODE_IEXTEN, boolToUint(lf.IEXTEN_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHOCTL, boolToUint(lf.ECHOCTL_));
+        append(modes, PtyModeOpcode::PTY_MODE_ECHOKE, boolToUint(lf.ECHOKE_));
+        append(modes, PtyModeOpcode::PTY_MODE_PENDIN, boolToUint(lf.PENDIN_));
+
+        //
+        // === Output flags ===
+        //
+        auto const& of = outputFlags;
+
+        append(modes, PtyModeOpcode::PTY_MODE_OPOST, boolToUint(of.OPOST_));
+        append(modes, PtyModeOpcode::PTY_MODE_OLCUC, boolToUint(of.OLCUC_));
+        append(modes, PtyModeOpcode::PTY_MODE_ONLCR, boolToUint(of.ONLCR_));
+        append(modes, PtyModeOpcode::PTY_MODE_OCRNL, boolToUint(of.OCRNL_));
+        append(modes, PtyModeOpcode::PTY_MODE_ONOCR, boolToUint(of.ONOCR_));
+        append(modes, PtyModeOpcode::PTY_MODE_ONLRET, boolToUint(of.ONLRET_));
+
+        //
+        // === Control flags (subset supported by RFC) ===
+        //
+        auto const& cf = controlFlags;
+
+        append(modes, PtyModeOpcode::PTY_MODE_PARENB, boolToUint(cf.PARENB_));
+        append(modes, PtyModeOpcode::PTY_MODE_PARODD, boolToUint(cf.PARODD_));
+
+        if (cf.CSIZE_)
+        {
+            if (*cf.CSIZE_ == "CS7")
+                append(modes, PtyModeOpcode::PTY_MODE_CS7, 1);
+            else if (*cf.CSIZE_ == "CS8")
+                append(modes, PtyModeOpcode::PTY_MODE_CS8, 1);
+        }
+
+        //
+        // === Speeds ===
+        //
+        if (iSpeed)
+            append(modes, PtyModeOpcode::PTY_MODE_TTY_OP_ISPEED, *iSpeed);
+
+        if (oSpeed)
+            append(modes, PtyModeOpcode::PTY_MODE_TTY_OP_OSPEED, *oSpeed);
+
+        //
+        // === END ===
+        //
+        modes.push_back('\0'); // TTY_OP_END
+
+        return modes;
     }
 }

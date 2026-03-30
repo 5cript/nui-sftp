@@ -261,6 +261,8 @@ void Session::registerRpcCreateChannel()
 
                 if (!verify.hasValueDeep("engineOptions"))
                     return;
+                if (!verify.hasValueDeep("termios"))
+                    return;
 
                 const bool fileMode = parameters.contains("fileMode") && parameters["fileMode"].is_boolean() &&
                     parameters["fileMode"].get<bool>();
@@ -268,11 +270,19 @@ void Session::registerRpcCreateChannel()
                 if (!fileMode)
                 {
                     Log::info("Creating pty channel for session '{}'", self->id_.value());
+                    Log::info("Session options: {}", parameters["engineOptions"].dump());
+                    Log::info("Termios: {}", parameters["termios"].dump());
 
                     const auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
+                    const auto termios = parameters["termios"].get<Persistence::Termios>();
 
-                    const auto weakChannel =
-                        self->session_->createPtyChannel({.environment = sessionOptions.sshOptions->environment}).get();
+                    const auto weakChannel = self->session_
+                                                 ->createPtyChannel(
+                                                     {.environment = sessionOptions.sshOptions->environment,
+                                                         .localeEnv = sessionOptions.sshOptions->localeEnv,
+                                                         .termios = termios}
+                                                 )
+                                                 .get();
                     if (!weakChannel.has_value())
                     {
                         Log::error("Failed to create pty channel: {}", weakChannel.error());
