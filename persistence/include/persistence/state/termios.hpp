@@ -201,8 +201,8 @@ namespace Persistence
         };
         std::optional<CC> cc{std::nullopt};
 
-        std::optional<unsigned int> iSpeed{0};
-        std::optional<unsigned int> oSpeed{0};
+        std::optional<unsigned int> iSpeed{std::nullopt};
+        std::optional<unsigned int> oSpeed{std::nullopt};
 
         void useDefaultsFrom(Termios const& other);
         static Termios saneDefaults();
