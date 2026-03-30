@@ -6,3 +6,28 @@
     margin: 1rem 2rem;
     gap: 10px;
 }
+
+.input-dialog-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.8;
+    padding-bottom: 2px;
+}
+
+.input-dialog-input-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 380px;
+    width: 100%;
+}
+
+.input-dialog-input-container > :first-child {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.input-dialog-toggle-btn-wrapper {
+    flex: 0 0 auto;
+}
