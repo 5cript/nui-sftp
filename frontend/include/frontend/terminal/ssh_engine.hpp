@@ -18,7 +18,7 @@ class SshTerminalEngine : public MultiChannelTerminalEngine
   public:
     struct Settings
     {
-        Persistence::SshSessionOptions engineOptions;
+        Persistence::SessionOptions sessionOptions;
         std::function<void()> onConnectionLoss;
     };
 

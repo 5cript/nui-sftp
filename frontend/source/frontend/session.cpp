@@ -561,7 +561,7 @@ void Session::createSshEngine()
 
     impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
         std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
-            .engineOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine),
+            .sessionOptions = impl_->engineOptions,
             .onConnectionLoss = std::bind(&Session::onTerminalConnectionLoss, this),
         }),
         true,

@@ -145,6 +145,11 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
         onChange,
         nulloptReset(environment, onChange)
     },
+    localeEnv{
+        language->getObserved("settings", "sshOptions", "localeEnvHelpText"),
+        onChange,
+        nulloptReset(localeEnv, onChange),
+    },
     identities {
         language->getObserved("settings", "sshOptions", "identitiesHelpText"),
         inputDialog,
@@ -178,6 +183,7 @@ void SshOptions::applyToState(Persistence::SshOptions& state) const
     assignIfValid(state.connectTimeoutSeconds, connectTimeoutSeconds);
     assignIfValid(state.connectTimeoutUSeconds, connectTimeoutUSeconds);
     assignIfValid(state.environment, environment);
+    assignIfValid(state.localeEnv, localeEnv);
     assignIfValid(state.identities, identities);
 }
 
@@ -205,6 +211,7 @@ void SshOptions::loadFromState(Persistence::SshOptions const& state, bool)
     connectTimeoutSeconds.value(state.connectTimeoutSeconds);
     connectTimeoutUSeconds.value(state.connectTimeoutUSeconds);
     environment.value(state.environment);
+    localeEnv.value(state.localeEnv);
     identities.value(state.identities);
 }
 
@@ -232,6 +239,7 @@ void SshOptions::assumeDefaultsFrom(Persistence::SshOptions const& state)
     connectTimeoutSeconds.inherit(state.connectTimeoutSeconds);
     connectTimeoutUSeconds.inherit(state.connectTimeoutUSeconds);
     environment.inherit(state.environment);
+    localeEnv.inherit(state.localeEnv);
     identities.inherit(state.identities);
 }
 
@@ -262,6 +270,7 @@ Nui::ElementRenderer SshOptions::render()
         connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
         connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds")),
         environment(language->getObserved("settings", "sshOptions", "environment")),
+        localeEnv(language->getObserved("settings", "sshOptions", "localeEnv")),
         identities(language->getObserved("settings", "sshOptions", "identities"))
     );
 }
