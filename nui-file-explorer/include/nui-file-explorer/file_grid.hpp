@@ -17,7 +17,8 @@ namespace NuiFileExplorer
     {
       public:
         FileGrid(
-            SideSettings const& settings,
+            SideSettings const& leftSettings,
+            SideSettings const& rightSettings,
             std::unique_ptr<ISideModel> leftModel,
             std::unique_ptr<ISideModel> rightModel
         );

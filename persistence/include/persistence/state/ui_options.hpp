@@ -13,7 +13,8 @@ namespace Persistence
     {
         std::string theme{Constants::defaultThemeName};
         SharedData::DarkLightMode darkLightMode{SharedData::DarkLightMode::System};
-        bool showHiddenFiles{false};
+        bool showHiddenFilesLocally{false};
+        bool showHiddenFilesRemotely{false};
         bool fileGridPathBarOnTop{false};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/cpp.png"},
@@ -41,6 +42,11 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         UiOptions,
         (),
-        (theme, darkLightMode, showHiddenFiles, fileGridPathBarOnTop, fileGridExtensionIcons)
+        (theme,
+            darkLightMode,
+            showHiddenFilesLocally,
+            showHiddenFilesRemotely,
+            fileGridPathBarOnTop,
+            fileGridExtensionIcons)
     )
 }

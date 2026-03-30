@@ -29,6 +29,16 @@ namespace Persistence
             std::function<void(std::optional<std::string> const& error)> const& onSaveComplete =
                 [](std::optional<std::string> const&) {}
         );
+
+        /**
+         * @brief Loads the latest persisted state, applies a modifier to it, then saves it back.
+         * This ensures no concurrent disk writes are lost.
+         */
+        void loadModifySave(
+            std::function<void(State&)> modifier,
+            std::function<void(std::optional<std::string> const&)> onComplete =
+                [](std::optional<std::string> const&) {}
+        );
         void loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete);
 
         State& stateCache();

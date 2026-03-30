@@ -35,7 +35,8 @@ struct GeneralSettings
     {
         ComboSetting<std::string, std::string> theme;
         ComboSetting<SharedData::DarkLightMode, std::string> darkLightMode;
-        BoolSetting<> showHiddenFiles;
+        BoolSetting<> showHiddenFilesLocally;
+        BoolSetting<> showHiddenFilesRemotely;
         BoolSetting<> fileGridPathBarOnTop;
         MapSetting<> fileGridExtensionIcons;
     } userInterface;

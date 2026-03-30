@@ -121,6 +121,20 @@ struct Session::Implementation
         , confirmDialog{confirmDialog}
         , fileGrid{{
               .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
+              .showHiddenFiles = uiOptions.showHiddenFilesLocally,
+              .onShowHiddenFilesChanged = [this](bool value) {
+                  this->stateHolder->loadModifySave([value](Persistence::State& state) {
+                      state.uiOptions.showHiddenFilesLocally = value;
+                  });
+              },
+         }, {
+                .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
+                .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
+                .onShowHiddenFilesChanged = [this](bool value) {
+                    this->stateHolder->loadModifySave([value](Persistence::State& state) {
+                        state.uiOptions.showHiddenFilesRemotely = value;
+                    });
+                },
          },
             std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
             std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),

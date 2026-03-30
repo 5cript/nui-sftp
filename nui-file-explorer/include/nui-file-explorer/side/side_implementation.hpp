@@ -48,6 +48,7 @@ namespace NuiFileExplorer
         Nui::Observed<std::vector<std::string>> tableGridTemplateColumns{
             std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
         };
+        Nui::Observed<bool> showHiddenFiles{false};
 
         std::weak_ptr<Nui::Dom::BasicElement> sideElement{};
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};
@@ -277,6 +278,7 @@ namespace NuiFileExplorer
         SideImplementation(SideSettings settings, std::unique_ptr<ISideModel> model)
             : settings{std::move(settings)}
             , model{std::move(model)}
+            , showHiddenFiles{this->settings.showHiddenFiles}
         {
             selectionManager.setScrollIntoViewCallback(
                 [this](std::size_t idx)

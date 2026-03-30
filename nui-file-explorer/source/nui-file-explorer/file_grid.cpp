@@ -38,21 +38,25 @@ namespace NuiFileExplorer
         }
 
         Implementation(
-            SideSettings const& settings,
+            SideSettings const& leftSettings,
             std::unique_ptr<ISideModel> leftModel,
+            SideSettings const& rightSettings,
             std::unique_ptr<ISideModel> rightModel
         )
-            : leftSide{settings, std::move(leftModel)}
-            , rightSide{settings, std::move(rightModel)}
+            : leftSide{leftSettings, std::move(leftModel)}
+            , rightSide{rightSettings, std::move(rightModel)}
         {}
     };
 
     FileGrid::FileGrid(
-        SideSettings const& settings,
+        SideSettings const& leftSettings,
+        SideSettings const& rightSettings,
         std::unique_ptr<ISideModel> leftModel,
         std::unique_ptr<ISideModel> rightModel
     )
-        : impl_(std::make_unique<Implementation>(settings, std::move(leftModel), std::move(rightModel)))
+        : impl_(
+              std::make_unique<Implementation>(leftSettings, std::move(leftModel), rightSettings, std::move(rightModel))
+          )
     {
         impl_->leftSide.initialize(impl_->rightSide);
         impl_->rightSide.initialize(impl_->leftSide);
