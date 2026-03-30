@@ -12,3 +12,4 @@ themes/node_modules
 todo.txt
 .clangd
 install/*
+.claude/*
