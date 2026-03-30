@@ -77,7 +77,7 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
                 [&entry, this]() -> std::string
                 {
                     const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
-                    if (type == NuiFileExplorer::Item::Type::Directory)
+                    if (entry.isDirectoryLike())
                         return "nui://app.example/icons/folder_main.png";
                     if (type == NuiFileExplorer::Item::Type::BlockDevice)
                         return "nui://app.example/icons/hard_drive.png";

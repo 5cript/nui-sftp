@@ -201,24 +201,25 @@ void RpcFilesystem::registerListFiles()
                 }
                 for (const auto& entry : iter)
                 {
-                    fileList.push_back({
-                        {
-                            "path",
-                            [&entry, fileNameOnly]() -> std::string
-                            {
-                                if (fileNameOnly)
+                    fileList.push_back(
+                        nlohmann::json(
+                            SharedData::DirectoryEntry{
+                                .path = [&entry, fileNameOnly]() -> std::string
                                 {
-                                    const auto u8String = entry.path().filename().generic_u8string();
+                                    if (fileNameOnly)
+                                    {
+                                        const auto u8String = entry.path().filename().generic_u8string();
+                                        return {u8String.begin(), u8String.end()};
+                                    }
+                                    const auto u8String = entry.path().generic_u8string();
                                     return {u8String.begin(), u8String.end()};
-                                }
-                                const auto u8String = entry.path().generic_u8string();
-                                return {u8String.begin(), u8String.end()};
-                            }(),
-                        },
-                        {"type", static_cast<int>(entry.symlink_status().type())},
-                        {"symlinkTargetType", static_cast<int>(entry.status().type())},
-                        {"size", entry.is_regular_file() ? entry.file_size() : 0},
-                    });
+                                }(),
+                                .type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type()),
+                                .size = entry.is_regular_file() ? entry.file_size() : 0,
+                                .resolvedType = SharedData::fileTypeFromStdFilesystemType(entry.status().type()),
+                            }
+                        )
+                    );
                 }
 
                 Log::info("Successfully listed files in directory '{}'", directoryPath.generic_string());

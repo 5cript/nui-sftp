@@ -313,7 +313,7 @@ namespace NuiFileExplorer
                             onDrop(std::move(event), item.item);
                         },
                         "dragenter"_event = [&item](Nui::WebApi::DragEvent){
-                            if (item.item.type == Item::Type::Directory)
+                            if (item.item.isDirectoryLike())
                                 item.isDropHovered(true);
                         },
                         "dragleave"_event = [&item](Nui::WebApi::DragEvent){
