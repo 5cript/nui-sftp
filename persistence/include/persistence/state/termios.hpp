@@ -76,7 +76,7 @@ namespace Persistence
                 return OutputFlags{
                     .OPOST_ = true,
                     .OLCUC_ = false,
-                    .ONLCR_ = false,
+                    .ONLCR_ = true,
                     .OCRNL_ = false,
                     .ONOCR_ = false,
                     .ONLRET_ = false,
