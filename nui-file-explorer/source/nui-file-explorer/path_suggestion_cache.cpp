@@ -51,17 +51,22 @@ namespace NuiFileExplorer
         int maxSuggestions
     ) const
     {
+        if (filenamePart.empty())
+        {
+            if (maxSuggestions <= 0)
+                return suggestions;
+            const auto count = std::min(static_cast<std::size_t>(maxSuggestions), suggestions.size());
+            return {suggestions.begin(), suggestions.begin() + static_cast<std::ptrdiff_t>(count)};
+        }
+
         std::vector<std::pair<std::filesystem::path, double>> ratedResults;
-        const auto sizeTMax = static_cast<std::size_t>(maxSuggestions);
         for (const auto& suggestion : suggestions)
         {
             const auto suggestionStr = suggestion.filename().string();
-            const auto score = rapidfuzz::fuzz::ratio(filenamePart, suggestionStr);
+            const auto score = rapidfuzz::fuzz::partial_ratio(filenamePart, suggestionStr);
             if (score < fuzzScoreCutOff_)
                 continue;
             ratedResults.emplace_back(suggestion, score);
-            if (sizeTMax != 0 && ratedResults.size() >= sizeTMax)
-                break;
         }
         if (ratedResults.empty())
             return {};
@@ -74,11 +79,16 @@ namespace NuiFileExplorer
                 return a.second > b.second;
             }
         );
+
+        const auto takeCount = (maxSuggestions <= 0)
+            ? ratedResults.size()
+            : std::min(static_cast<std::size_t>(maxSuggestions), ratedResults.size());
+
         std::vector<std::filesystem::path> results;
-        results.reserve(ratedResults.size());
+        results.reserve(takeCount);
         std::transform(
             make_move_iterator(ratedResults.begin()),
-            make_move_iterator(ratedResults.end()),
+            make_move_iterator(ratedResults.begin() + static_cast<std::ptrdiff_t>(takeCount)),
             std::back_inserter(results),
             [](auto&& pair)
             {

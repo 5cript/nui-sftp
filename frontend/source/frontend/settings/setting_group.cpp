@@ -115,18 +115,14 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
                         .activeRenderer = [](auto const& option) -> Nui::ElementRenderer
                         {
                             return Nui::Elements::span{}(
-                                observe(option),
-                                [&option]() -> std::string
+                                observe(option.get()),
+                                [&option](std::optional<std::string> const& value) -> std::string
                                 {
-                                    if (!option.value())
+                                    if (!value)
                                         return "</>";
-                                    return *option.value();
+                                    return *value;
                                 }
                             );
-                        },
-                        .elementRenderer = [](auto const& option) -> Nui::ElementRenderer
-                        {
-                            return Nui::Elements::span{}(option);
                         },
                         .makeId =
                             []()
