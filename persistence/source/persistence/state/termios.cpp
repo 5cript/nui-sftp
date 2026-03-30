@@ -672,8 +672,8 @@ namespace Persistence
         termios.controlFlags = ControlFlags::saneDefaults();
         termios.localFlags = LocalFlags::saneDefaults();
         termios.cc = CC{};
-        termios.iSpeed = 0;
-        termios.oSpeed = 0;
+        termios.iSpeed = std::nullopt;
+        termios.oSpeed = std::nullopt;
         return termios;
     }
 
