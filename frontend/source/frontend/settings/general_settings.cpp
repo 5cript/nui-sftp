@@ -88,12 +88,21 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 return "???";
             },
         },
-        .showHiddenFiles = BoolSetting<>{
-            language->getObserved("settings", "general", "userInterface", "showHiddenFilesHelpText"),
+        .showHiddenFilesLocally = BoolSetting<>{
+            language->getObserved("settings", "general", "userInterface", "showHiddenFilesLocallyHelpText"),
             onChange,
             [this, onChange]()
             {
-                userInterface.showHiddenFiles.value(Persistence::UiOptions{}.showHiddenFiles);
+                userInterface.showHiddenFilesLocally.value(Persistence::UiOptions{}.showHiddenFilesLocally);
+                onChange();
+            },
+        },
+        .showHiddenFilesRemotely = BoolSetting<>{
+            language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotelyHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                userInterface.showHiddenFilesRemotely.value(Persistence::UiOptions{}.showHiddenFilesRemotely);
                 onChange();
             },
         },
@@ -220,7 +229,8 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     // Ui Options
     state.uiOptions.theme = userInterface.theme.value();
     state.uiOptions.darkLightMode = userInterface.darkLightMode.value();
-    state.uiOptions.showHiddenFiles = userInterface.showHiddenFiles.value();
+    state.uiOptions.showHiddenFilesLocally = userInterface.showHiddenFilesLocally.value();
+    state.uiOptions.showHiddenFilesRemotely = userInterface.showHiddenFilesRemotely.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
 
@@ -242,7 +252,8 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     // Ui Options
     userInterface.theme.value(state.uiOptions.theme);
     userInterface.darkLightMode.value(state.uiOptions.darkLightMode);
-    userInterface.showHiddenFiles.value(state.uiOptions.showHiddenFiles);
+    userInterface.showHiddenFilesLocally.value(state.uiOptions.showHiddenFilesLocally);
+    userInterface.showHiddenFilesRemotely.value(state.uiOptions.showHiddenFilesRemotely);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
 
@@ -293,7 +304,8 @@ Nui::ElementRenderer GeneralSettings::render(
         auto userInterfaceUi = fragment(
             userInterface.theme(language->getObserved("settings", "general", "userInterface", "theme")),
             userInterface.darkLightMode(language->getObserved("settings", "general", "userInterface", "darkLightMode")),
-            userInterface.showHiddenFiles(language->getObserved("settings", "general", "userInterface", "showHiddenFiles")),
+            userInterface.showHiddenFilesLocally(language->getObserved("settings", "general", "userInterface", "showHiddenFilesLocally")),
+            userInterface.showHiddenFilesRemotely(language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotely")),
             userInterface.fileGridPathBarOnTop(
                 language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
             ),

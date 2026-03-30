@@ -15,6 +15,10 @@
 
 #include <rapidfuzz/fuzz.hpp>
 
+#include <script-nui-components/button.hpp>
+#include <ui5-sap-icons/icons/show.hpp>
+#include <ui5-sap-icons/icons/hide.hpp>
+
 using namespace std::string_literals;
 
 namespace NuiFileExplorer
@@ -101,6 +105,14 @@ namespace NuiFileExplorer
         if (event.key() == "Backspace")
         {
             impl_->model->goBack();
+            return;
+        }
+        if (event.key() == "h" && event.ctrlKey())
+        {
+            impl_->showHiddenFiles = !impl_->showHiddenFiles.value();
+            if (impl_->settings.onShowHiddenFilesChanged)
+                impl_->settings.onShowHiddenFilesChanged(impl_->showHiddenFiles.value());
+            updateItems(true, false);
             return;
         }
         if (event.key() == "c" && event.ctrlKey())
@@ -211,13 +223,22 @@ namespace NuiFileExplorer
         std::set<std::filesystem::path> pathSet;
 
         impl_->items.value().clear();
-        std::transform(
-            items.begin(),
-            items.end(),
+        const bool showHidden = impl_->showHiddenFiles.value();
+        auto visibleItems = items |
+            std::views::filter(
+                [showHidden](auto const& item)
+                {
+                    const auto filename = item.path.filename().string();
+                    return showHidden || filename.empty() || filename[0] != '.' || filename == "..";
+                }
+            );
+        for (auto const& item : visibleItems)
+            pathSet.insert(item.path);
+        std::ranges::transform(
+            visibleItems,
             std::back_inserter(impl_->items.value()),
-            [&pathSet](auto const& item)
+            [](auto const& item)
             {
-                pathSet.insert(item.path);
                 return ItemWithInternals{item};
             }
         );
@@ -532,6 +553,7 @@ namespace NuiFileExplorer
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
+        namespace Snc = ScriptNuiComponents;
 
         // clang-format off
         return div {
@@ -540,6 +562,22 @@ namespace NuiFileExplorer
             impl_->newItemMenu(),
             impl_->sortMenu(),
             impl_->viewMenu(),
+            div{}(
+                observe(impl_->showHiddenFiles),
+                [this]() -> Nui::ElementRenderer {
+                    return Snc::button({
+                        .icon = impl_->showHiddenFiles.value() ? Ui5Icons::show() : Ui5Icons::hide(),
+                        .attributes = {
+                            onClick = [this]() {
+                                impl_->showHiddenFiles = !impl_->showHiddenFiles.value();
+                                if (impl_->settings.onShowHiddenFilesChanged)
+                                    impl_->settings.onShowHiddenFilesChanged(impl_->showHiddenFiles.value());
+                                updateItems(true, false);
+                            }
+                        }
+                    });
+                }
+            ),
             filter()
         );
         // clang-format on
@@ -799,7 +837,7 @@ namespace NuiFileExplorer
             {
                 for (auto i = std::cbegin(tokens), end = std::cend(tokens); i != end; ++i)
                 {
-                    auto const fuzzScore = rapidfuzz::fuzz::ratio(query, *i);
+                    auto const fuzzScore = rapidfuzz::fuzz::partial_ratio(query, *i);
                     if (fuzzScore >= hitScore)
                         return std::make_pair(fuzzScore, i);
                     auto previousMax = max;

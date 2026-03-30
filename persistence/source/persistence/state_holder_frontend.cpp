@@ -51,6 +51,25 @@ namespace Persistence
             onSaveComplete(std::nullopt);
         })(nlohmann::json(stateCache_).dump());
     }
+    void StateHolder::loadModifySave(
+        std::function<void(State&)> modifier,
+        std::function<void(std::optional<std::string> const&)> onComplete
+    )
+    {
+        load([this, modifier = std::move(modifier), onComplete = std::move(onComplete)](
+                 std::optional<std::string> const& error, StateHolder&, std::optional<std::string> const&
+             ) mutable
+        {
+            if (error)
+            {
+                onComplete(error);
+                return;
+            }
+            modifier(stateCache_);
+            save(std::move(onComplete));
+        });
+    }
+
     void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
         if (!onLoadComplete)
