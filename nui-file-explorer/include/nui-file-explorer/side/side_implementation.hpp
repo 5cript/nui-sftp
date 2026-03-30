@@ -175,7 +175,7 @@ namespace NuiFileExplorer
                 items.end(),
                 [](auto const& lhs)
                 {
-                    return lhs.item.type == Item::Type::Directory;
+                    return lhs.item.isDirectoryLike();
                 }
             );
         }

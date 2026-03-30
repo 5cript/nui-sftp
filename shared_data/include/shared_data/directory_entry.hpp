@@ -96,10 +96,19 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         std::string acl{};
+        // For symlinks: the type of the symlink target (if known). nullopt means unknown.
+        std::optional<FileType> resolvedType{std::nullopt};
 
         bool isDirectory() const
         {
             return type == FileType::Directory;
+        }
+        // Returns true for directories and for symlinks whose target is a directory.
+        bool isDirectoryLike() const
+        {
+            return type == FileType::Directory ||
+                   (type == FileType::Symlink && resolvedType.has_value() &&
+                    *resolvedType == FileType::Directory);
         }
         bool isRegularFile() const
         {

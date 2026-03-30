@@ -73,8 +73,7 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
-    // TODO: what about files?:
-    if (item.type != NuiFileExplorer::Item::Type::Directory)
+    if (!item.isDirectoryLike())
         return;
 
     if (item.path == ".")

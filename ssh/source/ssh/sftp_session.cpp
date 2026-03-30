@@ -107,6 +107,19 @@ namespace SecureShell
                     return std::unexpected(lastError());
                 }
 
+                for (auto& entry : entries)
+                {
+                    if (entry.type == SharedData::FileType::Symlink)
+                    {
+                        const auto fullPath = (path / entry.path).generic_string();
+                        std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> targetAttrs{
+                            sftp_stat(session_, fullPath.c_str()), sftp_attributes_free
+                        };
+                        if (targetAttrs != nullptr)
+                            entry.resolvedType = static_cast<SharedData::FileType>(targetAttrs->type);
+                    }
+                }
+
                 return entries;
             }
         );

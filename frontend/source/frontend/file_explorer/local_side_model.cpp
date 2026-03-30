@@ -70,8 +70,7 @@ LocalSideModel::LocalSideModel(
 
 void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
-    // TODO: what about files?:
-    if (item.type != NuiFileExplorer::Item::Type::Directory)
+    if (!item.isDirectoryLike())
         return;
 
     if (item.path == ".")
@@ -515,13 +514,25 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
             const auto files = val["files"];
             for (const auto& file : files)
             {
+                const auto fileType = SharedData::fileTypeFromStdFilesystemType(
+                    static_cast<std::filesystem::file_type>(file["type"].as<int>())
+                );
                 directoryEntries.push_back(
                     SharedData::DirectoryEntry{
                         .path = file["path"].as<std::string>(),
-                        .type = SharedData::fileTypeFromStdFilesystemType(
-                            static_cast<std::filesystem::file_type>(file["type"].as<int>())
-                        ),
+                        .type = fileType,
                         .size = file["size"].as<std::uint64_t>(),
+                        .resolvedType = [&]() -> std::optional<SharedData::FileType>
+                        {
+                            if (fileType != SharedData::FileType::Symlink)
+                                return std::nullopt;
+                            if (!file.hasOwnProperty("resolvedType") || file["resolvedType"].isNull() ||
+                                file["resolvedType"].isUndefined())
+                                return std::nullopt;
+                            return SharedData::fileTypeFromStdFilesystemType(
+                                static_cast<std::filesystem::file_type>(file["resolvedType"].as<int>())
+                            );
+                        }(),
                     }
                 );
             }
