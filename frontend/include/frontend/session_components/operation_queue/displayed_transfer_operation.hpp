@@ -2,6 +2,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/components/svg/arrow_right.hpp>
 
 #include <utility/format_bytes.hpp>
 
@@ -46,17 +47,28 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         using Nui::Elements::span;
 
         // clang-format off
+        const auto& srcPath = type_ == SharedData::OperationType::Download
+            ? remotePath_ : localPath_;
+        const auto& dstPath = type_ == SharedData::OperationType::Download
+            ? localPath_ : remotePath_;
+
         return div{
             class_ = "opq-body opq-single"
         }(
             div{}(
-                span{
-                    class_ = "opq-transfer-text",
-                    alt = fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
+                div{
+                    class_ = "opq-transfer-route",
+                    alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
                 }(
-                    type_ == SharedData::OperationType::Download
-                        ? fmt::format("{} -> {}", remotePath_.generic_string(), localPath_.generic_string())
-                        : fmt::format("{} -> {}", localPath_.generic_string(), remotePath_.generic_string())
+                    span{
+                        class_ = "opq-route-segment"
+                    }(srcPath.generic_string()),
+                    span{
+                        class_ = "opq-route-arrow"
+                    }(Svgs::arrowRight()),
+                    span{
+                        class_ = "opq-route-segment"
+                    }(dstPath.generic_string())
                 ),
                 div{
                     class_ = "opq-bytes-per-second"

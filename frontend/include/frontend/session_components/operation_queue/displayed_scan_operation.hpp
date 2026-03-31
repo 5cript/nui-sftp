@@ -37,10 +37,12 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
             ),
             // Spanner
             div{}(),
-            span{}(
+            span{
+                class_ = "opq-status-text"
+            }(
                 observe(totalBytes_, currentIndex_, totalScanned_).generate([this]() -> std::string {
                     return fmt::format(
-                        "{}/{} items ({})",
+                        "{}/{} ({})",
                         currentIndex_.value() > 0 ? (currentIndex_.value() - 1) : 0,
                         totalScanned_.value(),
                         Utility::formatBytes(totalBytes_.value(), Utility::determineOrderOfMagnitude(totalBytes_.value())));

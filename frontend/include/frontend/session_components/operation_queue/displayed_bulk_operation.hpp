@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/components/svg/arrow_right.hpp>
 
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <utility/format_bytes.hpp>
@@ -90,17 +91,38 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
             class_ = "opq-body opq-bulk"
         }(
             div{}(
-                span{
-                    style = "flex-grow: 1"
+                div{
+                    style = "flex-grow: 1; overflow: hidden; min-width: 0;"
                 }(
                     observe(currentFile),
-                    [this](){
-                        if (currentFile.empty())
-                            return fmt::format("{} {} {}", localPath_.generic_string(), type_ == SharedData::OperationType::BulkUpload ? "->" : "<-", remotePath_.generic_string());
-                        return fmt::format("{}:", currentFile.value());
+                    [this]() -> Nui::ElementRenderer {
+                        const auto& srcPath = type_ == SharedData::OperationType::BulkUpload ? localPath_ : remotePath_;
+                        const auto& dstPath = type_ == SharedData::OperationType::BulkUpload ? remotePath_ : localPath_;
+                        if (currentFile.value().empty())
+                        {
+                            return div{
+                                class_ = "opq-transfer-route",
+                                alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
+                            }(
+                                span{
+                                    class_ = "opq-route-segment"
+                                }(srcPath.generic_string()),
+                                span{
+                                    class_ = "opq-route-arrow"
+                                }(Svgs::arrowRight()),
+                                span{
+                                    class_ = "opq-route-segment"
+                                }(dstPath.generic_string())
+                            );
+                        }
+                        return span{
+                            class_ = "opq-route-segment"
+                        }(currentFile.value());
                     }
                 ),
-                span{}(
+                span{
+                    class_ = "opq-status-text"
+                }(
                     observe(fileCurrentIndex, fileCount, bytesPerSecond),
                     [this](){
                         return statusText();
@@ -108,8 +130,8 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                 )
             ),
             div{}(
-                fileProgressBar_(),
-                totalProgressBar_()
+                totalProgressBar_(),
+                fileProgressBar_()
             )
         );
         // clang-format on
