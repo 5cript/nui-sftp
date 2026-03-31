@@ -51,6 +51,9 @@ namespace NuiFileExplorer
     ///                            Shift+Up at row 0 → extend flag_ to index 0
     ///                              (leftward fill to start of row).
     ///                          Both ctrl sets are untouched.
+    ///   Home / End           → collapse to first selectable / last item;
+    ///                          clear both ctrl sets, clear flag_.
+    ///   Shift+Home / Shift+End → extend flag_ to 0 / last item.
     ///   Ctrl+A               → select all (clear ctrl sets, anchor_=0,
     ///                          flag_=last).
     class SelectionManager

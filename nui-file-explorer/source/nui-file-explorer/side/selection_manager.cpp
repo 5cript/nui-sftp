@@ -131,7 +131,8 @@ namespace NuiFileExplorer
         auto& vec = items_->value();
         for (std::size_t i = 0; i < vec.size(); ++i)
         {
-            const bool selected = (inRange(i) && ctrlRemove_.count(i) == 0) || ctrlAdd_.count(i) > 0;
+            const bool selected = isSelectablePath(i) &&
+                ((inRange(i) && ctrlRemove_.count(i) == 0) || ctrlAdd_.count(i) > 0);
             vec[i].isSelected(selected);
         }
         Nui::globalEventContext.sync();
@@ -315,7 +316,13 @@ namespace NuiFileExplorer
         const std::size_t idx = *idxOpt;
 
         if (!isSelectablePath(idx))
+        {
+            // Non-selectable items (e.g. "..") can never be selected, but must
+            // always be deselectable in case they somehow ended up selected.
+            if (isSelected(idx))
+                deselect(idx);
             return;
+        }
 
         const bool ctrl = event.ctrlKey();
         const bool shift = event.shiftKey();
@@ -416,9 +423,11 @@ namespace NuiFileExplorer
         const auto key = event.key();
 
         const bool isArrow = (key == "ArrowRight" || key == "ArrowLeft" || key == "ArrowDown" || key == "ArrowUp");
+        const bool isHome = (key == "Home");
+        const bool isEnd = (key == "End");
         const bool isSelectAll = (key == "a" || key == "A") && event.ctrlKey();
 
-        if (!isArrow && !isSelectAll)
+        if (!isArrow && !isHome && !isEnd && !isSelectAll)
             return false;
 
         if (isSelectAll)
@@ -428,6 +437,46 @@ namespace NuiFileExplorer
         }
 
         const bool shift = event.shiftKey();
+        const auto n = items_->value().size();
+
+        if (isHome || isEnd)
+        {
+            if (n == 0)
+                return true;
+
+            if (shift)
+            {
+                // Extend flag_ to the boundary; anchor and ctrl mask untouched.
+                if (!flag_.has_value())
+                    flag_ = anchor_.value_or(0);
+                flag_ = isEnd ? (n - 1) : 0;
+                rebuildSelection();
+                maybeScrollActiveIntoView();
+            }
+            else
+            {
+                // Plain Home/End: collapse to a single item at the boundary.
+                ctrlAdd_.clear();
+                ctrlRemove_.clear();
+                flag_.reset();
+                if (isEnd)
+                {
+                    anchor_ = n - 1;
+                }
+                else
+                {
+                    // Home: land on the first selectable item (skip "..").
+                    anchor_ = 0;
+                    while (*anchor_ < n && !isSelectablePath(*anchor_))
+                        anchor_ = *anchor_ + 1;
+                    if (*anchor_ >= n)
+                        anchor_ = 0;
+                }
+                rebuildSelection();
+                maybeScrollActiveIntoView();
+            }
+            return true;
+        }
 
         if (shift)
         {
