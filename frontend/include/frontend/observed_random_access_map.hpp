@@ -3,6 +3,7 @@
 #include <nui/event_system/observed_value.hpp>
 #include <log/log.hpp>
 
+#include <algorithm>
 #include <deque>
 #include <stdexcept>
 
@@ -14,12 +15,12 @@ class ObservedRandomAccessMap
 
     void insert(KeyT const& key, ValueT&& value)
     {
-        if (keyToIndexMap_.find(key) != keyToIndexMap_.end())
+        if (keyToPointerMap_.find(key) != keyToPointerMap_.end())
             throw std::invalid_argument("Key already exists in ObservedRandomAccessMap");
 
         observedValues_.push_back(std::make_unique<ValueT>(std::move(value)));
         Log::info("Inserting key '{}' at index '{}'", key.value(), observedValues_.value().size() - 1);
-        keyToIndexMap_[key] = observedValues_.value().size() - 1;
+        keyToPointerMap_[key] = observedValues_.value().back().get();
     }
 
     void pop_back()
@@ -27,7 +28,7 @@ class ObservedRandomAccessMap
         if (observedValues_.value().empty())
             return;
 
-        keyToIndexMap_.erase(observedValues_.value().back()->key());
+        keyToPointerMap_.erase(observedValues_.value().back()->key());
         observedValues_.pop_back();
     }
 
@@ -36,7 +37,7 @@ class ObservedRandomAccessMap
         if (observedValues_.value().empty())
             return;
 
-        keyToIndexMap_.erase(observedValues_.value().front()->key());
+        keyToPointerMap_.erase(observedValues_.value().front()->key());
         observedValues_.pop_front();
     }
 
@@ -49,19 +50,26 @@ class ObservedRandomAccessMap
 
     void erase(KeyT const& key)
     {
-        auto it = keyToIndexMap_.find(key);
-        if (it == keyToIndexMap_.end())
+        auto mapIt = keyToPointerMap_.find(key);
+        if (mapIt == keyToPointerMap_.end())
             throw std::out_of_range("Key not found in ObservedRandomAccessMap");
 
-        Log::info("Erasing key '{}' at index '{}'", key.value(), it->second);
+        ValueT* ptr = mapIt->second;
+        keyToPointerMap_.erase(mapIt);
 
-        if (it->second >= observedValues_.value().size())
-            throw std::out_of_range("Index out of range in ObservedRandomAccessMap erase");
+        auto& deque = observedValues_.value();
+        auto dequeIt = std::find_if(
+            deque.begin(),
+            deque.end(),
+            [ptr](std::unique_ptr<ValueT> const& uptr)
+            {
+                return uptr.get() == ptr;
+            }
+        );
+        if (dequeIt == deque.end())
+            throw std::logic_error("Pointer not found in deque during ObservedRandomAccessMap erase");
 
-        observedValues_.erase(observedValues_.begin() + it->second);
-
-        // TODO: be more clever here:
-        rebuildIndexMap();
+        observedValues_.erase(dequeIt);
     }
 
     Nui::Observed<std::deque<std::unique_ptr<ValueT>>>& observedValues()
@@ -71,20 +79,27 @@ class ObservedRandomAccessMap
 
     ValueT* at(KeyT const& key)
     {
-        auto it = keyToIndexMap_.find(key);
-        if (it == keyToIndexMap_.end())
+        auto it = keyToPointerMap_.find(key);
+        if (it == keyToPointerMap_.end())
             return nullptr;
-
-        return observedValues_.value().at(it->second).get();
+        return it->second;
     }
 
     auto find(KeyT const& key)
     {
-        auto it = keyToIndexMap_.find(key);
-        if (it == keyToIndexMap_.end())
+        auto mapIt = keyToPointerMap_.find(key);
+        if (mapIt == keyToPointerMap_.end())
             return observedValues_.value().end();
 
-        return observedValues_.value().begin() + it->second;
+        ValueT* ptr = mapIt->second;
+        return std::find_if(
+            observedValues_.value().begin(),
+            observedValues_.value().end(),
+            [ptr](std::unique_ptr<ValueT> const& uptr)
+            {
+                return uptr.get() == ptr;
+            }
+        );
     }
 
     auto end()
@@ -95,11 +110,11 @@ class ObservedRandomAccessMap
     template <typename FunctionT>
     void modify(KeyT const& key, FunctionT const& modifier)
     {
-        auto it = keyToIndexMap_.find(key);
-        if (it == keyToIndexMap_.end())
+        auto it = keyToPointerMap_.find(key);
+        if (it == keyToPointerMap_.end())
             throw std::out_of_range("Key not found in ObservedRandomAccessMap");
 
-        modifier(*observedValues_[it->second].get());
+        modifier(*it->second);
     }
 
     bool empty() const
@@ -110,22 +125,10 @@ class ObservedRandomAccessMap
     void clear()
     {
         observedValues_.clear();
-        keyToIndexMap_.clear();
-    }
-
-  private:
-    void rebuildIndexMap()
-    {
-        keyToIndexMap_.clear();
-        std::size_t i = 0;
-        for (auto const& value : observedValues_.value())
-        {
-            keyToIndexMap_.emplace(value->key(), i);
-            ++i;
-        }
+        keyToPointerMap_.clear();
     }
 
   private:
     Nui::Observed<std::deque<std::unique_ptr<ValueT>>> observedValues_;
-    MapT<KeyT, std::size_t> keyToIndexMap_;
+    MapT<KeyT, ValueT*> keyToPointerMap_;
 };
