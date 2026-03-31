@@ -11,6 +11,7 @@
 #include <frontend/settings/atomic_setting/path_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/map_setting.hpp>
+#include <frontend/settings/atomic_setting/list_setting.hpp>
 #include <frontend/settings/setting_group.hpp>
 
 #include <persistence/state/state.hpp>
@@ -39,6 +40,7 @@ struct GeneralSettings
         BoolSetting<> showHiddenFilesRemotely;
         BoolSetting<> fileGridPathBarOnTop;
         MapSetting<> fileGridExtensionIcons;
+        ListSetting<false, std::set> neverShowAgainDialogs;
     } userInterface;
 
     struct LocalFilesystemOptions
@@ -55,7 +57,7 @@ struct GeneralSettings
     bool darkLightEventOriginatesHere{false};
     Nui::ListenRemover<decltype(FrontendEvents::darkLightMode)> darkLightModeListener;
 
-    GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, MultiInputDialog& multiInputDialog);
+    GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, InputDialog& inputDialog, MultiInputDialog& multiInputDialog);
 
     void updateThemes(std::vector<std::filesystem::path> paths);
 

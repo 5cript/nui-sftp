@@ -2,9 +2,11 @@
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <persistence/state_holder.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/resizeable_table.hpp>
+#include <script-nui-components/switch.hpp>
 
 #include <script-nui-components/dialog.hpp>
 
@@ -20,13 +22,18 @@ namespace Snc = ScriptNuiComponents;
 struct ConfirmDialog::Implementation
 {
     std::string id;
+    Persistence::StateHolder* stateHolder;
     std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
     Snc::ResizableTable table;
     Nui::Observed<std::string> text;
     Nui::Observed<bool> listItemsPresent{false};
+    Nui::Observed<bool> showNeverAgain{false};
+    Nui::Observed<bool> neverAgainChecked{false};
+    std::string currentNeverShowAgainId;
 
-    Implementation(std::string id)
+    Implementation(std::string id, Persistence::StateHolder& stateHolder)
         : id{std::move(id)}
+        , stateHolder{&stateHolder}
         , dialog{}
         , table{
               Snc::ResizableTable::HeaderRow{
@@ -41,8 +48,8 @@ struct ConfirmDialog::Implementation
     {}
 };
 
-ConfirmDialog::ConfirmDialog(std::string id)
-    : impl_{std::make_unique<Implementation>(std::move(id))}
+ConfirmDialog::ConfirmDialog(std::string id, Persistence::StateHolder& stateHolder)
+    : impl_{std::make_unique<Implementation>(std::move(id), stateHolder)}
 {
     impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
 }
@@ -51,6 +58,24 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(ConfirmDialog);
 
 void ConfirmDialog::open(OpenOptions const& options)
 {
+    if (options.neverShowAgainId.has_value())
+    {
+        auto const& neverShow = impl_->stateHolder->stateCache().uiOptions.neverShowAgainDialogs;
+        if (neverShow.find(*options.neverShowAgainId) != neverShow.end())
+        {
+            options.onClose(std::nullopt);
+            return;
+        }
+        impl_->currentNeverShowAgainId = *options.neverShowAgainId;
+        impl_->neverAgainChecked = false;
+        impl_->showNeverAgain = true;
+    }
+    else
+    {
+        impl_->currentNeverShowAgainId.clear();
+        impl_->showNeverAgain = false;
+    }
+
     impl_->listItemsPresent = !options.listItems.empty();
     impl_->table.clear();
     for (const auto& item : options.listItems)
@@ -94,6 +119,37 @@ Nui::ElementRenderer ConfirmDialog::dialogBody()
                 if (!present)
                     return Nui::nil();
                 return impl_->table({style = "max-height: 200px;"});
+            }
+        ),
+        div{
+            style = "display: flex; align-items: center; gap: 8px; margin-top: 10px;"
+        }(
+            observe(impl_->showNeverAgain),
+            [this](bool show) -> Nui::ElementRenderer {
+                if (!show)
+                    return Nui::nil();
+                return div{
+                    style = "display: flex; align-items: center; gap: 8px;"
+                }(
+                    Snc::switch_({
+                        .isChecked = impl_->neverAgainChecked,
+                        .onChange = [this](bool checked, auto const&) {
+                            impl_->neverAgainChecked = checked;
+                            impl_->stateHolder->loadModifySave(
+                                [checked, id = impl_->currentNeverShowAgainId](Persistence::State& state) {
+                                    if (checked)
+                                        state.uiOptions.neverShowAgainDialogs.insert(id);
+                                    else
+                                        state.uiOptions.neverShowAgainDialogs.erase(id);
+                                }
+                            );
+                        },
+                        .dontUpdateValue = true,
+                    }),
+                    div{
+                        style = "font-size: 14px; color: var(--muted);"
+                    }(language->getObserved("confirmDialog", "neverShowAgain"))
+                );
             }
         )
     );

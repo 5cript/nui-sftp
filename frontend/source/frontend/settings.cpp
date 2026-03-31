@@ -116,7 +116,7 @@ struct Settings::Implementation
         , inputDialog{&inputDialog}
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
-        , generalSettings{onChange, events, multiInputDialog}
+        , generalSettings{onChange, events, inputDialog, multiInputDialog}
         , termiosSettings{[onChange, reloadInheritance]()
               {
                   onChange();
@@ -528,6 +528,7 @@ void Settings::save()
                     .text =
                         fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error),
                     .buttons = ConfirmDialog::Button::Ok,
+                    .neverShowAgainId = "errorSavingSettings",
                 });
             }
 
@@ -726,6 +727,7 @@ Nui::ElementRenderer Settings::header()
                             .headerText = language->get("settings", "settingsClosedHeader"),
                             .text = language->get("settings", "settingsClosedText"),
                             .buttons = ConfirmDialog::Button::Ok,
+                            .neverShowAgainId = "settingsClosedWarning",
                         });
                     }
                 },
@@ -772,6 +774,7 @@ void Settings::addNewSession()
                                 fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
                             ),
                             .buttons = ConfirmDialog::Button::Ok,
+                            .neverShowAgainId = "errorSavingSettings",
                         });
                     }
 
@@ -1383,6 +1386,7 @@ void Settings::removeGroup(
             .headerText = language->get("settings", "cannotDeleteDefaultGroupKeyHeader"),
             .text = language->get("settings", "cannotDeleteDefaultGroupKeyText"),
             .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "cannotDeleteDefaultGroupKeyWarning",
         });
         return;
     }

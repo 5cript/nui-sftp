@@ -34,7 +34,7 @@ struct MainPage::Implementation
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
         : stateHolder{stateHolder}
         , events{events}
-        , confirmDialog{"ConfirmDialog"}
+        , confirmDialog{"ConfirmDialog", *stateHolder}
         , newItemAskDialog{"AskDialog"}
         , filePropertyDialog{"FilePropertyDialog"}
         , prompter{}
@@ -81,6 +81,7 @@ void MainPage::onSetupComplete()
                         .headerText = language->get("persistence", "warningLoadingState"),
                         .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
                         .buttons = ConfirmDialog::Button::Ok,
+                        .neverShowAgainId = "persistenceLoadWarning",
                     });
                 }
             }

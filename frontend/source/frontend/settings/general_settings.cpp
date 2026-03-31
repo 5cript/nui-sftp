@@ -1,8 +1,9 @@
 #include <frontend/settings/general_settings.hpp>
+#include <frontend/dialog/input_dialog.hpp>
 
 using namespace std::string_literals;
 
-GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, MultiInputDialog& multiInputDialog)
+GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
     : localization{
         .language = {
             {"en_US", "de_DE"},
@@ -135,6 +136,18 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 onChange();
             }
         },
+        .neverShowAgainDialogs = ListSetting<false, std::set>{
+            language->getObserved("settings", "general", "userInterface", "neverShowAgainDialogsHelpText"),
+            inputDialog,
+            onChange,
+            [this, onChange]()
+            {
+                userInterface.neverShowAgainDialogs.value(
+                    Persistence::UiOptions{}.neverShowAgainDialogs
+                );
+                onChange();
+            }
+        },
     }
     , localFilesystemOptions {
         .preventDeletion =
@@ -239,6 +252,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.uiOptions.showHiddenFilesRemotely = userInterface.showHiddenFilesRemotely.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
+    state.uiOptions.neverShowAgainDialogs = userInterface.neverShowAgainDialogs.value();
 
     // Local FS
     state.localFilesystemOptions.preventDeletion = localFilesystemOptions.preventDeletion.value();
@@ -262,6 +276,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     userInterface.showHiddenFilesRemotely.value(state.uiOptions.showHiddenFilesRemotely);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
+    userInterface.neverShowAgainDialogs.value(state.uiOptions.neverShowAgainDialogs);
 
     // Local FS
     localFilesystemOptions.preventDeletion.value(state.localFilesystemOptions.preventDeletion);
@@ -317,6 +332,9 @@ Nui::ElementRenderer GeneralSettings::render(
             ),
             userInterface.fileGridExtensionIcons(
                 language->getObserved("settings", "general", "userInterface", "fileGridExtensionIcons")
+            ),
+            userInterface.neverShowAgainDialogs(
+                language->getObserved("settings", "general", "userInterface", "neverShowAgainDialogs")
             )
         );
 

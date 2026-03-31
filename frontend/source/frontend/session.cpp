@@ -298,6 +298,7 @@ void Session::onDrop(
             .headerText = language->get("sessionFrontend", "dropNotImplementedTitle"),
             .text = language->get("sessionFrontend", "dropNotImplementedText"),
             .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "dropNotImplemented",
         });
         return;
     }
@@ -464,6 +465,7 @@ void Session::setupFileGrid()
                 .headerText = "File Grid Error",
                 .text = message,
                 .buttons = ConfirmDialog::Button::Ok,
+                .neverShowAgainId = "fileGridError",
             });
         }
     );
@@ -629,6 +631,7 @@ void Session::openLocalFilesystem()
                     .headerText = "Get Home Directory Failed",
                     .text = "Invalid response from backend: missing 'path'",
                     .buttons = ConfirmDialog::Button::Ok,
+                    .neverShowAgainId = "getHomeDirectoryFailed",
                 });
                 return;
             }
@@ -678,6 +681,7 @@ void Session::onOpenSession(bool success, std::string const& info)
             .headerText = language->get("sessionFrontend", "sessionCreationFailedHeader"),
             .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "sessionCreationFailedText")), info),
             .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "sessionCreationFailed",
         });
         closeSelf();
         return;
@@ -729,6 +733,7 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
             .headerText = language->get("sessionFrontend", "channelCreationFailedHeader"),
             .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "channelCreationFailedText")), info),
             .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "channelCreationFailed",
         });
         return;
     }
@@ -1164,6 +1169,7 @@ void Session::initializeLayout()
             .headerText = language->get("sessionFrontend", "layoutCreationFailedHeader"),
             .text = language->get("sessionFrontend", "layoutCreationFailedText"),
             .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "layoutCreationFailed",
         });
         closeSelf();
     }
