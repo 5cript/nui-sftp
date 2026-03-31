@@ -170,13 +170,13 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             if (operationCompleted.error)
                 Log::error("Operation failed: {}", operationCompleted.error->toString());
 
-            Log::info(
-                "Operation completed: id={}, reason={}, localPath='{}', remotePath='{}'",
-                operationCompleted.operationId.value(),
-                static_cast<int>(operationCompleted.reason),
-                operationCompleted.localPath ? operationCompleted.localPath->generic_string() : "<none>",
-                operationCompleted.remotePath ? operationCompleted.remotePath->generic_string() : "<none>"
-            );
+            // Log::info(
+            //     "Operation completed: id={}, reason={}, localPath='{}', remotePath='{}'",
+            //     operationCompleted.operationId.value(),
+            //     static_cast<int>(operationCompleted.reason),
+            //     operationCompleted.localPath ? operationCompleted.localPath->generic_string() : "<none>",
+            //     operationCompleted.remotePath ? operationCompleted.remotePath->generic_string() : "<none>"
+            // );
 
             self->hub_->callRemote(
                 fmt::format("OperationQueue::{}::onOperationCompleted", self->sessionId_.value()),
@@ -241,7 +241,6 @@ bool OperationQueue::work()
         const auto workStatus = workResult.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            Log::info("Operation completed successfully: {}", id.value());
             auto* next = (i + 1 < operations_.size()) ? operations_[i + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {

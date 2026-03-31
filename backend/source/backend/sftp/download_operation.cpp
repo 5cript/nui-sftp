@@ -61,7 +61,6 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     Log::error("DownloadOperation: Failed to handle symlink: {}", result.error().toString());
                     return enterErrorState<WorkStatus>(result.error());
                 }
-                Log::info("DownloadOperation: Symlink handled, no file to download.");
                 state_ = Completed;
                 // to show 100%
                 options_.progressCallback(1, 1, 1, 0);
@@ -154,7 +153,6 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 return enterErrorState<WorkStatus>(finalizeResult.error());
             }
             state_ = Completed;
-            Log::info("DownloadOperation: Operation completed successfully.");
             return WorkStatus::Complete;
         }
         case (Completed):
@@ -343,7 +341,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile
     }
     else
     {
-        Log::info("DownloadOperation: Starting new download to '{}'.", tempPath);
         localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
     }
 
@@ -484,7 +481,6 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     if (options_.reserveSpace && options_.entry->size != 0)
     {
         // Reserve space
-        Log::info("DownloadOperation: Reserving space for file.");
         const auto pos = localFile_.tellp();
         localFile_.seekp(options_.entry->size - 1);
         localFile_.put('\0');
@@ -495,12 +491,6 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         }
         localFile_.seekp(pos);
     }
-
-    Log::info(
-        "DownloadOperation: Prepared download of '{}' to '{}'.",
-        options_.remotePath.generic_string(),
-        options_.localPath.generic_string()
-    );
 
     return {};
 }
@@ -572,7 +562,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
 
     if (options_.inheritPermissions)
     {
-        Log::info("DownloadOperation: Inheriting permissions from remote file.");
         auto stream = fileStream_.lock();
         if (!stream)
         {
@@ -597,7 +586,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
     }
     else if (options_.filePermissions)
     {
-        Log::info("DownloadOperation: Setting permissions.");
         std::error_code permissionsError{};
         std::filesystem::permissions(options_.localPath, *options_.filePermissions, permissionsError);
         if (permissionsError)
@@ -607,11 +595,5 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
         }
     }
     /* else keep default */
-
-    Log::info(
-        "DownloadOperation: Finalized download of '{}' to '{}'.",
-        options_.remotePath.generic_string(),
-        options_.localPath.generic_string()
-    );
     return {};
 }
