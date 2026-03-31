@@ -1,6 +1,7 @@
 .confirm-dialog-text {
     background-color: var(--background-color-fields);
     color: var(--color-fields);
+    min-width: 400px;
 }
 
 .confirm-dialog {
