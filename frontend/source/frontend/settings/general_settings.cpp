@@ -56,6 +56,12 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 events->selectedTheme.modifyNow();
                 onChange();
             },
+            {},
+            {},
+            [events](){
+                events->onReloadThemes = !events->onReloadThemes;
+                return true;
+            }
         },
         .darkLightMode = ComboSetting<SharedData::DarkLightMode, std::string>{
             { SharedData::DarkLightMode::System, SharedData::DarkLightMode::Dark, SharedData::DarkLightMode::Light },

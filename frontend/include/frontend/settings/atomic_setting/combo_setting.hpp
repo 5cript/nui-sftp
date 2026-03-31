@@ -30,7 +30,8 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         std::function<TransformedType(ValueType const&)> valueTransformer = {},
-        std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer = {}
+        std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer = {},
+        std::function<bool()> doLoad = {}
     )
         : SettingBase{
               std::move(helpText),
@@ -40,6 +41,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         , availableStates_{std::move(availableStates)}
         , valueTransformer_{std::move(valueTransformer)}
         , iconRenderer_{std::move(iconRenderer)}
+        , doLoad_{std::move(doLoad)}
     {}
 
     Nui::ElementRenderer renderActive()
@@ -159,6 +161,12 @@ class ComboSetting : public Setting<Disengageable, ValueType>
                     .makeId = [](){
                         return Nui::val::global("generateId")().as<std::string>();
                     },
+                    .onOpen = [this]()
+                    {
+                        if (doLoad_)
+                            return doLoad_();
+                        return false;
+                    },
                     .dontUpdateValue = true,
                 }
             ),
@@ -173,4 +181,5 @@ class ComboSetting : public Setting<Disengageable, ValueType>
     Nui::Observed<std::vector<ValueType>> availableStates_;
     std::function<TransformedType(ValueType const&)> valueTransformer_;
     std::function<Nui::ElementRenderer(ValueType const&)> iconRenderer_;
+    std::function<bool()> doLoad_;
 };
