@@ -6,10 +6,15 @@
 
 #include <memory>
 
+namespace Persistence
+{
+    class StateHolder;
+}
+
 class ConfirmDialog
 {
   public:
-    ConfirmDialog(std::string id);
+    ConfirmDialog(std::string id, Persistence::StateHolder& stateHolder);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(ConfirmDialog);
 
     using Button = ScriptNuiComponents::Dialog::Button;
@@ -45,6 +50,7 @@ class ConfirmDialog
             std::optional<State> additionalState = std::nullopt;
         };
         std::vector<ListElement> listItems = {};
+        std::optional<std::string> neverShowAgainId = std::nullopt;
         std::function<void(std::optional<Button> buttonPressed)> onClose = [](auto) {};
     };
 

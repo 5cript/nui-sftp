@@ -5,6 +5,7 @@
 #include <constants/persistence.hpp>
 
 #include <map>
+#include <set>
 #include <string>
 
 namespace Persistence
@@ -16,6 +17,7 @@ namespace Persistence
         bool showHiddenFilesLocally{false};
         bool showHiddenFilesRemotely{false};
         bool fileGridPathBarOnTop{false};
+        std::set<std::string> neverShowAgainDialogs{};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/cpp.png"},
             {".hpp", "icons/cpp.png"},
@@ -47,6 +49,7 @@ namespace Persistence
             showHiddenFilesLocally,
             showHiddenFilesRemotely,
             fileGridPathBarOnTop,
+            neverShowAgainDialogs,
             fileGridExtensionIcons)
     )
 }

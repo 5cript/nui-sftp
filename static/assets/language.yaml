@@ -10,6 +10,7 @@ en_US:
     none: "None"
     cancel: "Cancel"
     items: "Items"
+    neverShowAgain: "Never show again"
   newSessionDialog:
     title: "Create New Session"
     validationMessage: "Please fill in all required fields."
@@ -510,6 +511,8 @@ en_US:
         fileGridExtensionIconsValueName: "Icon Path"
         fileGridExtensionIcons: "FileGrid Extension Icons"
         fileGridExtensionIconsHelpText: "Mapping of file extensions to icon paths used in the file grid view. Specify the file extension (e.g., '.txt') as the key and the corresponding icon path as the value."
+        neverShowAgainDialogs: "Never Show Again Dialogs"
+        neverShowAgainDialogsHelpText: "List of dialog IDs that will never be shown again. Remove an entry to allow that dialog to appear again."
       localFilesystemOptions:
         preventDeletionHelpText: "If enabled, prevents deletion of files and directories in the local filesystem."
         preventDeletion: "Prevent Deletion"
@@ -975,6 +978,8 @@ de_DE:
         fileGridExtensionIconsValueName: "Symbolpfad"
         fileGridExtensionIcons: "Dateiansicht Symbole"
         fileGridExtensionIconsHelpText: "Zuordnung von Dateierweiterungen zu Symbolpfaden, die in der Dateiansicht verwendet werden. Geben Sie die Dateierweiterung (z.B. '.txt') als Schlüssel und den entsprechenden Symbolpfad als Wert an."
+        neverShowAgainDialogs: "Nicht mehr anzeigen - Dialoge"
+        neverShowAgainDialogsHelpText: "Liste der Dialog-IDs, die nicht mehr angezeigt werden. Eintrag entfernen, um den Dialog wieder anzuzeigen."
       localFilesystemOptions:
         preventDeletionHelpText: "Wenn aktiviert, wird das Löschen von Dateien und Verzeichnissen im lokalen Dateisystem verhindert."
         preventDeletion: "Löschen verhindern"

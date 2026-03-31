@@ -153,7 +153,7 @@ There will not be support for any other system and that will not change in the n
 - [ ] Local shell is broken on windows and linux. There is a bigger fix needed because I need to fork at the very start of main to an intermediate process that then starts the actual app and the shell processes on linux.
 
 ## Settings UI
-- [ ] Option to disable some warning boxes.
+- [X] Option to disable some warning boxes.
 
 ## File View UI
 - [ ] Same side drag and drop for moving files locally or remotely.
