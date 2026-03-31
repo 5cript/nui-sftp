@@ -34,7 +34,7 @@
 #include <string>
 #include <string_view>
 
-constexpr static std::string_view progressHeight{"8px"};
+constexpr static std::string_view progressHeight{"11px"};
 
 namespace Svgs = Components::Svg;
 

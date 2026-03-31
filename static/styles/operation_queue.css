@@ -72,15 +72,23 @@ header.opq-controls {
     padding: 0 5px;
     height: 36px;
 
-    /* first child */
+    /* first child — icon */
     &>div:first-child {
         width: 20px;
         height: 20px;
         margin-right: 8px;
+        flex-shrink: 0;
     }
 
     .progress-bar {
-        font-size: 9px;
+        font-size: 10px;
+    }
+
+    .progress-bar>div:nth-child(2) {
+        color: rgba(255, 255, 255, 0.9);
+        text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+        -webkit-font-smoothing: antialiased;
+        transform: translateZ(0);
     }
 }
 
@@ -139,12 +147,14 @@ header.opq-controls {
 }
 
 .opq-clock {
-    margin: 0 8px;
+    margin: 0;
+    display: flex;
+    align-items: center;
 }
 
 .opq-cancel-btn {
     color: #ffb3b3;
-    margin-left: 8px;
+    margin-left: 4px;
 }
 
 /* dynamic content area */
@@ -154,11 +164,24 @@ header.opq-controls {
     gap: 8px;
     align-items: center;
     flex-grow: 1;
+    align-self: stretch;
+    min-height: 0;
 }
 
 .opq-bytes-per-second {
     text-align: right;
     min-width: 45px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.opq-status-text {
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
+    font-variant-numeric: tabular-nums;
 }
 
 .opq-transfer-text {
@@ -178,6 +201,38 @@ header.opq-controls {
     border-radius: 8px;
 }
 
+.opq-transfer-route {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+}
+
+.opq-route-segment {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    color: var(--subdued-text, rgba(255, 255, 255, 0.85));
+}
+
+.opq-route-arrow {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    color: var(--opq-muted);
+    opacity: 0.6;
+
+    & svg {
+        width: 12px;
+        height: 12px;
+    }
+}
+
 .opq-single {
     display: grid;
     grid-template-columns: 1fr;
@@ -185,10 +240,13 @@ header.opq-controls {
     column-gap: 12px;
     row-gap: 2px;
 
-    &>div {
+    /* only the text row, not the progress bar */
+    &>div:first-child {
         display: grid;
         grid-template-columns: 1fr max-content;
         gap: 4px;
+        min-width: 0;
+        overflow: hidden;
     }
 }
 
@@ -199,18 +257,29 @@ header.opq-controls {
     column-gap: 12px;
     row-gap: 2px;
 
-    &>div {
+    /* text row */
+    &>div:first-child {
         display: flex;
         flex-direction: row;
         gap: 4px;
+        align-items: center;
+        overflow: hidden;
+        min-width: 0;
+    }
+
+    /* progress bars row — fixed grid so bars never shift */
+    &>div:last-child {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
+        font-variant-numeric: tabular-nums;
 
         &>.progress-bar:first-child {
-            flex-grow: 1;
             border-radius: 8px 0 0 8px;
         }
 
         &>.progress-bar:last-child {
-            flex-grow: 1;
             border-radius: 0 8px 8px 0;
         }
     }
@@ -222,6 +291,8 @@ header.opq-controls {
     &>.progress-bar {
         width: 100%;
         border-radius: 0;
+        font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
+        font-variant-numeric: tabular-nums;
     }
 }
 
