@@ -50,7 +50,7 @@ mkdir -p "${INSTALL_TARGET}/assets"
 mkdir -p "${INSTALL_TARGET}/themes"
 
 cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}"
-cp -r "${BUILD_DIRECTORY}/assets/." "${INSTALL_TARGET}/assets"
+cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
 if [ "$OMIT_FRONTEND" = false ]; then
     cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/frontend"
