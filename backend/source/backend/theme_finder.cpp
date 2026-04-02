@@ -1,5 +1,5 @@
 #include <backend/theme_finder.hpp>
-#include <backend/resources.hpp>
+#include <utility/resources.hpp>
 #include <log/log.hpp>
 
 #include <filesystem>

@@ -1,5 +1,6 @@
 #include <persistence/state_holder.hpp>
 #include <persistence/state/state.hpp>
+#include <utility/resources.hpp>
 #include <constants/persistence.hpp>
 #include <log/log.hpp>
 #include <yaml-cpp/yaml.h>
@@ -479,11 +480,14 @@ namespace Persistence
 
     void StateHolder::loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
-#ifdef NDEBUG
-        const auto fileDirectory = programDirectory_ / ".." / "assets" / "languages";
-#else
-        const auto fileDirectory = std::filesystem::path{SOURCE_DIR} / "static" / "assets" / "languages";
-#endif
+        const auto assetsDir = getAssetsDirectory(programDirectory_);
+        if (!assetsDir)
+        {
+            Log::error("Assets directory not found, cannot load language files.");
+            onLoadComplete(std::nullopt);
+            return;
+        }
+        const auto fileDirectory = *assetsDir / "languages";
 
         std::filesystem::directory_iterator dirIt;
         try

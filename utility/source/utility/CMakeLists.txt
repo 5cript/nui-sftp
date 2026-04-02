@@ -14,6 +14,7 @@ else()
         utility
         PRIVATE
         node/node.cpp
+        resources.cpp
     )
 
     find_package(Boost CONFIG 1.89.0 REQUIRED COMPONENTS process)
@@ -35,4 +36,5 @@ target_link_libraries(utility PUBLIC
     gimo::gimo
     fmt::fmt
     events
+    constants
 )
