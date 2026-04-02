@@ -22,6 +22,7 @@ option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
 option(FETCH_EFSW "Fetch efsw" ON)
 option(FETCH_ICONS "Fetch icons" ON)
+option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which includes a command line tool for checking language files" OFF)
 
 if (OFFLINE_BUILD)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/offline_build.cmake")
@@ -114,12 +115,6 @@ else()
         )
     endif()
 
-    # Copy web files to destination.
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/static/assets/language.yaml" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../assets/language.yaml"
-        VERBATIM
-    )
-
     # Copy module bin to frontend.
     if (NOT OMIT_FRONTEND_BUILD)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -134,5 +129,9 @@ else()
         add_subdirectory(ssh/test/ssh)
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
+    endif()
+
+    if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)
+        add_subdirectory(tools/language_check/source/language_check)
     endif()
 endif()

@@ -3,6 +3,7 @@
 #include <constants/persistence.hpp>
 #include <log/log.hpp>
 #include <yaml-cpp/yaml.h>
+#include <build_environment.hpp>
 
 #include <fmt/chrono.h>
 #include <roar/filesystem/special_paths.hpp>
@@ -408,12 +409,12 @@ namespace Persistence
         );
 
         hub.registerFunction(
-            "StateHolder::loadLanguageFile",
+            "StateHolder::loadLanguageFiles",
             [this, &hub](std::string responseId)
             {
                 Log::debug("Received language file load request from frontend state holder.");
 
-                loadLanguageFile(
+                loadLanguageFiles(
                     [responseId, &hub](std::optional<nlohmann::json> const& jsonOpt)
                     {
                         if (jsonOpt)
@@ -437,17 +438,17 @@ namespace Persistence
         );
     }
 
-    void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
+    void StateHolder::loadLanguageFile(
+        std::filesystem::path const& filePath,
+        std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete
+    )
     {
-        const auto path = programDirectory_ / ".." / "assets" / "language.yaml";
-
         // Convert to json:
-
         nlohmann::json json;
 
         try
         {
-            YAML::Node config = YAML::LoadFile(path.generic_string());
+            YAML::Node config = YAML::LoadFile(filePath.generic_string());
             auto translateNode = [&](this const auto& translateNode, YAML::Node const& node) -> nlohmann::json
             {
                 if (node.IsScalar())
@@ -474,5 +475,51 @@ namespace Persistence
             return;
         }
         onLoadComplete(std::move(json));
+    }
+
+    void StateHolder::loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
+    {
+#ifdef NDEBUG
+        const auto fileDirectory = programDirectory_ / ".." / "assets" / "languages";
+#else
+        const auto fileDirectory = std::filesystem::path{SOURCE_DIR} / "static" / "assets" / "languages";
+#endif
+
+        std::filesystem::directory_iterator dirIt;
+        try
+        {
+            dirIt = std::filesystem::directory_iterator(fileDirectory);
+        }
+        catch (std::exception const& e)
+        {
+            Log::error("Failed to read language files directory: {}", e.what());
+            onLoadComplete(std::nullopt);
+            return;
+        }
+        nlohmann::json assembled = nlohmann::json::object();
+        for (const auto& entry : dirIt)
+        {
+            if (entry.is_regular_file() && entry.path().extension() == ".yaml")
+            {
+                std::optional<nlohmann::json> content;
+                loadLanguageFile(
+                    entry.path(),
+                    [&content](const auto maybeJson)
+                    {
+                        content = maybeJson;
+                    }
+                );
+                if (!content)
+                {
+                    Log::error("Failed to load language file: {}", entry.path().string());
+                    onLoadComplete(std::nullopt);
+                    return;
+                }
+
+                const auto fileName = entry.path().stem().string();
+                assembled[fileName] = *content;
+            }
+        }
+        onLoadComplete(std::move(assembled));
     }
 }
