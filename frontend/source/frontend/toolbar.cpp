@@ -17,7 +17,6 @@
 #include <frontend/svgs/settings.hpp>
 #include <ui5-sap-icons/icons/light-mode.hpp>
 #include <ui5-sap-icons/icons/dark-mode.hpp>
-#include <ui5-sap-icons/icons/question-mark.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -247,15 +246,13 @@ Nui::ElementRenderer Toolbar::operator()()
                 return Nui::Elements::fragment(
                     observe(impl_->events->darkLightMode),
                     [this](){
-                        if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Dark) {
+                        auto mode = impl_->events->darkLightMode.value();
+                        if (mode == SharedData::DarkLightMode::System)
+                            mode = impl_->themeController->getPreferredMode();
+
+                        if (mode == SharedData::DarkLightMode::Dark)
                             return Ui5Icons::light_mode();
-                        }
-
-                        if (impl_->events->darkLightMode.value() == SharedData::DarkLightMode::Light) {
-                            return Ui5Icons::dark_mode();
-                        }
-
-                        return Ui5Icons::question_mark();
+                        return Ui5Icons::dark_mode();
                     }
                 );
             }(),
