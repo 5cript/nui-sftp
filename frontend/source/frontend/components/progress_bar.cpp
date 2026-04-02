@@ -146,7 +146,11 @@ namespace Components
             // text
             div{}(impl_->text),
             // shine animation
-            div{}()
+            div{
+                class_ = observe(impl_->progress, impl_->maxObserved).generate([this]() -> std::string {
+                    return impl_->progress.value() >= impl_->maxObserved.value() ? "hidden" : "";
+                })
+            }()
         );
         // clang-format on
     }
