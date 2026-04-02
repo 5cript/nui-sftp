@@ -34,6 +34,8 @@ struct Toolbar::Implementation
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
 
+    Nui::ListenRemover<decltype(FrontendEvents::onSettingsChanged)> settingsChangedListener;
+
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
@@ -108,6 +110,19 @@ Toolbar::Toolbar(
         [this]()
         {
             reloadLayouts();
+        }
+    );
+
+    impl_->settingsChangedListener = Nui::smartListen(
+        impl_->events->onSettingsChanged,
+        [this](auto const&)
+        {
+            impl_->updateSessionsList(
+                [this]()
+                {
+                    reloadLayouts();
+                }
+            );
         }
     );
 }

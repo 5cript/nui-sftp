@@ -533,6 +533,7 @@ void Settings::save()
             }
 
             impl_->saveInProgress = false;
+            impl_->events->onSettingsChanged.modify();
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
@@ -785,6 +786,7 @@ void Settings::addNewSession()
                             .icon = iconFromName(result.iconName),
                         }
                     );
+                    impl_->events->onSettingsChanged.modify();
                     impl_->sessionSelectors.modifyNow();
                 }
             );
@@ -1117,6 +1119,7 @@ void Settings::deleteActiveSession()
 
                 impl_->activeSession = std::nullopt;
                 impl_->activeSection = Section::GeneralSettings;
+                impl_->events->onSettingsChanged.modify();
                 impl_->sessionSelectors.modifyNow();
             }}
     );
