@@ -36,14 +36,34 @@ namespace Persistence
          */
         void loadModifySave(
             std::function<void(State&)> modifier,
-            std::function<void(std::optional<std::string> const&)> onComplete =
-                [](std::optional<std::string> const&) {}
+            std::function<void(std::optional<std::string> const&)> onComplete = [](std::optional<std::string> const&) {}
         );
-        void loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete);
+
+        /**
+         * @brief Loads all language files and assembles them into a single json object, which is passed to the
+         * callback. The keys of the json object are the file names (without extension) of the language files, and the
+         * values are the contents of the language files as json objects. Language files are expected to be in yaml
+         * format and located in the "assets/languages" directory.
+         *
+         * @param onLoadComplete
+         */
+        void loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete);
 
         State& stateCache();
 
 #ifdef NUI_BACKEND
+        /**
+         * @brief Loads a single language (expected format eg "en_US.yaml")
+         *
+         * @param filePath Path to the language file to load.
+         * @param onLoadComplete Callback that is called when loading is complete. The json object is passed if loading
+         * was successful, otherwise std::nullopt.
+         */
+        void loadLanguageFile(
+            std::filesystem::path const& filePath,
+            std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete
+        );
+
         void registerRpc(Nui::RpcHub& rpcHub);
         /**
          * @brief

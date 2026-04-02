@@ -54,7 +54,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 
                 themeController = std::make_unique<ThemeController>(*frontendEvents);
 
-                persistence->loadLanguageFile(
+                persistence->loadLanguageFiles(
                     [](std::optional<nlohmann::json> lang)
                     {
                         Log::info("Language file loaded, continuing setup.");

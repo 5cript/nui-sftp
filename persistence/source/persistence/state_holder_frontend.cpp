@@ -56,33 +56,35 @@ namespace Persistence
         std::function<void(std::optional<std::string> const&)> onComplete
     )
     {
-        load([this, modifier = std::move(modifier), onComplete = std::move(onComplete)](
-                 std::optional<std::string> const& error, StateHolder&, std::optional<std::string> const&
-             ) mutable
-        {
-            if (error)
+        load(
+            [this, modifier = std::move(modifier), onComplete = std::move(onComplete)](
+                std::optional<std::string> const& error, StateHolder&, std::optional<std::string> const&
+            ) mutable
             {
-                onComplete(error);
-                return;
+                if (error)
+                {
+                    onComplete(error);
+                    return;
+                }
+                modifier(stateCache_);
+                save(std::move(onComplete));
             }
-            modifier(stateCache_);
-            save(std::move(onComplete));
-        });
+        );
     }
 
-    void StateHolder::loadLanguageFile(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
+    void StateHolder::loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
         if (!onLoadComplete)
         {
-            Log::error("StateHolder::loadLanguageFile called with nullish onLoadComplete");
+            Log::error("StateHolder::loadLanguageFiles called with nullish onLoadComplete");
             return;
         }
 
-        Log::info("StateHolder::loadLanguageFile calling frontend.");
+        Log::info("StateHolder::loadLanguageFiles calling frontend.");
         Nui::RpcClient::getRemoteCallableWithBackChannel(
-            "StateHolder::loadLanguageFile",
+            "StateHolder::loadLanguageFiles",
             [onLoadComplete](Nui::val const& val) {
-                Log::info("StateHolder::loadLanguageFile got response, checking for error.");
+                Log::info("StateHolder::loadLanguageFiles got response, checking for error.");
                 if (val.hasOwnProperty("error"))
                 {
                     Log::error("Failed to load language file: {}", val["error"].as<std::string>());
