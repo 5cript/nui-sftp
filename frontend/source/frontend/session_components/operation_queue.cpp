@@ -951,7 +951,7 @@ Nui::ElementRenderer OperationQueue::operator()()
                 .dontUpdateValue = true,
             }),
             div{
-                style = "font-size: 14px; color: var(--muted);"
+                style = "font-size: 14px; color: var(--color);"
             }(language->getObserved("operationQueue", "autoCleanCompleted"))
         )
     );
