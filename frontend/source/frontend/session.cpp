@@ -728,6 +728,15 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
     if (!channelId)
     {
         Log::error("Failed to open channel: {}", info);
+
+        if (!impl_->channelElements.empty())
+        {
+            Nui::val::global("contentPanelManager").call<void>(
+                "closeTerminalByNode", impl_->sessionLayoutId, impl_->channelElements.back()->val()
+            );
+            impl_->channelElements.pop_back();
+        }
+
         impl_->confirmDialog->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "channelCreationFailedHeader"),

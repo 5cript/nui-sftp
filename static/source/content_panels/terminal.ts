@@ -9,7 +9,11 @@ class Terminal extends NuiWidget {
         super(name, factory, () => {
             const channelElement = this.node.querySelector('.terminal-channel');
             if (channelElement) {
-                return deleter(((channelElement as HTMLElement).dataset.channelid) as ChannelId);
+                const channelId = (channelElement as HTMLElement).dataset.channelid;
+                if (channelId !== undefined) {
+                    return deleter(channelId as ChannelId);
+                }
+                return; // No channel ID: channel was never successfully created, nothing to delete
             }
             deleter("INVALID_ID" as ChannelId);
         }, 'terminal');

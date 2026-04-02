@@ -267,7 +267,7 @@ class OperationCard : public OperationCardInterface
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
-        return div{style = "margin-top: 8px, font-size: 13px; color: var(--muted);"}(
+        return div{style = "margin-top: 8px, font-size: 13px; color: var(--color);"}(
             // TODO:
             "Elapsed: 0s"
         );
