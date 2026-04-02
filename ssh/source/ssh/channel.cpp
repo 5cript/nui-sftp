@@ -79,15 +79,15 @@ namespace SecureShell
         }
         return promise->get_future();
     }
-    void Channel::readTask(std::chrono::milliseconds pollTimeout)
+    bool Channel::readTask(std::chrono::milliseconds pollTimeout)
     {
         if (!onStdout_ || !onStderr_ || !onExit_)
-            return;
+            return false;
 
         if (!channel_)
         {
             std::this_thread::sleep_for(pollTimeout);
-            return;
+            return false;
         }
 
         constexpr static int bufferSize = 1024;
@@ -124,14 +124,15 @@ namespace SecureShell
         {
             if (onExit_)
                 onExit_();
-            return;
+            return false;
         }
         if (readOne(false) < 0)
         {
             if (onExit_)
                 onExit_();
-            return;
+            return false;
         }
+        return true;
     }
     void Channel::startReading(
         std::function<void(std::string const&)> onStdout,
@@ -146,8 +147,7 @@ namespace SecureShell
         auto [success, id] = strand_->pushPermanentTask(
             [this]()
             {
-                readTask();
-                return true;
+                return readTask();
             }
         );
         if (!success)

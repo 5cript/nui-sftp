@@ -56,7 +56,8 @@ class FrontendSessionManager
     void createChannel(
         Nui::val host,
         Persistence::TerminalOptions const& options,
-        std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated
+        std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated,
+        std::function<void(Ids::ChannelId const&)> onChannelLoss
     );
     TerminalChannel* channel(Ids::ChannelId const& channelId);
     void closeChannel(Ids::ChannelId const& channelId);

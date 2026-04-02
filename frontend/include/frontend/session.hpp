@@ -101,6 +101,7 @@ class Session
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
     void onConnectionLoss();
+    void onChannelLoss(Ids::ChannelId const& id);
     void onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input);
     void saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents);
 

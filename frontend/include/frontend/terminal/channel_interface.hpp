@@ -11,6 +11,7 @@ class ChannelInterface
     virtual void open(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
+        std::function<void(Ids::ChannelId const&)> onExit,
         bool fileMode
     ) = 0;
     virtual void write(std::string const& data) = 0;

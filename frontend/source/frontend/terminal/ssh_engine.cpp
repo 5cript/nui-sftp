@@ -118,6 +118,7 @@ void SshTerminalEngine::createChannelImpl(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss,
     bool fileMode
 )
 {
@@ -139,6 +140,7 @@ void SshTerminalEngine::createChannelImpl(
             onCreated = std::move(onCreated),
             handler = std::move(handler),
             errorHandler = std::move(errorHandler),
+            onChannelLoss = std::move(onChannelLoss),
             fileMode](Nui::val val)
         {
             if (val.hasOwnProperty("error"))
@@ -160,7 +162,7 @@ void SshTerminalEngine::createChannelImpl(
                 impl_->channels.emplace(channelId, SshChannel{impl_->sshSessionId, channelId});
 
             // Creates recepticals for stdout/stderr
-            iter->second.open(handler, errorHandler, fileMode);
+            iter->second.open(handler, errorHandler, onChannelLoss, fileMode);
 
             if (!fileMode)
             {
@@ -193,17 +195,23 @@ void SshTerminalEngine::createChannelImpl(
 void SshTerminalEngine::createChannel(
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
-    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss
 )
 {
-    createChannelImpl(std::move(handler), std::move(errorHandler), std::move(onCreated), false);
+    createChannelImpl(
+        std::move(handler), std::move(errorHandler), std::move(onCreated), std::move(onChannelLoss), false
+    );
 }
 
 void SshTerminalEngine::createSftpChannel(
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
 )
 {
-    createChannelImpl([](std::string const&) {}, [](std::string const&) {}, std::move(onCreated), true);
+    // TODO: onChannelLoss for sftp channel should do something
+    createChannelImpl(
+        [](std::string const&) {}, [](std::string const&) {}, std::move(onCreated), [](Ids::ChannelId const&) {}, true
+    );
 }
 
 Ids::SessionId SshTerminalEngine::sshSessionId() const

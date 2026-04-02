@@ -27,7 +27,7 @@ namespace SecureShell
         friend class SftpSession;
         friend class FileStream;
 
-        Session();
+        Session(std::function<void()> onConnectionLoss);
         ~Session();
         Session(Session const&) = delete;
         Session& operator=(Session const&) = delete;
@@ -68,7 +68,9 @@ namespace SecureShell
             int columns = 80;
             int rows = 24;
             bool requestShell = true;
+            bool isHiddenChannel = false;
         };
+
         /**
          * @brief Creates a new channel as a pty.
          *
@@ -98,9 +100,13 @@ namespace SecureShell
          */
         void shutdown();
 
+        void createHiddenChannel();
+
       private:
+        std::function<void()> onConnectionLoss_;
         SecureShell::ProcessingThread processingThread_;
         ssh::Session session_;
+        std::shared_ptr<Channel> hiddenChannel_;
         std::vector<std::shared_ptr<Channel>> channels_;
         std::vector<std::shared_ptr<SftpSession>> sftpSessions_;
     };
@@ -120,6 +126,7 @@ namespace SecureShell
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
-        std::vector<PasswordCacheEntry>* pwCache
+        std::vector<PasswordCacheEntry>* pwCache,
+        std::function<void()> onConnectionLoss
     );
 }

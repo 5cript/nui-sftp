@@ -177,6 +177,11 @@ struct GenericTerminalChannel
     std::function<void(std::string const&, bool)> doWrite{};
     bool isLocked{false};
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
+    // Lifetime sentinel: xterm onData/onResize callbacks capture a weak_ptr to this.
+    // When the TerminalChannel is destroyed (e.g. by closeChannel after connection loss),
+    // the shared_ptr is released and weak_ptr::lock() returns nullptr, so stale callbacks
+    // become no-ops instead of dereferencing the freed object.
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
     Nui::val terminal() const
     {
@@ -368,8 +373,10 @@ void TerminalChannel::open(
     term.call<void>(
         "onData",
         Nui::bind(
-            [this](Nui::val data, Nui::val)
+            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val data, Nui::val)
             {
+                if (!aliveWeak.lock())
+                    return;
                 write(data.as<std::string>(), true);
             },
             std::placeholders::_1,
@@ -380,8 +387,12 @@ void TerminalChannel::open(
     term.call<void>(
         "onResize",
         Nui::bind(
-            [this](Nui::val obj, Nui::val)
+            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val obj, Nui::val)
             {
+                if (!aliveWeak.lock())
+                    return;
+                if (impl_->isLocked)
+                    return;
                 // Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
                 if (auto* channel = impl_->channel(); channel)
                     channel->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
@@ -567,7 +578,8 @@ void FrontendSessionManager::writeBroadcast(std::string const& msg)
 void FrontendSessionManager::createChannel(
     Nui::val host,
     Persistence::TerminalOptions const& options,
-    std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated
+    std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss
 )
 {
     CHECK_DISPOSAL()
@@ -661,6 +673,17 @@ void FrontendSessionManager::createChannel(
                         onChannelCreated(channelId, info);
                     }
                 );
+            },
+            [this, onChannelLoss](Ids::ChannelId const& lostChannelId)
+            {
+                Log::info("Channel lost: '{}'", lostChannelId.value());
+                onChannelLoss(lostChannelId);
+                // In locked mode the terminal stays visible so the user can save its
+                // contents or press Enter to close. Destroying the TerminalChannel here
+                // would leave the xterm onData callback with a dangling this pointer.
+                // dispose() will clean it up when the session is actually closed.
+                if (!impl_->isInLockedMode)
+                    closeChannel(lostChannelId);
             }
         );
     }

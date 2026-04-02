@@ -335,6 +335,22 @@ class ContentPanelManager {
         console.error('closeTerminalByNode: could not find terminal widget to close');
     }
 
+    closeTerminalById = (panelId: string, channelId: ChannelId) => {
+        const dock = this.getDockPanelById(panelId);
+        if (!dock) {
+            console.error(`closeTerminalById: no dock panel found for id ${panelId}`);
+            return;
+        }
+        for (const widget of dock.widgets()) {
+            const channelElement = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
+            if (channelElement) {
+                widget.close();
+                return;
+            }
+        }
+        console.error(`closeTerminalById: could not find terminal widget with channel id ${channelId}`);
+    }
+
     removePanel = (id: string) => {
         console.log("remove panel");
         let main = document.getElementById('main_' + id);

@@ -112,15 +112,46 @@ void SessionManager::addSession(
     within_strand_do(
         [this, sessionOptions, onComplete = std::move(onComplete)]()
         {
+            const auto sessionId = Ids::SessionId{Ids::generateId()};
+
             std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "Key phrase"};
             std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "Password"};
             auto maybeSshSession = makeSession(
-                sessionOptions, askPassDefault, &askPassUserDataKeyPhrase, &askPassUserDataPassword, &pwCache_
+                sessionOptions,
+                askPassDefault,
+                &askPassUserDataKeyPhrase,
+                &askPassUserDataPassword,
+                &pwCache_,
+                // Self destruct callback
+                [weak = weak_from_this(), sessionId]()
+                {
+                    auto self = weak.lock();
+                    if (self)
+                        self->removeSession(sessionId);
+
+                    // Notify frontend of session loss:
+                    self->wnd_->runInJavascriptThread(
+                        [hub_ = self->hub_, sessionId]()
+                        {
+                            try
+                            {
+                                hub_->callRemote(fmt::format("Session::{}::onDisconnect", sessionId.value()));
+                            }
+                            catch (const std::exception& e)
+                            {
+                                // There should never anything throw here, but lets log just in case and dont let an
+                                // exception escape out of this lambda.
+                                Log::error(
+                                    "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), e.what()
+                                );
+                            }
+                        }
+                    );
+                }
             );
 
             if (maybeSshSession)
             {
-                const auto sessionId = Ids::SessionId{Ids::generateId()};
                 const auto session = std::make_shared<Session>(
                     sessionId,
                     std::move(maybeSshSession).value(),
@@ -128,33 +159,7 @@ void SessionManager::addSession(
                     strand_,
                     *wnd_,
                     *hub_,
-                    sessionOptions.sftpOptions.value(),
-                    // Self destruct callback
-                    [weak = weak_from_this(), sessionId]()
-                    {
-                        auto self = weak.lock();
-                        if (self)
-                            self->removeSession(sessionId);
-
-                        // Notify frontend of session loss:
-                        self->wnd_->runInJavascriptThread(
-                            [hub_ = self->hub_, sessionId]()
-                            {
-                                try
-                                {
-                                    hub_->callRemote(fmt::format("Session::{}::onDisconnect", sessionId.value()));
-                                }
-                                catch (const std::exception& e)
-                                {
-                                    // There should never anything throw here, but lets log just in case and dont let an
-                                    // exception escape out of this lambda.
-                                    Log::error(
-                                        "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), e.what()
-                                    );
-                                }
-                            }
-                        );
-                    }
+                    sessionOptions.sftpOptions.value()
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)

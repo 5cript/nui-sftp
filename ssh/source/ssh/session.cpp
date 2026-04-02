@@ -33,8 +33,9 @@ namespace SecureShell
         }
     }
 
-    Session::Session()
-        : processingThread_{}
+    Session::Session(std::function<void()> onConnectionLoss)
+        : onConnectionLoss_(std::move(onConnectionLoss))
+        , processingThread_{}
         , session_{}
         , channels_{}
     {}
@@ -42,6 +43,49 @@ namespace SecureShell
     void Session::start()
     {
         processingThread_.start(std::chrono::milliseconds{1});
+        createHiddenChannel();
+    }
+
+    void Session::createHiddenChannel()
+    {
+        auto fut = createPtyChannel({
+            .environment = std::nullopt,
+            .localeEnv = std::nullopt,
+            .terminalType = "xterm-256color",
+            .termios = {},
+            .columns = 80,
+            .rows = 24,
+            .requestShell = true,
+            .isHiddenChannel = true,
+        });
+
+        if (fut.wait_for(std::chrono::seconds{10}) != std::future_status::ready)
+        {
+            Log::error("Failed to create control/monitoring channel: timeout");
+            return;
+        }
+        const auto result = fut.get();
+        if (!result.has_value())
+        {
+            Log::error("Failed to create control/monitoring channel: {}", session_.getError());
+            return;
+        }
+
+        hiddenChannel_->startReading(
+            [](auto const&)
+            {
+                // not yet needed
+            },
+            [](auto const&)
+            {
+                // not yet needed
+            },
+            [onConnectionLoss = onConnectionLoss_]()
+            {
+                if (onConnectionLoss)
+                    onConnectionLoss();
+            }
+        );
     }
 
     void Session::stop()
@@ -69,6 +113,8 @@ namespace SecureShell
 
     void Session::removeAllChannels()
     {
+        if (hiddenChannel_)
+            hiddenChannel_->close(false);
         while (!channels_.empty())
         {
             channels_.back()->close(true);
@@ -90,6 +136,11 @@ namespace SecureShell
 
     void Session::channelRemoveItself(Channel* channel, bool isBackElement)
     {
+        if (channel == hiddenChannel_.get())
+        {
+            hiddenChannel_.reset();
+            return;
+        }
         removeFromContainer(channels_, channel, isBackElement);
     }
     void Session::sftpSessionRemoveItself(SftpSession* sftpSession, bool isBackElement)
@@ -158,7 +209,10 @@ namespace SecureShell
 
                 auto sharedChannel =
                     std::make_shared<Channel>(this, processingThread_.createStrand(), std::move(ptyChannel));
-                channels_.push_back(sharedChannel);
+                if (options.isHiddenChannel)
+                    hiddenChannel_ = sharedChannel;
+                else
+                    channels_.push_back(sharedChannel);
                 return promise->set_value(sharedChannel);
             }
         );
@@ -216,10 +270,11 @@ namespace SecureShell
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
-        std::vector<PasswordCacheEntry>* pwCache
+        std::vector<PasswordCacheEntry>* pwCache,
+        std::function<void()> onConnectionLoss
     )
     {
-        auto session = std::make_unique<Session>();
+        auto session = std::make_unique<Session>(std::move(onConnectionLoss));
 
         const auto sshOptions = sessionOptions.sshOptions.value();
 
