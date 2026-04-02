@@ -21,7 +21,6 @@ if(NOT EMSCRIPTEN)
     set(FETCH_RAPIDFUZZ OFF CACHE BOOL "Do not fetch rapidfuzz, assume it is in dependencies/rapidfuzz" FORCE)
     set(FETCH_SPDLOG OFF CACHE BOOL "Do not fetch spdlog, assume it is in dependencies/spdlog" FORCE)
     set(FETCH_EFSW OFF CACHE BOOL "Do not fetch efsw, assume it is in dependencies/efsw" FORCE)
-    set(FETCH_ICONS OFF CACHE BOOL "Do not fetch icons, assume it is in dependencies/icons" FORCE)
 
     set(OMIT_FRONTEND_BUILD ON CACHE BOOL "Do not build the frontend, in offline environments emscripten is hard to use" FORCE)
 

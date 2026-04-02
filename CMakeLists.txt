@@ -21,7 +21,6 @@ option(OMIT_FRONTEND_BUILD "Dont build the frontend, used primarily for flatpak,
 option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
 option(FETCH_EFSW "Fetch efsw" ON)
-option(FETCH_ICONS "Fetch icons" ON)
 option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which includes a command line tool for checking language files" OFF)
 
 if (OFFLINE_BUILD)
@@ -96,7 +95,6 @@ if (EMSCRIPTEN)
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components")
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
 else()
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/resource_copy.cmake")
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/copy_styles_to_build_dir.cmake")
 
     if (NOT ${NUI_FETCH_ROAR})

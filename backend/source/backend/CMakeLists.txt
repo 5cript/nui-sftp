@@ -3,7 +3,6 @@ add_library(
     STATIC
         session_manager.cpp
         session.cpp
-        resources.cpp
         rpc_filesystem.cpp
         rpc_system.cpp
         theme_finder.cpp
@@ -83,8 +82,6 @@ target_link_libraries(
 )
 
 nui_set_target_output_directories(${PROJECT_NAME})
-
-add_dependencies(backend nui-sftp-resource-copy)
 
 set(BROWSER_ENGINE "")
 if (WIN32)

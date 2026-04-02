@@ -7,7 +7,7 @@
 #endif
 
 #include <backend/process/process_store.hpp>
-#include <backend/resources.hpp>
+#include <utility/resources.hpp>
 #include <roar/filesystem/special_paths.hpp>
 
 #include <nui/core.hpp>
