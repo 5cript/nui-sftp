@@ -335,13 +335,45 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
                     Log::info("Channel terminal materialized");
                     if (impl_->frontendSessionManager.value())
                     {
-                        impl_->frontendSessionManager.value()->createChannel(element, *impl_->options, std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2));
+                        impl_->frontendSessionManager.value()->createChannel(
+                            element,
+                            *impl_->options,
+                            std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2),
+                            std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
+                        );
                     }
                 })
             }();
         }
     );
     // clang-format on
+}
+
+void Session::onChannelLoss(Ids::ChannelId const& id)
+{
+    Log::warn("Channel loss detected for session '{}'", impl_->initialName);
+
+    if (impl_->isInLostConnectionState.value())
+        return; // Connection loss already confirmed: keep tab open so the user can save contents.
+
+    // Race guard: on a connection drop, the Session::*::onDisconnect signal (which sets
+    // isInLostConnectionState) and sshTerminalOnExit_* both arrive from background threads.
+    // Depending on thread scheduling, onDisconnect may not yet have been processed when this
+    // callback fires. Defer the close decision by 100ms to let it arrive first.
+    // On a normal shell exit, onDisconnect never fires, so after the delay the flag is still
+    // false and the tab closes as expected.
+    const std::string sessionLayoutId = impl_->sessionLayoutId;
+    const std::string channelId = id.value();
+    Nui::val::global("setTimeout")(
+        Nui::bind(
+            [this, sessionLayoutId, channelId]()
+            {
+                if (!impl_->isInLostConnectionState.value())
+                    Nui::val::global("contentPanelManager").call<void>("closeTerminalById", sessionLayoutId, channelId);
+            }
+        ),
+        Nui::val{100}
+    );
 }
 
 NuiFileExplorer::Side& Session::remoteFileGridSide()
@@ -490,19 +522,21 @@ void Session::saveTerminalContents(std::filesystem::path const& file, std::vecto
 {
     // Save channels to file(s):
     int indexIncrement = 0;
-    const auto basePath = file.string();
+    const auto basePath = file.parent_path();
     const auto extension = file.extension().string();
     const auto baseName = file.stem().string();
     for (auto const& textContent : contents)
     {
-        const auto filePath = fmt::format("{}_{}{}", baseName, indexIncrement++, extension);
+        const auto filePath = basePath / fmt::format("{}_{}{}", baseName, indexIncrement++, extension);
         Nui::RpcClient::callWithBackChannel(
             "RpcFilesystem::writeFile",
             [filePath](Nui::val response)
             {
                 if (!response.hasOwnProperty("success"))
                 {
-                    Log::error("Invalid response from RpcFilesystem::writeFile for file '{}'", filePath);
+                    Log::error(
+                        "Invalid response from RpcFilesystem::writeFile for file '{}'", filePath.generic_string()
+                    );
                     return;
                 }
 
@@ -510,11 +544,11 @@ void Session::saveTerminalContents(std::filesystem::path const& file, std::vecto
                 if (!success)
                 {
                     const auto error = response["error"].as<std::string>();
-                    Log::error("Failed to write file '{}': {}", filePath, error);
+                    Log::error("Failed to write file '{}': {}", filePath.generic_string(), error);
                     return;
                 }
 
-                Log::info("Successfully wrote file '{}'", filePath);
+                Log::info("Successfully wrote file '{}'", filePath.generic_string());
             },
             filePath,
             textContent
@@ -731,9 +765,8 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
 
         if (!impl_->channelElements.empty())
         {
-            Nui::val::global("contentPanelManager").call<void>(
-                "closeTerminalByNode", impl_->sessionLayoutId, impl_->channelElements.back()->val()
-            );
+            Nui::val::global("contentPanelManager")
+                .call<void>("closeTerminalByNode", impl_->sessionLayoutId, impl_->channelElements.back()->val());
             impl_->channelElements.pop_back();
         }
 
@@ -922,17 +955,13 @@ void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
         impl_->channelElements,
         [channelId](auto elem) -> bool
         {
-            const auto val = elem->val();
-            if (val.template call<bool>("hasAttribute", "data-channelid"s))
-            {
-                return val.template call<std::string>("getAttribute", "data-channelid"s) == channelId.value();
-            }
-            else
-            {
-                // FIXME: I can see this warning, which should not happen, but it does.
-                Log::warn("Channel element does not have a channel id attribute");
-            }
-            return false;
+            const auto outerVal = elem->val();
+            const auto channelEl = outerVal.template call<Nui::val>("querySelector", ".terminal-channel"s);
+            if (channelEl.isNull() || channelEl.isUndefined())
+                return false;
+            if (!channelEl.template call<bool>("hasAttribute", "data-channelid"s))
+                return false;
+            return channelEl.template call<std::string>("getAttribute", "data-channelid"s) == channelId.value();
         }
     );
 

@@ -14,15 +14,13 @@ Session::Session(
     std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
     Nui::Window& wnd,
     Nui::RpcHub& hub,
-    Persistence::SftpOptions const& sftpOptions,
-    std::function<void()> onSelfDestruct
+    Persistence::SftpOptions const& sftpOptions
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
     , session_{std::move(session)}
     , operationQueue_{std::make_shared<
           OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(1))}
-    , onSelfDestruct_{std::move(onSelfDestruct)}
 {}
 
 Session::~Session()
@@ -76,7 +74,6 @@ void Session::stop()
 {
     running_ = false;
     timer_.cancel();
-    onSelfDestruct_ = nullptr;
 
     std::promise<void> waitForPostedWork;
     within_strand_do(
@@ -393,25 +390,18 @@ void Session::registerRpcStartChannelRead()
                     // On channel exit:
                     [weak = self->weak_from_this(), sessionId = self->id_, channelId]
                     {
-                        Log::info(
-                            "Channel for session '{}' lost with id: {}. Tearing down entire session.",
-                            sessionId.value(),
-                            channelId.value()
-                        );
-                        if (auto self = weak.lock(); self)
-                            self->selfDestruct();
+                        Log::info("Channel for session '{}' lost with id: {}.", sessionId.value(), channelId.value());
+                        auto self = weak.lock();
+                        if (!self)
+                            return;
+                        self->hub_->call(fmt::format("sshTerminalOnExit_{}", channelId.value()));
+                        self->removeChannel(channelId);
                     }
                 );
 
                 return reply({{"success", true}});
             }
         );
-}
-
-void Session::selfDestruct()
-{
-    if (onSelfDestruct_)
-        onSelfDestruct_();
 }
 
 void Session::registerRpcChannelClose()

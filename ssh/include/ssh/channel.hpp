@@ -72,10 +72,11 @@ namespace SecureShell
         void startReading(
             std::function<void(std::string const&)> onStdout,
             std::function<void(std::string const&)> onStderr,
-            std::function<void()> onExit);
+            std::function<void()> onExit
+        );
 
       private:
-        void readTask(std::chrono::milliseconds pollTimeout = std::chrono::milliseconds{0});
+        bool readTask(std::chrono::milliseconds pollTimeout = std::chrono::milliseconds{0});
 
       private:
         Session* owner_;

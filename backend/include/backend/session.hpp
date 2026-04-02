@@ -34,8 +34,7 @@ class Session
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
         Nui::Window& wnd,
         Nui::RpcHub& hub,
-        Persistence::SftpOptions const& sftpOptions,
-        std::function<void()> onSelfDestruct
+        Persistence::SftpOptions const& sftpOptions
     );
 
     Session(const Session&) = delete;
@@ -242,7 +241,6 @@ class Session
 
     void doOperationQueueWork();
     void resetQueueThrottle();
-    void selfDestruct();
 
   private:
     Ids::SessionId id_;
@@ -255,5 +253,4 @@ class Session
     std::shared_ptr<OperationQueue> operationQueue_;
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
-    std::function<void()> onSelfDestruct_;
 };

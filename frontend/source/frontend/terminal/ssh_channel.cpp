@@ -5,6 +5,7 @@
 SshChannel::SshChannel(Ids::SessionId sessionId, Ids::ChannelId channelId)
     : stdoutReceiver_{}
     , stderrReceiver_{}
+    , onExitReceiver_{}
     , sshChannelId_{channelId}
     , sshSessionId_{std::move(sessionId)}
     , stdoutHandler_{}
@@ -16,6 +17,7 @@ SshChannel::~SshChannel() = default;
 void SshChannel::open(
     std::function<void(std::string const&)> onStdout,
     std::function<void(std::string const&)> onStderr,
+    std::function<void(Ids::ChannelId const&)> onExit,
     bool fileMode
 )
 {
@@ -51,6 +53,15 @@ void SshChannel::open(
                 }
                 else
                     Log::error("sshTerminalStderr_" + sshChannelId_.value() + " received an empty message");
+            }
+        );
+
+        onExitReceiver_ = Nui::RpcClient::autoRegisterFunction(
+            "sshTerminalOnExit_" + sshChannelId_.value(),
+            [onExit, sshChannelId = sshChannelId_](Nui::val)
+            {
+                if (onExit)
+                    onExit(sshChannelId);
             }
         );
     }
