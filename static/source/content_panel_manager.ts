@@ -320,6 +320,21 @@ class ContentPanelManager {
         return undefined;
     }
 
+    closeTerminalByNode = (panelId: string, node: HTMLElement) => {
+        const dock = this.getDockPanelById(panelId);
+        if (!dock) {
+            console.error(`closeTerminalByNode: no dock panel found for id ${panelId}`);
+            return;
+        }
+        for (const widget of dock.widgets()) {
+            if (widget.node === node) {
+                widget.close();
+                return;
+            }
+        }
+        console.error('closeTerminalByNode: could not find terminal widget to close');
+    }
+
     removePanel = (id: string) => {
         console.log("remove panel");
         let main = document.getElementById('main_' + id);
