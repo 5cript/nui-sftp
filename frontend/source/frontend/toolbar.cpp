@@ -2,6 +2,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
+#include <frontend/components/icon_panel.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
@@ -182,6 +183,16 @@ Nui::ElementRenderer Toolbar::operator()()
 
     // clang-format off
     return div{class_ = "toolbar"}(
+        iconPanel({
+            .icon = [](){
+                return img{
+                    src = "nui://app.example/nui-sftp-logo.svg",
+                    style = "width: 32px; height: 32px;",
+                }();
+            }(),
+            .padding = 0,
+            .withBorder = false
+        }),
         Snc::select(Snc::SelectOptions<decltype(impl_->activeTerminalEngine), decltype(impl_->terminalEngines)>{
             .activeOption = impl_->activeTerminalEngine,
             .options = impl_->terminalEngines,
