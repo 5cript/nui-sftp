@@ -249,7 +249,7 @@ bool OperationQueue::work()
                     auto* scan = static_cast<ScanOperation*>(operation.get());
                     static_cast<BulkDownloadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
-                if (next && next->type() == SharedData::OperationType::Delete)
+                else if (next && next->type() == SharedData::OperationType::Delete)
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
                     static_cast<DeleteOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
