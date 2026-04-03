@@ -15,11 +15,17 @@ namespace Persistence
         bool preventCreateFile{false};
         bool preventCreateDirectory{false};
         std::optional<std::filesystem::path> homeOverride{std::nullopt};
+        std::optional<std::filesystem::path> temporaryDownloadsDirectory{"%temp%/nui-sftp-downloads"};
     };
 
     BOOST_DESCRIBE_STRUCT(
         LocalFilesystemOptions,
         (),
-        (preventDeletion, preventRename, preventCreateFile, preventCreateDirectory, homeOverride)
+        (preventDeletion,
+            preventRename,
+            preventCreateFile,
+            preventCreateDirectory,
+            homeOverride,
+            temporaryDownloadsDirectory)
     )
 }

@@ -198,7 +198,19 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             onChange,
             [this, onChange]()
             {
-                localFilesystemOptions.homeOverride.value(Persistence::LocalFilesystemOptions{}.homeOverride.value_or(""));
+                localFilesystemOptions.homeOverride.value(Persistence::LocalFilesystemOptions{}.homeOverride);
+                onChange();
+            },
+        },
+        .temporaryDownloadsDirectory = PathSetting<true>{
+            language->getObserved("settings", "general", "localFilesystemOptions", "temporaryDownloadsDirectoryHelpText"),
+            PathSettingType::Directory,
+            onChange,
+            [this, onChange]()
+            {
+                localFilesystemOptions.temporaryDownloadsDirectory.value(
+                    Persistence::LocalFilesystemOptions{}.temporaryDownloadsDirectory.value_or("%temp%/nui-sftp-downloads")
+                );
                 onChange();
             },
         },
