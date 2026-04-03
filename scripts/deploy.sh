@@ -51,6 +51,10 @@ mkdir -p "${INSTALL_TARGET}/themes"
 mkdir -p "${INSTALL_TARGET}/assets/icons"
 
 cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}"
+if [ "$IS_WINDOWS" = true ]; then
+    # use ldd to copy dependencies from msys2 into the bin dir
+    ldd "${EXECUTABLE}" | grep "clang" | awk 'NF == 4 { system("cp " $3 " '"${INSTALL_TARGET}/bin/"'") }'
+else
 
 # Assets (Images, icons, language files)...
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
@@ -62,7 +66,12 @@ if [ "$OMIT_FRONTEND" = false ]; then
     cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/frontend"
 fi
 
-# Dont create a symlink on windows or if NOLINK is true
-if [ "$IS_WINDOWS" = false ] && [ "$NOLINK" = false ]; then
-    ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
+if [ "$NOLINK" = false ]; then
+    if [ "$IS_WINDOWS" = false ]; then
+        # Dont create a symlink on windows or if NOLINK is true
+        ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
+    else
+        # Instead create a shortcut on windows
+        powershell -Command "New-Item -ItemType SymbolicLink -Path '${INSTALL_TARGET}/${EXECUTABLE_NAME}' -Target './bin/${EXECUTABLE_NAME}'"
+    fi
 fi
