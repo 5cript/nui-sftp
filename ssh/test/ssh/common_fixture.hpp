@@ -125,7 +125,11 @@ namespace SecureShell::Test
                 },
                 nullptr,
                 nullptr,
-                nullptr
+                nullptr,
+                []()
+                {
+                    std::cout << "connection lost." << std::endl;
+                }
             );
         }
 
