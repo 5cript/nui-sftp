@@ -7,6 +7,7 @@
 #endif
 
 #include <backend/process/process_store.hpp>
+#include <backend/program_options.hpp>
 #include <utility/resources.hpp>
 #include <roar/filesystem/special_paths.hpp>
 
@@ -174,7 +175,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
     );
 }
 
-Main::Main(int const, char const* const*)
+Main::Main(ProgramOptions options)
     : shuttingDown_{false}
     , programDir_{boost::dll::program_location().parent_path().string()}
     , stateHolder_{programDir_}
@@ -183,7 +184,7 @@ Main::Main(int const, char const* const*)
           Nui::WindowOptions{
               .title = "NuiSftp"s,
 #ifdef NDEBUG
-              .debug = false,
+              .debug = options.enableDevTools,
 #else
               .debug = true,
 #endif
@@ -346,6 +347,10 @@ void Main::startChildSignalTimer()
 
 int main(int const argc, char const* const* argv)
 {
+    auto options = parseProgramOptions(argc, argv);
+    if (!options)
+        return 0;
+
 #ifdef __linux__
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wc99-designator"
@@ -380,7 +385,7 @@ int main(int const argc, char const* const* argv)
     ssh_init();
 
     {
-        Main m{argc, argv};
+        Main m{std::move(*options)};
         m.startChildSignalTimer();
         m.show();
     }
