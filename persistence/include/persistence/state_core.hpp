@@ -116,11 +116,6 @@ namespace Persistence
             {
                 if constexpr (CanCallUseDefaultsFrom<std::decay_t<decltype(toFill.*memAccessor.pointer)>>)
                 {
-                    Log::debug(
-                        "Calling useDefaultsFrom for member {} of type {}.",
-                        memAccessor.name,
-                        typeid(decltype(toFill.*memAccessor.pointer)).name()
-                    );
                     useDefaultsFrom(toFill.*memAccessor.pointer, defaultsFromThis.*memAccessor.pointer);
                 }
                 else

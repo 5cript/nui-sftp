@@ -163,7 +163,6 @@ class ComboSetting : public Setting<Disengageable, ValueType>
                     },
                     .onOpen = [this]()
                     {
-                        Log::info("ComboSetting select opened.");
                         if (doLoad_)
                         {
                             Log::info("ComboSetting doing load on open.");
