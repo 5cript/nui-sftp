@@ -94,6 +94,9 @@ else()
     set(BROWSER_ENGINE "webkitgtk")
 endif()
 
+include(ProcessorCount)
+ProcessorCount(nproc)
+
 if (NOT OMIT_FRONTEND_BUILD)
     # Creates a target that is compiled through emscripten. This target becomes the frontend part.
     nui_add_emscripten_target(
@@ -121,6 +124,8 @@ if (NOT OMIT_FRONTEND_BUILD)
             # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
             -DOFFLINE_BUILD=${OFFLINE_BUILD}
             -DBACKEND_BUILD_TYPE=${BACKEND_BUILD_TYPE}
+        BUILD_OPTIONS
+            -- -j${nproc}
     )
 
     target_sources(
