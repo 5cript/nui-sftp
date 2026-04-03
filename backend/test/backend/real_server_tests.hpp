@@ -82,10 +82,9 @@ class RealServerTests : public ::testing::Test
             .host = host,
             .port = port,
             .user = user,
-            .sshOptions =
-                Persistence::SshOptions{
-                    .connectTimeoutSeconds = connectTimeout.count(),
-                },
+            .sshOptions = Persistence::SshOptions{
+                .connectTimeoutSeconds = connectTimeout.count(),
+            },
         };
     }
 
@@ -101,7 +100,8 @@ class RealServerTests : public ::testing::Test
             },
             nullptr,
             nullptr,
-            nullptr
+            nullptr,
+            []() {}
         );
     }
 

@@ -332,7 +332,7 @@ namespace SecureShell::Test
         auto session = std::move(expectedSession).value();
         session->start();
 
-        auto expectedChannel = session->createPtyChannel({.terminalType = "invalid"}).get();
+        auto expectedChannel = session->createPtyChannel({.terminalType = "invalid", .termios = {}}).get();
         ASSERT_FALSE(expectedChannel.has_value());
     }
 
