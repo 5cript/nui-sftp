@@ -25,25 +25,27 @@ namespace SecureShell::Test
                     programDirectory / "temp" / "log.txt",
                     programDirectory / "temp" /
                         ("log_"s + ::testing::UnitTest::GetInstance()->current_test_info()->test_case_name() + "_"s +
-                         ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".txt"));
+                            ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".txt")
+                );
             }
         }
     };
 
     TEST_F(SshSessionTests, CanCreateSshSession)
     {
-        SecureShell::Session client{};
+        SecureShell::Session client{[]() {}};
     }
 
     TEST_F(SshSessionTests, CanStartAndStopSession)
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -59,10 +61,11 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -91,13 +94,15 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
-        auto sessionScope = [this, &result]() {
+        auto sessionScope = [this, &result]()
+        {
             auto expectedSession = makePasswordTestSession(result->port);
 
             ASSERT_TRUE(expectedSession.has_value());
@@ -112,13 +117,15 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
-        auto sessionScope = [this, &result]() {
+        auto sessionScope = [this, &result]()
+        {
             auto expectedSession = makePasswordTestSession(result->port);
 
             ASSERT_TRUE(expectedSession.has_value());
@@ -137,11 +144,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -161,18 +169,26 @@ namespace SecureShell::Test
         std::string channel2Output{};
 
         std::promise<void> awaiter1{};
-        channelStartReading(channel1, [&channel1Output, &awaiter1](std::string const& output) {
-            channel1Output += output;
-            if (channel1Output.find("bashrc") != std::string::npos)
-                awaiter1.set_value();
-        });
+        channelStartReading(
+            channel1,
+            [&channel1Output, &awaiter1](std::string const& output)
+            {
+                channel1Output += output;
+                if (channel1Output.find("bashrc") != std::string::npos)
+                    awaiter1.set_value();
+            }
+        );
 
         std::promise<void> awaiter2{};
-        channelStartReading(channel2, [&channel2Output, &awaiter2](std::string const& output) {
-            channel2Output += output;
-            if (channel2Output.find("bashrc") != std::string::npos)
-                awaiter2.set_value();
-        });
+        channelStartReading(
+            channel2,
+            [&channel2Output, &awaiter2](std::string const& output)
+            {
+                channel2Output += output;
+                if (channel2Output.find("bashrc") != std::string::npos)
+                    awaiter2.set_value();
+            }
+        );
 
         channel1->write("ls -lah");
         channel1->write("\r");
@@ -201,22 +217,26 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto session = makeSession(
             getSessionOptions(result->port),
-            +[](char const*, char* buf, std::size_t length, int, int, void*) {
+            +[](char const*, char* buf, std::size_t length, int, int, void*)
+            {
                 static constexpr std::string_view pw = "wrong";
                 std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                 return 0;
             },
             nullptr,
             nullptr,
-            nullptr);
+            nullptr,
+            []() {}
+        );
 
         EXPECT_FALSE(session.has_value());
     }
@@ -225,22 +245,26 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto session = makeSession(
             getSessionOptions(result->port, "wrong"),
-            +[](char const*, char* buf, std::size_t length, int, int, void*) {
+            +[](char const*, char* buf, std::size_t length, int, int, void*)
+            {
                 static constexpr std::string_view pw = "test";
                 std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                 return 0;
             },
             nullptr,
             nullptr,
-            nullptr);
+            nullptr,
+            []() {}
+        );
 
         EXPECT_FALSE(session.has_value());
     }
@@ -250,14 +274,17 @@ namespace SecureShell::Test
         std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
         auto session = makeSession(
             getSessionOptions(0),
-            +[](char const*, char* buf, std::size_t length, int, int, void*) {
+            +[](char const*, char* buf, std::size_t length, int, int, void*)
+            {
                 static constexpr std::string_view pw = "test";
                 std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                 return 0;
             },
             nullptr,
             nullptr,
-            nullptr);
+            nullptr,
+            []() {}
+        );
         auto diff = std::chrono::steady_clock::now() - start;
         // 1s leniency
         EXPECT_LT(diff, (connectTimeout + 1s));
@@ -269,14 +296,17 @@ namespace SecureShell::Test
         std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
         auto session = makeSession(
             getSessionOptions(22, "test", "0100::"),
-            +[](char const*, char* buf, std::size_t length, int, int, void*) {
+            +[](char const*, char* buf, std::size_t length, int, int, void*)
+            {
                 static constexpr std::string_view pw = "test";
                 std::strncpy(buf, pw.data(), std::min(pw.size(), length - 1));
                 return 0;
             },
             nullptr,
             nullptr,
-            nullptr);
+            nullptr,
+            []() {}
+        );
         auto diff = std::chrono::steady_clock::now() - start;
         // 1s leniency
         EXPECT_LT(diff, (connectTimeout + 1s));
@@ -288,12 +318,13 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            // result->command("exit");
-            result->terminate();
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                // result->command("exit");
+                result->terminate();
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -309,11 +340,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -339,11 +371,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -365,11 +398,15 @@ namespace SecureShell::Test
         channel1->close();
 
         std::promise<void> awaiter2{};
-        channelStartReading(channel2, [&channel2Output, &awaiter2](std::string const& output) {
-            channel2Output += output;
-            if (channel2Output.find("bashrc") != std::string::npos)
-                awaiter2.set_value();
-        });
+        channelStartReading(
+            channel2,
+            [&channel2Output, &awaiter2](std::string const& output)
+            {
+                channel2Output += output;
+                if (channel2Output.find("bashrc") != std::string::npos)
+                    awaiter2.set_value();
+            }
+        );
 
         channel2->write("ls -lah");
         channel2->write("\r");
@@ -389,13 +426,15 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
-        auto sessionScope = [this, &result]() {
+        auto sessionScope = [this, &result]()
+        {
             auto expectedSession = makePasswordTestSession(result->port);
 
             ASSERT_TRUE(expectedSession.has_value());
@@ -420,11 +459,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -446,11 +486,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -471,11 +512,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
@@ -498,11 +540,12 @@ namespace SecureShell::Test
     {
         auto [result, processThread] = createSshServer();
         ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept {
-            result->command("exit");
-            if (processThread.joinable())
-                processThread.join();
-        }};
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
 
         auto expectedSession = makePasswordTestSession(result->port);
 
