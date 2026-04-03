@@ -31,10 +31,6 @@ namespace NuiFileExplorer
 
     struct SideImplementation
     {
-        constexpr static std::array<std::string_view, 4> tableGridTemplateColumnsDefaults =
-            {"1fr", "max-content", "max-content", "max-content"};
-        constexpr static std::string_view tableGridTemplateColumnsHiddenValue = "25px";
-
         SideSettings settings;
         Side* otherSide{nullptr};
         std::unique_ptr<ISideModel> model;
@@ -45,9 +41,6 @@ namespace NuiFileExplorer
         Nui::Observed<unsigned int> iconSize{static_cast<unsigned int>(IconSize::Medium)};
         Nui::Observed<unsigned int> iconSpacing{48u};
         Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
-        Nui::Observed<std::vector<std::string>> tableGridTemplateColumns{
-            std::vector<std::string>(tableGridTemplateColumnsDefaults.begin(), tableGridTemplateColumnsDefaults.end())
-        };
         Nui::Observed<bool> showHiddenFiles{false};
 
         std::weak_ptr<Nui::Dom::BasicElement> sideElement{};

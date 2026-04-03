@@ -470,6 +470,8 @@
     display: flex;
     align-items: center;
     border-right: 1px solid hsl(0 100% 100% / 0.1);
+    position: relative;
+    overflow: visible;
 }
 
 .nui-file-grid-header-cell-text {
@@ -516,37 +518,68 @@
     margin-left: 4px;
 }
 
-.nui-file-grid-eye-collapser {
-    margin: 0;
+.nui-file-grid-col-expand-btn {
     cursor: pointer;
-    color: var(--nui-file-grid-table-cell-color, #efefef);
-    opacity: 0.5;
-    transition: opacity 120ms ease, transform 120ms ease;
-    user-select: none;
+    opacity: 0;
+    font-size: 0.8em;
+    padding: 1px 3px;
+    border-radius: 3px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 
     &:hover {
-        opacity: 0.9;
-        transform: scale(1.1);
+        opacity: 1;
+        background-color: var(--theme-color, #60a5fa);
+        color: #fff;
+    }
+}
+
+.nui-file-grid-table-header-cell:hover .nui-file-grid-col-expand-btn {
+    opacity: 0.5;
+}
+
+.nui-file-grid-col-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -0.4em;
+    width: 0.8em;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+
+    &::after {
+        content: "";
+        position: absolute;
+        top: 25%;
+        bottom: 25%;
+        left: 50%;
+        width: 1px;
+        background: var(--nui-file-grid-border-color, #444);
+        transform: translateX(-50%);
+        opacity: 0.4;
+        transition: all 0.15s ease;
     }
 
-    &.hidden {
-        opacity: 0.35;
-        filter: grayscale(1);
+    &:hover::after {
+        opacity: 1;
+        background: var(--theme-color, #60a5fa);
+        width: 2px;
     }
+}
+
+.nui-file-grid-table-header-cell:hover .nui-file-grid-col-resize-handle::after {
+    opacity: 0.7;
 }
 
 .nui-file-grid-arrow {
-    color: #bbb;
+    color: color-mix(in srgb, var(--nui-file-grid-table-header-color, #efefef) 45%, transparent);
     transition: color 120ms ease;
 }
 
-.sorted-asc .nui-file-grid-arrow.nfg-up {
-    color: var(--nui-file-grid-table-sort-highlight);
-    /* blue */
-}
-
+.sorted-asc .nui-file-grid-arrow.nfg-up,
 .sorted-desc .nui-file-grid-arrow.nfg-down {
-    color: var(--nui-file-grid-table-sort-highlight);
+    color: var(--theme-color, #60a5fa);
 }
 
 /* Visible separator */
