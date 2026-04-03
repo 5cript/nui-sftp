@@ -7,6 +7,7 @@
 #include <backend/rpc_system.hpp>
 #include <backend/password/password_prompter.hpp>
 #include <backend/theme_finder.hpp>
+#include <backend/program_options.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
 
@@ -24,7 +25,7 @@
 class Main
 {
   public:
-    Main(int const argc, char const* const* argv);
+    Main(ProgramOptions options);
     ~Main();
 
     Main(Main const&) = delete;

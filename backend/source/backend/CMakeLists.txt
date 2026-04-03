@@ -6,6 +6,7 @@ add_library(
         rpc_filesystem.cpp
         rpc_system.cpp
         theme_finder.cpp
+        program_options.cpp
         password/password_prompter.cpp
         process/process.cpp
         process/process_store.cpp
@@ -45,7 +46,7 @@ target_sources(
         main.cpp
 )
 
-find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS filesystem process)
+find_package(Boost CONFIG 1.86.0 REQUIRED COMPONENTS filesystem process program_options)
 
 target_include_directories(backend PUBLIC "${CMAKE_SOURCE_DIR}/backend/include")
 
@@ -65,6 +66,7 @@ target_link_libraries(
         efsw-static
         Boost::filesystem
         Boost::process
+        Boost::program_options
         roar-include-only
         shared-data
         utility
