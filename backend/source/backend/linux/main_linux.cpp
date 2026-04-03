@@ -54,6 +54,8 @@ gboolean on_context_menu(
 Main::PlatformSpecifics::PlatformSpecifics(Nui::Window& wnd, Nui::RpcHub&)
 {
     auto* webview = static_cast<GtkWidget*>(wnd.getNativeWebView());
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-strict"
     g_signal_connect(
         webview,
         "context-menu",
@@ -69,4 +71,5 @@ Main::PlatformSpecifics::PlatformSpecifics(Nui::Window& wnd, Nui::RpcHub&)
         ),
         nullptr
     );
+#pragma clang diagnostic pop
 }

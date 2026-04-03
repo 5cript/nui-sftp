@@ -23,6 +23,20 @@ static std::unique_ptr<ThemeController> themeController{};
 static std::unique_ptr<MainPage> mainPage{};
 static std::unique_ptr<Nui::Dom::Dom> dom{};
 
+namespace
+{
+    void printKeys(Nui::val obj)
+    {
+        Nui::val keys = Nui::val::global("Object").call<Nui::val>("keys", obj);
+        int length = keys["length"].as<int>();
+        for (int i = 0; i < length; ++i)
+        {
+            std::string key = keys[i].as<std::string>();
+            Log::debug("Key: '{}'", key);
+        }
+    }
+}
+
 bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 {
     static int counter = 0;
@@ -85,6 +99,16 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 
                             Log::info("Calling setup completion function");
                             mainPage->onSetupComplete();
+
+                            Log::debug("Dumping nui_rpc.backend and nui_rpc.frontend for debugging:");
+                            auto nuiRpc = Nui::val::global("nui_rpc");
+                            if (!nuiRpc.isUndefined() && nuiRpc.hasOwnProperty("backend"))
+                            {
+                                Log::debug("nui_rpc.backend:");
+                                printKeys(nuiRpc["backend"]);
+                                Log::debug("nui_rpc.frontend:");
+                                printKeys(nuiRpc["frontend"]);
+                            }
                         }
                         catch (std::exception const& exc)
                         {
