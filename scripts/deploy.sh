@@ -54,7 +54,7 @@ cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}"
 if [ "$IS_WINDOWS" = true ]; then
     # use ldd to copy dependencies from msys2 into the bin dir
     ldd "${EXECUTABLE}" | grep "clang" | awk 'NF == 4 { system("cp " $3 " '"${INSTALL_TARGET}/bin/"'") }'
-else
+fi
 
 # Assets (Images, icons, language files)...
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
@@ -71,7 +71,15 @@ if [ "$NOLINK" = false ]; then
         # Dont create a symlink on windows or if NOLINK is true
         ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
     else
-        # Instead create a shortcut on windows
-        powershell -Command "New-Item -ItemType SymbolicLink -Path '${INSTALL_TARGET}/${EXECUTABLE_NAME}' -Target './bin/${EXECUTABLE_NAME}'"
+        # Convert to Windows path
+        WIN_INSTALL_TARGET=$(cygpath -w "${INSTALL_TARGET}")
+
+        powershell -Command "
+        \$WshShell = New-Object -ComObject WScript.Shell;
+        \$Shortcut = \$WshShell.CreateShortcut('${WIN_INSTALL_TARGET}\\${EXECUTABLE_NAME}.lnk');
+        \$Shortcut.TargetPath = '.\\bin\\${EXECUTABLE_NAME}';
+        \$Shortcut.WorkingDirectory = '${WIN_INSTALL_TARGET}';
+        \$Shortcut.Save();
+        "
     fi
 fi
