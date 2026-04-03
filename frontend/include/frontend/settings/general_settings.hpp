@@ -50,6 +50,7 @@ struct GeneralSettings
         BoolSetting<> preventCreateFile;
         BoolSetting<> preventCreateDirectory;
         PathSetting<true> homeOverride;
+        PathSetting<true> temporaryDownloadsDirectory;
     } localFilesystemOptions;
 
     LogOptions logOptions;
@@ -57,7 +58,12 @@ struct GeneralSettings
     bool darkLightEventOriginatesHere{false};
     Nui::ListenRemover<decltype(FrontendEvents::darkLightMode)> darkLightModeListener;
 
-    GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, InputDialog& inputDialog, MultiInputDialog& multiInputDialog);
+    GeneralSettings(
+        std::function<void()> const& onChange,
+        FrontendEvents* events,
+        InputDialog& inputDialog,
+        MultiInputDialog& multiInputDialog
+    );
 
     void updateThemes(std::vector<std::filesystem::path> paths);
 
