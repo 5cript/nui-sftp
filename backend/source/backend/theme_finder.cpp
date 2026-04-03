@@ -17,26 +17,13 @@ ThemeFinder::ThemeFinder(std::filesystem::path const& relativeRoot, AppWideEvent
 
 std::vector<std::filesystem::path> ThemeFinder::findAvailableThemes(std::filesystem::path const& relativeRoot)
 {
-    const auto dirs = getThemeDirs(relativeRoot);
-    std::vector<std::filesystem::path> themes{};
-    Log::info("Finding available themes in {} candidate directories.", dirs.size());
-    for (const auto& dir : dirs)
+    const auto files = findFilesInSearchPaths(relativeRoot, "themes/*.css");
+    std::vector<std::filesystem::path> themes;
+    themes.reserve(files.size());
+    for (const auto& file : files)
     {
-        Log::info("Checking theme directory: {}", dir.generic_string());
-        if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir))
-        {
-            Log::info("Skipping non-existing or non-directory theme path: {}", dir.generic_string());
-            continue;
-        }
-
-        for (const auto& entry : std::filesystem::directory_iterator(dir))
-        {
-            if (entry.is_regular_file() && entry.path().extension() == ".css")
-            {
-                Log::info("Found theme file: {}", entry.path().generic_string());
-                themes.push_back(entry.path().stem());
-            }
-        }
+        Log::info("Found theme file: {}", file.generic_string());
+        themes.push_back(file.stem());
     }
     Log::info("Theme discovery complete, found {} themes.", themes.size());
     return themes;
