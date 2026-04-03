@@ -6,6 +6,7 @@
 #endif
 
 #include <ranges>
+#include <unordered_set>
 
 namespace
 {
@@ -13,6 +14,69 @@ namespace
     {
         return pathString.size() >= ending.size() && pathString.substr(pathString.size() - ending.size()) == ending;
     };
+
+    bool segmentMatchesPattern(std::string_view name, std::string_view pattern)
+    {
+        if (pattern.empty())
+            return name.empty();
+        if (pattern[0] == '*')
+        {
+            for (std::size_t i = 0; i <= name.size(); ++i)
+                if (segmentMatchesPattern(name.substr(i), pattern.substr(1)))
+                    return true;
+            return false;
+        }
+        if (name.empty())
+            return false;
+        if (pattern[0] == '?')
+            return segmentMatchesPattern(name.substr(1), pattern.substr(1));
+        if (pattern[0] != name[0])
+            return false;
+        return segmentMatchesPattern(name.substr(1), pattern.substr(1));
+    }
+
+    bool hasGlobChars(std::string_view s)
+    {
+        return s.find_first_of("*?") != std::string_view::npos;
+    }
+
+    void matchPatternInDirImpl(
+        std::filesystem::path const& currentDir,
+        std::vector<std::string> const& segments,
+        std::size_t index,
+        std::filesystem::path const& relative,
+        std::vector<std::filesystem::path>& results
+    )
+    {
+        if (index == segments.size())
+        {
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(currentDir, ec))
+                results.push_back(relative);
+            return;
+        }
+
+        const auto& seg = segments[index];
+        if (!hasGlobChars(seg))
+        {
+            const auto next = currentDir / seg;
+            std::error_code ec;
+            if (std::filesystem::exists(next, ec))
+                matchPatternInDirImpl(next, segments, index + 1, relative / seg, results);
+        }
+        else
+        {
+            std::error_code ec;
+            if (!std::filesystem::is_directory(currentDir, ec))
+                return;
+            for (const auto& entry : std::filesystem::directory_iterator(currentDir, ec))
+            {
+                const auto name = entry.path().filename().string();
+                if (segmentMatchesPattern(name, seg))
+                    matchPatternInDirImpl(entry.path(), segments, index + 1, relative / name, results);
+            }
+        }
+    }
 
     std::vector<std::filesystem::path> getSearchPath(std::filesystem::path const& relativeRoot)
     {
@@ -105,12 +169,56 @@ std::vector<std::filesystem::path> getThemeDirs(std::filesystem::path const& rel
     return transformedSearchPaths(relativeRoot, "themes");
 }
 
+std::vector<std::filesystem::path>
+matchPatternInDir(std::filesystem::path const& baseDir, std::filesystem::path const& relativePattern)
+{
+    std::vector<std::string> segments;
+    for (auto const& part : relativePattern)
+    {
+        const auto s = part.string();
+        if (!s.empty() && s != "." && s != "/" && s != "\\")
+            segments.push_back(s);
+    }
+    std::vector<std::filesystem::path> results;
+    matchPatternInDirImpl(baseDir, segments, 0, {}, results);
+    return results;
+}
+
+std::vector<std::filesystem::path>
+findFilesInSearchPaths(
+    std::vector<std::filesystem::path> const& searchPaths,
+    std::filesystem::path const& relativePattern
+)
+{
+    std::unordered_set<std::string> seen;
+    std::vector<std::filesystem::path> result;
+    for (const auto& searchPath : searchPaths)
+    {
+        for (auto const& relPath : matchPatternInDir(searchPath, relativePattern))
+        {
+            if (seen.insert(relPath.generic_string()).second)
+                result.push_back(searchPath / relPath);
+        }
+    }
+    return result;
+}
+
+std::vector<std::filesystem::path>
+findFilesInSearchPaths(std::filesystem::path const& relativeRoot, std::filesystem::path const& relativePattern)
+{
+    return findFilesInSearchPaths(getSearchPath(relativeRoot), relativePattern);
+}
+
 std::optional<std::filesystem::path>
 mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPathString)
 {
     auto endsWith = [&](std::string_view ending)
     {
         return endsWithImpl(urlPathString, ending);
+    };
+    auto firstOf = [](std::vector<std::filesystem::path> const& v) -> std::optional<std::filesystem::path>
+    {
+        return v.empty() ? std::nullopt : std::optional{v[0]};
     };
 
     const auto path = [&]() -> std::optional<std::filesystem::path>
@@ -119,19 +227,17 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
         const auto relative = std::filesystem::relative(urlPathString, "/");
 
         if (endsWith(".css") && relative.parent_path().filename() == "themes")
-        {
-            return searchInPaths(getThemeDirs(resourceDir), relative.filename());
-        }
+            return firstOf(findFilesInSearchPaths(getThemeDirs(resourceDir), relative.filename()));
 
         if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
         {
 #ifndef NDEBUG
-            return searchInPaths(transformedSearchPaths(resourceDir, "module_nui-sftp/bin"), relative);
+            return firstOf(findFilesInSearchPaths(transformedSearchPaths(resourceDir, "module_nui-sftp/bin"), relative));
 #endif
-            return searchInPaths(transformedSearchPaths(resourceDir, "frontend"), relative);
+            return firstOf(findFilesInSearchPaths(transformedSearchPaths(resourceDir, "frontend"), relative));
         }
         else
-            return searchInPaths(transformedSearchPaths(resourceDir, "assets"), relative);
+            return firstOf(findFilesInSearchPaths(transformedSearchPaths(resourceDir, "assets"), relative));
 
         return std::nullopt;
     }();

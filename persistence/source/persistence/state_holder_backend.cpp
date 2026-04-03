@@ -480,49 +480,32 @@ namespace Persistence
 
     void StateHolder::loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
-        const auto assetsDir = getAssetsDirectory(programDirectory_);
-        if (!assetsDir)
+        const auto files = findFilesInSearchPaths(programDirectory_.parent_path(), "assets/languages/*.yaml");
+        if (files.empty())
         {
-            Log::error("Assets directory not found, cannot load language files.");
+            Log::error("No language files found in any search path.");
             onLoadComplete(std::nullopt);
             return;
         }
-        const auto fileDirectory = *assetsDir / "languages";
 
-        std::filesystem::directory_iterator dirIt;
-        try
-        {
-            dirIt = std::filesystem::directory_iterator(fileDirectory);
-        }
-        catch (std::exception const& e)
-        {
-            Log::error("Failed to read language files directory: {}", e.what());
-            onLoadComplete(std::nullopt);
-            return;
-        }
         nlohmann::json assembled = nlohmann::json::object();
-        for (const auto& entry : dirIt)
+        for (const auto& file : files)
         {
-            if (entry.is_regular_file() && entry.path().extension() == ".yaml")
-            {
-                std::optional<nlohmann::json> content;
-                loadLanguageFile(
-                    entry.path(),
-                    [&content](const auto maybeJson)
-                    {
-                        content = maybeJson;
-                    }
-                );
-                if (!content)
+            std::optional<nlohmann::json> content;
+            loadLanguageFile(
+                file,
+                [&content](const auto maybeJson)
                 {
-                    Log::error("Failed to load language file: {}", entry.path().string());
-                    onLoadComplete(std::nullopt);
-                    return;
+                    content = maybeJson;
                 }
-
-                const auto fileName = entry.path().stem().string();
-                assembled[fileName] = *content;
+            );
+            if (!content)
+            {
+                Log::error("Failed to load language file: {}", file.string());
+                onLoadComplete(std::nullopt);
+                return;
             }
+            assembled[file.stem().string()] = *content;
         }
         onLoadComplete(std::move(assembled));
     }
