@@ -3,50 +3,58 @@
 #include <shared_data/directory_entry.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
+#include <roar/detail/pimpl_special_functions.hpp>
+#include <nui/utility/move_detector.hpp>
 
 #include <filesystem>
 #include <vector>
 #include <optional>
 
+class SshTerminalEngine;
+
+enum class OperationMode
+{
+    Immediate,
+    Queued,
+    PriorityQueued,
+};
+
 class FileEngine
 {
   public:
-    virtual ~FileEngine() = default;
-    FileEngine() = default;
-    FileEngine(const FileEngine& other) = default;
-    FileEngine(FileEngine&& other) noexcept = default;
-    FileEngine& operator=(const FileEngine& other) = default;
-    FileEngine& operator=(FileEngine&& other) noexcept = default;
+    FileEngine(SshTerminalEngine* engine);
+    ROAR_PIMPL_SPECIAL_FUNCTIONS(FileEngine);
 
-    virtual void listDirectory(
+    std::optional<Ids::ChannelId> release();
+
+    void listDirectory(
         std::filesystem::path const& path,
         std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
             onComplete
-    ) = 0;
+    );
 
-    virtual void createDirectory(
+    void createDirectory(
         std::filesystem::path const& path,
         std::function<void(bool, std::string const& info)> onComplete
-    ) = 0;
-    virtual void
-    createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete) = 0;
+    );
+    void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
 
-    virtual void addDownload(
+    void addDownload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
-    ) = 0;
-    virtual void addUpload(
+    );
+    void addUpload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh
-    ) = 0;
+    );
 
-    virtual void remove(
+    void remove(
         std::vector<NuiFileExplorer::Item> const& files,
         std::vector<NuiFileExplorer::Item> const& directories,
         std::function<void(bool, std::string const& info)> onComplete,
@@ -54,7 +62,7 @@ class FileEngine
             std::vector<std::filesystem::path>, /* regular files & empty */
             std::vector<std::filesystem::path> /* non empties */
         )> onNonEmptyDirectoriesFound
-    ) = 0;
+    );
 
     /**
      * @brief Use remove first and if it calls onNonEmptyDirectoriesFound, call this.
@@ -63,24 +71,37 @@ class FileEngine
      * @param recursive
      * @param onComplete
      */
-    virtual void removeOnQueueUnchecked(
+    void removeOnQueueUnchecked(
         std::vector<std::filesystem::path> const& paths,
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
-    ) = 0;
+    );
 
-    virtual void rename(
+    void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
         std::function<void(bool, std::string const& info)> onComplete
-    ) = 0;
+    );
 
-    virtual void stat(
+    void stat(
         std::filesystem::path const& path,
         std::function<
             void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&, std::string const& info)>
             onComplete
-    ) = 0;
+    );
 
-    virtual void dispose(std::function<void()> onComplete) = 0;
+    void dispose(std::function<void()> onComplete);
+
+  private:
+    void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen);
+    void performDelete(
+        std::vector<NuiFileExplorer::Item> files,
+        std::vector<std::filesystem::path> directoriesEmpty,
+        std::function<void(bool, std::string const& info)> onComplete
+    );
+
+  private:
+    struct Implementation;
+    std::unique_ptr<Implementation> impl_;
+    Nui::MoveDetector moveDetector_;
 };

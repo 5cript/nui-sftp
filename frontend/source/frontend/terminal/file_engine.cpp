@@ -1,11 +1,12 @@
-#include <frontend/terminal/sftp_file_engine.hpp>
+#include <frontend/terminal/file_engine.hpp>
+#include <frontend/terminal/ssh_engine.hpp>
 #include <log/log.hpp>
 #include <constants/sftp.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/api/json.hpp>
 
-struct SftpFileEngine::Implementation
+struct FileEngine::Implementation
 {
     bool wasDisposed = false;
     SshTerminalEngine* engine;
@@ -16,17 +17,17 @@ struct SftpFileEngine::Implementation
     {}
 };
 
-SftpFileEngine::SftpFileEngine(SshTerminalEngine* engine)
+FileEngine::FileEngine(SshTerminalEngine* engine)
     : impl_{std::make_unique<Implementation>(engine)}
 {}
-SftpFileEngine::~SftpFileEngine() = default;
+FileEngine::~FileEngine() = default;
 
-std::optional<Ids::ChannelId> SftpFileEngine::release()
+std::optional<Ids::ChannelId> FileEngine::release()
 {
     return std::move(impl_->sftpChannelId);
 }
 
-void SftpFileEngine::dispose(std::function<void()> onComplete)
+void FileEngine::dispose(std::function<void()> onComplete)
 {
     if (!impl_->wasDisposed)
     {
@@ -39,9 +40,9 @@ void SftpFileEngine::dispose(std::function<void()> onComplete)
     impl_->wasDisposed = true;
 }
 
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(SftpFileEngine);
+ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(FileEngine);
 
-void SftpFileEngine::lazyOpen(
+void FileEngine::lazyOpen(
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen
 )
 {
@@ -61,7 +62,7 @@ void SftpFileEngine::lazyOpen(
     );
 }
 
-void SftpFileEngine::listDirectory(
+void FileEngine::listDirectory(
     std::filesystem::path const& path,
     std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
         onComplete
@@ -109,7 +110,7 @@ void SftpFileEngine::listDirectory(
     );
 }
 
-void SftpFileEngine::createDirectory(
+void FileEngine::createDirectory(
     std::filesystem::path const& path,
     std::function<void(bool, std::string const& info)> onComplete
 )
@@ -147,7 +148,7 @@ void SftpFileEngine::createDirectory(
     );
 }
 
-void SftpFileEngine::createFile(
+void FileEngine::createFile(
     std::filesystem::path const& path,
     std::function<void(bool, std::string const& info)> onComplete
 )
@@ -185,7 +186,7 @@ void SftpFileEngine::createFile(
     );
 }
 
-void SftpFileEngine::addDownload(
+void FileEngine::addDownload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
@@ -246,7 +247,7 @@ void SftpFileEngine::addDownload(
     );
 }
 
-void SftpFileEngine::addUpload(
+void FileEngine::addUpload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
@@ -305,7 +306,7 @@ void SftpFileEngine::addUpload(
     );
 }
 
-void SftpFileEngine::remove(
+void FileEngine::remove(
     std::vector<NuiFileExplorer::Item> const& files,
     std::vector<NuiFileExplorer::Item> const& directories,
     std::function<void(bool, std::string const& info)> onComplete,
@@ -407,7 +408,7 @@ void SftpFileEngine::remove(
     );
 }
 
-void SftpFileEngine::performDelete(
+void FileEngine::performDelete(
     std::vector<NuiFileExplorer::Item> files,
     std::vector<std::filesystem::path> directoriesEmpty,
     std::function<void(bool, std::string const& info)> onComplete
@@ -468,7 +469,7 @@ void SftpFileEngine::performDelete(
     );
 }
 
-void SftpFileEngine::rename(
+void FileEngine::rename(
     std::filesystem::path const& oldPath,
     std::filesystem::path const& newPath,
     std::function<void(bool, std::string const& info)> onComplete
@@ -508,7 +509,7 @@ void SftpFileEngine::rename(
     );
 }
 
-void SftpFileEngine::removeOnQueueUnchecked(
+void FileEngine::removeOnQueueUnchecked(
     std::vector<std::filesystem::path> const& paths,
     bool recursive,
     std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
@@ -553,7 +554,7 @@ void SftpFileEngine::removeOnQueueUnchecked(
     );
 }
 
-void SftpFileEngine::stat(
+void FileEngine::stat(
     std::filesystem::path const& path,
     std::function<
         void(std::optional<std::pair<bool /*exists*/, SharedData::DirectoryEntry>> const&, std::string const& info)>
