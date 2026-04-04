@@ -2,7 +2,6 @@
 #include <frontend/session.hpp>
 #include <frontend/terminal/frontend_ssh_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
-#include <frontend/terminal/user_control_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/classes.hpp>
@@ -600,7 +599,6 @@ void Session::createSshEngine()
             .sessionOptions = impl_->engineOptions,
             .onConnectionLoss = std::bind(&Session::onTerminalConnectionLoss, this),
         }),
-        true,
         std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2)
     );
 
@@ -623,7 +621,6 @@ void Session::createExecutingEngine()
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
         }),
-        false,
         std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2)
     );
 

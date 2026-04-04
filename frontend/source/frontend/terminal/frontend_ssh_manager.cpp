@@ -211,7 +211,7 @@ struct GenericTerminalChannel
 
 struct TerminalChannel::Implementation : public GenericTerminalChannel
 {
-    MultiChannelTerminalEngine* engine;
+    TerminalEngine* engine;
 
     ChannelInterface* channel()
     {
@@ -233,7 +233,7 @@ struct TerminalChannel::Implementation : public GenericTerminalChannel
     }
 
     Implementation(
-        MultiChannelTerminalEngine* engine,
+        TerminalEngine* engine,
         Ids::ChannelId channelId,
         std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
     )
@@ -310,7 +310,7 @@ void GenericTerminalChannel::writeAfterCache(std::string const& data, bool isUse
 }
 
 TerminalChannel::TerminalChannel(
-    MultiChannelTerminalEngine* engine,
+    TerminalEngine* engine,
     Ids::ChannelId channelId,
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
 )
@@ -471,31 +471,10 @@ bool TerminalChannel::isOpen() const
     return !impl_->termId.empty();
 }
 
-struct SingleTerminalChannel : public GenericTerminalChannel
-{
-    SingleChannelTerminalEngine* engine;
-
-    void writeUser(std::string const& data) override
-    {
-        engine->write(data);
-    }
-
-    SingleTerminalChannel(
-        SingleChannelTerminalEngine* engine,
-        Ids::ChannelId channelId,
-        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
-    )
-        : GenericTerminalChannel{std::move(channelId), std::move(onLockedUserInput)}
-        , engine{engine}
-    {}
-};
-
 struct FrontendSessionManager::Implementation
 {
     std::unique_ptr<TerminalEngine> engine;
     std::unordered_map<Ids::ChannelId, std::unique_ptr<TerminalChannel>, Ids::IdHash> channels;
-    bool isMultiChannel;
-    std::unique_ptr<SingleTerminalChannel> singleModeChannel;
     bool beingDisposed{false};
     bool disposeComplete{false};
     bool isInLockedMode{false};
@@ -503,13 +482,10 @@ struct FrontendSessionManager::Implementation
 
     Implementation(
         std::unique_ptr<TerminalEngine> engine,
-        bool isMultiChannel,
         std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
     )
         : engine{std::move(engine)}
         , channels{}
-        , isMultiChannel{isMultiChannel}
-        , singleModeChannel{}
         , onLockedUserInput{std::move(onLockedUserInput)}
     {}
 };
@@ -523,10 +499,9 @@ struct FrontendSessionManager::Implementation
 
 FrontendSessionManager::FrontendSessionManager(
     std::unique_ptr<TerminalEngine> engine,
-    bool isMultiChannel,
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
 )
-    : impl_{std::make_unique<Implementation>(std::move(engine), isMultiChannel, std::move(onLockedUserInput))}
+    : impl_{std::make_unique<Implementation>(std::move(engine), std::move(onLockedUserInput))}
 {}
 
 void FrontendSessionManager::iterateAllChannels(
@@ -568,11 +543,6 @@ void FrontendSessionManager::writeBroadcast(std::string const& msg)
             return true;
         }
     );
-
-    if (impl_->singleModeChannel)
-    {
-        impl_->singleModeChannel->doWrite(msg, false);
-    }
 }
 
 void FrontendSessionManager::createChannel(
@@ -595,180 +565,90 @@ void FrontendSessionManager::createChannel(
 
     Log::info("Creating channel");
 
-    if (impl_->isMultiChannel)
-    {
-        auto* multiChannelEngine = static_cast<MultiChannelTerminalEngine*>(impl_->engine.get());
+    std::shared_ptr<std::optional<Ids::ChannelId>> channelId =
+        std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
 
-        std::shared_ptr<std::optional<Ids::ChannelId>> channelId =
-            std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
-
-        Log::info("Creating channel using multi-channel engine");
-        multiChannelEngine->createChannel(
-            [this, channelId](std::string const& data)
+    impl_->engine->createChannel(
+        [this, channelId](std::string const& data)
+        {
+            // This should work, because the channel is opened after creation, and no data should be written before
+            if (channelId && *channelId)
             {
-                // This should work, because the channel is opened after creation, and no data should be written before
-                if (channelId && *channelId)
+                if (auto channel = impl_->channels.find(**channelId); channel != impl_->channels.end())
                 {
-                    if (auto channel = impl_->channels.find(**channelId); channel != impl_->channels.end())
-                    {
-                        channel->second->write(data, false);
-                    }
+                    channel->second->write(data, false);
                 }
-            },
-            [this, channelId](std::string const& data)
-            {
-                // This should work, because the channel is opened after creation, and no data should be written before
-                if (channelId && *channelId)
-                {
-                    if (auto channel = impl_->channels.find(**channelId); channel != impl_->channels.end())
-                    {
-                        channel->second->writeStderr(data, false);
-                    }
-                }
-            },
-            [this, channelId, onChannelCreated, host, options](
-                std::optional<Ids::ChannelId> const& creationResult, std::string const& info
-            )
-            {
-                if (!creationResult)
-                {
-                    onChannelCreated(std::nullopt, info);
-                    return;
-                }
-                Log::info("Channel created.");
-
-                *channelId = creationResult;
-
-                auto* multiChannelEngine = static_cast<MultiChannelTerminalEngine*>(impl_->engine.get());
-
-                if (!*channelId)
-                {
-                    onChannelCreated(std::nullopt, "Failed to create channel");
-                    return;
-                }
-
-                [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
-                    **channelId,
-                    std::make_unique<TerminalChannel>(multiChannelEngine, **channelId, impl_->onLockedUserInput)
-                );
-                if (channelIter == impl_->channels.end())
-                {
-                    Log::error("Failed to create channel");
-                    onChannelCreated(std::nullopt, "Failed to create channel");
-                    return;
-                }
-
-                Log::info("Opening channel");
-                channelIter->second->open(
-                    host,
-                    options,
-                    [onChannelCreated, channelId = **channelId, host](bool success, std::string const& info) mutable
-                    {
-                        if (!success)
-                        {
-                            onChannelCreated(std::nullopt, info);
-                            return;
-                        }
-                        host.call<void>("setAttribute", "data-channelid"s, channelId.value());
-                        onChannelCreated(channelId, info);
-                    }
-                );
-            },
-            [this, onChannelLoss](Ids::ChannelId const& lostChannelId)
-            {
-                Log::info("Channel lost: '{}'", lostChannelId.value());
-                onChannelLoss(lostChannelId);
-                // In locked mode the terminal stays visible so the user can save its
-                // contents or press Enter to close. Destroying the TerminalChannel here
-                // would leave the xterm onData callback with a dangling this pointer.
-                // dispose() will clean it up when the session is actually closed.
-                if (!impl_->isInLockedMode)
-                    closeChannel(lostChannelId);
             }
-        );
-    }
-    else
-    {
-        auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
-
-        singleChannelEngine->open(
-            [this, onChannelCreated = std::move(onChannelCreated), host, options](
-                bool success, std::string const& infoOrUuid
-            )
+        },
+        [this, channelId](std::string const& data)
+        {
+            // This should work, because the channel is opened after creation, and no data should be written before
+            if (channelId && *channelId)
             {
-                if (!success)
+                if (auto channel = impl_->channels.find(**channelId); channel != impl_->channels.end())
                 {
-                    Log::error("Failed to open terminal: '{}'", infoOrUuid);
-                    onChannelCreated(std::nullopt, infoOrUuid);
-                    return;
-                };
-
-                const auto channelId = Ids::makeChannelId(infoOrUuid);
-                auto* singleChannelEngine = static_cast<SingleChannelTerminalEngine*>(impl_->engine.get());
-
-                impl_->singleModeChannel =
-                    std::make_unique<SingleTerminalChannel>(singleChannelEngine, channelId, impl_->onLockedUserInput);
-
-                singleChannelEngine->setStderrHandler(
-                    [this](std::string const& data)
-                    {
-                        impl_->singleModeChannel->doWrite(data, false);
-                    }
-                );
-                singleChannelEngine->setStdoutHandler(
-                    [this](std::string const& data)
-                    {
-                        // TODO: Add stderr styling mode
-                        impl_->singleModeChannel->doWrite(data, false);
-                    }
-                );
-
-                impl_->singleModeChannel->termId =
-                    terminalUtility().call<std::string>("createTerminal", host, asVal(options));
-
-                auto term = impl_->singleModeChannel->terminal();
-                if (term.isUndefined())
-                {
-                    Log::error("Failed to get terminal with id: '{}", impl_->singleModeChannel->termId);
-                    dispose([]() {});
-                    onChannelCreated(std::nullopt, "Failed to get terminal");
-                    return;
+                    channel->second->writeStderr(data, false);
                 }
-
-                Log::info("Single channel terminal opened with id: '{}'", impl_->singleModeChannel->termId);
-
-                term.call<void>(
-                    "onData",
-                    Nui::bind(
-                        [this](Nui::val data, Nui::val)
-                        {
-                            impl_->singleModeChannel->doWrite(data.as<std::string>(), true);
-                        },
-                        std::placeholders::_1,
-                        std::placeholders::_2
-                    )
-                );
-
-                term.call<void>(
-                    "onResize",
-                    Nui::bind(
-                        [this](Nui::val obj, Nui::val)
-                        {
-                            // Log::debug("FrontendSessionManager resized {}:{}. ", obj["cols"].as<int>(),
-                            // obj["rows"].as<int>());
-                            impl_->singleModeChannel->engine->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
-                        },
-                        std::placeholders::_1,
-                        std::placeholders::_2
-                    )
-                );
-
-                if (!impl_->singleModeChannel->writeCache.empty())
-                    impl_->singleModeChannel->doWrite("", false);
-                onChannelCreated(channelId, "");
             }
-        );
-    }
+        },
+        [this, channelId, onChannelCreated, host, options](
+            std::optional<Ids::ChannelId> const& creationResult, std::string const& info
+        )
+        {
+            if (!creationResult)
+            {
+                onChannelCreated(std::nullopt, info);
+                return;
+            }
+            Log::info("Channel created.");
+
+            *channelId = creationResult;
+
+            if (!*channelId)
+            {
+                onChannelCreated(std::nullopt, "Failed to create channel");
+                return;
+            }
+
+            [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
+                **channelId,
+                std::make_unique<TerminalChannel>(impl_->engine.get(), **channelId, impl_->onLockedUserInput)
+            );
+            if (channelIter == impl_->channels.end())
+            {
+                Log::error("Failed to create channel");
+                onChannelCreated(std::nullopt, "Failed to create channel");
+                return;
+            }
+
+            Log::info("Opening channel");
+            channelIter->second->open(
+                host,
+                options,
+                [onChannelCreated, channelId = **channelId, host](bool success, std::string const& info) mutable
+                {
+                    if (!success)
+                    {
+                        onChannelCreated(std::nullopt, info);
+                        return;
+                    }
+                    host.call<void>("setAttribute", "data-channelid"s, channelId.value());
+                    onChannelCreated(channelId, info);
+                }
+            );
+        },
+        [this, onChannelLoss](Ids::ChannelId const& lostChannelId)
+        {
+            Log::info("Channel lost: '{}'", lostChannelId.value());
+            onChannelLoss(lostChannelId);
+            // In locked mode the terminal stays visible so the user can save its
+            // contents or press Enter to close. Destroying the TerminalChannel here
+            // would leave the xterm onData callback with a dangling this pointer.
+            // dispose() will clean it up when the session is actually closed.
+            if (!impl_->isInLockedMode)
+                closeChannel(lostChannelId);
+        }
+    );
 }
 TerminalChannel* FrontendSessionManager::channel(Ids::ChannelId const& channelId)
 {
@@ -811,20 +691,8 @@ void FrontendSessionManager::focus()
 {
     CHECK_DISPOSAL()
 
-    if (impl_->isMultiChannel)
-    {
-        if (!impl_->channels.empty())
-        {
-            impl_->channels.begin()->second->focus();
-        }
-    }
-    else
-    {
-        if (!impl_->singleModeChannel->termId.empty())
-        {
-            impl_->singleModeChannel->terminal().call<void>("focus");
-        }
-    }
+    if (!impl_->channels.empty())
+        impl_->channels.begin()->second->focus();
 }
 
 bool FrontendSessionManager::isBeingDisposed() const

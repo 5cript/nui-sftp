@@ -47,7 +47,6 @@ target_sources(
         terminal/executing_engine.cpp
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
-        terminal/user_control_engine.cpp
         terminal/ssh_channel.cpp
         components/progress_bar.cpp
         file_explorer/side_model.cpp

@@ -11,9 +11,7 @@
 #include <memory>
 #include <string>
 
-// TODO: https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
-
-class SshTerminalEngine : public MultiChannelTerminalEngine
+class SshTerminalEngine : public TerminalEngine
 {
   public:
     struct Settings
