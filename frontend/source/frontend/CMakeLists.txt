@@ -43,7 +43,7 @@ target_sources(
         settings/log_options.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
-        terminal/frontend_ssh_manager.cpp
+        terminal/frontend_session_manager.cpp
         terminal/executing_engine.cpp
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
