@@ -45,7 +45,7 @@ target_sources(
         session_components/operation_queue.cpp
         terminal/frontend_ssh_manager.cpp
         terminal/executing_engine.cpp
-        terminal/sftp_file_engine.cpp
+        terminal/file_engine.cpp
         terminal/ssh_engine.cpp
         terminal/user_control_engine.cpp
         terminal/ssh_channel.cpp

@@ -4,7 +4,7 @@
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/user_control_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
-#include <frontend/terminal/sftp_file_engine.hpp>
+#include <frontend/terminal/file_engine.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/session_components/session_options.hpp>
@@ -685,7 +685,7 @@ void Session::openSftp(std::string const& username)
         {
             Log::info("Opening SFTP by default");
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
-            auto fileEngine = std::make_shared<SftpFileEngine>(sshTerminalEngine);
+            auto fileEngine = std::make_shared<FileEngine>(sshTerminalEngine);
             remoteSideModel().engine(fileEngine);
             localSideModel().engine(std::move(fileEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
