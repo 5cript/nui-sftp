@@ -1,4 +1,4 @@
-#include <frontend/terminal/frontend_ssh_manager.hpp>
+#include <frontend/terminal/frontend_session_manager.hpp>
 #include <log/log.hpp>
 #include <frontend/nlohmann_compat.hpp>
 

@@ -1,6 +1,6 @@
 #include <persistence/state/session_options.hpp>
 #include <frontend/session.hpp>
-#include <frontend/terminal/frontend_ssh_manager.hpp>
+#include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
 #include <frontend/terminal/file_engine.hpp>
