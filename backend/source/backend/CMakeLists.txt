@@ -11,6 +11,7 @@ add_library(
         process/process.cpp
         process/process_store.cpp
         process/environment.cpp
+        file_tracking/instance_lock.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
@@ -26,6 +27,7 @@ if (WIN32)
     target_sources(
         backend
         PRIVATE
+            file_tracking/instance_lock_win.cpp
             pty/windows/conpty.cpp
             pty/windows/pipe.cpp
             windows/windows_drag_drop.cpp
@@ -35,6 +37,7 @@ else()
     target_sources(
         backend
         PRIVATE
+            file_tracking/instance_lock_nix.cpp
             pty/linux/pty.cpp
             linux/main_linux.cpp
     )
