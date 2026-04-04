@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/file_operations/operation_mode.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
@@ -11,13 +12,6 @@
 #include <optional>
 
 class SshTerminalEngine;
-
-enum class OperationMode
-{
-    Immediate,
-    Queued,
-    PriorityQueued,
-};
 
 class FileEngine
 {
@@ -44,14 +38,16 @@ class FileEngine
         NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void addUpload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     void remove(

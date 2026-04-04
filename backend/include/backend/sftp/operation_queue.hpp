@@ -7,10 +7,13 @@
 #include <ids/ids.hpp>
 #include <backend/rpc_helper.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_operations/operation_mode.hpp>
 
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <atomic>
 
@@ -54,7 +57,8 @@ class OperationQueue
         std::filesystem::path const& remotePath,
         bool allowOverwrite,
         bool isBigFile,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     std::expected<void, Operation::Error> addUploadOperation(
@@ -64,7 +68,8 @@ class OperationQueue
         std::filesystem::path const& remotePath,
         bool allowOverwrite,
         bool isBigFile,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     std::expected<void, Operation::Error> addDeleteOperation(
@@ -72,7 +77,8 @@ class OperationQueue
         Ids::OperationId operationId,
         std::filesystem::path const& remotePath,
         bool recursive,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     void registerRpc();
@@ -84,9 +90,30 @@ class OperationQueue
     void completeOperation(OperationCompleted&& operationCompleted);
     void deepPause(bool pause);
 
+    std::string rpcName(std::string_view event) const;
+
+    auto makeScanProgressCallback(std::string_view eventName, Ids::OperationId operationId)
+        -> std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>;
+
+    auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId)
+        -> std::function<void(
+            std::filesystem::path const&,
+            std::uint64_t,
+            std::uint64_t,
+            std::uint64_t,
+            std::uint64_t,
+            std::uint64_t,
+            std::uint64_t,
+            std::make_signed_t<std::size_t>
+        )>;
+
+  private:
+    bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
+
   private:
     Persistence::SftpOptions sftpOpts_{};
     Ids::SessionId sessionId_{};
+    std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
     int parallelism_{1};

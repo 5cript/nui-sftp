@@ -53,6 +53,25 @@ header.opq-controls {
     grid-auto-rows: 36px;
 }
 
+/* Transparent pass-through wrappers so cards remain direct grid children */
+.opq-priority-list,
+.opq-regular-list {
+    display: contents;
+}
+
+.opq-priority-separator {
+    grid-column: 1 / -1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--opq-accent, rgba(100, 160, 255, 0.35)), transparent);
+    align-self: center;
+    margin: 0 8px;
+}
+
+/* Hide separator when there are no priority operations (separator is the sole child) */
+.opq-priority-separator:only-child {
+    display: none;
+}
+
 .opq-footer {
     margin-top: 8px;
     color: var(--opq-muted);
