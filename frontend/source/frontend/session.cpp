@@ -749,7 +749,7 @@ void Session::onOpenSession(bool success, std::string const& info)
             );
         }
 
-        impl_->frontendSessionManager.value()->focus();
+        impl_->frontendSessionManager.value()->focusFirst();
         initializeLayout();
     }
 }
@@ -809,7 +809,7 @@ void Session::onConnectionLoss()
     }
 
     impl_->frontendSessionManager.value()->connectionLossMode(true);
-    impl_->frontendSessionManager.value()->iterateAllChannels(
+    impl_->frontendSessionManager.value()->forEachChannel(
         [this](Ids::ChannelId const&, TerminalChannel& channel) -> bool
         {
             const auto content = channel.getAllTextContent();
@@ -817,7 +817,7 @@ void Session::onConnectionLoss()
             return true;
         }
     );
-    impl_->frontendSessionManager.value()->writeBroadcast(
+    impl_->frontendSessionManager.value()->broadcast(
         language->get("sessionFrontend", "connectionLostTerminalMessage")
     );
 }
@@ -917,7 +917,7 @@ void Session::visible(bool value)
     impl_->isVisible = value;
     Nui::globalEventContext.executeActiveEventsImmediately();
     if (value)
-        impl_->frontendSessionManager.value()->focus();
+        impl_->frontendSessionManager.value()->focusFirst();
 }
 
 auto Session::makeOperationQueueElement() -> Nui::ElementRenderer

@@ -43,6 +43,7 @@ target_sources(
         settings/log_options.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
+        terminal/terminal_channel.cpp
         terminal/frontend_session_manager.cpp
         terminal/executing_engine.cpp
         terminal/file_engine.cpp
