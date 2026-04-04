@@ -191,7 +191,8 @@ void FileEngine::addDownload(
     NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     Log::info(
@@ -203,7 +204,8 @@ void FileEngine::addDownload(
             localPath,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
-            insertRefresh](auto const& channelId, std::string const& info)
+            insertRefresh,
+            mode](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
@@ -241,7 +243,8 @@ void FileEngine::addDownload(
                 localPath.path.generic_string(),
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
-                insertRefresh
+                insertRefresh,
+                static_cast<int>(mode)
             );
         }
     );
@@ -252,7 +255,8 @@ void FileEngine::addUpload(
     NuiFileExplorer::Item const& localPath,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     Log::info("Requesting to add upload: {} -> {}", localPath.path.generic_string(), remotePath.path.generic_string());
@@ -262,7 +266,8 @@ void FileEngine::addUpload(
             localPath,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
-            insertRefresh](auto const& channelId, std::string const& info)
+            insertRefresh,
+            mode](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
@@ -300,7 +305,8 @@ void FileEngine::addUpload(
                 remotePath.path.generic_string(),
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
-                insertRefresh
+                insertRefresh,
+                static_cast<int>(mode)
             );
         }
     );

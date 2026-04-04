@@ -104,6 +104,46 @@ namespace
             )
         );
     }
+
+    DownloadOperation::DownloadOperationOptions resolveDownloadOptions(
+        Persistence::DownloadOptions const& opts,
+        std::chrono::seconds futureTimeout
+    )
+    {
+        const auto def = DownloadOperation::DownloadOperationOptions{};
+        return {
+            .tempFileSuffix = opts.tempFileSuffix.value_or(def.tempFileSuffix),
+            .mayOverwrite = opts.mayOverwrite.value_or(def.mayOverwrite),
+            .reserveSpace = opts.reserveSpace.value_or(def.reserveSpace),
+            .tryContinue = opts.tryContinue.value_or(def.tryContinue),
+            .inheritPermissions = opts.inheritPermissions.value_or(def.inheritPermissions),
+            .doCleanup = opts.doCleanup.value_or(def.doCleanup),
+            .filePermissions = opts.customFilePermissions ? opts.customFilePermissions : def.filePermissions,
+            .directoryPermissions =
+                opts.customDirectoryPermissions ? opts.customDirectoryPermissions : def.directoryPermissions,
+            .futureTimeout = futureTimeout,
+            .symlinkHandling = opts.symlinkHandling.value_or(def.symlinkHandling),
+        };
+    }
+
+    UploadOperation::UploadOperationOptions resolveUploadOptions(
+        Persistence::UploadOptions const& opts,
+        std::chrono::seconds futureTimeout
+    )
+    {
+        const auto def = UploadOperation::UploadOperationOptions{};
+        return {
+            .tempFileSuffix = opts.tempFileSuffix.value_or(def.tempFileSuffix),
+            .mayOverwrite = opts.mayOverwrite.value_or(def.mayOverwrite),
+            .tryContinue = opts.tryContinue.value_or(def.tryContinue),
+            .inheritPermissions = opts.inheritPermissions.value_or(def.inheritPermissions),
+            .filePermissions = opts.customFilePermissions ? opts.customFilePermissions : def.filePermissions,
+            .directoryPermissions =
+                opts.customDirectoryPermissions ? opts.customDirectoryPermissions : def.directoryPermissions,
+            .futureTimeout = futureTimeout,
+            .symlinkHandling = opts.symlinkHandling.value_or(def.symlinkHandling),
+        };
+    }
 }
 
 OperationQueue::OperationQueue(
@@ -121,6 +161,74 @@ OperationQueue::OperationQueue(
     , parallelism_{parallelism}
 {}
 
+std::string OperationQueue::rpcName(std::string_view event) const
+{
+    return fmt::format("OperationQueue::{}::{}", sessionId_.value(), event);
+}
+
+auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::OperationId operationId)
+    -> std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>
+{
+    return [weak = weak_from_this(), name = rpcName(eventName), operationId](
+               std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->hub_->callRemote(
+            name,
+            SharedData::ScanProgress{
+                .operationId = operationId,
+                .totalBytes = totalBytes,
+                .currentIndex = currentIndex,
+                .totalScanned = totalScanned,
+            }
+        );
+    };
+}
+
+auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId)
+    -> std::function<void(
+        std::filesystem::path const&,
+        std::uint64_t,
+        std::uint64_t,
+        std::uint64_t,
+        std::uint64_t,
+        std::uint64_t,
+        std::uint64_t,
+        std::make_signed_t<std::size_t>
+    )>
+{
+    return [weak = weak_from_this(), name = rpcName(eventName), operationId](
+               std::filesystem::path const& currentFile,
+               std::uint64_t fileCurrentIndex,
+               std::uint64_t fileCount,
+               std::uint64_t currentFileBytes,
+               std::uint64_t currentFileTotalBytes,
+               std::uint64_t bytesCurrent,
+               std::uint64_t bytesTotal,
+               std::make_signed_t<std::size_t> bytesPerSecond)
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->hub_->callRemote(
+            name,
+            SharedData::BulkProgress{
+                .operationId = operationId,
+                .currentFile = currentFile.string(),
+                .fileCurrentIndex = fileCurrentIndex,
+                .fileCount = fileCount,
+                .currentFileBytes = currentFileBytes,
+                .currentFileTotalBytes = currentFileTotalBytes,
+                .bytesCurrent = bytesCurrent,
+                .bytesTotal = bytesTotal,
+                .bytesPerSecond = bytesPerSecond,
+            }
+        );
+    };
+}
+
 void OperationQueue::cancelAll()
 {
     within_strand_do(
@@ -135,6 +243,7 @@ void OperationQueue::cancelAll()
         }
     );
 }
+
 void OperationQueue::cancel(Ids::OperationId id)
 {
     within_strand_do(
@@ -144,16 +253,18 @@ void OperationQueue::cancel(Ids::OperationId id)
             if (!self)
                 return;
 
-            std::erase_if(
-                self->operations_,
-                [id](auto& op)
-                {
-                    bool isMatch = op.first == id;
-                    if (isMatch)
-                        op.second->cancel(true);
-                    return isMatch;
-                }
-            );
+            auto cancelPredicate = [id](auto& op)
+            {
+                bool isMatch = op.first == id;
+                if (isMatch)
+                    op.second->cancel(true);
+                return isMatch;
+            };
+
+            const auto erasedFromRegular =
+                std::erase_if(self->operations_, cancelPredicate);
+            if (erasedFromRegular == 0)
+                std::erase_if(self->priorityOperations_, cancelPredicate);
         }
     );
 }
@@ -179,7 +290,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             // );
 
             self->hub_->callRemote(
-                fmt::format("OperationQueue::{}::onOperationCompleted", self->sessionId_.value()),
+                self->rpcName("onOperationCompleted"),
                 std::move(operationCompleted)
             );
         }
@@ -205,26 +316,23 @@ void OperationQueue::deepPause(bool pause)
     }
 }
 
-bool OperationQueue::work()
+bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue)
 {
     // Assumed in strand
 
-    if (paused_)
-        return false;
+    const auto updateCount = std::min(queue.size(), static_cast<std::size_t>(parallelism_));
 
-    const auto updateCount = std::min(operations_.size(), static_cast<std::size_t>(parallelism_));
-
-    bool moreWork = false;
     if (updateCount == 0)
         return false;
 
+    bool moreWork = false;
     bool previousWasBarrier = false;
     for (std::size_t i = 0; i < updateCount; ++i)
     {
         if (previousWasBarrier)
             break;
 
-        auto& [id, operation] = operations_[i];
+        auto& [id, operation] = queue[i];
         previousWasBarrier = operation->isBarrier();
 
         const auto workResult = operation->work();
@@ -233,15 +341,14 @@ bool OperationQueue::work()
             completeOperation(
                 makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, workResult.error())
             );
-            operations_.erase(operations_.begin() + static_cast<std::ptrdiff_t>(i));
-            // Exit loop and avoid any offset math. Just do another update cycle.
+            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(i));
             return true;
         }
 
         const auto workStatus = workResult.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            auto* next = (i + 1 < operations_.size()) ? operations_[i + 1].second.get() : nullptr;
+            auto* next = (i + 1 < queue.size()) ? queue[i + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {
                 if (next && next->type() == SharedData::OperationType::BulkDownload)
@@ -269,8 +376,7 @@ bool OperationQueue::work()
             }
 
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
-            operations_.pop_front();
-            // Exit loop and avoid any offset math. Just do another update cycle.
+            queue.pop_front();
             return true;
         }
         else if (workStatus == Operation::WorkStatus::MoreWork)
@@ -282,10 +388,26 @@ bool OperationQueue::work()
     return moreWork;
 }
 
+bool OperationQueue::work()
+{
+    // Assumed in strand
+
+    // Priority queue always runs, regardless of paused state.
+    // Regular queue is effectively paused while priority items are being processed.
+    if (!priorityOperations_.empty())
+        return workQueue(priorityOperations_);
+
+    if (paused_)
+        return false;
+
+    return workQueue(operations_);
+}
+
 bool OperationQueue::paused() const
 {
     return paused_;
 }
+
 void OperationQueue::paused(bool pause)
 {
     within_strand_do(
@@ -308,7 +430,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     std::filesystem::path const& remotePath,
     bool allowOverwrite,
     bool isBigFile,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     // Assumed in strand
@@ -328,66 +451,51 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     }
 
     auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{});
-    const auto defaultOptions = DownloadOperation::DownloadOperationOptions{};
-
     if (allowOverwrite)
         transferOptions.mayOverwrite = allowOverwrite;
 
+    const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
+
     if (result->isRegularFile() || result->isSymlink())
     {
-        auto operation = std::make_unique<DownloadOperation>(
-            sftp,
-            DownloadOperation::DownloadOperationOptions{
-                .progressCallback =
-                    [weak = weak_from_this(), operationId](auto min, auto max, auto current, auto bytesPerSecond)
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
+        auto opts = resolveDownloadOptions(transferOptions, resolvedTimeout);
+        opts.remotePath = remotePath;
+        opts.localPath = localPath;
+        opts.bigFileOptimized = isBigFile;
+        opts.entry = result.value();
+        opts.progressCallback =
+            [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
+                auto min, auto max, auto current, auto bytesPerSecond)
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+            self->hub_->callRemote(
+                name,
+                SharedData::TransferProgress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                }
+            );
+        };
 
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onDownloadProgress", self->sessionId_.value()),
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
-                },
-                .remotePath = remotePath,
-                .localPath = localPath,
-                .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                .reserveSpace = transferOptions.reserveSpace.value_or(defaultOptions.reserveSpace),
-                .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
-                .bigFileOptimized = isBigFile,
-                .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                         : defaultOptions.filePermissions,
-                .directoryPermissions = transferOptions.customDirectoryPermissions
-                    ? transferOptions.customDirectoryPermissions
-                    : defaultOptions.directoryPermissions,
-                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
-                .entry = result.value(),
-            }
-        );
-
-        operations_.emplace_back(operationId, std::move(operation));
+        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        targetQueue.emplace_back(operationId, std::make_unique<DownloadOperation>(sftp, std::move(opts)));
 
         Log::info("Calling OperationQueue::{}::onOperationAdded", sessionId_.value());
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
                 .type = SharedData::OperationType::Download,
+                .mode = mode,
                 .insertRefresh = insertRefresh,
                 .totalBytes = result->size,
                 .localPath = localPath,
-                .remotePath = remotePath
+                .remotePath = remotePath,
             }
         );
 
@@ -398,103 +506,43 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         auto scan = std::make_unique<ScanOperation>(
             sftp,
             ScanOperation::ScanOperationOptions{
-                .progressCallback =
-                    [weak = weak_from_this(), operationId](auto totalBytes, auto currentIndex, auto totalScanned)
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onScanProgress", self->sessionId_.value()),
-                        SharedData::ScanProgress{
-                            .operationId = operationId,
-                            .totalBytes = totalBytes,
-                            .currentIndex = currentIndex,
-                            .totalScanned = totalScanned,
-                        }
-                    );
-                },
+                .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                 .remotePath = remotePath,
                 .futureTimeout = std::chrono::seconds{5},
             }
         );
 
-        // Cant use same ID for scan and bulk download
         const auto bulkId = Ids::generateOperationId();
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
-                .overallProgressCallback =
-                    [weak = weak_from_this(), bulkId](
-                        auto const& currentFile,
-                        std::uint64_t fileCurrentIndex,
-                        std::uint64_t fileCount,
-                        std::uint64_t currentFileBytes,
-                        std::uint64_t currentFileTotalBytes,
-                        std::uint64_t bytesCurrent,
-                        std::uint64_t bytesTotal,
-                        std::make_signed_t<std::size_t> bytesPerSecond
-                    )
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onBulkDownloadProgress", self->sessionId_.value()),
-                        SharedData::BulkProgress{
-                            .operationId = bulkId,
-                            .currentFile = currentFile.string(),
-                            .fileCurrentIndex = fileCurrentIndex,
-                            .fileCount = fileCount,
-                            .currentFileBytes = currentFileBytes,
-                            .currentFileTotalBytes = currentFileTotalBytes,
-                            .bytesCurrent = bytesCurrent,
-                            .bytesTotal = bytesTotal,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
-                },
+                .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkId),
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions =
-                    DownloadOperation::DownloadOperationOptions{
-                        .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                        .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                        .reserveSpace = transferOptions.reserveSpace.value_or(defaultOptions.reserveSpace),
-                        .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                        .inheritPermissions =
-                            transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                        .doCleanup = transferOptions.doCleanup.value_or(defaultOptions.doCleanup),
-                        .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                                 : defaultOptions.filePermissions,
-                        .directoryPermissions = transferOptions.customDirectoryPermissions
-                            ? transferOptions.customDirectoryPermissions
-                            : defaultOptions.directoryPermissions,
-                        .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                        .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
-                    },
+                .individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout),
                 .failFast = transferOptions.failFast.value_or(false),
             }
         );
 
-        operations_.emplace_back(operationId, std::move(scan));
-        operations_.emplace_back(bulkId, std::move(bulk));
+        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        targetQueue.emplace_back(operationId, std::move(scan));
+        targetQueue.emplace_back(bulkId, std::move(bulk));
 
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
                 .type = SharedData::OperationType::Scan,
+                .mode = mode,
                 .remotePath = remotePath,
             }
         );
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = bulkId,
                 .type = SharedData::OperationType::BulkDownload,
+                .mode = mode,
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
@@ -517,7 +565,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     std::filesystem::path const& remotePath,
     bool allowOverwrite,
     bool isBigFile,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     // Assumed in strand
@@ -532,61 +581,48 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
 
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
-    const auto defaultOptions = UploadOperation::UploadOperationOptions{};
-
     if (allowOverwrite)
         transferOptions.mayOverwrite = allowOverwrite;
 
+    const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
+
     if (stat.type() == std::filesystem::file_type::regular)
     {
-        auto operation = std::make_unique<UploadOperation>(
-            sftp,
-            UploadOperation::UploadOperationOptions{
-                .progressCallback =
-                    [weak = weak_from_this(), operationId](auto min, auto max, auto current, auto bytesPerSecond)
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
+        auto opts = resolveUploadOptions(transferOptions, resolvedTimeout);
+        opts.remotePath = remotePath;
+        opts.localPath = localPath;
+        opts.bigFileOptimized = isBigFile;
+        opts.progressCallback =
+            [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
+                auto min, auto max, auto current, auto bytesPerSecond)
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+            self->hub_->callRemote(
+                name,
+                SharedData::TransferProgress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                }
+            );
+        };
 
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onUploadProgress", self->sessionId_.value()),
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond
-                        }
-                    );
-                },
-                .remotePath = remotePath,
-                .localPath = localPath,
-                .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                .inheritPermissions = transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                .bigFileOptimized = isBigFile,
-                .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                         : defaultOptions.filePermissions,
-                .directoryPermissions = transferOptions.customDirectoryPermissions
-                    ? transferOptions.customDirectoryPermissions
-                    : defaultOptions.directoryPermissions,
-                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
-            }
-        );
-
-        operations_.emplace_back(operationId, std::move(operation));
+        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        targetQueue.emplace_back(operationId, std::make_unique<UploadOperation>(sftp, std::move(opts)));
 
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
                 .type = SharedData::OperationType::Upload,
+                .mode = mode,
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
-                .remotePath = remotePath
+                .remotePath = remotePath,
             }
         );
 
@@ -595,99 +631,41 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     else if (stat.type() == std::filesystem::file_type::directory)
     {
         auto scan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
-            .progressCallback =
-                [weak = weak_from_this(), operationId](auto totalBytes, auto currentIndex, auto totalScanned)
-            {
-                auto self = weak.lock();
-                if (!self)
-                    return;
-
-                self->hub_->callRemote(
-                    fmt::format("OperationQueue::{}::onLocalScanProgress", self->sessionId_.value()),
-                    SharedData::ScanProgress{
-                        .operationId = operationId,
-                        .totalBytes = totalBytes,
-                        .currentIndex = currentIndex,
-                        .totalScanned = totalScanned,
-                    }
-                );
-            },
+            .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
             .localPath = localPath,
         });
 
-        // Cant use same ID for scan and bulk upload
         const auto bulkId = Ids::generateOperationId();
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp,
             BulkUploadOperation::BulkUploadOperationOptions{
-                .overallProgressCallback =
-                    [weak = weak_from_this(), bulkId](
-                        auto const& currentFile,
-                        std::uint64_t fileCurrentIndex,
-                        std::uint64_t fileCount,
-                        std::uint64_t currentFileBytes,
-                        std::uint64_t currentFileTotalBytes,
-                        std::uint64_t bytesCurrent,
-                        std::uint64_t bytesTotal,
-                        std::make_signed_t<std::size_t> bytesPerSecond
-                    )
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onBulkUploadProgress", self->sessionId_.value()),
-                        SharedData::BulkProgress{
-                            .operationId = bulkId,
-                            .currentFile = currentFile.string(),
-                            .fileCurrentIndex = fileCurrentIndex,
-                            .fileCount = fileCount,
-                            .currentFileBytes = currentFileBytes,
-                            .currentFileTotalBytes = currentFileTotalBytes,
-                            .bytesCurrent = bytesCurrent,
-                            .bytesTotal = bytesTotal,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
-                },
+                .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkId),
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions =
-                    UploadOperation::UploadOperationOptions{
-                        .tempFileSuffix = transferOptions.tempFileSuffix.value_or(defaultOptions.tempFileSuffix),
-                        .mayOverwrite = transferOptions.mayOverwrite.value_or(defaultOptions.mayOverwrite),
-                        .tryContinue = transferOptions.tryContinue.value_or(defaultOptions.tryContinue),
-                        .inheritPermissions =
-                            transferOptions.inheritPermissions.value_or(defaultOptions.inheritPermissions),
-                        .filePermissions = transferOptions.customFilePermissions ? transferOptions.customFilePermissions
-                                                                                 : defaultOptions.filePermissions,
-                        .directoryPermissions = transferOptions.customDirectoryPermissions
-                            ? transferOptions.customDirectoryPermissions
-                            : defaultOptions.directoryPermissions,
-                        .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-                        .symlinkHandling = transferOptions.symlinkHandling.value_or(defaultOptions.symlinkHandling),
-                    },
+                .individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout),
                 .failFast = transferOptions.failFast.value_or(false),
             }
         );
 
-        operations_.emplace_back(operationId, std::move(scan));
-        operations_.emplace_back(bulkId, std::move(bulk));
+        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        targetQueue.emplace_back(operationId, std::move(scan));
+        targetQueue.emplace_back(bulkId, std::move(bulk));
 
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
                 .type = SharedData::OperationType::LocalScan,
+                .mode = mode,
                 .localPath = localPath,
             }
         );
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::{}", sessionId_.value(), "onOperationAdded"),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = bulkId,
                 .type = SharedData::OperationType::BulkUpload,
+                .mode = mode,
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
@@ -708,10 +686,13 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     Ids::OperationId operationId,
     std::filesystem::path const& remotePath,
     bool recursive,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     // Assumed in strand
+    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+
     if (recursive)
     {
         const auto scanId = Ids::generateOperationId();
@@ -719,35 +700,20 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         auto scan = std::make_unique<ScanOperation>(
             sftp,
             ScanOperation::ScanOperationOptions{
-                .progressCallback =
-                    [weak = weak_from_this(), scanId](auto totalBytes, auto currentIndex, auto totalScanned)
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-
-                    self->hub_->callRemote(
-                        fmt::format("OperationQueue::{}::onScanProgress", self->sessionId_.value()),
-                        SharedData::ScanProgress{
-                            .operationId = scanId,
-                            .totalBytes = totalBytes,
-                            .currentIndex = currentIndex,
-                            .totalScanned = totalScanned,
-                        }
-                    );
-                },
+                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
                 .remotePath = remotePath,
                 .futureTimeout = std::chrono::seconds{5},
             }
         );
 
-        operations_.emplace_back(scanId, std::move(scan));
+        targetQueue.emplace_back(scanId, std::move(scan));
 
         hub_->callRemote(
-            fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+            rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = scanId,
                 .type = SharedData::OperationType::Scan,
+                .mode = mode,
                 .remotePath = remotePath,
             }
         );
@@ -757,15 +723,14 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         sftp,
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress =
-                [weak = weak_from_this(),
-                    operationId](auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles)
+                [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
+                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles)
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-
                 self->hub_->callRemote(
-                    fmt::format("OperationQueue::{}::onDeleteProgress", self->sessionId_.value()),
+                    name,
                     SharedData::BulkDeleteProgress{
                         .operationId = operationId,
                         .currentFile = path,
@@ -776,19 +741,20 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
             },
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-            .recursive = recursive
+            .recursive = recursive,
         }
     );
 
-    operations_.emplace_back(operationId, std::move(operation));
+    targetQueue.emplace_back(operationId, std::move(operation));
 
     hub_->callRemote(
-        fmt::format("OperationQueue::{}::onOperationAdded", sessionId_.value()),
+        rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
             .type = SharedData::OperationType::Delete,
+            .mode = mode,
             .insertRefresh = insertRefresh,
-            .remotePath = remotePath
+            .remotePath = remotePath,
         }
     );
 
@@ -797,7 +763,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 
 void OperationQueue::registerRpc()
 {
-    on(fmt::format("OperationQueue::{}::isPaused", sessionId_.value()))
+    on(rpcName("isPaused"))
         .perform(
             [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
             {
@@ -813,7 +779,7 @@ void OperationQueue::registerRpc()
             }
         );
 
-    on(fmt::format("OperationQueue::{}::cancel", sessionId_.value()))
+    on(rpcName("cancel"))
         .perform(
             [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, Ids::OperationId operationId)
             {
@@ -826,7 +792,7 @@ void OperationQueue::registerRpc()
             }
         );
 
-    on(fmt::format("OperationQueue::{}::cancelAll", sessionId_.value()))
+    on(rpcName("cancelAll"))
         .perform(
             [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
             {

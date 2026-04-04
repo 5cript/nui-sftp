@@ -58,14 +58,16 @@ class OperationQueue
         NuiFileExplorer::Item const& localItem,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueUpload(
         NuiFileExplorer::Item const& remoteItem,
         NuiFileExplorer::Item const& localItem,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
-        bool insertRefresh
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueRename(
         std::filesystem::path const& oldPath,

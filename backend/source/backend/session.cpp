@@ -2,6 +2,7 @@
 
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
+#include <shared_data/file_operations/operation_mode.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -625,7 +626,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                 std::string const& localPath,
                 bool allowOverwrite,
                 bool bigFile,
-                bool insertRefresh
+                bool insertRefresh,
+                int mode
             )
             {
                 auto self = weak.lock();
@@ -640,7 +642,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                         remotePath,
                         allowOverwrite,
                         bigFile,
-                        insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        insertRefresh,
+                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -653,7 +656,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                             remotePath,
                             allowOverwrite,
                             bigFile,
-                            insertRefresh
+                            insertRefresh,
+                            static_cast<SharedData::OperationMode>(mode)
                         );
 
                         if (!result.has_value())
@@ -695,7 +699,8 @@ void Session::registerRpcSftpAddUploadOperation()
                 std::string const& remotePath,
                 bool allowOverwrite,
                 bool bigFile,
-                bool insertRefresh
+                bool insertRefresh,
+                int mode
             )
             {
                 auto self = weak.lock();
@@ -710,7 +715,8 @@ void Session::registerRpcSftpAddUploadOperation()
                         remotePath,
                         allowOverwrite,
                         bigFile,
-                        insertRefresh](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        insertRefresh,
+                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -723,7 +729,8 @@ void Session::registerRpcSftpAddUploadOperation()
                             remotePath,
                             allowOverwrite,
                             bigFile,
-                            insertRefresh
+                            insertRefresh,
+                            static_cast<SharedData::OperationMode>(mode)
                         );
 
                         if (!result.has_value())

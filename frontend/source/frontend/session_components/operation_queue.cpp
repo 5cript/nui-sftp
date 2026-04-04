@@ -43,8 +43,25 @@ struct OperationQueue::Implementation
     Nui::Observed<std::string> pausedText{language->get("operationQueue", "continue")};
     Nui::Observed<bool> paused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
+    ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
+
+    DisplayedOperation* findOperation(Ids::OperationId const& id)
+    {
+        auto* op = priorityOperations.at(id);
+        if (op)
+            return op;
+        return operations.at(id);
+    }
+
+    void eraseOperation(Ids::OperationId const& id)
+    {
+        if (priorityOperations.at(id))
+            priorityOperations.erase(id);
+        else
+            operations.erase(id);
+    }
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -129,24 +146,32 @@ OperationQueue::OperationQueue(
         1000,
         [this]()
         {
-            if (impl_->autoClean->value() && !impl_->operations.empty())
+            if (impl_->autoClean->value() && (!impl_->operations.empty() || !impl_->priorityOperations.empty()))
             {
                 auto now = std::chrono::steady_clock::now();
                 bool anyRemoved = false;
-                for (auto* front = impl_->operations.front(); front != nullptr; front = impl_->operations.front())
+
+                auto cleanFront = [&](auto& queue)
                 {
-                    if (front->isCompletedState())
+                    for (auto* front = queue.front(); front != nullptr; front = queue.front())
                     {
-                        auto duration = now - front->completionTime();
-                        if (duration >= autoRemoveTime)
+                        if (front->isCompletedState())
                         {
-                            impl_->operations.pop_front();
-                            anyRemoved = true;
-                            continue;
+                            auto duration = now - front->completionTime();
+                            if (duration >= autoRemoveTime)
+                            {
+                                queue.pop_front();
+                                anyRemoved = true;
+                                continue;
+                            }
                         }
+                        break;
                     }
-                    break;
-                }
+                };
+
+                cleanFront(impl_->priorityOperations);
+                cleanFront(impl_->operations);
+
                 if (anyRemoved)
                     Nui::globalEventContext.executeActiveEventsImmediately();
             }
@@ -171,7 +196,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
     if (operation.isCompletedState())
     {
         const auto id = operation.operationId();
-        impl_->operations.erase(id);
+        impl_->eraseOperation(id);
         Nui::globalEventContext.executeActiveEventsImmediately();
         return;
     }
@@ -189,7 +214,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
                     );
                 }
 
-                auto* operation = impl_->operations.at(operationId);
+                auto* operation = impl_->findOperation(operationId);
                 if (operation)
                     operation->state(SharedData::OperationState::Canceled);
                 Nui::globalEventContext.executeActiveEventsImmediately();
@@ -523,7 +548,14 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     Log::info("Inserting operation id: {} into operation queue", added.operationId.value());
     try
     {
-        impl_->operations.insert(added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)});
+        if (added.mode == SharedData::OperationMode::PriorityQueued)
+            impl_->priorityOperations.insert(
+                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
+            );
+        else
+            impl_->operations.insert(
+                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
+            );
     }
     catch (std::exception const& e)
     {
@@ -537,7 +569,7 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
 {
     // Log::debug("Received delete progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received delete progress for unknown operation id: {}", progress.operationId.value());
@@ -561,7 +593,7 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
 
 void OperationQueue::onDownloadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received download progress for unknown operation id: {}", progress.operationId.value());
@@ -596,7 +628,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
     //     progress.totalScanned
     // );
 
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received scan progress for unknown operation id: {}", progress.operationId.value());
@@ -638,7 +670,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
 {
     // Log::debug("Received bulk download progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received bulk download progress for unknown operation id: {}", progress.operationId.value());
@@ -666,7 +698,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
 
 void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received upload progress for unknown operation id: {}", progress.operationId.value());
@@ -694,7 +726,7 @@ void OperationQueue::onBulkUploadProgress(SharedData::BulkProgress const& progre
 {
     // Log::debug("Received bulk upload progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->operations.at(progress.operationId);
+    auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
     {
         Log::error("Received bulk upload progress for unknown operation id: {}", progress.operationId.value());
@@ -735,7 +767,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     }
 
     Log::info("Received operation completed for operation id: {}", completed.operationId.value());
-    auto* operation = impl_->operations.at(completed.operationId);
+    auto* operation = impl_->findOperation(completed.operationId);
     if (!operation)
     {
         Log::error("Received operation completed for unknown operation id: {}", completed.operationId.value());
@@ -886,7 +918,10 @@ Nui::ElementRenderer OperationQueue::operator()()
     {
         return fmt::format(
             fmt::runtime(language->get("operationQueue", "totalOperations")),
-            static_cast<int>(impl_->operations.observedValues().value().size())
+            static_cast<int>(
+                impl_->operations.observedValues().value().size() +
+                impl_->priorityOperations.observedValues().value().size()
+            )
         );
     };
 
@@ -927,17 +962,29 @@ Nui::ElementRenderer OperationQueue::operator()()
             div{
                 class_ = "opq-summary"
             }(
-                observe(impl_->operations.observedValues()).generate(makeSummaryText)
+                observe(impl_->operations.observedValues(), impl_->priorityOperations.observedValues())
+                    .generate(makeSummaryText)
             )
         ),
         // Main content
         div{
             class_ = "opq-list"
         }(
-            impl_->operations.observedValues().map([](auto, auto const& element)
-            {
-                return (*element)();
-            })
+            div{class_ = "opq-priority-list"}(
+                // TODO: Make after element depend on list length > 0
+                Nui::range(impl_->priorityOperations.observedValues())
+                    .after(div{class_ = "opq-priority-separator"}()),
+                [](auto, auto const& element) -> Nui::ElementRenderer
+                {
+                    return (*element)();
+                }
+            ),
+            div{class_ = "opq-regular-list"}(
+                impl_->operations.observedValues().map([](auto, auto const& element)
+                {
+                    return (*element)();
+                })
+            )
         ),
         // Footer
         div{
@@ -963,7 +1010,8 @@ void OperationQueue::enqueueDownload(
     NuiFileExplorer::Item const& localItem,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     if (!impl_->fileEngine)
@@ -976,14 +1024,15 @@ void OperationQueue::enqueueDownload(
     Log::info(
         "Frontend Operation Queue download: {} -> {}", remoteItem.path.generic_string(), localItem.path.generic_string()
     );
-    impl_->fileEngine->addDownload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh);
+    impl_->fileEngine->addDownload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, mode);
 }
 void OperationQueue::enqueueUpload(
     NuiFileExplorer::Item const& remoteItem,
     NuiFileExplorer::Item const& localItem,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
-    bool insertRefresh
+    bool insertRefresh,
+    SharedData::OperationMode mode
 )
 {
     if (!impl_->fileEngine)
@@ -996,7 +1045,7 @@ void OperationQueue::enqueueUpload(
     Log::info(
         "Frontend Operation Queue upload: {} -> {}", localItem.path.generic_string(), remoteItem.path.generic_string()
     );
-    impl_->fileEngine->addUpload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh);
+    impl_->fileEngine->addUpload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, mode);
 }
 void OperationQueue::enqueueRename(
     std::filesystem::path const&,
