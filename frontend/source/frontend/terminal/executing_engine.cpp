@@ -236,3 +236,28 @@ void ExecutingTerminalEngine::setStderrHandler(std::function<void(std::string co
 {
     impl_->stderrHandler = std::move(handler);
 }
+
+// TODO: Implement once multi-channel support for local processes is added.
+void ExecutingTerminalEngine::createChannel(
+    std::function<void(std::string const&)>,
+    std::function<void(std::string const&)>,
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
+    std::function<void(Ids::ChannelId const&)>
+)
+{
+    onCreated(std::nullopt, "Multi-channel not yet implemented for local processes");
+}
+void ExecutingTerminalEngine::createSftpChannel(
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+)
+{
+    onCreated(std::nullopt, "SFTP not supported by local process engine");
+}
+void ExecutingTerminalEngine::closeChannel(Ids::ChannelId const&, std::function<void()> onClose)
+{
+    onClose();
+}
+ChannelInterface* ExecutingTerminalEngine::channel(Ids::ChannelId const&)
+{
+    return nullptr;
+}

@@ -12,7 +12,7 @@ class TerminalChannel
 {
   public:
     TerminalChannel(
-        MultiChannelTerminalEngine* engine,
+        TerminalEngine* engine,
         Ids::ChannelId channelId,
         std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
     );
@@ -46,7 +46,6 @@ class FrontendSessionManager
   public:
     FrontendSessionManager(
         std::unique_ptr<TerminalEngine> engine,
-        bool isMultiChannel,
         std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FrontendSessionManager);

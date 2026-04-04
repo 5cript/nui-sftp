@@ -9,7 +9,7 @@
 #include <memory>
 #include <string>
 
-class ExecutingTerminalEngine : public SingleChannelTerminalEngine
+class ExecutingTerminalEngine : public TerminalEngine
 {
   public:
     struct Settings
@@ -25,16 +25,30 @@ class ExecutingTerminalEngine : public SingleChannelTerminalEngine
 
     void open(std::function<void(bool, std::string const&)> onOpen) override;
     void dispose(std::function<void()> onDisposeComplete) override;
-    void write(std::string const& data) override;
-    void resize(int cols, int rows) override;
     std::string id() const;
     std::string engineName() const override
     {
         return "local";
     }
 
-    void setStdoutHandler(std::function<void(std::string const&)> handler) override;
-    void setStderrHandler(std::function<void(std::string const&)> handler) override;
+    // TODO: Map these onto createChannel/closeChannel once multi-channel support is implemented for local processes.
+    void write(std::string const& data);
+    void resize(int cols, int rows);
+    void setStdoutHandler(std::function<void(std::string const&)> handler);
+    void setStderrHandler(std::function<void(std::string const&)> handler);
+
+    // TerminalEngine channel interface — not yet implemented for local processes.
+    void createChannel(
+        std::function<void(std::string const&)> handler,
+        std::function<void(std::string const&)> errorHandler,
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
+        std::function<void(Ids::ChannelId const&)> onChannelLoss
+    ) override;
+    void createSftpChannel(
+        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
+    ) override;
+    void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) override;
+    ChannelInterface* channel(Ids::ChannelId const& channelId) override;
 
   private:
     void updatePtyProcs();
