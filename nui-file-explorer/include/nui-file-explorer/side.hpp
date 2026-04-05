@@ -87,6 +87,11 @@ namespace NuiFileExplorer
         std::vector<std::filesystem::path> selectedPaths() const;
 
         /**
+         * @brief Closes the path suggestions.
+         */
+        void closePathSuggestions(bool otherSideToo = false) const;
+
+        /**
          * @brief Use this to close all menus and deselect all items.
          */
         void onUneventfulClick();

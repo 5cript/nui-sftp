@@ -313,11 +313,24 @@ namespace NuiFileExplorer
         impl_->selectionManager.onItemClicked(item, event);
     }
 
-    void Side::onUneventfulClick()
+    void Side::closePathSuggestions(bool otherSideToo) const
     {
         impl_->pathBoxSuggestions.clear();
-        if (!closeMenus())
+        if (otherSideToo && impl_->otherSide)
+            impl_->otherSide->closePathSuggestions(false);
+    }
+
+    void Side::onUneventfulClick()
+    {
+        closePathSuggestions(true);
+        const auto localCloseResult = closeMenus();
+        const auto otherCloseResult = impl_->otherSide ? impl_->otherSide->closeMenus() : false;
+        if (!localCloseResult && !otherCloseResult)
+        {
             impl_->selectionManager.deselectAll();
+            if (impl_->otherSide)
+                impl_->otherSide->impl_->selectionManager.deselectAll();
+        }
     }
 
     std::vector<Item> Side::selectedItems() const
@@ -333,12 +346,13 @@ namespace NuiFileExplorer
 
     bool Side::closeMenus()
     {
-        const bool wasOpen = impl_->contextMenuPopup.isOpen();
+        const bool wasAnyOpen = impl_->contextMenuPopup.isOpen() || impl_->newItemMenu.isOpen() ||
+            impl_->sortMenu.isOpen() || impl_->viewMenu.isOpen();
         impl_->newItemMenu.close();
         impl_->sortMenu.close();
         impl_->viewMenu.close();
         impl_->contextMenuPopup.close();
-        return wasOpen;
+        return wasAnyOpen;
     }
 
     void Side::onContextMenu(ItemWithInternals* item, Nui::val event)
