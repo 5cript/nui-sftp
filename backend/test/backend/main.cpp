@@ -1,6 +1,7 @@
-// Broken: needs complete rewrite:
-// #include "test_download_operation.hpp"
-// #include "test_upload_operation.hpp"
+#include "nui_env.hpp"
+
+#include "test_download_operation.hpp"
+#include "test_upload_operation.hpp"
 #include "test_file_tracking.hpp"
 
 #include <log/log.hpp>

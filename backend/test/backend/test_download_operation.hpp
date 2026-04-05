@@ -1,640 +1,437 @@
 #pragma once
 
 #include <backend/sftp/download_operation.hpp>
-#include <ssh/mocks/file_stream_mock.hpp>
-#include <utility/temporary_directory.hpp>
+#include "real_server_tests.hpp"
 
-#include <utility/awaiter.hpp>
+#include <nui/utility/scope_exit.hpp>
 
-#include <gtest/gtest.h>
-
-#include <queue>
+#include <fstream>
 #include <string>
-#include <memory>
-
-using namespace std::chrono_literals;
-using namespace std::string_literals;
-
-extern std::filesystem::path programDirectory;
 
 namespace Test
 {
-    class DownloadOperationTests : public ::testing::Test
+    class DownloadOperationTests : public RealServerTests
     {
-      protected:
+      public:
         void SetUp() override
         {
-            for (int i = 0; i != 10; ++i)
-                fakeFileContent_ += "This is a test file content.\n";
-
-            processingThread_.start(5ms);
+            RealServerTests::SetUp();
         }
 
-        void TearDown() override
+        std::string readLocalFile(std::filesystem::path const& path)
         {
-            processingThread_.stop();
-        }
-
-        std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> makeFileStreamMock()
-        {
-            auto mock = std::make_shared<::testing::NiceMock<SecureShell::Test::FileStreamMock>>();
-
-            ON_CALL(*mock, strand())
-                .WillByDefault(
-                    [this]() -> SecureShell::ProcessingStrand*
-                    {
-                        return strand_.get();
-                    }
-                );
-
-            return mock;
-        }
-
-        void giveMockDefaultStat(
-            std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> const& mock,
-            std::optional<std::size_t> size = std::nullopt
-        )
-        {
-            if (!size)
-                size = fakeFileContent_.size();
-
-            ON_CALL(*mock, stat())
-                .WillByDefault(
-                    [size = size.value()]()
-                        -> std::future<std::expected<SecureShell::FileInformation, SecureShell::SftpError>>
-                    {
-                        std::promise<std::expected<SecureShell::FileInformation, SecureShell::SftpError>> promise;
-                        promise.set_value(
-                            SecureShell::FileInformation{
-                                .size = size,
-                                .permissions = std::filesystem::perms::owner_all,
-                            }
-                        );
-                        return promise.get_future();
-                    }
-                );
-        }
-
-        void giveMockExpectedRead(std::shared_ptr<::testing::NiceMock<SecureShell::Test::FileStreamMock>> const& mock)
-        {
-            EXPECT_CALL(*mock, readSome(testing::_, testing::_))
-                .WillRepeatedly(
-                    [this](
-                        char const* buffer, std::size_t size
-                    ) -> std::future<std::expected<std::size_t, SecureShell::SftpError>>
-                    {
-                        readPromise_ = {};
-                        if (!readCycleQueue_.empty())
-                        {
-                            auto data = readCycleQueue_.front();
-                            std::memcpy(const_cast<char*>(buffer), data.data(), std::min(size, data.size()));
-                            readCycleQueue_.pop();
-                            readPromise_.set_value(data.size());
-                        }
-                        return readPromise_.get_future();
-                    }
-                );
-        }
-
-        void enqueueFakeReadCycle(std::optional<std::size_t> chunkSizeOpt = std::nullopt)
-        {
-            std::size_t chunkSize = chunkSizeOpt.value_or(fakeFileContent_.size());
-            readCycleQueue_.push(fakeFileContent_.substr(readOffset_, chunkSize));
-            readOffset_ += chunkSize;
-        }
-
-        std::string readFile(std::filesystem::path const& path)
-        {
-            std::ifstream file{path};
+            std::ifstream file{path, std::ios::binary};
             return std::string{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
         }
 
       protected:
-        std::string fakeFileContent_{};
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
-        SecureShell::ProcessingThread processingThread_{};
-        std::unique_ptr<SecureShell::ProcessingStrand> strand_{processingThread_.createStrand()};
-        std::promise<std::expected<std::size_t, SecureShell::SftpError>> readPromise_{};
-        std::size_t readOffset_{0};
-        std::queue<std::string> readCycleQueue_{};
-        bool onReadResult_{true};
+        // Isolated subdirectory per test run so downloaded files do not collide across tests.
+        Utility::TemporaryDirectory downloadDir_{programDirectory / "temp", true};
     };
+
+    TEST_F(DownloadOperationTests, CanCreateServer)
+    {
+        /*self test*/
+        CREATE_SERVER_AND_JOINER(sftpServer);
+    }
 
     TEST_F(DownloadOperationTests, CanCreateDownloadOperation)
     {
-        auto fileStream = makeFileStreamMock();
-        auto options = DownloadOperation::DownloadOperationOptions{};
-        DownloadOperation operation{fileStream, options};
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        DownloadOperation operation{*sftp, {}};
     }
 
-    TEST_F(DownloadOperationTests, DownloadPreparationFailsWithLocalPathEmpty)
+    TEST_F(DownloadOperationTests, DownloadOperationTypeIsDownload)
     {
-        auto fileStream = makeFileStreamMock();
-        auto options = DownloadOperation::DownloadOperationOptions{};
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().type, DownloadOperation::ErrorType::InvalidPath);
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        DownloadOperation operation{*sftp, {}};
+        EXPECT_EQ(operation.type(), SharedData::OperationType::Download);
     }
 
-    TEST_F(DownloadOperationTests, DownloadPreparationFailsWhenFileExistsAndMayNotBeOverwritten)
+    TEST_F(DownloadOperationTests, CanPrepareDownload)
     {
-        auto fileStream = makeFileStreamMock();
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .mayOverwrite = false,
-        };
-        std::ofstream file{options.localPath};
-        file.close();
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        DownloadOperation operation{fileStream, options};
+        const auto localPath = downloadDir_.path() / "file1.txt";
 
-        auto result = operation.prepare();
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().type, DownloadOperation::ErrorType::FileExists);
-    }
-
-    TEST_F(DownloadOperationTests, DownloadPreparationFailsWhenStreamIsExpired)
-    {
-        std::weak_ptr<SecureShell::IFileStream> fileWeak;
-        {
-            auto fileStream = makeFileStreamMock();
-            fileWeak = fileStream;
-        }
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileWeak, options};
-
-        auto result = operation.prepare();
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().type, DownloadOperation::ErrorType::FileStreamExpired);
-    }
-
-    TEST_F(DownloadOperationTests, DownloadPreparationFailsWhenStattingTheFileFails)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-
-        EXPECT_CALL(*fileStream, stat())
-            .WillOnce(
-                []() -> std::future<std::expected<FileInformation, SftpError>>
-                {
-                    std::promise<std::expected<FileInformation, SftpError>> promise;
-                    promise.set_value(
-                        std::unexpected(
-                            SftpError{
-                                .message = "Stat failed",
-                            }
-                        )
-                    );
-                    return promise.get_future();
-                }
-            );
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().type, DownloadOperation::ErrorType::FileStatFailed);
-    }
-
-    // TODO: Test continuation download
-
-    TEST_F(DownloadOperationTests, DownloadPreparationSucceedsWithEmptyRemoteFile)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-
-        EXPECT_CALL(*fileStream, stat())
-            .WillOnce(
-                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 0,
-                        }
-                    );
-                    return promise.get_future();
-                }
-            );
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-    }
-
-    TEST_F(DownloadOperationTests, DownloadPreparationSucceedsWithNonEmptyRemoteFile)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-
-        EXPECT_CALL(*fileStream, stat())
-            .WillOnce(
-                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 42,
-                        }
-                    );
-                    return promise.get_future();
-                }
-            );
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-    }
-
-    TEST_F(DownloadOperationTests, DownloadPreparationCreatesPartFile)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-
-        EXPECT_CALL(*fileStream, stat())
-            .WillOnce(
-                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 42,
-                        }
-                    );
-                    return promise.get_future();
-                }
-            );
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-        EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-    }
-
-    TEST_F(DownloadOperationTests, DestructorCleansUpIfOptionIsTrue)
-    {
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = true,
-        };
-
-        {
-            using namespace SecureShell;
-
-            auto fileStream = makeFileStreamMock();
-
-            EXPECT_CALL(*fileStream, stat())
-                .WillOnce(
-                    []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                    {
-                        std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                        promise.set_value(
-                            FileInformation{
-                                .size = 42,
-                            }
-                        );
-                        return promise.get_future();
-                    }
-                );
-
-            DownloadOperation operation{fileStream, options};
-
-            auto result = operation.prepare();
-            EXPECT_TRUE(result.has_value());
-            EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-        }
-
-        EXPECT_FALSE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-    }
-
-    TEST_F(DownloadOperationTests, DestructorDoesNotCleanUpIfOptionIsFalse)
-    {
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = false,
-        };
-
-        {
-            using namespace SecureShell;
-
-            auto fileStream = makeFileStreamMock();
-
-            EXPECT_CALL(*fileStream, stat())
-                .WillOnce(
-                    []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                    {
-                        std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                        promise.set_value(
-                            FileInformation{
-                                .size = 42,
-                            }
-                        );
-                        return promise.get_future();
-                    }
-                );
-
-            DownloadOperation operation{fileStream, options};
-
-            auto result = operation.prepare();
-            EXPECT_TRUE(result.has_value());
-            EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-        }
-
-        EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-    }
-
-    TEST_F(DownloadOperationTests, CancelDoesNotRemoveTheFileIfCleanIsFalse)
-    {
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = false,
-        };
-
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream);
-
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-        EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-
-        EXPECT_TRUE(operation.cancel(true).has_value());
-
-        EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-    }
-
-    TEST_F(DownloadOperationTests, CancelDoesRemoveTheFileIfCleanIsTrue)
-    {
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = true,
-        };
-
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-
-        EXPECT_CALL(*fileStream, stat())
-            .WillOnce(
-                []() -> std::future<std::expected<FileInformation, SecureShell::SftpError>>
-                {
-                    std::promise<std::expected<FileInformation, SecureShell::SftpError>> promise;
-                    promise.set_value(
-                        FileInformation{
-                            .size = 42,
-                        }
-                    );
-                    return promise.get_future();
-                }
-            );
-
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-        EXPECT_TRUE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-
-        EXPECT_TRUE(operation.cancel(true).has_value());
-
-        EXPECT_FALSE(std::filesystem::exists(options.localPath.generic_string() + ".filepart"));
-    }
-
-    TEST_F(DownloadOperationTests, WorkWithEmptyRemoteFileSucceeds)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, 0);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        const auto result = operation.work();
-        EXPECT_TRUE(result.has_value());
-    }
-
-    TEST_F(DownloadOperationTests, WorkFailsWithExpiredFileStream)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value()) << boost::describe::enum_to_string(result.error().type, "INVALID_ENUM_VALUE");
-
-        fileStream.reset();
-
-        const auto workResult = operation.work();
-        EXPECT_FALSE(workResult.has_value());
-        EXPECT_EQ(workResult.error().type, DownloadOperation::ErrorType::FileStreamExpired);
-    }
-
-    TEST_F(DownloadOperationTests, WorkCallsReadOnFileStream)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, 42);
-        giveMockExpectedRead(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-        };
-        DownloadOperation operation{fileStream, options};
-
-        enqueueFakeReadCycle();
-
-        const auto result = operation.work();
-        EXPECT_TRUE(result.has_value());
-    }
-
-    TEST_F(DownloadOperationTests, PrepareReservesSpaceForFile)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, fakeFileContent_.size());
-        giveMockExpectedRead(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .reserveSpace = true,
-            .doCleanup = false,
-        };
-        DownloadOperation operation{fileStream, options};
-
-        auto result = operation.prepare();
-        EXPECT_TRUE(result.has_value());
-
-        EXPECT_TRUE(operation.cancel(true).has_value());
-
-        EXPECT_EQ(
-            std::filesystem::file_size(options.localPath.generic_string() + ".filepart"), fakeFileContent_.size()
-        );
-    }
-
-    TEST_F(DownloadOperationTests, ReadCycleWritesDataToFile)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, fakeFileContent_.size());
-        giveMockExpectedRead(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = false,
-        };
-        DownloadOperation operation{fileStream, options};
-
-        enqueueFakeReadCycle(5);
-
-        const auto result = operation.work();
-        EXPECT_TRUE(result.has_value());
-
-        EXPECT_TRUE(operation.cancel(false).has_value());
-
-        EXPECT_EQ(std::filesystem::file_size(options.localPath.generic_string() + ".filepart"), 5);
-        EXPECT_EQ(readFile(options.localPath.generic_string() + ".filepart"), fakeFileContent_.substr(0, 5));
-    }
-
-    TEST_F(DownloadOperationTests, FinalizeFailsIfFileExistsButOverwriteIsForbidden)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, fakeFileContent_.size());
-        giveMockExpectedRead(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .mayOverwrite = false,
-        };
-        DownloadOperation operation{fileStream, options};
-
-        enqueueFakeReadCycle();
-
-        const auto result = operation.work();
-        EXPECT_TRUE(result.has_value());
-
-        {
-            std::ofstream file{options.localPath};
-        }
-
-        auto fin = operation.finalize();
-        EXPECT_FALSE(fin.has_value());
-        EXPECT_EQ(fin.error().type, DownloadOperation::ErrorType::FileExists);
-    }
-
-    TEST_F(DownloadOperationTests, FinalizeSucceedsIfFileExistsButOverwriteIsAllowed)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, fakeFileContent_.size());
-        giveMockExpectedRead(fileStream);
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .mayOverwrite = true,
-        };
-        DownloadOperation operation{fileStream, options};
-
-        enqueueFakeReadCycle();
-        enqueueFakeReadCycle(0);
-
-        {
-            std::ofstream file{options.localPath};
-        }
-
-        auto result = operation.work();
-        EXPECT_TRUE(result.has_value());
-    }
-
-    TEST_F(DownloadOperationTests, ProgressCallbackIsCalledDuringRead)
-    {
-        using namespace SecureShell;
-
-        auto fileStream = makeFileStreamMock();
-        giveMockDefaultStat(fileStream, fakeFileContent_.size());
-        giveMockExpectedRead(fileStream);
-
-        std::vector<std::tuple<std::int64_t, std::int64_t, std::int64_t, std::make_signed_t<std::size_t>>>
-            progressCalls;
-
-        auto options = DownloadOperation::DownloadOperationOptions{
-            .progressCallback =
-                [&progressCalls](
-                    std::int64_t min, std::int64_t max, std::int64_t current, std::make_signed_t<std::size_t> bps
-                )
+        DownloadOperation operation{
+            *sftp,
             {
-                progressCalls.emplace_back(min, max, current, bps);
-            },
-            .localPath = isolateDirectory_.path() / "file.txt",
-            .doCleanup = false,
-        };
-        DownloadOperation operation{fileStream, options};
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+            }};
 
-        for (std::size_t i = 0; i < fakeFileContent_.size(); ++i)
+        auto prepareResult = operation.prepare();
+        ASSERT_TRUE(prepareResult.has_value());
+        EXPECT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+    }
+
+    TEST_F(DownloadOperationTests, CanDownloadFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
         {
-            enqueueFakeReadCycle(1);
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
         }
-        enqueueFakeReadCycle(0);
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
 
-        decltype(operation.work()) result;
-        do
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, FilepartAbsentAfterSuccessfulDownload)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
         {
-            result = operation.work();
-            ASSERT_TRUE(result.has_value());
-        } while (result.value() == DownloadOperation::WorkStatus::MoreWork);
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
 
-        EXPECT_TRUE(operation.cancel(true).has_value());
+        EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+    }
 
-        ASSERT_EQ(progressCalls.size(), fakeFileContent_.size());
+    TEST_F(DownloadOperationTests, DownloadFailsWhenLocalFileExists)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        for (std::size_t i = 0; i < fakeFileContent_.size(); ++i)
+        const auto localPath = downloadDir_.path() / "file1.txt";
         {
-            EXPECT_EQ(std::get<0>(progressCalls[i]), 0);
-            EXPECT_EQ(std::get<1>(progressCalls[i]), fakeFileContent_.size());
-            EXPECT_EQ(std::get<2>(progressCalls[i]), i + 1);
+            std::ofstream existingFile{localPath};
         }
 
-        EXPECT_EQ(std::get<0>(progressCalls.back()), 0);
-        EXPECT_EQ(std::get<1>(progressCalls.back()), fakeFileContent_.size());
-        EXPECT_EQ(std::get<2>(progressCalls.back()), fakeFileContent_.size());
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .mayOverwrite = false,
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, DownloadOperation::ErrorType::FileExists);
+    }
+
+    TEST_F(DownloadOperationTests, DownloadOverwritesExistingFileWhenEnabled)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        // First download
+        {
+            DownloadOperation operation{
+                *sftp,
+                {
+                    .remotePath = "/home/test/file1.txt",
+                    .localPath = localPath,
+                }};
+
+            DownloadOperation::WorkStatus workStatus;
+            for (int workTimes = 0; workTimes < 100; ++workTimes)
+            {
+                auto workResult = operation.work();
+                ASSERT_TRUE(workResult.has_value());
+                workStatus = workResult.value();
+                if (workStatus == DownloadOperation::WorkStatus::Complete)
+                    break;
+            }
+            ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+        }
+
+        // Second download with overwrite enabled
+        {
+            DownloadOperation operation{
+                *sftp,
+                {
+                    .remotePath = "/home/test/file1.txt",
+                    .localPath = localPath,
+                    .mayOverwrite = true,
+                }};
+
+            DownloadOperation::WorkStatus workStatus;
+            for (int workTimes = 0; workTimes < 100; ++workTimes)
+            {
+                auto workResult = operation.work();
+                ASSERT_TRUE(workResult.has_value());
+                workStatus = workResult.value();
+                if (workStatus == DownloadOperation::WorkStatus::Complete)
+                    break;
+            }
+            ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+        }
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, DownloadNonExistentRemoteFileFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/does_not_exist.txt",
+                .localPath = downloadDir_.path() / "does_not_exist.txt",
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, DownloadOperation::ErrorType::FileStatFailed);
+    }
+
+    TEST_F(DownloadOperationTests, DownloadToEmptyLocalPathFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = {},
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, DownloadOperation::ErrorType::InvalidPath);
+    }
+
+    TEST_F(DownloadOperationTests, WorkOnCompletedOperationReturnsError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = downloadDir_.path() / "file1.txt",
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        auto secondCallResult = operation.work();
+        ASSERT_FALSE(secondCallResult.has_value());
+        EXPECT_EQ(secondCallResult.error().type, DownloadOperation::ErrorType::CannotWorkCompletedOperation);
+    }
+
+    TEST_F(DownloadOperationTests, WorkOnFailedOperationReturnsError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/does_not_exist.txt",
+                .localPath = downloadDir_.path() / "does_not_exist.txt",
+            }};
+
+        auto firstResult = operation.work();
+        ASSERT_FALSE(firstResult.has_value());
+
+        auto secondResult = operation.work();
+        ASSERT_FALSE(secondResult.has_value());
+        EXPECT_EQ(secondResult.error().type, DownloadOperation::ErrorType::CannotWorkFailedOperation);
+    }
+
+    TEST_F(DownloadOperationTests, DoCleanupRemovesFilepartOnCancel)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .doCleanup = true,
+            }};
+
+        auto prepareResult = operation.prepare();
+        ASSERT_TRUE(prepareResult.has_value());
+        ASSERT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+
+        ASSERT_TRUE(operation.cancel(true).has_value());
+        EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+    }
+
+    TEST_F(DownloadOperationTests, NoCleanupKeepsFilepartOnCancel)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .doCleanup = false,
+            }};
+
+        auto prepareResult = operation.prepare();
+        ASSERT_TRUE(prepareResult.has_value());
+        ASSERT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+
+        ASSERT_TRUE(operation.cancel(true).has_value());
+        EXPECT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+    }
+
+    TEST_F(DownloadOperationTests, CanContinuePartialDownload)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        const auto filepartPath = localPath.generic_string() + ".filepart";
+
+        // Write the first 8 bytes of "Fake file content" to simulate a previous interrupted download
+        {
+            std::ofstream partial{filepartPath, std::ios::binary};
+            partial << "Fake fil";
+        }
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .tryContinue = true,
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, PartialFileLargerThanRemoteStartsFresh)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        const auto filepartPath = localPath.generic_string() + ".filepart";
+
+        // Write more bytes than the remote file size (17) to simulate a corrupted partial download
+        {
+            std::ofstream partial{filepartPath, std::ios::binary};
+            partial << std::string(100, 'x');
+        }
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .tryContinue = true,
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, LargeFileDownloadSucceeds)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "large.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/large.txt",
+                .localPath = localPath,
+            }};
+
+        // large.txt is 1 MiB: needs ~64 work() calls with a 16384-byte buffer
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 200; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(std::filesystem::file_size(localPath), 1024u * 1024u);
     }
 }
