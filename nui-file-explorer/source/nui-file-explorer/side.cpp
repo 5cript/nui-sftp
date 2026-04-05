@@ -16,8 +16,11 @@
 #include <rapidfuzz/fuzz.hpp>
 
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/text_input.hpp>
 #include <ui5-sap-icons/icons/show.hpp>
 #include <ui5-sap-icons/icons/hide.hpp>
+#include <ui5-sap-icons/icons/refresh.hpp>
+#include <ui5-sap-icons/icons/search.hpp>
 
 using namespace std::string_literals;
 
@@ -576,99 +579,105 @@ namespace NuiFileExplorer
                 return "border-top: 1px solid var(--nui-file-grid-border-color)";
             }()
         }(
-            div{
-                /*refresh*/
-                onClick = [this](){
-                    impl_->model->onRefresh();
+            ScriptNuiComponents::button({
+                .icon = Ui5Icons::refresh(),
+                .attributes = {
+                    onClick = [this](){
+                        impl_->model->onRefresh();
+                    }
                 }
-            }(),
-            input{
-                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
-                    impl_->pathBoxElement = ref;
-                },
-                type = "text",
-                "value"_prop = observe(model().currentPath()).generate([this](){
-                    return model().currentPath().value().generic_string();
-                }),
-                "keydown"_event = [this](Nui::WebApi::KeyboardEvent event){
-                    event.stopPropagation();
-                    if (event.key() == "Tab")
-                    {
-                        event.preventDefault();
-                        if (impl_->pathBoxSuggestions.value().empty())
-                            return;
-
-                        if (impl_->pathBoxSuggestions.value().size() == 1)
+            }),
+            ScriptNuiComponents::textInput({
+                .value = "",
+                .attributes = {
+                    reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
+                        impl_->pathBoxElement = ref;
+                    },
+                    type = "text",
+                    "value"_prop = observe(model().currentPath()).generate([this](){
+                        return model().currentPath().value().generic_string();
+                    }),
+                    "keydown"_event = [this](Nui::WebApi::KeyboardEvent event){
+                        event.stopPropagation();
+                        if (event.key() == "Tab")
                         {
-                            impl_->model->onPathChange(impl_->pathBoxSuggestions.value().front());
+                            event.preventDefault();
+                            if (impl_->pathBoxSuggestions.value().empty())
+                                return;
+
+                            if (impl_->pathBoxSuggestions.value().size() == 1)
+                            {
+                                impl_->model->onPathChange(impl_->pathBoxSuggestions.value().front());
+                                return;
+                            }
+
+                            auto firstElementIt = impl_->searchResultElements.find(0);
+                            if (firstElementIt == impl_->searchResultElements.end())
+                                return;
+                            auto element = firstElementIt->second.lock();
+                            if (!element)
+                                return;
+                            element->val().call<void>("focus");
+                            return;
+                        }
+                    },
+                    "keyup"_event = [this](Nui::WebApi::KeyboardEvent event){
+                        event.stopPropagation();
+                        if (event.key() == "Enter")
+                        {
+                            Nui::WebApi::Console::log("Path box Enter hit");
+                            impl_->model->onPathChange(std::filesystem::path{event.target()["value"].as<std::string>()});
+                            event.preventDefault();
                             return;
                         }
 
-                        auto firstElementIt = impl_->searchResultElements.find(0);
-                        if (firstElementIt == impl_->searchResultElements.end())
+                        if (event.key() == "Tab")
+                        {
+                            event.preventDefault();
                             return;
-                        auto element = firstElementIt->second.lock();
-                        if (!element)
+                        }
+
+                        if (event.key() == "Escape")
+                        {
+                            impl_->pathBoxSuggestions.clear();
+                            event.preventDefault();
                             return;
-                        element->val().call<void>("focus");
-                        return;
+                        }
+
+                        if (event.key() == "ArrowDown" ||
+                            event.key() == "ArrowUp")
+                        {
+                            if (impl_->pathBoxSuggestions.value().empty())
+                                return;
+
+                            auto isDownNotUp = event.key() == "ArrowDown";
+                            auto firstElementIt = impl_->searchResultElements.find(
+                                isDownNotUp ? 0 : static_cast<long long>(impl_->pathBoxSuggestions.value().size() - 1));
+                            if (firstElementIt == impl_->searchResultElements.end())
+                                return;
+
+                            auto element = firstElementIt->second.lock();
+                            if (!element)
+                                return;
+
+                            element->val().call<void>("focus");
+                            event.preventDefault();
+                            return;
+                        }
+
+                        const auto inputValue = event.target()["value"].as<std::string>();
+                        impl_->model->generatePathBoxSuggestions(
+                            std::filesystem::path{inputValue},
+                            0,
+                            [this](std::vector<std::filesystem::path> const& suggestions){
+                                impl_->pathBoxSuggestions = suggestions;
+                                Nui::globalEventContext.executeActiveEventsImmediately();
+                            }
+                        );
                     }
                 },
-                "keyup"_event = [this](Nui::WebApi::KeyboardEvent event){
-                    event.stopPropagation();
-                    if (event.key() == "Enter")
-                    {
-                        Nui::WebApi::Console::log("Path box Enter hit");
-                        impl_->model->onPathChange(std::filesystem::path{event.target()["value"].as<std::string>()});
-                        event.preventDefault();
-                        return;
-                    }
-
-                    if (event.key() == "Tab")
-                    {
-                        event.preventDefault();
-                        return;
-                    }
-
-                    if (event.key() == "Escape")
-                    {
-                        impl_->pathBoxSuggestions.clear();
-                        event.preventDefault();
-                        return;
-                    }
-
-                    if (event.key() == "ArrowDown" ||
-                        event.key() == "ArrowUp")
-                    {
-                        if (impl_->pathBoxSuggestions.value().empty())
-                            return;
-
-                        auto isDownNotUp = event.key() == "ArrowDown";
-                        auto firstElementIt = impl_->searchResultElements.find(
-                            isDownNotUp ? 0 : static_cast<long long>(impl_->pathBoxSuggestions.value().size() - 1));
-                        if (firstElementIt == impl_->searchResultElements.end())
-                            return;
-
-                        auto element = firstElementIt->second.lock();
-                        if (!element)
-                            return;
-
-                        element->val().call<void>("focus");
-                        event.preventDefault();
-                        return;
-                    }
-
-                    const auto inputValue = event.target()["value"].as<std::string>();
-                    impl_->model->generatePathBoxSuggestions(
-                        std::filesystem::path{inputValue},
-                        0,
-                        [this](std::vector<std::filesystem::path> const& suggestions){
-                            impl_->pathBoxSuggestions = suggestions;
-                            Nui::globalEventContext.executeActiveEventsImmediately();
-                        }
-                    );
-                }
-            }()
+                .dontUpdateValue = true
+            })
         );
         // clang-format on
     }
@@ -684,25 +693,24 @@ namespace NuiFileExplorer
         return div{
             class_ = "nui-file-grid-filter"
         }(
-            img{
-                src = "data:image/svg+xml,%3C%3Fxml version='1.0' %3F%3E%3C!DOCTYPE svg PUBLIC '-//W3C//DTD SVG 1.1//EN' 'http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd'%3E%3Csvg height='512px' id='Layer_1' style='enable-background:new 0 0 512 512;' version='1.1' viewBox='0 0 512 512' width='512px' xml:space='preserve' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'%3E%3Cpath d='M344.5,298c15-23.6,23.8-51.6,23.8-81.7c0-84.1-68.1-152.3-152.1-152.3C132.1,64,64,132.2,64,216.3 c0,84.1,68.1,152.3,152.1,152.3c30.5,0,58.9-9,82.7-24.4l6.9-4.8L414.3,448l33.7-34.3L339.5,305.1L344.5,298z M301.4,131.2 c22.7,22.7,35.2,52.9,35.2,85c0,32.1-12.5,62.3-35.2,85c-22.7,22.7-52.9,35.2-85,35.2c-32.1,0-62.3-12.5-85-35.2 c-22.7-22.7-35.2-52.9-35.2-85c0-32.1,12.5-62.3,35.2-85c22.7-22.7,52.9-35.2,85-35.2C248.5,96,278.7,108.5,301.4,131.2z'/%3E%3C/svg%3E",
-                alt = "Filter",
-                style = "filter: invert(100%) sepia(3%) saturate(183%) hue-rotate(281deg) brightness(120%) contrast(100%)",
-            }(),
-            input{
-                type = "text",
-                placeHolder = "Search",
-                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
-                    impl_->searchTextBox = ref;
+            Ui5Icons::search(),
+            ScriptNuiComponents::textInput({
+                .value = "",
+                .attributes = {
+                    placeHolder = "Search",
+                    reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
+                        impl_->searchTextBox = ref;
+                    },
+                    "keyup"_event = [this](Nui::val event){
+                        event.call<void>("stopPropagation");
+                        search(event["target"]["value"].as<std::string>());
+                    },
+                    "keydown"_event = [](Nui::val event){
+                        event.call<void>("stopPropagation");
+                    }
                 },
-                "keyup"_event = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    search(event["target"]["value"].as<std::string>());
-                },
-                "keydown"_event = [](Nui::val event){
-                    event.call<void>("stopPropagation");
-                }
-            }()
+                .dontUpdateValue = true,
+            })
         );
         // clang-format on
     }
