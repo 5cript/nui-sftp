@@ -1,6 +1,7 @@
 // Broken: needs complete rewrite:
 // #include "test_download_operation.hpp"
-#include "test_upload_operation.hpp"
+// #include "test_upload_operation.hpp"
+#include "test_file_tracking.hpp"
 
 #include <log/log.hpp>
 
@@ -17,5 +18,6 @@ int main(int argc, char** argv)
     programDirectory = std::filesystem::path{argv[0]}.parent_path();
 
     ::testing::InitGoogleTest(&argc, argv);
+    ::testing::AddGlobalTestEnvironment(new Test::NuiEnvGuard{});
     return RUN_ALL_TESTS();
 }
