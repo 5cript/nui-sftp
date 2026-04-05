@@ -34,6 +34,17 @@ target_compile_definitions(nui-sftp-ssh-test PRIVATE -DNODE_EXECUTABLE="${NODE}"
 
 add_custom_command(
     OUTPUT
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/node_modules/.package-lock.json"
+    COMMAND ${NPM} install
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers"
+    DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package.json"
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package-lock.json"
+    COMMENT "Installing test_ssh2_servers npm dependencies"
+)
+
+add_custom_command(
+    OUTPUT
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/shell.mjs"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/dist/sftp.mjs"
         "${CMAKE_CURRENT_BINARY_DIR}/ssh_server/sftp.mjs"
@@ -48,10 +59,10 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/key.public" "${CMAKE_CURRENT_BINARY_DIR}/ssh_server/key.public"
     WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers"
     DEPENDS
-        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package.json"
+        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/node_modules/.package-lock.json"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/sftp_server.mjs"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/shell_emulator.mjs"
-        "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/package-lock.json"
+    COMMENT "Building test_ssh2_servers with webpack"
 )
 add_custom_target(
     build_test_ssh2_servers

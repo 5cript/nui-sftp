@@ -45,7 +45,7 @@ namespace FileTracking
 
     bool InstanceLock::hasLock() const
     {
-        return systemDependantData_->fileDescriptor != -1;
+        return systemDependantData_ && systemDependantData_->fileDescriptor != -1;
     }
     bool InstanceLock::aquireLock()
     {
@@ -73,5 +73,33 @@ namespace FileTracking
             close(systemDependantData_->fileDescriptor);
             systemDependantData_->fileDescriptor = -1;
         }
+    }
+
+    bool InstanceLock::tryAcquire()
+    {
+        systemDependantData_->fileDescriptor = open(lockFilePath_.c_str(), O_RDWR | O_CREAT, 0666);
+        if (systemDependantData_->fileDescriptor == -1)
+            return false;
+
+        if (flock(systemDependantData_->fileDescriptor, LOCK_EX | LOCK_NB) == -1)
+        {
+            close(systemDependantData_->fileDescriptor);
+            systemDependantData_->fileDescriptor = -1;
+            return false;
+        }
+        return true;
+    }
+
+    bool InstanceLock::isLockedByAnother(std::filesystem::path const& lockFilePath)
+    {
+        int desc = open(lockFilePath.c_str(), O_RDWR | O_CREAT, 0666);
+        if (desc == -1)
+            return false;
+
+        bool locked = (flock(desc, LOCK_EX | LOCK_NB) == -1);
+        if (!locked)
+            flock(desc, LOCK_UN);
+        close(desc);
+        return locked;
     }
 }

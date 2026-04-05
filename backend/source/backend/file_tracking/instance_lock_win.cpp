@@ -45,7 +45,7 @@ namespace FileTracking
 
     bool InstanceLock::hasLock() const
     {
-        return systemDependantData_->fileHandle != INVALID_HANDLE_VALUE;
+        return systemDependantData_ && systemDependantData_->fileHandle != INVALID_HANDLE_VALUE;
     }
     bool InstanceLock::aquireLock()
     {
@@ -81,5 +81,61 @@ namespace FileTracking
             CloseHandle(systemDependantData_->fileHandle);
             systemDependantData_->fileHandle = INVALID_HANDLE_VALUE;
         }
+    }
+
+    bool InstanceLock::tryAcquire()
+    {
+        systemDependantData_->fileHandle = CreateFileW(
+            lockFilePath_.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr
+        );
+        if (systemDependantData_->fileHandle == INVALID_HANDLE_VALUE)
+            return false;
+
+        OVERLAPPED ovl{};
+        if (!LockFileEx(
+                systemDependantData_->fileHandle,
+                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                MAXDWORD,
+                MAXDWORD,
+                &ovl))
+        {
+            CloseHandle(systemDependantData_->fileHandle);
+            systemDependantData_->fileHandle = INVALID_HANDLE_VALUE;
+            return false;
+        }
+        return true;
+    }
+
+    bool InstanceLock::isLockedByAnother(std::filesystem::path const& lockFilePath)
+    {
+        HANDLE hdl = CreateFileW(
+            lockFilePath.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr
+        );
+        if (hdl == INVALID_HANDLE_VALUE)
+            return false;
+
+        OVERLAPPED ovl{};
+        bool locked =
+            !LockFileEx(hdl, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &ovl);
+        if (!locked)
+        {
+            OVERLAPPED unlockOvl{};
+            UnlockFileEx(hdl, 0, MAXDWORD, MAXDWORD, &unlockOvl);
+        }
+        CloseHandle(hdl);
+        return locked;
     }
 }
