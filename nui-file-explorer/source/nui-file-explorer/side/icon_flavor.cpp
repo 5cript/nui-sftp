@@ -207,6 +207,7 @@ namespace NuiFileExplorer
                 event.stopPropagation();
             },
             "contextmenu"_event = [this](Nui::val event) {
+                Nui::WebApi::Console::info("Context menu on empty space");
                 side_->onContextMenu(nullptr, event);
             },
             "mousedown"_event = [this](WebApi::MouseEvent event) {
