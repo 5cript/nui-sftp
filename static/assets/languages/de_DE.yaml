@@ -535,6 +535,8 @@ settings:
       preventCreateDirectory: "Verzeichniserstellung verhindern"
       homeOverrideHelpText: "Wenn gesetzt, überschreibt dies den Standardpfad des Heimatverzeichnisses der Anwendung."
       homeOverride: "Heimatverzeichnis überschreiben"
+      temporaryDirectoryHelpText: "Das Verzeichnis, in dem Dateien gespeichert werden, die heruntergeladen und geöffnet werden sollen."
+      temporaryDirectory: "Temporäres Verzeichnis"
 persistence:
   warningLoadingState: "Warnung beim Laden des Zustands"
   loadedWithWarnings: "Der Anwendungszustand wurde mit Warnungen geladen:\n\n{}\n\nBitte überprüfen Sie Ihre Konfiguration."

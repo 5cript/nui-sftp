@@ -533,6 +533,8 @@ settings:
       preventCreateDirectory: "Prevent Create Directory"
       homeOverrideHelpText: "If set, overrides the default home directory path used by the application."
       homeOverride: "Home Directory Override"
+      temporaryDirectoryHelpText: "The directory where files that are downloaded to be opened are stored."
+      temporaryDirectory: "Temporary Directory"
 persistence:
   warningLoadingState: "Warning loading state"
   loadedWithWarnings: "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration."
