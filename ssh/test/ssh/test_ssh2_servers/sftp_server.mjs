@@ -632,7 +632,7 @@ const server = new Server({
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
                         logMessage('File not found');
-                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                     }
 
                     logMessage(result.stat);

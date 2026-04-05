@@ -5,8 +5,6 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 
-#include <nui/window.hpp>
-#include <nui/rpc.hpp>
 #include <nlohmann/json.hpp>
 
 #include <boost/asio/io_context.hpp>
@@ -24,6 +22,8 @@
 using namespace FileTracking;
 using namespace std::chrono_literals;
 
+extern std::filesystem::path programDirectory;
+
 namespace Test
 {
     namespace fs = std::filesystem;
@@ -40,10 +40,8 @@ namespace Test
      */
     inline fs::path makeTestTempRoot(std::string const& tag = "base")
     {
-        auto suffix = std::to_string(
-            std::chrono::system_clock::now().time_since_epoch().count()
-        );
-        auto root = fs::temp_directory_path() / ("nui_sftp_ft_" + tag + "_" + suffix);
+        auto suffix = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        auto root = programDirectory / "temp" / ("nui_sftp_ft_" + tag + "_" + suffix);
         fs::create_directories(root);
         return root;
     }
@@ -83,65 +81,6 @@ namespace Test
         metaOut << meta.dump(4);
     }
 
-    // -------------------------------------------------------------------------
-    // NuiEnv — lazy singleton holding a Window + RpcHub for tests that need them
-    // -------------------------------------------------------------------------
-
-    /**
-     * @brief Holds the single Nui::Window and Nui::RpcHub used by all display-
-     *        dependent tests.  Construction is attempted once; if it fails (e.g.
-     *        no display is available) available() returns false and the tests that
-     *        use this object skip themselves via GTEST_SKIP().
-     */
-    struct NuiEnv
-    {
-        std::unique_ptr<Nui::Window> window;
-        std::unique_ptr<Nui::RpcHub> hub;
-
-        static NuiEnv& instance()
-        {
-            static NuiEnv env;
-            return env;
-        }
-
-        bool available() const { return window != nullptr; }
-
-        void shutdown()
-        {
-            if (window)
-            {
-                window->terminate();
-                window->run();
-            }
-            hub.reset();
-            window.reset();
-        }
-
-      private:
-        NuiEnv()
-        {
-            try
-            {
-                window = std::make_unique<Nui::Window>();
-                hub = std::make_unique<Nui::RpcHub>(*window);
-            }
-            catch (...)
-            {
-                window.reset();
-                hub.reset();
-            }
-        }
-    };
-
-    class NuiEnvGuard : public ::testing::Environment
-    {
-      public:
-        void TearDown() override
-        {
-            NuiEnv::instance().shutdown();
-        }
-    };
-
     // =========================================================================
     // InstanceLockTest — no display required
     // =========================================================================
@@ -151,8 +90,14 @@ namespace Test
       protected:
         fs::path root_;
 
-        void SetUp() override { root_ = makeTestTempRoot("lock"); }
-        void TearDown() override { fs::remove_all(root_); }
+        void SetUp() override
+        {
+            root_ = makeTestTempRoot("lock");
+        }
+        void TearDown() override
+        {
+            fs::remove_all(root_);
+        }
     };
 
     TEST_F(InstanceLockTest, ConstructorCreatesLockFile)
@@ -171,7 +116,7 @@ namespace Test
     TEST_F(InstanceLockTest, IsLockedByAnotherReturnsFalseForUnownedFile)
     {
         auto lockPath = root_ / "c.lock";
-        std::ofstream{lockPath}.flush();  // file exists, nobody locks it
+        std::ofstream{lockPath}.flush(); // file exists, nobody locks it
         EXPECT_FALSE(InstanceLock::isLockedByAnother(lockPath));
     }
 
@@ -303,10 +248,7 @@ namespace Test
         {
             auto& env = NuiEnv::instance();
             return std::make_unique<TemporaryDirectoryInstance>(
-                TemporaryDirectoryInstance::Config{.tempRootDir = root_},
-                makeStrand(),
-                *env.window,
-                *env.hub
+                TemporaryDirectoryInstance::Config{.tempRootDir = root_}, makeStrand(), *env.window, *env.hub
             );
         }
     };
@@ -548,11 +490,7 @@ namespace Test
         {
             auto& env = NuiEnv::instance();
             return std::make_unique<TempDirInstanceManager>(
-                ioc_.get_executor(),
-                *env.window,
-                *env.hub,
-                root_,
-                retention
+                ioc_.get_executor(), *env.window, *env.hub, root_, retention
             );
         }
     };
@@ -694,7 +632,7 @@ namespace Test
         std::string deadId = "dead-no-meta";
         auto dir = root_ / deadId;
         fs::create_directories(dir);
-        std::ofstream{dir / (deadId + ".lock")}.flush();  // no metadata.json
+        std::ofstream{dir / (deadId + ".lock")}.flush(); // no metadata.json
 
         mgr->manualCleanup();
 
@@ -709,7 +647,7 @@ namespace Test
     {
         auto mgr = makeManager(24h);
         std::string deadId = "dead-null-deadat";
-        makeDeadInstanceDir(root_, deadId);  // deadAt = null
+        makeDeadInstanceDir(root_, deadId); // deadAt = null
 
         mgr->manualCleanup();
 

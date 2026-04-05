@@ -328,6 +328,215 @@ namespace Test
         }
     }
 
+    TEST_F(UploadOperationTests, EmptyFileUploadSucceeds)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        std::ofstream emptyFile{programDirectory / "temp" / "emptyfile.txt", std::ios_base::binary};
+        emptyFile.close();
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/emptyfile.txt",
+                .localPath = programDirectory / "temp" / "emptyfile.txt",
+            }};
+
+        UploadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto fut = sftp->listDirectory("/home/test");
+        ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+        auto listResult = fut.get();
+        ASSERT_TRUE(listResult.has_value());
+        auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
+            return entry.path == "emptyfile.txt";
+        });
+        EXPECT_NE(it, listResult.value().end());
+    }
+
+    TEST_F(UploadOperationTests, FilepartAbsentAfterSuccessfulUpload)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+            }};
+
+        UploadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto fut = sftp->listDirectory("/home/test");
+        ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+        auto listResult = fut.get();
+        ASSERT_TRUE(listResult.has_value());
+        auto filepartIt =
+            std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
+                return entry.path == "testfile.txt.filepart";
+            });
+        EXPECT_EQ(filepartIt, listResult.value().end());
+    }
+
+    TEST_F(UploadOperationTests, WorkOnCompletedOperationReturnsError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+            }};
+
+        UploadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto secondCallResult = operation.work();
+        ASSERT_FALSE(secondCallResult.has_value());
+        EXPECT_EQ(secondCallResult.error().type, UploadOperation::ErrorType::CannotWorkCompletedOperation);
+    }
+
+    TEST_F(UploadOperationTests, WorkOnFailedOperationReturnsError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory / "temp" / "does_not_exist.txt",
+            }};
+
+        auto firstResult = operation.work();
+        ASSERT_FALSE(firstResult.has_value());
+
+        auto secondResult = operation.work();
+        ASSERT_FALSE(secondResult.has_value());
+        EXPECT_EQ(secondResult.error().type, UploadOperation::ErrorType::CannotWorkFailedOperation);
+    }
+
+    TEST_F(UploadOperationTests, UploadToNonExistentRemoteDirectoryFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/nonexistent_dir/file.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::SftpError);
+    }
+
+    TEST_F(UploadOperationTests, UploadNonExistentLocalFileFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory / "temp" / "does_not_exist.txt",
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::NotAFile);
+    }
+
+    TEST_F(UploadOperationTests, UploadLocalDirectoryFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory,
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::NotAFile);
+    }
+
+    TEST_F(UploadOperationTests, LargeFileUploadSucceeds)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // File larger than the internal buffer (16384 bytes) to exercise multi-chunk upload
+        const std::string largeContent(30000, 'x');
+        {
+            std::ofstream largeFile{programDirectory / "temp" / "largefile.txt", std::ios_base::binary};
+            largeFile << largeContent;
+        }
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/largefile.txt",
+                .localPath = programDirectory / "temp" / "largefile.txt",
+            }};
+
+        UploadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto fut = sftp->listDirectory("/home/test");
+        ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+        auto listResult = fut.get();
+        ASSERT_TRUE(listResult.has_value());
+        auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
+            return entry.path == "largefile.txt";
+        });
+        EXPECT_NE(it, listResult.value().end());
+    }
+
     TEST_F(UploadOperationTests, PartialFileLargerThanLocalDoesNotContinueButWorksAnyways)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
