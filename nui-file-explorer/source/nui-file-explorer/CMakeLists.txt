@@ -4,7 +4,6 @@ add_library(
     nui-file-explorer
     STATIC
         "${CMAKE_CURRENT_LIST_DIR}/file_grid.cpp"
-        "${CMAKE_CURRENT_LIST_DIR}/dropdown_menu.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/side.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/flavor.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/drop_event_extractor.cpp"

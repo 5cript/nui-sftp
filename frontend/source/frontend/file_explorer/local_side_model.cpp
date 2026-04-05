@@ -1,5 +1,6 @@
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
+#include <script-nui-components/popup_menu.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -699,6 +700,55 @@ void LocalSideModel::enqueueSingleUpload(
         allowOverwrite,
         insertRefresh
     );
+}
+
+std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
+    std::vector<NuiFileExplorer::Item> const& selectedItems
+)
+{
+    namespace Snc = ScriptNuiComponents;
+    const bool hasItems = !selectedItems.empty();
+    const bool singleItem = selectedItems.size() == 1;
+
+    return {
+        Snc::PopupMenu::item(
+            "Upload",
+            {},
+            [this, selectedItems]()
+            {
+                onTransfer(selectedItems, std::nullopt);
+            },
+            !hasItems
+        ),
+        Snc::PopupMenu::separator(),
+        Snc::PopupMenu::item(
+            "Delete",
+            {},
+            [this, selectedItems]()
+            {
+                onDelete(selectedItems);
+            },
+            !hasItems
+        ),
+        Snc::PopupMenu::item(
+            "Rename",
+            {},
+            [this, selectedItems]()
+            {
+                onRename(selectedItems.front());
+            },
+            !singleItem
+        ),
+        Snc::PopupMenu::item(
+            "Properties",
+            {},
+            [this, selectedItems]()
+            {
+                onProperties(selectedItems.front());
+            },
+            !singleItem
+        ),
+    };
 }
 
 void LocalSideModel::setRemoteModel(SideModel* model)

@@ -3,6 +3,7 @@
 #include <nui-file-explorer/item.hpp>
 #include <nui-file-explorer/flavor.hpp>
 #include <nui/event_system/observed_value.hpp>
+#include <nui-file-explorer/context_menu_item.hpp>
 
 #include <functional>
 #include <filesystem>
@@ -160,5 +161,16 @@ namespace NuiFileExplorer
          * @brief Goes back to the previous path, if any.
          */
         virtual void goBack() = 0;
+
+        /**
+         * @brief Returns the context menu items for the given selection.
+         * Called just before the context menu opens; the returned entries
+         * are used directly as PopupMenu items, allowing each side model to
+         * expose exactly the actions that make sense for its context.
+         *
+         * @param selectedItems The items currently selected (may be empty).
+         * @return std::vector<ContextMenuItem>
+         */
+        virtual std::vector<ContextMenuItem> contextMenuItems(std::vector<Item> const& selectedItems) = 0;
     };
 }

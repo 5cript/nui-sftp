@@ -24,6 +24,7 @@ class RemoteSideModel : public SideModel
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
+    std::vector<NuiFileExplorer::ContextMenuItem> contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
     void onDropExternal(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,

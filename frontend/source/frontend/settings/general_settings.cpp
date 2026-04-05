@@ -272,6 +272,8 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.localFilesystemOptions.preventCreateFile = localFilesystemOptions.preventCreateFile.value();
     state.localFilesystemOptions.preventCreateDirectory = localFilesystemOptions.preventCreateDirectory.value();
     state.localFilesystemOptions.homeOverride = localFilesystemOptions.homeOverride.value();
+    state.localFilesystemOptions.temporaryDownloadsDirectory =
+        localFilesystemOptions.temporaryDownloadsDirectory.value();
 
     logOptions.applyToState(state.logOptions);
 }
@@ -296,6 +298,9 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     localFilesystemOptions.preventCreateFile.value(state.localFilesystemOptions.preventCreateFile);
     localFilesystemOptions.preventCreateDirectory.value(state.localFilesystemOptions.preventCreateDirectory);
     localFilesystemOptions.homeOverride.value(state.localFilesystemOptions.homeOverride);
+    localFilesystemOptions.temporaryDownloadsDirectory.value(
+        state.localFilesystemOptions.temporaryDownloadsDirectory.value_or("%temp%/nui-sftp-downloads")
+    );
 
     logOptions.loadFromState(state.logOptions);
 }
@@ -365,6 +370,9 @@ Nui::ElementRenderer GeneralSettings::render(
             ),
             localFilesystemOptions.homeOverride(
                 language->getObserved("settings", "general", "localFilesystemOptions", "homeOverride")
+            ),
+            localFilesystemOptions.temporaryDownloadsDirectory(
+                language->getObserved("settings", "general", "localFilesystemOptions", "temporaryDownloadsDirectory")
             )
         );
         // clang-format on

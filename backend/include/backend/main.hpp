@@ -2,6 +2,7 @@
 
 #include <backend/process/process_store.hpp>
 #include <backend/session_manager.hpp>
+#include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_filesystem.hpp>
 #include <backend/rpc_system.hpp>
@@ -55,6 +56,8 @@ class Main
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
+    std::unique_ptr<FileTracking::TempDirInstanceManager> tempDirInstanceManager_;
+
     std::shared_ptr<SessionManager> sshSessionManager_;
     boost::asio::steady_timer childSignalTimer_;
     // for display later in UI

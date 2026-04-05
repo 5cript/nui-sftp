@@ -2,10 +2,12 @@
 
 #include <nui-file-explorer/side_model_interface.hpp>
 #include <nui-file-explorer/item_with_internals.hpp>
-#include <nui-file-explorer/dropdown_menu.hpp>
 #include <nui-file-explorer/icon_size.hpp>
 #include <nui-file-explorer/side/side_settings.hpp>
 #include <nui-file-explorer/side/selection_manager.hpp>
+
+#include <script-nui-components/popup_menu.hpp>
+#include <script-nui-components/dropdown_menu.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -53,93 +55,10 @@ namespace NuiFileExplorer
 
         std::vector<Item> copiedFiles{};
 
-        DropdownMenu newItemMenu{
-            {
-                "File",
-                "Folder",
-                // Soft Link ?
-                // Hard Link ?
-            },
-            [this](std::string const& item)
-            {
-                Nui::WebApi::Console::log("New clicked: ", item);
-                if (item == "File")
-                {
-                    model->onNewItem(Item::Type::Regular);
-                }
-                else if (item == "Folder")
-                {
-                    model->onNewItem(Item::Type::Directory);
-                }
-            },
-            [this]()
-            {
-                sortMenu.close();
-                viewMenu.close();
-            },
-            "New",
-        };
-        DropdownMenu sortMenu{
-            {
-                "Name Ascending",
-                "Name Descending",
-                "Size Ascending",
-                "Size Descending",
-                "Info Ascending",
-                "Info Descending",
-                "Modification Time Ascending",
-                "Modification Time Descending",
-            },
-            [this](std::string const& item)
-            {
-                if (item == "Name Ascending")
-                    sorting = {SortCriterion::Name, true};
-                else if (item == "Name Descending")
-                    sorting = {SortCriterion::Name, false};
-                else if (item == "Size Ascending")
-                    sorting = {SortCriterion::Size, true};
-                else if (item == "Size Descending")
-                    sorting = {SortCriterion::Size, false};
-                else if (item == "Info Ascending")
-                    sorting = {SortCriterion::Info, true};
-                else if (item == "Info Descending")
-                    sorting = {SortCriterion::Info, false};
-                else if (item == "Modification Time Ascending")
-                    sorting = {SortCriterion::Mtime, true};
-                else if (item == "Modification Time Descending")
-                    sorting = {SortCriterion::Mtime, false};
-
-                sortItems();
-                items.modifyNow();
-            },
-            [this]()
-            {
-                newItemMenu.close();
-                viewMenu.close();
-            },
-            "Sort",
-        };
-        DropdownMenu viewMenu{
-            {"Icons", "Table"},
-            [this](std::string const& item)
-            {
-                if (item == "Icons")
-                    flavor = Flavor::Icons;
-                if (item == "Table")
-                    flavor = Flavor::Table;
-                selectionManager.setFlavor(flavor.value());
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            },
-            [this]()
-            {
-                newItemMenu.close();
-                sortMenu.close();
-            },
-            "View",
-        };
-
-        std::weak_ptr<Nui::Dom::BasicElement> contextMenuView{};
-        std::vector<Item> contextMenuClickItems{};
+        ScriptNuiComponents::DropdownMenu newItemMenu{};
+        ScriptNuiComponents::DropdownMenu sortMenu{};
+        ScriptNuiComponents::DropdownMenu viewMenu{};
+        ScriptNuiComponents::PopupMenu contextMenuPopup{};
 
         void sortItems()
         {
@@ -273,11 +192,140 @@ namespace NuiFileExplorer
             , model{std::move(model)}
             , showHiddenFiles{this->settings.showHiddenFiles}
         {
+            namespace Snc = ScriptNuiComponents;
+
+            newItemMenu.setOnOpen([this]() { sortMenu.close(); viewMenu.close(); contextMenuPopup.close(); });
+            sortMenu.setOnOpen([this]() { newItemMenu.close(); viewMenu.close(); contextMenuPopup.close(); });
+            viewMenu.setOnOpen([this]() { newItemMenu.close(); sortMenu.close(); contextMenuPopup.close(); });
+
+            newItemMenu.setItems({
+                Snc::PopupMenu::item(
+                    "File",
+                    {},
+                    [this]()
+                    {
+                        this->model->onNewItem(Item::Type::Regular);
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Folder",
+                    {},
+                    [this]()
+                    {
+                        this->model->onNewItem(Item::Type::Directory);
+                    }
+                ),
+            });
+
+            sortMenu.setItems({
+                Snc::PopupMenu::item(
+                    "Name Ascending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Name, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Name Descending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Name, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Size Ascending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Size, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Size Descending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Size, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Info Ascending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Info, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Info Descending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Info, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Modification Time Ascending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Mtime, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Modification Time Descending",
+                    {},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Mtime, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+            });
+
+            viewMenu.setItems({
+                Snc::PopupMenu::item(
+                    "Icons",
+                    {},
+                    [this]()
+                    {
+                        flavor = Flavor::Icons;
+                        selectionManager.setFlavor(flavor.value());
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    "Table",
+                    {},
+                    [this]()
+                    {
+                        flavor = Flavor::Table;
+                        selectionManager.setFlavor(flavor.value());
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                ),
+            });
+
             selectionManager.setScrollIntoViewCallback(
                 [this](std::size_t idx)
                 {
-                    using namespace std::string_literals;
-
                     auto elem = items.value()[idx].element.lock();
                     if (elem)
                     {

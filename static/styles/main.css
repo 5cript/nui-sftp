@@ -8,6 +8,7 @@
 @import "./operation_queue.css";
 @import "./icon_panel.css";
 @import "./settings.css";
+@import "./file_tracking_panel.css";
 @import "./dialog/new_session_dialog.css";
 @import "./dialog/file_property_dialog.css";
 @import "./dialog/multi_input_dialog.css";
@@ -20,6 +21,7 @@
 @import "../../../styles/5cript-nui-components/color_picker.css";
 @import "../../../styles/5cript-nui-components/dialog.css";
 @import "../../../styles/5cript-nui-components/popup_menu.css";
+@import "../../../styles/5cript-nui-components/dropdown_menu.css";
 @import "../../../styles/5cript-nui-components/resizeable_table.css";
 @import "../../../styles/5cript-nui-components/select.css";
 @import "../../../styles/5cript-nui-components/switch.css";
@@ -39,17 +41,6 @@
     font-size: 16px;
     --theme-color: #90d26d;
 
-    /* Icon Panel */
-    --brightness-mixin: black;
-    --brightness-mixin-percent: 50%;
-    --anti-brightness-mixin: white;
-    --anti-brightness-mixin-percent: 80%;
-
-    /* Fields */
-    --script-nui-components-field-theme-color: var(--theme-color);
-
-    --settings-group-header-title-color: var(--theme-color);
-
     /* Dark / Light */
     --resize-handle-color: #707070;
     --brighter-background: #404040;
@@ -62,6 +53,20 @@
     --foreground-border-color: #505050;
     /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
     --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
+
+    /* Icon Panel */
+    --brightness-mixin: black;
+    --brightness-mixin-percent: 50%;
+    --anti-brightness-mixin: white;
+    --anti-brightness-mixin-percent: 80%;
+
+    /* Fields */
+    --script-nui-components-field-theme-color: var(--theme-color);
+    --settings-group-header-title-color: var(--theme-color);
+
+    /* Dropdown Menu */
+    --script-nui-dropdown-menu-arrow-color: var(--theme-color);
+    --script-nui-dropdown-menu-inside-border-color: var(--border-color-fields);
 
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;

@@ -171,6 +171,7 @@ namespace NuiFileExplorer
                 return Nui::nil();
             }(),
             headMenu(),
+            impl_->contextMenuPopup(),
             div{
                 class_ = "nui-file-grid-side-content",
                 style = [this]() -> std::string {
@@ -182,10 +183,10 @@ namespace NuiFileExplorer
                     impl_->scrollContainer = ref;
                 }
             }(
-                contextMenu(),
                 div{
                     style = "width: 100%; height: 100%",
                     "contextmenu"_event = [this](Nui::val event) {
+                        Nui::WebApi::Console::info("Context menu on empty space");
                         onContextMenu(nullptr, event);
                     }
                 }(
@@ -332,57 +333,12 @@ namespace NuiFileExplorer
 
     bool Side::closeMenus()
     {
+        const bool wasOpen = impl_->contextMenuPopup.isOpen();
         impl_->newItemMenu.close();
         impl_->sortMenu.close();
         impl_->viewMenu.close();
-
-        if (const auto menu = impl_->contextMenuView.lock(); menu)
-        {
-            bool wasOpen = menu->val()["style"]["display"].as<std::string>() != "none";
-            menu->val()["style"].set("display", "none");
-            return wasOpen;
-        }
-        return false;
-    }
-
-    std::pair<int /*x*/, int /*y*/> Side::calculateContextMenuPosition(Nui::val const& event)
-    {
-        using namespace std::string_literals;
-        Nui::WebApi::Console::log(event);
-
-        const auto menu = impl_->contextMenuView.lock();
-        if (!menu)
-            return {};
-
-        const auto side = impl_->sideElement.lock();
-        if (!side)
-            return {};
-
-        // its a pointer event, but pointer event derives from mouse event and mouse event has all the interesting
-        // props.
-        const auto mouseEvent = Nui::WebApi::MouseEvent{event};
-
-        const auto sideViewportCords = Nui::WebApi::DomRect{side->val().call<Nui::val>("getBoundingClientRect")};
-        const auto menuRect = Nui::WebApi::DomRect{menu->val().call<Nui::val>("getBoundingClientRect")};
-
-        const auto leftRelativeOffsetToOffsetParent = mouseEvent.clientX() - sideViewportCords.left();
-        const auto topRelativeOffsetToOffsetParent = mouseEvent.clientY() - sideViewportCords.top();
-
-        auto top = topRelativeOffsetToOffsetParent + side->val()["offsetTop"].as<double>();
-        auto left = leftRelativeOffsetToOffsetParent + side->val()["offsetLeft"].as<double>();
-
-        if (mouseEvent.clientX() + menuRect.width() > sideViewportCords.right())
-        {
-            // overflow right side
-            left -= menuRect.width();
-        }
-        if (mouseEvent.clientY() + menuRect.height() > sideViewportCords.bottom())
-        {
-            // overflow bottom side
-            top -= menuRect.height();
-        }
-
-        return {static_cast<int>(left), static_cast<int>(top)};
+        impl_->contextMenuPopup.close();
+        return wasOpen;
     }
 
     void Side::onContextMenu(ItemWithInternals* item, Nui::val event)
@@ -390,56 +346,56 @@ namespace NuiFileExplorer
         event.call<void>("stopPropagation");
         event.call<void>("preventDefault");
 
-        const auto menu = impl_->contextMenuView.lock();
-        if (!menu)
-            return;
+        std::vector<Item> clickItems;
 
         if (item != nullptr)
         {
             Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
             auto selected = selectedItems();
 
-            // "if it does not appear in the selected list..."
             if (std::find_if(
                     selected.begin(),
                     selected.end(),
-                    [&item](auto const& i)
+                    [&item](auto const& sel)
                     {
-                        return i.path == item->item.path;
+                        return sel.path == item->item.path;
                     }
                 ) == selected.end())
             {
                 impl_->selectionManager.deselectAll();
                 impl_->selectionManager.select(*item);
-                impl_->contextMenuClickItems = {item->item};
+                clickItems = {item->item};
             }
             else
-                impl_->contextMenuClickItems = selected;
+                clickItems = selected;
         }
         else
         {
             Nui::WebApi::Console::log("Context menu item: none");
-            impl_->contextMenuClickItems = selectedItems();
+            clickItems = selectedItems();
         }
-        // filter ".." from context menu click items:
-        impl_->contextMenuClickItems.erase(
+
+        // filter ".." from context menu items
+        clickItems.erase(
             std::remove_if(
-                impl_->contextMenuClickItems.begin(),
-                impl_->contextMenuClickItems.end(),
-                [](auto const& item)
+                clickItems.begin(),
+                clickItems.end(),
+                [](auto const& itm)
                 {
-                    return item.path.filename() == "..";
+                    return itm.path.filename() == "..";
                 }
             ),
-            impl_->contextMenuClickItems.end()
+            clickItems.end()
         );
 
-        // display block before calculation, otherwise the rect is 0x0
-        menu->val()["style"].set("display", "block");
-        auto [left, top] = calculateContextMenuPosition(event);
-        menu->val()["style"].set("top", fmt::format("{}px", top));
-        menu->val()["style"].set("left", fmt::format("{}px", left));
-        return;
+        closeMenus();
+        if (impl_->otherSide)
+            impl_->otherSide->closeMenus();
+
+        impl_->contextMenuPopup.setItems(impl_->model->contextMenuItems(clickItems));
+
+        const auto mouseEvent = Nui::WebApi::MouseEvent{event};
+        impl_->contextMenuPopup.openAt(mouseEvent.clientX(), mouseEvent.clientY());
     }
 
     void Side::path(std::filesystem::path const& path)
@@ -469,84 +425,6 @@ namespace NuiFileExplorer
         return result;
     }
 
-    Nui::ElementRenderer Side::contextMenu()
-    {
-        using namespace Nui;
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-
-        // clang-format off
-        return div{
-            reference = impl_->contextMenuView,
-            class_ = "nui-file-grid-context-menu",
-        }(
-            div{
-                class_ = "nui-file-grid-context-menu-item",
-                onClick = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    closeMenus();
-                    if (impl_->contextMenuClickItems.empty())
-                        impl_->model->onError("No items selected"s);
-                    impl_->model->onTransfer(impl_->contextMenuClickItems, std::nullopt);
-                    impl_->contextMenuClickItems = {};
-                }
-            }(
-                "Transfer"
-            ),
-            div{
-                class_ = "nui-file-grid-context-menu-item",
-                onClick = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    closeMenus();
-                    if (impl_->contextMenuClickItems.empty())
-                        impl_->model->onError("No items selected"s);
-                    impl_->model->onDelete(impl_->contextMenuClickItems);
-                    impl_->contextMenuClickItems = {};
-                }
-            }(
-                "Delete"
-            ),
-            div{
-                class_ = "nui-file-grid-context-menu-item",
-                onClick = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    closeMenus();
-                    const auto& items = impl_->contextMenuClickItems;
-                    if (items.empty())
-                        impl_->model->onError("No items selected"s);
-                    if (items.size() > 1) {
-                        impl_->model->onError("Cannot rename multiple items at once"s);
-                    } else if (items.size() == 1) {
-                        impl_->model->onRename(items.front());
-                    }
-                    impl_->contextMenuClickItems = {};
-                }
-            }(
-                "Rename"
-            ),
-            div{
-                class_ = "nui-file-grid-context-menu-item",
-                onClick = [this](Nui::val event){
-                    event.call<void>("stopPropagation");
-                    closeMenus();
-                    auto const& items = impl_->contextMenuClickItems;
-                    if (items.empty())
-                        impl_->model->onError("No items selected"s);
-                    if (items.size() > 1) {
-                        impl_->model->onError("Cannot view properties of multiple items at once"s);
-                    } else if (items.size() == 1) {
-                        impl_->model->onProperties(items.front());
-                    }
-                    impl_->contextMenuClickItems = {};
-                }
-            }(
-                "Properties"
-            )
-        );
-        // clang-format on
-    }
-
     Nui::ElementRenderer Side::headMenu()
     {
         using namespace Nui;
@@ -555,13 +433,15 @@ namespace NuiFileExplorer
         using Nui::Elements::div;
         namespace Snc = ScriptNuiComponents;
 
+        const std::string sideStr = model().isLeft() ? "left" : "right";
+
         // clang-format off
-        return div {
+        return div{
             class_ = "nui-file-grid-head"
         }(
-            impl_->newItemMenu(),
-            impl_->sortMenu(),
-            impl_->viewMenu(),
+            impl_->newItemMenu("New",  "nfe-new-"  + sideStr),
+            impl_->sortMenu("Sort", "nfe-sort-" + sideStr),
+            impl_->viewMenu("View", "nfe-view-" + sideStr),
             div{}(
                 observe(impl_->showHiddenFiles),
                 [this]() -> Nui::ElementRenderer {
