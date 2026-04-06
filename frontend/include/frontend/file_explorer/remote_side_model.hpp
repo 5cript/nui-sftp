@@ -10,6 +10,8 @@
 #include <nui-file-explorer/side_model_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
+class FileTrackingPanel;
+
 class RemoteSideModel : public SideModel
 {
   public:
@@ -40,6 +42,7 @@ class RemoteSideModel : public SideModel
     }
     void navigateTo(std::filesystem::path const& path) override;
     void setLocalModel(SideModel* model);
+    void setFileTracking(FileTrackingPanel* fileTracking);
     bool isComplete() const override;
 
     void generatePathBoxSuggestions(
@@ -76,8 +79,10 @@ class RemoteSideModel : public SideModel
     enqueueDeletes(std::vector<std::filesystem::path> nonEmpties, std::vector<std::filesystem::path> filesAndEmptyDirs);
 
     void continueDeletion();
+    void onWatchDownloadAndOpen(std::vector<NuiFileExplorer::Item> const& items, bool openWith);
 
   private:
     SideModel* localModel_{nullptr};
+    FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
 };

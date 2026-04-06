@@ -17,6 +17,7 @@ fileExplorer:
     delete: "Delete"
     rename: "Rename"
     properties: "Properties"
+    watchAndDownload: "Watch & Download"
 newSessionDialog:
   title: "Create New Session"
   validationMessage: "Please fill in all required fields."
@@ -78,6 +79,11 @@ localSideModel:
   unsupportedItemType: "Unsupported item type"
   createDirectoryFailedTitle: "Create Directory Failed"
   failedToOpenFile: "Failed to open file."
+  watchAndDownloadHeader: "Watch & Download?"
+  watchAndDownloadSingle: "Download '{}' to a temporary directory and watch it for changes?"
+  watchAndDownloadMultiple: "Download {} items to a temporary directory and watch them for changes?"
+  watchAndDownloadFailed: "Watch & Download Failed"
+  watchAndDownloadCreateInstanceFailed: "Failed to create a temporary tracking instance."
 sessionFrontend:
   sessionCreationFailedHeader: "Session Creation Failed"
   sessionCreationFailedText: "Failed to create session instance:\n{}"
@@ -87,6 +93,7 @@ sessionFrontend:
   fileExplorer: "File Explorer"
   operationQueue: "Operation Queue"
   sessionOptions: "Session Options"
+  fileTracking: "File Tracking"
   connectionLostTerminalMessage: "\n\e[31mConnection lost\e[0m\n\t- Press \e[35m<return>\e[0m to exit\n\t- Press \e[35mS\e[0m to save terminal output to file"
   connectionLost: "Connection Lost"
   dropNotImplementedTitle: "Drop Not Implemented"
@@ -95,6 +102,14 @@ sessionFrontend:
   externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
   channelCreationFailedHeader: "(SSH) Channel Creation Failed"
   channelCreationFailedText: "Failed to create channel:\n{}"
+fileTracking:
+  columnName: "Name"
+  columnRemotePath: "Remote Path"
+  columnAutoReupload: "Auto Reupload"
+  columnStatus: "Status"
+  stopButton: "Stop"
+  statusWatching: "Watching"
+  statusUploading: "Uploading..."
 settings:
   settingsClosedHeader: "Most Settings Require Restart"
   settingsClosedText: "At current implementation status, most settings changes require a restart to take effect.\nPlease restart the application to apply the changes.\nThis will be improved in the future."

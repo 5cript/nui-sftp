@@ -202,7 +202,29 @@ namespace FileTracking
                     reply.error("Instance not found: " + instanceId);
                     return;
                 }
+                watches_.erase(instanceId);
                 instances_.erase(iter);
+                reply({{"success", true}});
+            }
+        );
+
+        registerOnStrand(
+            "FileTracking::addWatch",
+            [this](RpcHelper::RpcOnce&& reply, std::string instanceId, std::string path, bool recursive)
+            {
+                auto* inst = findInstance(instanceId);
+                if (!inst)
+                {
+                    reply.error("Instance not found: " + instanceId);
+                    return;
+                }
+                auto watch = inst->addWatch(std::filesystem::path{path}, recursive);
+                if (!watch)
+                {
+                    reply.error("Failed to add watch on path: " + path);
+                    return;
+                }
+                watches_[instanceId].push_back(std::move(*watch));
                 reply({{"success", true}});
             }
         );

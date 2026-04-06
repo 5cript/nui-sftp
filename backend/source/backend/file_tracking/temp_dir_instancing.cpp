@@ -83,6 +83,10 @@ namespace FileTracking
             if (filename == lockFileName_ || filename == "metadata.json")
                 return;
 
+            // .goutputstream* ignore
+            if (filename.starts_with(".goutputstream"))
+                return;
+
             nlohmann::json payload = {
                 {"action", Utility::enumToString(toFileAction(action))},
                 {"directory", dir},
@@ -155,18 +159,9 @@ namespace FileTracking
         Nui::Window& /*wnd*/,
         Nui::RpcHub& hub
     )
-        : impl_{std::make_unique<Implementation>(
-              std::move(config),
-              std::move(strand),
-              &hub,
-              Ids::generateId().value()
-          )}
+        : impl_{std::make_unique<Implementation>(std::move(config), std::move(strand), &hub, Ids::generateId().value())}
     {
-        impl_->listener = std::make_unique<FileChangeListener>(
-            impl_->instanceId,
-            impl_->strand,
-            impl_->hub
-        );
+        impl_->listener = std::make_unique<FileChangeListener>(impl_->instanceId, impl_->strand, impl_->hub);
 
         writeMetadata();
         impl_->valid = true;
@@ -195,8 +190,7 @@ namespace FileTracking
         return impl_->instanceDir;
     }
 
-    std::optional<InstanceWatch>
-    TemporaryDirectoryInstance::addWatch(std::filesystem::path const& path, bool recursive)
+    std::optional<InstanceWatch> TemporaryDirectoryInstance::addWatch(std::filesystem::path const& path, bool recursive)
     {
         namespace fs = std::filesystem;
 
@@ -206,11 +200,7 @@ namespace FileTracking
         auto rel = fs::relative(absPath, impl_->instanceDir);
         if (rel.string().starts_with(".."))
         {
-            Log::warn(
-                "addWatch: '{}' is outside instance dir '{}'",
-                absPath.string(),
-                impl_->instanceDir.string()
-            );
+            Log::warn("addWatch: '{}' is outside instance dir '{}'", absPath.string(), impl_->instanceDir.string());
             return std::nullopt;
         }
 
@@ -283,9 +273,7 @@ namespace FileTracking
         }
         catch (std::exception const& exc)
         {
-            Log::error(
-                "writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, exc.what()
-            );
+            Log::error("writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, exc.what());
         }
     }
 }
