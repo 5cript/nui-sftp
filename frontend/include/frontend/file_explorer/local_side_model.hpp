@@ -23,7 +23,8 @@ class LocalSideModel : public SideModel
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
-    std::vector<NuiFileExplorer::ContextMenuItem> contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
+    std::vector<NuiFileExplorer::ContextMenuItem>
+    contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
     void onDropExternal(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,
@@ -32,6 +33,7 @@ class LocalSideModel : public SideModel
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
     void onError(std::string const& error) override;
+    void onOpen(NuiFileExplorer::Item const& item, bool openWith);
 
     bool isLeft() const override
     {

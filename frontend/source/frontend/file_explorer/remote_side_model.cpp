@@ -60,9 +60,8 @@ RemoteSideModel::RemoteSideModel(
       }
 {}
 
-std::vector<NuiFileExplorer::ContextMenuItem> RemoteSideModel::contextMenuItems(
-    std::vector<NuiFileExplorer::Item> const& selectedItems
-)
+std::vector<NuiFileExplorer::ContextMenuItem>
+RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
 {
     namespace Snc = ScriptNuiComponents;
     const bool hasItems = !selectedItems.empty();
@@ -70,7 +69,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> RemoteSideModel::contextMenuItems(
 
     return {
         Snc::PopupMenu::item(
-            "Download",
+            language->get("fileExplorer", "contextMenu", "download"),
             {},
             [this, selectedItems]()
             {
@@ -78,9 +77,27 @@ std::vector<NuiFileExplorer::ContextMenuItem> RemoteSideModel::contextMenuItems(
             },
             !hasItems
         ),
+        Snc::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", "open"),
+            {},
+            [this, selectedItems]()
+            {
+                // TODO:
+            },
+            !singleItem
+        ),
+        Snc::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", "openWith"),
+            {},
+            [this, selectedItems]()
+            {
+                // TODO:
+            },
+            !singleItem
+        ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
-            "Delete",
+            language->get("fileExplorer", "contextMenu", "delete"),
             {},
             [this, selectedItems]()
             {
@@ -89,7 +106,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> RemoteSideModel::contextMenuItems(
             !hasItems
         ),
         Snc::PopupMenu::item(
-            "Rename",
+            language->get("fileExplorer", "contextMenu", "rename"),
             {},
             [this, selectedItems]()
             {
@@ -98,7 +115,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> RemoteSideModel::contextMenuItems(
             !singleItem
         ),
         Snc::PopupMenu::item(
-            "Properties",
+            language->get("fileExplorer", "contextMenu", "properties"),
             {},
             [this, selectedItems]()
             {

@@ -9,6 +9,7 @@
 #include <backend/password/password_prompter.hpp>
 #include <backend/theme_finder.hpp>
 #include <backend/program_options.hpp>
+#include <backend/opener.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
 
@@ -52,6 +53,7 @@ class Main
     } loggerSetup_;
     Nui::Window window_;
     Nui::RpcHub hub_;
+    std::unique_ptr<Opener> opener_;
     std::unique_ptr<RpcFilesystem> rpcFilesystem_;
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;

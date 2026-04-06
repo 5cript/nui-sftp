@@ -10,10 +10,12 @@ RpcFilesystem::RpcFilesystem(
     boost::asio::any_io_executor executor,
     Nui::Window& wnd,
     Nui::RpcHub& hub,
-    Persistence::LocalFilesystemOptions options
+    Persistence::LocalFilesystemOptions options,
+    Opener& opener
 )
     : RpcHelper::StrandRpc{executor, wnd, hub}
     , options_{std::move(options)}
+    , opener_{&opener}
 {
     registerRemove();
     registerRemoveMultiple();
@@ -25,6 +27,7 @@ RpcFilesystem::RpcFilesystem(
     registerGetHome();
     registerDoesExist();
     registerWriteFile();
+    registerOpen();
 }
 
 void RpcFilesystem::registerRemove()
@@ -414,6 +417,25 @@ void RpcFilesystem::registerWriteFile()
 
                 Log::info("Successfully wrote to file '{}'", filePath);
                 return reply({{"success", true}});
+            }
+        );
+}
+
+void RpcFilesystem::registerOpen()
+{
+    on("RpcFilesystem::open")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply, std::string const& filePath, bool openWith)
+            {
+                Log::info("RpcFilesystem::open called for file: {}", filePath);
+                auto result = opener_->openFile(std::filesystem::path{filePath}, openWith);
+                if (!result)
+                {
+                    Log::error("Failed to open file '{}': {}", filePath, result.error());
+                    return reply.error(result.error());
+                }
+
+                reply({{"success", true}});
             }
         );
 }

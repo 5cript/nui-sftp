@@ -8,6 +8,15 @@ confirmDialog:
   cancel: "Cancel"
   items: "Items"
   neverShowAgain: "Never show again"
+fileExplorer:
+  contextMenu:
+    download: "Download"
+    upload: "Upload"
+    open: "Open"
+    openWith: "Open With"
+    delete: "Delete"
+    rename: "Rename"
+    properties: "Properties"
 newSessionDialog:
   title: "Create New Session"
   validationMessage: "Please fill in all required fields."
@@ -68,6 +77,7 @@ localSideModel:
   createFileFailedTitle: "Create File Failed"
   unsupportedItemType: "Unsupported item type"
   createDirectoryFailedTitle: "Create Directory Failed"
+  failedToOpenFile: "Failed to open file."
 sessionFrontend:
   sessionCreationFailedHeader: "Session Creation Failed"
   sessionCreationFailedText: "Failed to create session instance:\n{}"

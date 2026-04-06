@@ -35,6 +35,7 @@ if (WIN32)
             pty/windows/pipe.cpp
             windows/windows_drag_drop.cpp
             windows/main_windows.cpp
+            windows/opener_windows.cpp
     )
 else()
     target_sources(
@@ -43,6 +44,12 @@ else()
             file_tracking/instance_lock_nix.cpp
             pty/linux/pty.cpp
             linux/main_linux.cpp
+            linux/opener_linux.cpp
+    )
+    target_link_libraries(
+        backend
+        PRIVATE
+            SDBusCpp::sdbus-c++
     )
 endif()
 
