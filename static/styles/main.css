@@ -41,6 +41,18 @@
     font-size: 16px;
     --theme-color: #90d26d;
 
+    /* Operation Queue */
+    --opq-card: #0b1220;
+    --opq-muted: #98a2b3;
+    --opq-lime: #7EE787;
+    --opq-red: #ff6b6b;
+    --opq-warn: #ffb534;
+    --opq-gray: #9aa0a6;
+    --opq-accent: #2563eb;
+    --opq-border-faint: rgba(255, 255, 255, 0.06);
+    --opq-border: rgba(255, 255, 255, 0.25);
+    --opq-zebra-alternation: rgba(0, 0, 0, 0.20);
+
     /* Dark / Light */
     --resize-handle-color: #707070;
     --brighter-background: #404040;
@@ -149,14 +161,4 @@ body {
     margin: 0;
     background-color: var(--background-color);
     color: var(--color);
-
-    --opq-card: #0b1220;
-    --opq-muted: #98a2b3;
-    --opq-lime: #7EE787;
-    --opq-red: #ff6b6b;
-    --opq-warn: #ffb534;
-    --opq-gray: #9aa0a6;
-    --opq-accent: #2563eb;
-    --opq-border-faint: rgba(255, 255, 255, 0.06);
-    --opq-border: rgba(255, 255, 255, 0.25);
 }

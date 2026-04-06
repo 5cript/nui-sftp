@@ -57,18 +57,13 @@ header.opq-controls {
 .opq-priority-list,
 .opq-regular-list {
     display: contents;
+
+    &>:nth-child(even) {
+        --opq-base-bg: var(--opq-zebra-alternation, rgba(255, 255, 255, 0.04));
+    }
 }
 
 .opq-priority-separator {
-    grid-column: 1 / -1;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--opq-accent, rgba(100, 160, 255, 0.35)), transparent);
-    align-self: center;
-    margin: 0 8px;
-}
-
-/* Hide separator when there are no priority operations (separator is the sole child) */
-.opq-priority-separator:only-child {
     display: none;
 }
 
@@ -83,8 +78,10 @@ header.opq-controls {
 }
 
 .opq-card {
+    --opq-base-bg: transparent;
+    --opq-state-color: transparent;
     border-bottom: 1px solid var(--opq-border-faint);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
+    background: color-mix(in srgb, var(--opq-base-bg) 80%, var(--opq-state-color));
     overflow: hidden;
     transition: box-shadow .18s ease;
     font-size: 0.75rem;
@@ -329,27 +326,27 @@ header.opq-controls {
 
 /* states */
 .opq-card.opq-completed {
-    background: rgba(37, 65, 37, 0.3);
-    border-color: rgb(0, 187, 16);
+    --opq-state-color: rgba(37, 65, 37, 0.3);
+    border-color: rgba(0, 187, 16, 0.50);
     color: var(--opq-lime)
 }
 
 .opq-card.opq-failed {
-    background: rgba(104, 52, 52, 0.3);
-    border-color: rgb(168, 0, 0);
+    --opq-state-color: rgba(104, 52, 52, 0.3);
+    border-color: rgba(168, 0, 0, 0.50);
     color: var(--opq-red)
 }
 
 .opq-card.opq-canceled {
-    background: rgba(153, 153, 153, 0.04);
-    border-color: rgb(153, 153, 153);
+    --opq-state-color: rgba(153, 153, 153, 0.04);
+    border-color: rgba(153, 153, 153, 0.50);
     color: var(--opq-gray)
 }
 
 .opq-card.opq-partial-success {
-    background: #ffff0040;
-    border-color: rgb(255, 176, 40);
-    color: yellow;
+    --opq-state-color: rgba(255, 255, 0, 0.25);
+    border-color: rgba(255, 176, 40, 0.50);
+    color: var(--opq-warn, yellow);
 }
 
 /* pending state (default) */

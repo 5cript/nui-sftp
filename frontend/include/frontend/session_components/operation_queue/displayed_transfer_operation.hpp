@@ -98,6 +98,13 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         return !isCompletedState() && progressBar_.max() > 10'000'000; // 10 MB
     }
 
+    void state(SharedData::OperationState newState) override
+    {
+        OperationCard::state(newState);
+        if (isCompletedState())
+            progressBar_.setZeroAsComplete();
+    }
+
   private:
     Components::ProgressBar progressBar_;
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};

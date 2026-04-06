@@ -76,14 +76,14 @@
 
 namespace
 {
-    double percentageBetween(long long current, long long min, long long max)
+    double percentageBetween(long long current, long long min, long long max, bool zeroIsComplete)
     {
         // Ensure min is less than or equal to max
         if (min > max)
             std::swap(min, max);
 
         if (max == 0)
-            return 0.;
+            return zeroIsComplete ? 100. : 0.;
 
         // Clamp current between min and max
         current = std::clamp(current, min, max);
@@ -105,6 +105,7 @@ namespace Components
         Nui::Observed<long long> maxObserved;
         Nui::Observed<std::string> text{"0%"};
         Nui::Observed<std::string> backgroundColor{"#a0a0a0"};
+        Nui::Observed<bool> zeroAsComplete{false};
         Utility::OrderOfMagnitude magnitude;
 
         Implementation(Settings settings)
@@ -120,6 +121,12 @@ namespace Components
 
     ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(ProgressBar);
 
+    void ProgressBar::setZeroAsComplete()
+    {
+        impl_->zeroAsComplete = true;
+        recalculate();
+    }
+
     Nui::ElementRenderer ProgressBar::operator()() const
     {
         using namespace Nui::Elements;
@@ -134,10 +141,10 @@ namespace Components
         }(
             // bar fill
             div{
-                style = observe(impl_->progress, impl_->maxObserved, impl_->backgroundColor).generate([this]() {
+                style = observe(impl_->progress, impl_->maxObserved, impl_->backgroundColor, impl_->zeroAsComplete).generate([this]() {
                     return format(
                         "width: {:.2f}%; height: {}; background-color: {};",
-                        percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value()),
+                        percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value(), impl_->zeroAsComplete.value()),
                         impl_->height,
                         impl_->backgroundColor.value()
                     );
@@ -158,7 +165,10 @@ namespace Components
     void ProgressBar::updateText()
     {
         impl_->text =
-            [this, percent = percentageBetween(impl_->progress.value(), impl_->min, impl_->maxObserved.value())]()
+            [this,
+                percent = percentageBetween(
+                    impl_->progress.value(), impl_->min, impl_->maxObserved.value(), impl_->zeroAsComplete.value()
+                )]()
         {
             if (impl_->showMinMax)
             {
@@ -184,7 +194,8 @@ namespace Components
     void ProgressBar::recalculate()
     {
         const auto current = impl_->progress.value();
-        const auto percent = percentageBetween(current, impl_->min, impl_->maxObserved.value());
+        const auto percent =
+            percentageBetween(current, impl_->min, impl_->maxObserved.value(), impl_->zeroAsComplete.value());
         const auto hue = current == impl_->maxObserved.value()
             ? 120.
             : std::max(5., 120. * std::pow(static_cast<double>(percent) / 100., 1.8));
