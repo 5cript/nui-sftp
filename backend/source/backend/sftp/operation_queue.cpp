@@ -419,6 +419,11 @@ bool OperationQueue::paused() const
     return paused_;
 }
 
+bool OperationQueue::hasPriorityWork() const
+{
+    return !priorityOperations_.empty();
+}
+
 void OperationQueue::paused(bool pause)
 {
     within_strand_do(

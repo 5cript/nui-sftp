@@ -42,6 +42,12 @@ namespace Components
          */
         long long max() const;
 
+        /**
+         * @brief Sometimes a progress bar from 0 to 0 makes sense. Initially shown as 0% but once marked as complete,
+         * it should show 100%. Call this to enable that behavior.
+         */
+        void setZeroAsComplete();
+
       private:
         void updateText();
         void recalculate();

@@ -137,6 +137,16 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         // clang-format on
     }
 
+    void state(SharedData::OperationState newState) override
+    {
+        OperationCard::state(newState);
+        if (isCompletedState())
+        {
+            fileProgressBar_.setZeroAsComplete();
+            totalProgressBar_.setZeroAsComplete();
+        }
+    }
+
   private:
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;

@@ -94,6 +94,8 @@ class OperationQueue
     bool paused() const;
     void paused(bool pause);
 
+    bool hasPriorityWork() const;
+
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
     void deepPause(bool pause);

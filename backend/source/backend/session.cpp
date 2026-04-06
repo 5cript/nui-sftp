@@ -145,7 +145,7 @@ void Session::doOperationQueueWork()
             if (!self->running_)
                 return;
 
-            if (self->operationQueue_ && !self->operationQueue_->paused() && self->operationQueue_->work())
+            if (self->operationQueue_ && (!self->operationQueue_->paused() || self->operationQueue_->hasPriorityWork()) && self->operationQueue_->work())
             {
                 ++self->unthrottledLimitCounter_;
                 if (self->unthrottledLimitCounter_ < 10)
