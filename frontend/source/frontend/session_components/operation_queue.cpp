@@ -24,7 +24,9 @@
 #include <script-nui-components/switch.hpp>
 
 #include <chrono>
+#include <functional>
 #include <string_view>
+#include <unordered_map>
 
 using namespace std::chrono_literals;
 
@@ -46,6 +48,7 @@ struct OperationQueue::Implementation
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
+    std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
     {
@@ -817,7 +820,20 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                 static_cast<int>(completed.reason)
             );
     }
+    auto cbIt = impl_->completionCallbacks.find(completed.operationId.value());
+    if (cbIt != impl_->completionCallbacks.end())
+    {
+        bool success = completed.reason == SharedData::OperationCompletionReason::Completed;
+        cbIt->second(success);
+        impl_->completionCallbacks.erase(cbIt);
+    }
+
     Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback)
+{
+    impl_->completionCallbacks[opId.value()] = std::move(callback);
 }
 
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)

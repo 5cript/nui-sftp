@@ -8,6 +8,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
+#include <frontend/session_components/file_tracking.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <nui-file-explorer/file_grid.hpp>
 #include <persistence/state_holder.hpp>
@@ -83,6 +84,10 @@ struct Session::Implementation
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
     SessionOptions sessionOptions;
 
+    // File Tracking
+    FileTrackingPanel fileTrackingPanel;
+    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
+
     // Shutdown & Connection Status:
     Nui::Observed<bool> inertEverything{false};
     Nui::Observed<bool> isInLostConnectionState{false};
@@ -147,6 +152,8 @@ struct Session::Implementation
         , channelElements{}
         , sessionOptionsElement{}
         , sessionOptions{stateHolder, events, this->initialName, this->sessionLayoutId, confirmDialog}
+        , fileTrackingPanel{stateHolder, events, confirmDialog}
+        , fileTrackingElement{}
         , disambiguateTitle{std::move(disambiguateTitle)}
     {
         fileGrid.leftModel().dropMetadata(sessionLayoutId);
@@ -200,6 +207,18 @@ struct Session::Implementation
                     if (sessionOptionsElement.value())
                         return;
                     Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "session-options"s);
+                }
+            ),
+            PopupMenu::item(
+                language->get("sessionFrontend", "fileTracking"),
+                {},
+                [this]()
+                {
+                    tabAddMenu.close();
+                    // There can only be one!
+                    if (fileTrackingElement.value())
+                        return;
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-tracking"s);
                 }
             ),
         });
@@ -259,6 +278,25 @@ struct Session::Implementation
                     {
                         tabAddMenu.modifyItemByLabel(
                             language->get("sessionFrontend", "operationQueue"),
+                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
+                            {
+                                if (mi)
+                                    mi->disabled = dis;
+                            }
+                        );
+                    }
+                );
+            }
+        );
+        Nui::listen(
+            fileTrackingElement,
+            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
+            {
+                fileTrackingElement.eventContext().delayToAfterProcessing(
+                    [this, elem]()
+                    {
+                        tabAddMenu.modifyItemByLabel(
+                            language->get("sessionFrontend", "fileTracking"),
                             [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
                             {
                                 if (mi)
@@ -686,7 +724,9 @@ void Session::openSftp(std::string const& username)
             remoteSideModel().engine(fileEngine);
             localSideModel().engine(std::move(fileEngine));
             impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
+            impl_->fileTrackingPanel.activate(&impl_->operationQueue, sshTerminalEngine->sshSessionId());
             remoteSideModel().operationQueue(&impl_->operationQueue);
+            remoteSideModel().setFileTracking(&impl_->fileTrackingPanel);
             localSideModel().operationQueue(&impl_->operationQueue);
             remoteFileGridSide().path(
                 fmt::format(
@@ -817,9 +857,7 @@ void Session::onConnectionLoss()
             return true;
         }
     );
-    impl_->frontendSessionManager.value()->broadcast(
-        language->get("sessionFrontend", "connectionLostTerminalMessage")
-    );
+    impl_->frontendSessionManager.value()->broadcast(language->get("sessionFrontend", "connectionLostTerminalMessage"));
 }
 
 void Session::shutdown(std::function<void()> onShutdown)
@@ -859,6 +897,7 @@ void Session::closeSelf()
         Log::info("Session shutdown started.");
 
         impl_->operationQueue.deactivate();
+        impl_->fileTrackingPanel.deactivate();
         auto terminalDispose = [this, closeSelfCompletion]()
         {
             Log::info("Disposing frontend ssh manager.");
@@ -1174,6 +1213,38 @@ void Session::initializeLayout()
                 }
                 impl_->sessionOptionsElement.value().reset();
                 impl_->sessionOptionsElement.modifyNow();
+                return Nui::val::undefined();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "fileTrackingFactory",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (impl_->fileTrackingElement.value())
+                {
+                    Log::warn("There is already a file tracking panel, cannot open another one");
+                    return Nui::val::undefined();
+                }
+                impl_->fileTrackingElement = Nui::Dom::makeStandaloneElement(impl_->fileTrackingPanel());
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return impl_->fileTrackingElement.value()->val();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "fileTrackingDelete",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (!impl_->fileTrackingElement.value())
+                {
+                    Log::warn("There is no file tracking panel to remove");
+                    return Nui::val::undefined();
+                }
+                impl_->fileTrackingElement.value().reset();
+                impl_->fileTrackingElement.modifyNow();
                 return Nui::val::undefined();
             }
         )

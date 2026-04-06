@@ -80,6 +80,8 @@ class OperationQueue
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
     );
 
+    void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
+
     Nui::ElementRenderer operator()();
 
   private:

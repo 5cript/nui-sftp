@@ -189,6 +189,7 @@ Nui::ElementRenderer Toolbar::operator()()
                     style = "width: 32px; height: 32px;",
                 }();
             }(),
+            .color = "var(--theme-color)",
             .padding = 0,
             .withBorder = false
         }),

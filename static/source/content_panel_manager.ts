@@ -3,6 +3,7 @@ import { Terminal } from './content_panels/terminal';
 import { FileExplorer } from './content_panels/file_explorer';
 import { OperationQueue } from './content_panels/operation_queue';
 import { SessionOptions } from './content_panels/session_options';
+import { FileTracking } from './content_panels/file_tracking';
 import {
     BoxPanel,
     DockPanel,
@@ -26,6 +27,8 @@ interface addPanelArguments {
     operationQueueDelete: () => any;
     sessionOptionsFactory: () => HTMLElement;
     sessionOptionsDelete: () => any;
+    fileTrackingFactory: () => HTMLElement;
+    fileTrackingDelete: () => any;
     openAddContextMenu: (id: string | undefined) => void;
 }
 
@@ -44,6 +47,8 @@ class ContentPanelManager {
     operationQueueDelete: () => any;
     sessionOptionsFactory: () => HTMLElement | undefined;
     sessionOptionsDelete: () => any;
+    fileTrackingFactory: () => HTMLElement | undefined;
+    fileTrackingDelete: () => any;
     lastAddRequest: lastAddRequestArgs | undefined;
 
     constructor() {
@@ -56,6 +61,8 @@ class ContentPanelManager {
         this.operationQueueFactory = () => { return undefined; };
         this.sessionOptionsDelete = () => { return undefined; };
         this.sessionOptionsFactory = () => { return undefined; };
+        this.fileTrackingDelete = () => { return undefined; };
+        this.fileTrackingFactory = () => { return undefined; };
         this.lastAddRequest = undefined;
     }
 
@@ -94,6 +101,7 @@ class ContentPanelManager {
         let term = new Terminal('Terminal', this.terminalFactory, this.terminalDelete);
         let explorer = new FileExplorer('FileExplorer', this.fileExplorerFactory, this.fileExplorerDelete);
         let queue = new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
+        let fileTracking = new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
 
         let dock = new DockPanel({
             addButtonEnabled: true,
@@ -101,6 +109,7 @@ class ContentPanelManager {
         dock.addWidget(term);
         dock.addWidget(explorer, { mode: 'split-right', ref: term });
         dock.addWidget(queue, { mode: "split-bottom", ref: term });
+        dock.addWidget(fileTracking, { mode: "tab-after", ref: queue });
         dock.id = 'dock_' + id;
         this.modifyDefaultLayout(dock);
 
@@ -117,6 +126,8 @@ class ContentPanelManager {
                 return new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
             case 'session-options':
                 return new SessionOptions('SessionOptions', this.sessionOptionsFactory, this.sessionOptionsDelete);
+            case 'file-tracking':
+                return new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
             default:
                 return undefined;
         }
@@ -212,7 +223,10 @@ class ContentPanelManager {
         }
         if (!args.terminalFactory || !args.terminalDelete ||
             !args.fileExplorerFactory || !args.fileExplorerDelete ||
-            !args.operationQueueFactory || !args.operationQueueDelete || !args.sessionOptionsFactory || !args.sessionOptionsDelete || !args.openAddContextMenu) {
+            !args.operationQueueFactory || !args.operationQueueDelete ||
+            !args.sessionOptionsFactory || !args.sessionOptionsDelete ||
+            !args.fileTrackingFactory || !args.fileTrackingDelete ||
+            !args.openAddContextMenu) {
             console.error("Missing one function argument to addPanel");
             return false;
         }
@@ -229,6 +243,8 @@ class ContentPanelManager {
             operationQueueDelete,
             sessionOptionsFactory,
             sessionOptionsDelete,
+            fileTrackingFactory,
+            fileTrackingDelete,
             openAddContextMenu
         } = args!;
 
@@ -242,6 +258,8 @@ class ContentPanelManager {
         this.operationQueueDelete = operationQueueDelete;
         this.sessionOptionsFactory = sessionOptionsFactory;
         this.sessionOptionsDelete = sessionOptionsDelete;
+        this.fileTrackingFactory = fileTrackingFactory;
+        this.fileTrackingDelete = fileTrackingDelete;
 
         let main = new BoxPanel({ spacing: 0 });
         main.id = 'main_' + id;

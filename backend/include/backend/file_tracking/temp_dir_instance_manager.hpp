@@ -145,5 +145,6 @@ namespace FileTracking
         std::chrono::hours deadInstanceRetentionHours_;
         Nui::Window* wnd_;
         std::map<std::string, std::unique_ptr<TemporaryDirectoryInstance>> instances_;
+        std::map<std::string, std::vector<InstanceWatch>> watches_;
     };
 }

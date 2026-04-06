@@ -17,6 +17,7 @@ fileExplorer:
     delete: "Löschen"
     rename: "Umbenennen"
     properties: "Eigenschaften"
+    watchAndDownload: "Beobachten & Herunterladen"
 newSessionDialog:
   title: "Neue Sitzung erstellen"
   validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."
@@ -73,6 +74,11 @@ localSideModel:
   createDirectoryFailedTitle: "Verzeichniserstellung fehlgeschlagen"
   createItemFailedTitle: "Erstellung fehlgeschlagen"
   failedToOpenFile: "Datei konnte nicht geöffnet werden."
+  watchAndDownloadHeader: "Beobachten & Herunterladen?"
+  watchAndDownloadSingle: "'{}' in ein temporäres Verzeichnis herunterladen und auf Änderungen beobachten?"
+  watchAndDownloadMultiple: "{} Elemente in ein temporäres Verzeichnis herunterladen und auf Änderungen beobachten?"
+  watchAndDownloadFailed: "Beobachten & Herunterladen fehlgeschlagen"
+  watchAndDownloadCreateInstanceFailed: "Eine temporäre Tracking-Instanz konnte nicht erstellt werden."
 operationQueue:
   pause: "Pausieren"
   continue: "Fortsetzen"
@@ -88,6 +94,7 @@ sessionFrontend:
   fileExplorer: "Datei Explorer"
   operationQueue: "Operationswarteschlange"
   sessionOptions: "Sitzungsoptionen"
+  fileTracking: "Dateiüberwachung"
   connectionLostTerminalMessage: "\e[31mVerbindung verloren\e[0m\n\t- Drücken Sie \e[35m<return>\e[0m um die Sitzung zu beenden\n\t- Drücken Sie \e[35mS\e[0m um die Terminalausgabe in eine Datei zu speichern"
   connectionLost: "Verbindung verloren"
   dropNotImplementedTitle: "Nicht implementiert"
@@ -96,6 +103,14 @@ sessionFrontend:
   channelCreationFailedText: "Der Kanal konnte nicht erstellt werden:\n{}"
   externalDropWebkitWarningTitle: "Externer Drop ist fehlerhaft"
   externalDropWebkitWarningText: "Aufgrund technischer Einschränkungen der WebKitGTK-Engine funktioniert das Ablegen externer Elemente auf der Remote-Seite nur für einzelne Elemente."
+fileTracking:
+  columnName: "Name"
+  columnRemotePath: "Remote-Pfad"
+  columnAutoReupload: "Auto-Hochladen"
+  columnStatus: "Status"
+  stopButton: "Stopp"
+  statusWatching: "Beobachtend"
+  statusUploading: "Hochladen..."
 settings:
   settingsClosedHeader: "Die meisten Einstellungen erfordern einen Neustart"
   settingsClosedText: "Im aktuellen Implementierungsstatus erfordern die meisten Einstellungsänderungen einen Neustart, um wirksam zu werden.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden.\nDies wird in Zukunft verbessert."

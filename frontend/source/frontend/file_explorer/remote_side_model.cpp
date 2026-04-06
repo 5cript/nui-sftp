@@ -1,9 +1,14 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/session_components/file_tracking.hpp>
 
 #include <utility/language.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
 #include <log/log.hpp>
+#include <ids/ids.hpp>
+#include <shared_data/file_operations/operation_mode.hpp>
+
+#include <nui/rpc.hpp>
 
 #include <algorithm>
 #include <iterator>
@@ -83,18 +88,18 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {},
             [this, selectedItems]()
             {
-                // TODO:
+                onWatchDownloadAndOpen(selectedItems, false);
             },
-            !singleItem
+            !singleItem || fileTracking_ == nullptr
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWith"),
             {},
             [this, selectedItems]()
             {
-                // TODO:
+                onWatchDownloadAndOpen(selectedItems, true);
             },
-            !singleItem
+            !singleItem || fileTracking_ == nullptr
         ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
@@ -130,6 +135,11 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
 void RemoteSideModel::setLocalModel(SideModel* model)
 {
     localModel_ = model;
+}
+
+void RemoteSideModel::setFileTracking(FileTrackingPanel* fileTracking)
+{
+    fileTracking_ = fileTracking;
 }
 
 bool RemoteSideModel::isComplete() const
@@ -867,6 +877,120 @@ void RemoteSideModel::generatePathBoxSuggestions(
             for (auto& suggestion : suggestions)
                 suggestion = path.parent_path() / suggestion;
             onResultsAvailable(suggestions);
+        }
+    );
+}
+
+void RemoteSideModel::onWatchDownloadAndOpen(
+    std::vector<NuiFileExplorer::Item> const& items,
+    bool openWith
+)
+{
+    CHECK_COMPLETE();
+
+    if (items.empty() || fileTracking_ == nullptr)
+        return;
+
+    Nui::RpcClient::callWithBackChannel(
+        "FileTracking::createInstance",
+        [this, items, openWith](Nui::val response)
+        {
+            if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+            {
+                Log::error("FileTracking: createInstance failed");
+                return;
+            }
+
+            const auto instanceIdStr = response["instanceId"].as<std::string>();
+            const auto instanceDirStr = response["instanceDir"].as<std::string>();
+            Ids::InstanceId instanceId = Ids::makeInstanceId(instanceIdStr);
+            std::filesystem::path instanceDir{instanceDirStr};
+
+            Log::info(
+                "FileTracking: createInstance succeeded, id={}, dir={}", instanceIdStr, instanceDirStr
+            );
+
+            Nui::RpcClient::callWithBackChannel(
+                "FileTracking::addWatch",
+                [this, items, instanceId, instanceDir, openWith](Nui::val watchResponse)
+                {
+                    if (!watchResponse.hasOwnProperty("success") || !watchResponse["success"].as<bool>())
+                        Log::error("FileTracking: addWatch failed for instance {}", instanceId.value());
+                    else
+                        Log::info("FileTracking: addWatch succeeded for instance {}", instanceId.value());
+
+                    for (auto const& item : items)
+                    {
+                        std::filesystem::path remotePath = currentPath_.value() / item.path;
+                        std::filesystem::path localPath = instanceDir / item.path.filename();
+
+                        NuiFileExplorer::Item remoteItem = item;
+                        remoteItem.path = remotePath;
+                        NuiFileExplorer::Item localItem = item;
+                        localItem.path = localPath;
+
+                        operationQueue_->enqueueDownload(
+                            remoteItem,
+                            localItem,
+                            [this, instanceId, localPath, openWith](
+                                std::optional<Ids::OperationId> const& opId,
+                                std::string const& info
+                            )
+                            {
+                                if (!opId)
+                                {
+                                    Log::error(
+                                        "FileTracking: failed to enqueue download for instance {}: {}",
+                                        instanceId.value(),
+                                        info
+                                    );
+                                    return;
+                                }
+                                operationQueue_->addCompletionCallback(
+                                    *opId,
+                                    [localPath, openWith](bool success)
+                                    {
+                                        if (!success)
+                                        {
+                                            Log::error(
+                                                "FileTracking: download failed for {}",
+                                                localPath.generic_string()
+                                            );
+                                            return;
+                                        }
+                                        Log::info(
+                                            "FileTracking: opening {} (openWith={})",
+                                            localPath.generic_string(),
+                                            openWith
+                                        );
+                                        Nui::RpcClient::callWithBackChannel(
+                                            "RpcFilesystem::open",
+                                            [](Nui::val result)
+                                            {
+                                                if (!result.hasOwnProperty("success") ||
+                                                    !result["success"].as<bool>())
+                                                {
+                                                    Log::error("RpcFilesystem::open failed");
+                                                }
+                                            },
+                                            localPath.generic_string(),
+                                            openWith
+                                        );
+                                    }
+                                );
+                            },
+                            false, // allowOverwrite
+                            false, // insertRefresh
+                            SharedData::OperationMode::PriorityQueued
+                        );
+
+                        fileTracking_->startWatching(instanceId, instanceDir, remotePath, localPath);
+                    }
+                },
+                instanceIdStr,
+                instanceDirStr,
+                true
+            );
         }
     );
 }
