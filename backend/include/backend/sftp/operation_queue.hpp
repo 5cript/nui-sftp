@@ -81,6 +81,14 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    std::expected<void, Operation::Error> addRenameOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        std::filesystem::path const& sourcePath,
+        std::filesystem::path const& destinationPath,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
     void registerRpc();
 
     bool paused() const;

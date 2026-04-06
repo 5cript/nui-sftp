@@ -171,6 +171,7 @@ class Session
 
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
+    void registerRpcSftpAddRenameOperation();
     void registerOperationQueuePauseUnpause();
 
     void removeChannel(Ids::ChannelId channelId);

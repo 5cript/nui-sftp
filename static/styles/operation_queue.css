@@ -90,6 +90,7 @@ header.opq-controls {
     font-size: 0.75rem;
     padding: 0 5px;
     height: 36px;
+    fill: currentColor;
 
     /* first child — icon */
     &>div:first-child {

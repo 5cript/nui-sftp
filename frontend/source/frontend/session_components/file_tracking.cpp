@@ -33,6 +33,7 @@ struct TrackedEntry
     std::filesystem::path remotePath;
     std::filesystem::path localPath;
     bool autoReupload{true};
+    bool deleteRemote{false};
     bool uploading{false};
 };
 
@@ -62,6 +63,11 @@ struct FileTrackingPanel::Implementation
             },
             ScriptNuiComponents::ResizableTable::HeaderTableCell{
                 .content = std::string{language->get("fileTracking", "columnAutoReupload")},
+                .initialWidth = 120,
+                .resizeable = false,
+            },
+            ScriptNuiComponents::ResizableTable::HeaderTableCell{
+                .content = std::string{language->get("fileTracking", "columnDeleteRemote")},
                 .initialWidth = 120,
                 .resizeable = false,
             },
@@ -117,6 +123,28 @@ struct FileTrackingPanel::Implementation
                                         if (ent.instanceId.value() == instanceIdStr)
                                         {
                                             ent.autoReupload = checked;
+                                            break;
+                                        }
+                                    }
+                                    entries.modifyNow();
+                                },
+                            });
+                        },
+                    },
+                    ResizableTable::TableCell{
+                        [this, instanceIdStr, isChecked = entry.deleteRemote](
+                            std::unique_ptr<ResizableTable::ISelfController>
+                        ) -> Nui::ElementRenderer
+                        {
+                            return ScriptNuiComponents::switch_({
+                                .isChecked = isChecked,
+                                .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
+                                {
+                                    for (auto& ent : entries.value())
+                                    {
+                                        if (ent.instanceId.value() == instanceIdStr)
+                                        {
+                                            ent.deleteRemote = checked;
                                             break;
                                         }
                                     }
@@ -256,11 +284,66 @@ void FileTrackingPanel::startWatching(
             if (it == vec.end())
                 return;
 
+            if (action == "Deleted")
+            {
+                if (it->deleteRemote && impl_->operationQueue)
+                {
+                    std::filesystem::path changedLocalPath = std::filesystem::path{directory} / filename;
+                    std::filesystem::path relPath = changedLocalPath.lexically_relative(instanceDir);
+                    std::filesystem::path changedRemotePath = remotePath.parent_path() / relPath;
+
+                    impl_->operationQueue->enqueueDelete(
+                        {changedRemotePath},
+                        true,
+                        [instanceId](std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info)
+                        {
+                            if (!opIds)
+                                Log::error(
+                                    "FileTracking: failed to enqueue remote delete for instance {}: {}",
+                                    instanceId.value(),
+                                    info
+                                );
+                        }
+                    );
+                }
+                return;
+            }
+
+            if (action == "Moved")
+            {
+                if (!impl_->operationQueue)
+                    return;
+
+                const auto& oldFilename = payload["oldFilename"].as<std::string>();
+
+                std::filesystem::path oldLocalPath = std::filesystem::path{directory} / oldFilename;
+                std::filesystem::path newLocalPath = std::filesystem::path{directory} / filename;
+
+                std::filesystem::path oldRelPath = oldLocalPath.lexically_relative(instanceDir);
+                std::filesystem::path newRelPath = newLocalPath.lexically_relative(instanceDir);
+
+                std::filesystem::path oldRemotePath = remotePath.parent_path() / oldRelPath;
+                std::filesystem::path newRemotePath = remotePath.parent_path() / newRelPath;
+
+                impl_->operationQueue->enqueueRename(
+                    oldRemotePath,
+                    newRemotePath,
+                    [instanceId](std::optional<Ids::OperationId> const& opId, std::string const& info)
+                    {
+                        if (!opId)
+                            Log::error(
+                                "FileTracking: failed to enqueue remote rename for instance {}: {}",
+                                instanceId.value(),
+                                info
+                            );
+                    },
+                    SharedData::OperationMode::PriorityQueued
+                );
+                return;
+            }
+
             if (!it->autoReupload || it->uploading)
                 return;
-
-            if (action == "Deleted")
-                return; // TODO remove from tracking
 
             if (!impl_->operationQueue)
             {

@@ -72,12 +72,14 @@ class OperationQueue
     void enqueueRename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
-        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueDelete(
         std::vector<std::filesystem::path> const& paths,
         bool recursive,
-        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);

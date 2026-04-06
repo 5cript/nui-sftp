@@ -55,6 +55,7 @@ void Session::start()
             self->registerRpcSftpCreateFile();
             self->registerRpcSftpAddDownloadOperation();
             self->registerRpcSftpAddUploadOperation();
+            self->registerRpcSftpAddRenameOperation();
             self->registerOperationQueuePauseUnpause();
             self->registerRpcSftpDeleteFiles();
             self->registerRpcSftpRename();
@@ -513,7 +514,8 @@ void Session::registerRpcQueuedRemoves()
                 std::string const& channelIdString,
                 std::vector<std::filesystem::path> paths,
                 bool recursive,
-                bool insertRefresh
+                bool insertRefresh,
+                int mode
             )
             {
                 auto self = weak.lock();
@@ -522,7 +524,7 @@ void Session::registerRpcQueuedRemoves()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), paths = std::move(paths), recursive, insertRefresh](
+                    [weak = self->weak_from_this(), paths = std::move(paths), recursive, insertRefresh, mode](
                         RpcHelper::RpcOnce&& reply, auto&& channel
                     ) mutable
                     {
@@ -535,7 +537,12 @@ void Session::registerRpcQueuedRemoves()
                         {
                             const auto newOperationId = Ids::generateOperationId();
                             const auto result = self->operationQueue_->addDeleteOperation(
-                                *channel, newOperationId, path, recursive, insertRefresh
+                                *channel,
+                                newOperationId,
+                                path,
+                                recursive,
+                                insertRefresh,
+                                static_cast<SharedData::OperationMode>(mode)
                             );
                             operationIds.push_back(newOperationId.value());
                         }
@@ -749,6 +756,68 @@ void Session::registerRpcSftpAddUploadOperation()
                             newOperationIdString,
                             localPath,
                             remotePath
+                        );
+
+                        self->resetQueueThrottle();
+                        reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpAddRenameOperation()
+{
+    on(fmt::format("Session::{}::sftp::addRename", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::string const& newOperationIdString,
+                std::string const& sourcePath,
+                std::string const& destinationPath,
+                int mode
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(), newOperationIdString, sourcePath, destinationPath, mode](
+                        RpcHelper::RpcOnce&& reply, auto&& channel
+                    )
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto result = self->operationQueue_->addRenameOperation(
+                            *channel,
+                            Ids::makeOperationId(newOperationIdString),
+                            sourcePath,
+                            destinationPath,
+                            static_cast<SharedData::OperationMode>(mode)
+                        );
+
+                        if (!result.has_value())
+                        {
+                            Log::error(
+                                "Failed to add rename operation for '{}' to '{}': {}",
+                                sourcePath,
+                                destinationPath,
+                                result.error().toString()
+                            );
+                            return reply.error("Failed to add rename operation: " + result.error().toString());
+                        }
+
+                        Log::info(
+                            "Added rename operation with id '{}' for '{}' to '{}'",
+                            newOperationIdString,
+                            sourcePath,
+                            destinationPath
                         );
 
                         self->resetQueueThrottle();

@@ -8,7 +8,11 @@
     box-sizing: border-box;
 }
 
-.file-tracking-panel .snc-resizable-table {
+.file-tracking-panel .script-nui-resizable-table {
     flex: 1;
     min-height: 0;
+
+    & th {
+        padding: 3px;
+    }
 }

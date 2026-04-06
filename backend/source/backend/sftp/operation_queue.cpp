@@ -93,6 +93,17 @@ namespace
                         .error = error,
                     };
                 },
+                [reason, operationId, error](RenameOperation const& op)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .localPath = op.sourcePath(),
+                        .remotePath = op.destinationPath(),
+                        .error = error,
+                    };
+                },
                 [reason, operationId](std::nullopt_t)
                 {
                     return OperationQueue::OperationCompleted{
@@ -512,11 +523,14 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             }
         );
 
-        const auto bulkId = Ids::generateOperationId();
+        // operationId is assigned to BulkDownload so the frontend's completion callback
+        // (registered on operationId) fires only after all files are fully downloaded,
+        // not when the preceding scan finishes.
+        const auto scanId = Ids::generateOperationId();
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
-                .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkId),
+                .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", operationId),
                 .remotePath = remotePath,
                 .localPath = localPath,
                 .individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout),
@@ -525,13 +539,13 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         );
 
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
-        targetQueue.emplace_back(operationId, std::move(scan));
-        targetQueue.emplace_back(bulkId, std::move(bulk));
+        targetQueue.emplace_back(scanId, std::move(scan));
+        targetQueue.emplace_back(operationId, std::move(bulk));
 
         hub_->callRemote(
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
-                .operationId = operationId,
+                .operationId = scanId,
                 .type = SharedData::OperationType::Scan,
                 .mode = mode,
                 .remotePath = remotePath,
@@ -540,7 +554,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         hub_->callRemote(
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
-                .operationId = bulkId,
+                .operationId = operationId,
                 .type = SharedData::OperationType::BulkDownload,
                 .mode = mode,
                 .insertRefresh = insertRefresh,
@@ -693,7 +707,16 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     // Assumed in strand
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    if (recursive)
+    auto statFut = sftp.stat(remotePath);
+    if (statFut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
+    {
+        Log::error("addDeleteOperation: stat timed out for '{}'", remotePath.string());
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
+    }
+    const auto statResult = statFut.get();
+    const bool isDirectory = statResult.has_value() && statResult->isDirectoryLike();
+
+    if (recursive && isDirectory)
     {
         const auto scanId = Ids::generateOperationId();
 
@@ -741,7 +764,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
             },
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-            .recursive = recursive,
+            .recursive = recursive && isDirectory,
         }
     );
 
@@ -755,6 +778,42 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
             .mode = mode,
             .insertRefresh = insertRefresh,
             .remotePath = remotePath,
+        }
+    );
+
+    return {};
+}
+
+std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    std::filesystem::path const& sourcePath,
+    std::filesystem::path const& destinationPath,
+    SharedData::OperationMode mode
+)
+{
+    // Assumed in strand
+
+    auto operation = std::make_unique<RenameOperation>(
+        sftp,
+        RenameOperation::RenameOperationOptions{
+            .sourcePath = sourcePath,
+            .destinationPath = destinationPath,
+            .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+        }
+    );
+
+    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    targetQueue.emplace_back(operationId, std::move(operation));
+
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = operationId,
+            .type = SharedData::OperationType::Rename,
+            .mode = mode,
+            .localPath = sourcePath,
+            .remotePath = destinationPath,
         }
     );
 
