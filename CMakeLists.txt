@@ -101,6 +101,11 @@ else()
         add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
     endif()
 
+    # If linux platform add sdbus++ dependency
+    if (UNIX AND NOT APPLE)
+        find_package(sdbus-c++ REQUIRED)
+    endif()
+
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
 

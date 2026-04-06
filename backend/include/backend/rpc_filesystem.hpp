@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/rpc_helper.hpp>
+#include <backend/opener.hpp>
 #include <persistence/state/local_filesystem_options.hpp>
 
 class RpcFilesystem : public RpcHelper::StrandRpc
@@ -10,7 +11,8 @@ class RpcFilesystem : public RpcHelper::StrandRpc
         boost::asio::any_io_executor executor,
         Nui::Window& wnd,
         Nui::RpcHub& hub,
-        Persistence::LocalFilesystemOptions options
+        Persistence::LocalFilesystemOptions options,
+        Opener& opener
     );
 
   private:
@@ -24,7 +26,9 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     void registerGetHome();
     void registerDoesExist();
     void registerWriteFile();
+    void registerOpen();
 
   private:
     Persistence::LocalFilesystemOptions options_;
+    Opener* opener_;
 };

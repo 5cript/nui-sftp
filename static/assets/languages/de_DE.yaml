@@ -8,6 +8,15 @@ confirmDialog:
   cancel: "Abbrechen"
   items: "Elemente"
   neverShowAgain: "Nicht mehr anzeigen"
+fileExplorer:
+  contextMenu:
+    download: "Herunterladen"
+    upload: "Hochladen"
+    open: "Öffnen"
+    openWith: "Öffnen mit"
+    delete: "Löschen"
+    rename: "Umbenennen"
+    properties: "Eigenschaften"
 newSessionDialog:
   title: "Neue Sitzung erstellen"
   validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."
@@ -44,6 +53,7 @@ remoteSideModel:
   renamePrompt: "Geben Sie den neuen Namen für {} ein"
   renameWithItem: "{} umbenennen"
   failedToRenameItem: "Fehler beim Umbenennen von '{}' in '{}': {}"
+  failedToOpenFile: "Datei konnte nicht geöffnet werden."
 localSideModel:
   failedToStatFile: "Dateiinformationen für '{}' konnten nicht abgerufen werden: {}"
   fileAlreadyExistsOverwriteHeader: "Datei existiert bereits, überschreiben?"
@@ -62,6 +72,7 @@ localSideModel:
   unsupportedItemType: "Nicht unterstützter Elementtyp"
   createDirectoryFailedTitle: "Verzeichniserstellung fehlgeschlagen"
   createItemFailedTitle: "Erstellung fehlgeschlagen"
+  failedToOpenFile: "Datei konnte nicht geöffnet werden."
 operationQueue:
   pause: "Pausieren"
   continue: "Fortsetzen"

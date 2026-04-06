@@ -189,7 +189,6 @@ namespace NuiFileExplorer
                 div{
                     style = "width: 100%; height: 100%",
                     "contextmenu"_event = [this](Nui::val event) {
-                        Nui::WebApi::Console::info("Context menu on empty space");
                         onContextMenu(nullptr, event);
                     }
                 }(

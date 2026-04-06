@@ -702,9 +702,8 @@ void LocalSideModel::enqueueSingleUpload(
     );
 }
 
-std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
-    std::vector<NuiFileExplorer::Item> const& selectedItems
-)
+std::vector<NuiFileExplorer::ContextMenuItem>
+LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
 {
     namespace Snc = ScriptNuiComponents;
     const bool hasItems = !selectedItems.empty();
@@ -712,7 +711,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
 
     return {
         Snc::PopupMenu::item(
-            "Upload",
+            language->get("fileExplorer", "contextMenu", "upload"),
             {},
             [this, selectedItems]()
             {
@@ -720,9 +719,27 @@ std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
             },
             !hasItems
         ),
+        Snc::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", "open"),
+            {},
+            [this, selectedItems]()
+            {
+                onOpen(selectedItems.front(), false);
+            },
+            !singleItem
+        ),
+        Snc::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", "openWith"),
+            {},
+            [this, selectedItems]()
+            {
+                onOpen(selectedItems.front(), true);
+            },
+            !singleItem
+        ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
-            "Delete",
+            language->get("fileExplorer", "contextMenu", "delete"),
             {},
             [this, selectedItems]()
             {
@@ -731,7 +748,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
             !hasItems
         ),
         Snc::PopupMenu::item(
-            "Rename",
+            language->get("fileExplorer", "contextMenu", "rename"),
             {},
             [this, selectedItems]()
             {
@@ -740,7 +757,7 @@ std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
             !singleItem
         ),
         Snc::PopupMenu::item(
-            "Properties",
+            language->get("fileExplorer", "contextMenu", "properties"),
             {},
             [this, selectedItems]()
             {
@@ -749,6 +766,47 @@ std::vector<NuiFileExplorer::ContextMenuItem> LocalSideModel::contextMenuItems(
             !singleItem
         ),
     };
+}
+
+void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
+{
+    Log::info("Open item requested: {}. Open with: {}", item.path.generic_string(), openWith);
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::open",
+        [this](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+            {
+                Log::error("Invalid response from RpcFilesystem::open");
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "failedToOpenFile"),
+                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            const auto success = val["success"].as<bool>();
+            if (!success)
+            {
+                const auto error = val["error"].as<std::string>();
+                Log::error("Failed to open file: {}", error);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "failedToOpenFile"),
+                    .text = error,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            Log::info("File opened successfully");
+        },
+        (*currentPath_ / item.path).generic_string(),
+        openWith
+    );
 }
 
 void LocalSideModel::setRemoteModel(SideModel* model)
