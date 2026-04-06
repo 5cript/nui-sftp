@@ -8,6 +8,7 @@
 #include <frontend/session_components/operation_queue/displayed_scan_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_bulk_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_delete_operation.hpp>
+#include <frontend/session_components/operation_queue/displayed_rename_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_operation.hpp>
 
 #include <log/log.hpp>
@@ -527,6 +528,28 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 *added.localPath,
                 *added.remotePath,
                 [this](OperationCard<DisplayedBulkOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                remoteRefresh
+            );
+        }
+        else if (added.type == SharedData::OperationType::Rename)
+        {
+            if (!added.localPath || !added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for Rename id: {} without source or destination", added.operationId.value()
+                );
+                return {};
+            }
+            return std::make_unique<DisplayedRenameOperation>(
+                added.operationId,
+                *impl_->confirmDialog,
+                *added.localPath,
+                *added.remotePath,
+                [this](OperationCard<DisplayedRenameOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
@@ -1064,9 +1087,10 @@ void OperationQueue::enqueueUpload(
     impl_->fileEngine->addUpload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, mode);
 }
 void OperationQueue::enqueueRename(
-    std::filesystem::path const&,
-    std::filesystem::path const&,
-    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete
+    std::filesystem::path const& oldPath,
+    std::filesystem::path const& newPath,
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
+    SharedData::OperationMode mode
 )
 {
     if (!impl_->fileEngine)
@@ -1075,12 +1099,15 @@ void OperationQueue::enqueueRename(
         onComplete(std::nullopt, "No file engine set");
         return;
     }
-    // TODO: Implement
+
+    Log::info("Frontend Operation Queue rename: {} -> {}", oldPath.generic_string(), newPath.generic_string());
+    impl_->fileEngine->addRename(oldPath, newPath, std::move(onComplete), mode);
 }
 void OperationQueue::enqueueDelete(
     std::vector<std::filesystem::path> const& paths,
     bool recursive,
-    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
+    SharedData::OperationMode mode
 )
 {
     if (!impl_->fileEngine)
@@ -1089,5 +1116,5 @@ void OperationQueue::enqueueDelete(
         onComplete(std::nullopt, "No file engine set");
         return;
     }
-    impl_->fileEngine->removeOnQueueUnchecked(paths, recursive, std::move(onComplete));
+    impl_->fileEngine->removeOnQueueUnchecked(paths, recursive, std::move(onComplete), mode);
 }

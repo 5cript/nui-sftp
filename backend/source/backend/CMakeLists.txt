@@ -23,6 +23,7 @@ add_library(
         sftp/bulk_download_operation.cpp
         sftp/bulk_upload_operation.cpp
         sftp/delete_operation.cpp
+        sftp/rename_operation.cpp
         "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
 )
 

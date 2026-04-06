@@ -26,7 +26,8 @@ class RemoteSideModel : public SideModel
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
-    std::vector<NuiFileExplorer::ContextMenuItem> contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
+    std::vector<NuiFileExplorer::ContextMenuItem>
+    contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
     void onDropExternal(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,
@@ -79,7 +80,31 @@ class RemoteSideModel : public SideModel
     enqueueDeletes(std::vector<std::filesystem::path> nonEmpties, std::vector<std::filesystem::path> filesAndEmptyDirs);
 
     void continueDeletion();
-    void onWatchDownloadAndOpen(std::vector<NuiFileExplorer::Item> const& items, bool openWith);
+    void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
+    void onWatchDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
+    void onFileTrackingInstanceCreated(
+        NuiFileExplorer::Item const& item,
+        bool openWith,
+        bool synchronize,
+        Ids::InstanceId const& instanceId,
+        std::string const& instanceDirStr
+    );
+    void onFileDownloadComplete(
+        Ids::InstanceId const& instanceId,
+        std::filesystem::path const& instanceDir,
+        std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath,
+        bool openWith,
+        bool synchronize,
+        bool success
+    );
+    void onFileWatchAdded(
+        Ids::InstanceId const& instanceId,
+        std::filesystem::path const& instanceDir,
+        std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath,
+        bool openWith
+    );
 
   private:
     SideModel* localModel_{nullptr};

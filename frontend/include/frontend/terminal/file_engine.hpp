@@ -27,10 +27,8 @@ class FileEngine
             onComplete
     );
 
-    void createDirectory(
-        std::filesystem::path const& path,
-        std::function<void(bool, std::string const& info)> onComplete
-    );
+    void
+    createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
     void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
 
     void addDownload(
@@ -70,13 +68,21 @@ class FileEngine
     void removeOnQueueUnchecked(
         std::vector<std::filesystem::path> const& paths,
         bool recursive,
-        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
+        std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
         std::function<void(bool, std::string const& info)> onComplete
+    );
+
+    void addRename(
+        std::filesystem::path const& sourcePath,
+        std::filesystem::path const& destinationPath,
+        std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     void stat(

@@ -87,6 +87,11 @@ namespace FileTracking
             if (filename.starts_with(".goutputstream"))
                 return;
 
+            // Ignore in-progress download temp files; they get renamed to the real
+            // name once the download is complete and we don't want to upload partials.
+            if (filename.ends_with(".filepart"))
+                return;
+
             nlohmann::json payload = {
                 {"action", Utility::enumToString(toFileAction(action))},
                 {"directory", dir},
@@ -161,8 +166,6 @@ namespace FileTracking
     )
         : impl_{std::make_unique<Implementation>(std::move(config), std::move(strand), &hub, Ids::generateId().value())}
     {
-        impl_->listener = std::make_unique<FileChangeListener>(impl_->instanceId, impl_->strand, impl_->hub);
-
         writeMetadata();
         impl_->valid = true;
     }
@@ -209,6 +212,14 @@ namespace FileTracking
             Log::warn("addWatch: path '{}' does not exist", absPath.string());
             return std::nullopt;
         }
+
+        if (impl_->listener)
+        {
+            Log::error("Watch already exists for instance '{}'", impl_->instanceId);
+            return std::nullopt;
+        }
+
+        impl_->listener = std::make_unique<FileChangeListener>(impl_->instanceId, impl_->strand, impl_->hub);
 
         auto watchId = impl_->watcher->addWatch(absPath.string(), impl_->listener.get(), recursive);
         if (watchId < 0)

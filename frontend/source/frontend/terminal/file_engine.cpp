@@ -515,14 +515,68 @@ void FileEngine::rename(
     );
 }
 
+void FileEngine::addRename(
+    std::filesystem::path const& sourcePath,
+    std::filesystem::path const& destinationPath,
+    std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
+    SharedData::OperationMode mode
+)
+{
+    Log::info(
+        "Requesting to add rename operation: {} -> {}", sourcePath.generic_string(), destinationPath.generic_string()
+    );
+    lazyOpen(
+        [this, sourcePath, destinationPath, onOperationCreated = std::move(onOperationCreated), mode](
+            auto const& channelId, std::string const& info
+        ) mutable
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add rename, no channel");
+                onOperationCreated(std::nullopt, info);
+                return;
+            }
+
+            const auto operationId = Ids::generateOperationId();
+
+            Log::info(
+                "Adding rename (with ID '{}'): {} -> {}",
+                operationId.value(),
+                sourcePath.generic_string(),
+                destinationPath.generic_string()
+            );
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addRename", impl_->engine->sshSessionId().value()),
+                [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to add rename: {}", val["error"].as<std::string>());
+                        onOperationCreated(std::nullopt, val["error"].as<std::string>());
+                        return;
+                    }
+                    onOperationCreated(operationId, "Success");
+                },
+                channelId.value().value(),
+                operationId.value(),
+                sourcePath.generic_string(),
+                destinationPath.generic_string(),
+                static_cast<int>(mode)
+            );
+        }
+    );
+}
+
 void FileEngine::removeOnQueueUnchecked(
     std::vector<std::filesystem::path> const& paths,
     bool recursive,
-    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete
+    std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
+    SharedData::OperationMode mode
 )
 {
     lazyOpen(
-        [this, paths, recursive, onComplete = std::move(onComplete)](
+        [this, paths, recursive, onComplete = std::move(onComplete), mode](
             auto const& channelId, std::string const& info
         ) mutable
         {
@@ -554,7 +608,8 @@ void FileEngine::removeOnQueueUnchecked(
                 channelId.value().value(),
                 paths,
                 recursive,
-                true
+                true,
+                static_cast<int>(mode)
             );
         }
     );

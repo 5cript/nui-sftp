@@ -7,26 +7,28 @@
 
 #include <ids/ids.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/svg.hpp>
 #include <frontend/components/svg/scan.hpp>
-#include <frontend/components/svg/download.hpp>
 #include <frontend/components/svg/pause.hpp>
 #include <frontend/components/svg/play.hpp>
-#include <frontend/components/svg/refresh.hpp>
 #include <frontend/components/svg/scan_animated.hpp>
-#include <frontend/components/svg/scan.hpp>
-#include <frontend/components/svg/upload.hpp>
-#include <frontend/components/svg/delete.hpp>
+#include <frontend/components/icon_panel.hpp>
+
+#include <ui5-sap-icons/icons/download.hpp>
+#include <ui5-sap-icons/icons/upload.hpp>
+#include <ui5-sap-icons/icons/delete.hpp>
+#include <ui5-sap-icons/icons/refresh.hpp>
+#include <ui5-sap-icons/icons/edit.hpp>
 
 #include <utility/convert_naming_convention.hpp>
 #include <utility/visit_overloaded.hpp>
 #include <utility/format_bytes.hpp>
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <functional>
 #include <memory>
@@ -143,13 +145,17 @@ class OperationCard : public OperationCardInterface
                         else
                             return Svgs::scanAnimated();
                     }
+                    else if (type_ == SharedData::OperationType::Rename)
+                    {
+                        return Ui5Icons::edit();
+                    }
                     else if (type_ == SharedData::OperationType::Delete)
                     {
-                        return Svgs::deleteIcon();
+                        return Ui5Icons::delete_();
                     }
                     else if (type_ == SharedData::OperationType::CustomAction)
                     {
-                        return Svgs::refresh();
+                        return Ui5Icons::refresh();
                     }
                     else
                         return div{}("UnknownType");
