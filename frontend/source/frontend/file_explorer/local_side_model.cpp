@@ -719,6 +719,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             },
             !hasItems
         ),
+        Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "open"),
             {},
