@@ -1,10 +1,30 @@
 .new-session-section {
     margin: 1rem 2rem;
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    grid-template-rows: 1fr 1fr;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 10px;
+
+    & > span, & > div > span {
+        font-size: 0.85rem;
+        font-weight: 600;
+        opacity: 0.8;
+        padding-bottom: 2px;
+    }
+
+    & > div {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        width: 100%;
+    }
+
+    & .script-nui-text-input,
+    & .script-nui-select {
+        min-width: 380px;
+        width: 100%;
+    }
 
     & .script-nui-select {
         &>div {
