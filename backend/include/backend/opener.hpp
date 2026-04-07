@@ -8,7 +8,7 @@
 class Opener
 {
   public:
-    Opener();
+    explicit Opener(void* nativeWindow = nullptr);
     ~Opener();
     Opener(Opener const&) = delete;
     Opener& operator=(Opener const&) = delete;

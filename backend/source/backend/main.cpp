@@ -255,7 +255,7 @@ void Main::registerRpc()
                 initialPersistenceLoadWarning_ = *warning;
             }
 
-            opener_ = std::make_unique<Opener>();
+            opener_ = std::make_unique<Opener>(window_.getNativeWindow());
             rpcSystem_ = std::make_unique<RpcSystem>(window_.getExecutor(), window_, hub_);
             tempDirInstanceManager_ = std::make_unique<FileTracking::TempDirInstanceManager>(
                 window_.getExecutor(),
