@@ -34,7 +34,7 @@ struct TrackedEntry
     std::filesystem::path localPath;
     bool autoReupload{true};
     bool deleteRemote{false};
-    bool uploading{false};
+    std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
 };
 
 struct FileTrackingPanel::Implementation
@@ -85,98 +85,101 @@ struct FileTrackingPanel::Implementation
         std::nullopt
     )};
 
-    Nui::ListenRemover<Nui::Observed<std::vector<TrackedEntry>>> entriesListener{};
-
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{confirmDialog}
     {}
 
-    std::vector<ScriptNuiComponents::ResizableTable::TableRow>
-    buildTableRows(std::vector<TrackedEntry> const& trackedEntries)
+    ScriptNuiComponents::ResizableTable::TableRow buildRowForEntry(TrackedEntry const& entry)
     {
         using namespace ScriptNuiComponents;
-        std::vector<ResizableTable::TableRow> rows;
-        rows.reserve(trackedEntries.size());
-        for (auto const& entry : trackedEntries)
-        {
-            std::string instanceIdStr = entry.instanceId.value();
-            std::string statusStr = entry.uploading ? std::string{language->get("fileTracking", "statusUploading")}
-                                                    : std::string{language->get("fileTracking", "statusWatching")};
+        std::string instanceIdStr = entry.instanceId.value();
+        auto uploadingObs = entry.uploading;
 
-            rows.push_back(
-                ResizableTable::TableRow{
-                    entry.localPath.filename().generic_string(),
-                    entry.remotePath.generic_string(),
-                    ResizableTable::TableCell{
-                        [this, instanceIdStr, isChecked = entry.autoReupload](
-                            std::unique_ptr<ResizableTable::ISelfController>
-                        ) -> Nui::ElementRenderer
+        return ResizableTable::TableRow{
+            entry.localPath.filename().generic_string(),
+            entry.remotePath.generic_string(),
+            ResizableTable::TableCell{
+                [this, instanceIdStr, isChecked = entry.autoReupload](
+                    std::unique_ptr<ResizableTable::ISelfController>
+                ) -> Nui::ElementRenderer
+                {
+                    return ScriptNuiComponents::switch_({
+                        .isChecked = isChecked,
+                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
                         {
-                            return ScriptNuiComponents::switch_({
-                                .isChecked = isChecked,
-                                .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
+                            for (auto& ent : entries.value())
+                            {
+                                if (ent.instanceId.value() == instanceIdStr)
                                 {
-                                    for (auto& ent : entries.value())
-                                    {
-                                        if (ent.instanceId.value() == instanceIdStr)
-                                        {
-                                            ent.autoReupload = checked;
-                                            break;
-                                        }
-                                    }
-                                    entries.modifyNow();
-                                },
-                            });
+                                    ent.autoReupload = checked;
+                                    break;
+                                }
+                            }
                         },
-                    },
-                    ResizableTable::TableCell{
-                        [this, instanceIdStr, isChecked = entry.deleteRemote](
-                            std::unique_ptr<ResizableTable::ISelfController>
-                        ) -> Nui::ElementRenderer
+                    });
+                },
+            },
+            ResizableTable::TableCell{
+                [this, instanceIdStr, isChecked = entry.deleteRemote](
+                    std::unique_ptr<ResizableTable::ISelfController>
+                ) -> Nui::ElementRenderer
+                {
+                    return ScriptNuiComponents::switch_({
+                        .isChecked = isChecked,
+                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
                         {
-                            return ScriptNuiComponents::switch_({
-                                .isChecked = isChecked,
-                                .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
+                            for (auto& ent : entries.value())
+                            {
+                                if (ent.instanceId.value() == instanceIdStr)
                                 {
-                                    for (auto& ent : entries.value())
-                                    {
-                                        if (ent.instanceId.value() == instanceIdStr)
-                                        {
-                                            ent.deleteRemote = checked;
-                                            break;
-                                        }
-                                    }
-                                    entries.modifyNow();
-                                },
-                            });
+                                    ent.deleteRemote = checked;
+                                    break;
+                                }
+                            }
                         },
-                    },
-                    statusStr,
-                    ResizableTable::TableCell{
-                        [this, instanceIdStr](std::unique_ptr<ResizableTable::ISelfController> controller)
-                            -> Nui::ElementRenderer
+                    });
+                },
+            },
+            ResizableTable::TableCell{
+                [uploadingObs](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
+                {
+                    return Nui::Elements::div{
+                        Nui::Attributes::class_ = "file-tracking-status",
+                        Nui::Attributes::style = "display:contents",
+                    }(
+                        Nui::observe(*uploadingObs).generate([](bool isUploading) -> Nui::ElementRenderer
                         {
-                            std::shared_ptr<ResizableTable::ISelfController> sharedCtrl = std::move(controller);
-                            return ScriptNuiComponents::button({
-                                .text = std::string{language->get("fileTracking", "stopButton")},
-                                .attributes =
-                                    {
-                                        Nui::Attributes::onClick =
-                                            [this, instanceIdStr, ctrl = std::move(sharedCtrl)](Nui::val)
-                                        {
-                                            stopWatching(instanceIdStr, ctrl.get());
-                                        },
-                                    },
-                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            });
-                        },
-                    },
-                }
-            );
-        }
-        return rows;
+                            if (isUploading)
+                                return Nui::Elements::text{
+                                    std::string{language->get("fileTracking", "statusUploading")}}();
+                            return Nui::Elements::text{
+                                std::string{language->get("fileTracking", "statusWatching")}}();
+                        })
+                    );
+                },
+            },
+            ResizableTable::TableCell{
+                [this, instanceIdStr](std::unique_ptr<ResizableTable::ISelfController> controller)
+                    -> Nui::ElementRenderer
+                {
+                    std::shared_ptr<ResizableTable::ISelfController> sharedCtrl = std::move(controller);
+                    return ScriptNuiComponents::button({
+                        .text = std::string{language->get("fileTracking", "stopButton")},
+                        .attributes =
+                            {
+                                Nui::Attributes::onClick =
+                                    [this, instanceIdStr, ctrl = std::move(sharedCtrl)](Nui::val)
+                                {
+                                    stopWatching(instanceIdStr, ctrl.get());
+                                },
+                            },
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    });
+                },
+            },
+        };
     }
 
     void stopWatching(std::string const& instanceIdStr, ScriptNuiComponents::ResizableTable::ISelfController* ctrl)
@@ -221,15 +224,7 @@ FileTrackingPanel::FileTrackingPanel(
     ConfirmDialog* confirmDialog
 )
     : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog))
-{
-    impl_->entriesListener = Nui::smartListen(
-        impl_->entries,
-        [this](std::vector<TrackedEntry> const& vec)
-        {
-            impl_->table->setRows(impl_->buildTableRows(vec));
-        }
-    );
-}
+{}
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(FileTrackingPanel);
 
@@ -242,8 +237,8 @@ void FileTrackingPanel::activate(OperationQueue* operationQueue, Ids::SessionId 
 void FileTrackingPanel::deactivate()
 {
     impl_->fileChangeListeners.clear();
+    impl_->table->clear();
     impl_->entries.value().clear();
-    impl_->entries.modifyNow();
     impl_->operationQueue = nullptr;
     impl_->sessionId = {};
 }
@@ -342,18 +337,13 @@ void FileTrackingPanel::startWatching(
                 return;
             }
 
-            if (!it->autoReupload || it->uploading)
+            if (!it->autoReupload || *it->uploading)
                 return;
 
             if (!impl_->operationQueue)
-            {
-                it->uploading = false;
-                impl_->entries.modifyNow();
                 return;
-            }
 
-            it->uploading = true;
-            impl_->entries.modifyNow();
+            (*it->uploading) = true;
 
             std::filesystem::path changedLocalPath = std::filesystem::path{directory} / filename;
             std::filesystem::path relPath = changedLocalPath.lexically_relative(instanceDir);
@@ -384,11 +374,10 @@ void FileTrackingPanel::startWatching(
                     {
                         if (ent.instanceId.value() == instanceId.value())
                         {
-                            ent.uploading = false;
+                            (*ent.uploading) = false;
                             break;
                         }
                     }
-                    impl_->entries.modifyNow();
                 },
                 true, // allowOverwrite — re-upload always overwrites
                 false, // insertRefresh
@@ -405,6 +394,7 @@ void FileTrackingPanel::startWatching(
             .localPath = localPath,
         }
     );
+    impl_->table->addRow(impl_->buildRowForEntry(impl_->entries.value().back()));
     impl_->entries.modifyNow();
 }
 
