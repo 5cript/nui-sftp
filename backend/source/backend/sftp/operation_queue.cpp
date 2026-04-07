@@ -116,10 +116,8 @@ namespace
         );
     }
 
-    DownloadOperation::DownloadOperationOptions resolveDownloadOptions(
-        Persistence::DownloadOptions const& opts,
-        std::chrono::seconds futureTimeout
-    )
+    DownloadOperation::DownloadOperationOptions
+    resolveDownloadOptions(Persistence::DownloadOptions const& opts, std::chrono::seconds futureTimeout)
     {
         const auto def = DownloadOperation::DownloadOperationOptions{};
         return {
@@ -137,10 +135,8 @@ namespace
         };
     }
 
-    UploadOperation::UploadOperationOptions resolveUploadOptions(
-        Persistence::UploadOptions const& opts,
-        std::chrono::seconds futureTimeout
-    )
+    UploadOperation::UploadOperationOptions
+    resolveUploadOptions(Persistence::UploadOptions const& opts, std::chrono::seconds futureTimeout)
     {
         const auto def = UploadOperation::UploadOperationOptions{};
         return {
@@ -180,8 +176,9 @@ std::string OperationQueue::rpcName(std::string_view event) const
 auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::OperationId operationId)
     -> std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>
 {
-    return [weak = weak_from_this(), name = rpcName(eventName), operationId](
-               std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)
+    return [weak = weak_from_this(),
+               name = rpcName(eventName),
+               operationId](std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)
     {
         auto self = weak.lock();
         if (!self)
@@ -218,7 +215,8 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
                std::uint64_t currentFileTotalBytes,
                std::uint64_t bytesCurrent,
                std::uint64_t bytesTotal,
-               std::make_signed_t<std::size_t> bytesPerSecond)
+               std::make_signed_t<std::size_t> bytesPerSecond
+           )
     {
         auto self = weak.lock();
         if (!self)
@@ -250,6 +248,7 @@ void OperationQueue::cancelAll()
                 return;
 
             self->operations_.clear();
+            self->priorityOperations_.clear();
             Log::info("All operations in the queue have been canceled.");
         }
     );
@@ -272,8 +271,7 @@ void OperationQueue::cancel(Ids::OperationId id)
                 return isMatch;
             };
 
-            const auto erasedFromRegular =
-                std::erase_if(self->operations_, cancelPredicate);
+            const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
             if (erasedFromRegular == 0)
                 std::erase_if(self->priorityOperations_, cancelPredicate);
         }
@@ -300,10 +298,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             //     operationCompleted.remotePath ? operationCompleted.remotePath->generic_string() : "<none>"
             // );
 
-            self->hub_->callRemote(
-                self->rpcName("onOperationCompleted"),
-                std::move(operationCompleted)
-            );
+            self->hub_->callRemote(self->rpcName("onOperationCompleted"), std::move(operationCompleted));
         }
     );
 }
@@ -479,9 +474,9 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         opts.localPath = localPath;
         opts.bigFileOptimized = isBigFile;
         opts.entry = result.value();
-        opts.progressCallback =
-            [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
-                auto min, auto max, auto current, auto bytesPerSecond)
+        opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
+                                    auto min, auto max, auto current, auto bytesPerSecond
+                                )
         {
             auto self = weak.lock();
             if (!self)
@@ -611,9 +606,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.remotePath = remotePath;
         opts.localPath = localPath;
         opts.bigFileOptimized = isBigFile;
-        opts.progressCallback =
-            [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
-                auto min, auto max, auto current, auto bytesPerSecond)
+        opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
+                                    auto min, auto max, auto current, auto bytesPerSecond
+                                )
         {
             auto self = weak.lock();
             if (!self)
@@ -752,7 +747,8 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress =
                 [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
-                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles)
+                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles
+                )
             {
                 auto self = weak.lock();
                 if (!self)
