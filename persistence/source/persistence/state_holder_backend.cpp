@@ -7,7 +7,7 @@
 #include <build_environment.hpp>
 
 #include <fmt/chrono.h>
-#include <roar/filesystem/special_paths.hpp>
+#include <nui/backend/filesystem/special_paths.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -22,7 +22,7 @@ namespace Persistence
     {
         void setupPersistence()
         {
-            const auto path = Roar::resolvePath(Constants::persistencePath);
+            const auto path = Nui::resolvePath(Constants::persistencePath);
             const auto parentPath = std::filesystem::path{path}.parent_path().string();
 
             if (!std::filesystem::exists(parentPath))
@@ -58,7 +58,7 @@ namespace Persistence
     )
     {
         setupPersistence();
-        const auto path = Roar::resolvePath(Constants::persistencePath);
+        const auto path = Nui::resolvePath(Constants::persistencePath);
 
         try
         {
@@ -329,7 +329,7 @@ namespace Persistence
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
     {
         setupPersistence();
-        const auto path = Roar::resolvePath(Constants::persistencePath);
+        const auto path = Nui::resolvePath(Constants::persistencePath);
 
         try
         {
