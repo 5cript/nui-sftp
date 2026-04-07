@@ -10,8 +10,14 @@ header.opq-controls {
     display: flex;
     gap: 8px;
     align-items: center;
-    padding: 5px;
-    border-bottom: 1px solid var(--opq-border);
+    padding: 6px 8px;
+    background: linear-gradient(to bottom,
+            color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
+            var(--darker-background));
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--opq-border) 65%);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
+    position: relative;
+    z-index: 1;
 }
 
 .opq-play-toggle {
@@ -68,13 +74,18 @@ header.opq-controls {
 }
 
 .opq-footer {
-    margin-top: 8px;
     color: var(--opq-muted);
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 8px;
-    border-top: 1px solid var(--opq-border);
+    background: linear-gradient(to bottom,
+            color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
+            var(--darker-background));
+    border-top: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--opq-border) 65%);
+    box-shadow: 0 -3px 12px rgba(0, 0, 0, 0.38);
+    position: relative;
+    z-index: 1;
 }
 
 .opq-card {

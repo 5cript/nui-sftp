@@ -8,6 +8,63 @@
     box-sizing: border-box;
 }
 
+header.file-tracking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
+        var(--darker-background)
+    );
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--border-color, #3a3a3a) 65%);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+}
+
+.file-tracking-header-stats {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+    min-width: 0;
+}
+
+.file-tracking-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.08));
+    font-size: 0.82em;
+}
+
+.file-tracking-stat-label {
+    color: var(--color-secondary, rgba(255, 255, 255, 0.55));
+    user-select: none;
+}
+
+.file-tracking-stat-value {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    min-width: 1.5ch;
+    text-align: center;
+}
+
+.file-tracking-stat-orphaned {
+    color: var(--warning-color, #f5a623);
+}
+
+.file-tracking-header-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
 .file-tracking-panel .script-nui-resizable-table {
     flex: 1;
     min-height: 0;
