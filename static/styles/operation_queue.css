@@ -12,7 +12,7 @@ header.opq-controls {
     align-items: center;
     padding: 6px 8px;
     background: linear-gradient(to bottom,
-            color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
+            color-mix(in srgb, var(--background-color-fields) 6%, var(--darker-background)),
             var(--darker-background));
     border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--opq-border) 65%);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
@@ -80,7 +80,7 @@ header.opq-controls {
     gap: 12px;
     padding: 8px;
     background: linear-gradient(to bottom,
-            color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
+            color-mix(in srgb, var(--background-color-fields) 6%, var(--darker-background)),
             var(--darker-background));
     border-top: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--opq-border) 65%);
     box-shadow: 0 -3px 12px rgba(0, 0, 0, 0.38);

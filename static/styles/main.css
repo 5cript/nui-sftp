@@ -41,9 +41,23 @@
     font-size: 16px;
     --theme-color: #90d26d;
 
+    /* Dark / Light */
+    --resize-handle-color: #707070;
+    --brighter-background: #404040;
+    --subdued-text: #888888;
+    --background-color: #303030;
+    --background-color-fields: #202020;
+    --color: #dddddd;
+    --color-secondary: #aaaaaa;
+    --color-fields: var(--color);
+    --border-color-fields: #505050;
+    --foreground-border-color: #505050;
+    /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
+    --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
+
     /* Operation Queue */
     --opq-card: #0b1220;
-    --opq-muted: #98a2b3;
+    --opq-muted: var(--color-secondary);
     --opq-lime: #7EE787;
     --opq-red: #ff6b6b;
     --opq-warn: #ffb534;
@@ -52,19 +66,6 @@
     --opq-border-faint: rgba(255, 255, 255, 0.06);
     --opq-border: rgba(255, 255, 255, 0.25);
     --opq-zebra-alternation: rgba(0, 0, 0, 0.20);
-
-    /* Dark / Light */
-    --resize-handle-color: #707070;
-    --brighter-background: #404040;
-    --subdued-text: #888888;
-    --background-color: #303030;
-    --background-color-fields: #202020;
-    --color: #dddddd;
-    --color-fields: var(--color);
-    --border-color-fields: #505050;
-    --foreground-border-color: #505050;
-    /* font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; */
-    --darker-background: color-mix(in srgb, var(--background-color) 80%, black 20%);
 
     /* Icon Panel */
     --brightness-mixin: black;
@@ -83,6 +84,11 @@
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;
     --script-nui-components-switch-thumb-color: var(--color-fields);
+
+    /* Button */
+    --script-nui-components-button-color: var(--color);
+    --script-nui-components-button-color-regular: var(--background-color-fields);
+    --script-nui-components-button-border-color-regular: #5F5E5A;
 
     --nui-file-grid-color: var(--color);
     --nui-file-grid-background-color: var(--background-color);
@@ -116,9 +122,11 @@
 
 :root[data-theme="light"] {
     /* Dark / Light */
+    --theme-color: #48a814;
     --background-color: #e0e0e0;
     --background-color-fields: #cdcdcd;
     --color: black;
+    --color-secondary: #333333;
     --color-fields: var(--color);
     --border-color-fields: #9f9f9f;
 
