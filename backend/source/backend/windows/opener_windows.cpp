@@ -57,7 +57,7 @@ namespace
 struct Opener::Implementation
 {};
 
-Opener::Opener()
+Opener::Opener(void* /*nativeWindow*/)
     : impl_{std::make_unique<Implementation>()}
 {}
 
