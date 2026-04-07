@@ -77,6 +77,8 @@ class Settings
     void reloadInheritables();
     void reloadInheritance();
     void deleteActiveSession();
+    void renameActiveSession();
+    void copyActiveSession();
 
     void addGroup(
         Nui::Observed<std::optional<std::string>>& currentGroupKey,

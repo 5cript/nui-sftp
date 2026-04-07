@@ -18,7 +18,14 @@ class NewSessionDialog
         std::string sessionName{};
         std::string iconName{};
     };
-    void open(std::function<void(ConfirmResult const&)> onConfirm);
+    struct OpenOptions
+    {
+        std::function<void(ConfirmResult const&)> onConfirm;
+        bool showIconPicker{true};
+        std::string initialName{};
+        std::string initialIcon{"laptop"};
+    };
+    void open(OpenOptions options);
 
   private:
     Nui::ElementRenderer dialogBody();

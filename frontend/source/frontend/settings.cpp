@@ -756,8 +756,8 @@ bool Settings::isActive(SectionSelectorOptions const& options)
 
 void Settings::addNewSession()
 {
-    impl_->newSessionDialog.open(
-        [this](auto const& result)
+    impl_->newSessionDialog.open({
+        .onConfirm = [this](auto const& result)
         {
             Log::info("New session created: {}.", result.sessionName);
             impl_->stateHolder->stateCache().sessions[result.sessionName] =
@@ -790,8 +790,8 @@ void Settings::addNewSession()
                     impl_->sessionSelectors.modifyNow();
                 }
             );
-        }
-    );
+        },
+    });
 }
 
 void Settings::loadSessionFromState(std::string const& sessionId)
@@ -1125,6 +1125,140 @@ void Settings::deleteActiveSession()
     );
 }
 
+void Settings::renameActiveSession()
+{
+    if (!*impl_->activeSession)
+        return;
+
+    const auto oldSessionId = **impl_->activeSession;
+    impl_->newSessionDialog.open({
+        .onConfirm = [this, oldSessionId](NewSessionDialog::ConfirmResult const& result)
+        {
+            if (result.sessionName.empty() || result.sessionName == oldSessionId)
+                return;
+
+            const auto newSessionId = result.sessionName;
+
+            if (impl_->stateHolder->stateCache().sessions.contains(newSessionId))
+            {
+                impl_->confirmDialog->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("settings", "sessionNameAlreadyExistsHeader"),
+                    .text = language->get("settings", "sessionNameAlreadyExists"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            applySessionToState(oldSessionId);
+
+            auto& sessions = impl_->stateHolder->stateCache().sessions;
+            auto nodeHandle = sessions.extract(oldSessionId);
+            nodeHandle.key() = newSessionId;
+            sessions.insert(std::move(nodeHandle));
+
+            impl_->stateHolder->save(
+                [this](std::optional<std::string> const& error)
+                {
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
+                }
+            );
+
+            for (auto& selector : impl_->sessionSelectors.value())
+            {
+                if (selector.sessionId == oldSessionId)
+                {
+                    selector.sessionId = newSessionId;
+                    break;
+                }
+            }
+
+            impl_->activeSession = newSessionId;
+            impl_->events->onSettingsChanged.modify();
+            impl_->sessionSelectors.modifyNow();
+        },
+        .showIconPicker = false,
+        .initialName = oldSessionId,
+    });
+}
+
+void Settings::copyActiveSession()
+{
+    if (!*impl_->activeSession)
+        return;
+
+    const auto sourceSessionId = **impl_->activeSession;
+    const auto sourceIcon = impl_->stateHolder->stateCache().sessions.count(sourceSessionId)
+        ? impl_->stateHolder->stateCache().sessions.at(sourceSessionId).icon
+        : std::string{"laptop"};
+    impl_->newSessionDialog.open({
+        .onConfirm = [this, sourceSessionId](NewSessionDialog::ConfirmResult const& result)
+        {
+            if (result.sessionName.empty() || result.sessionName == sourceSessionId)
+                return;
+
+            const auto newSessionId = result.sessionName;
+            if (impl_->stateHolder->stateCache().sessions.contains(newSessionId))
+            {
+                impl_->confirmDialog->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("settings", "sessionNameAlreadyExistsHeader"),
+                    .text = language->get("settings", "sessionNameAlreadyExists"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            applySessionToState(sourceSessionId);
+
+            auto& sessions = impl_->stateHolder->stateCache().sessions;
+            sessions[newSessionId] = sessions.at(sourceSessionId);
+            sessions[newSessionId].icon = result.iconName;
+
+            impl_->stateHolder->save(
+                [this](std::optional<std::string> const& error)
+                {
+                    if (error)
+                    {
+                        impl_->confirmDialog->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = language->get("settings", "errorSavingSettingsHeader"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                    }
+                }
+            );
+
+            impl_->sessionSelectors.value().push_back(
+                Settings::SectionSelectorOptions{
+                    .thisSection = Settings::Section::Session,
+                    .sessionId = newSessionId,
+                    .icon = iconFromName(result.iconName),
+                }
+            );
+
+            impl_->events->onSettingsChanged.modify();
+            impl_->sessionSelectors.modifyNow();
+        },
+        .showIconPicker = true,
+        .initialName = sourceSessionId,
+        .initialIcon = sourceIcon,
+    });
+}
+
 Nui::ElementRenderer Settings::currentSession()
 {
     using namespace Nui;
@@ -1139,8 +1273,26 @@ Nui::ElementRenderer Settings::currentSession()
         auto overarchingSettings = fragment(
             div{
                 class_ = "settings-session-deleter",
-                style = "grid-template-columns: unset; padding: 0;"
+                style = "display: flex; gap: 8px; padding: 0 16px;"
             }(
+                Snc::button({
+                    .text = language->get("settings", "renameSessionButton"),
+                    .icon = GeneratedSvgs::wrench(),
+                    .attributes = {
+                        onClick = [this]() {
+                            renameActiveSession();
+                        },
+                    },
+                }),
+                Snc::button({
+                    .text = language->get("settings", "copySessionButton"),
+                    .icon = GeneratedSvgs::add(),
+                    .attributes = {
+                        onClick = [this]() {
+                            copyActiveSession();
+                        },
+                    },
+                }),
                 Snc::button({
                     .text = language->get("settings", "deleteSessionButton"),
                     .icon = GeneratedSvgs::delete_(),
