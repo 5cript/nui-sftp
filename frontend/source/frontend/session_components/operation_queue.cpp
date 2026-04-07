@@ -191,6 +191,7 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(OperationQueue);
 void OperationQueue::cancelAll()
 {
     impl_->operations.clear();
+    impl_->priorityOperations.clear();
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
