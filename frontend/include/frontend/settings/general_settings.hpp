@@ -24,6 +24,7 @@ struct GeneralSettings
         Nui::Observed<bool> logging{false};
         Nui::Observed<bool> userInterface{true};
         Nui::Observed<bool> localFilesystemOptions{true};
+        Nui::Observed<bool> fileTrackingOptions{true};
     } collapsibleStates;
 
     struct Localization
@@ -52,6 +53,13 @@ struct GeneralSettings
         PathSetting<true> homeOverride;
         PathSetting<true> temporaryDownloadsDirectory;
     } localFilesystemOptions;
+
+    struct FileTrackingOptions
+    {
+        BoolSetting<> autoReupload;
+        BoolSetting<> moveRemoteOnLocalMove;
+        BoolSetting<> deleteRemoteOnLocalDelete;
+    } fileTrackingOptions;
 
     LogOptions logOptions;
     Nui::ListenRemover<decltype(AppWideEvents::availableThemes)> availableThemesListener;

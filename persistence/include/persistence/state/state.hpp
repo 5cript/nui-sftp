@@ -8,6 +8,7 @@
 #include <persistence/state/ssh_options.hpp>
 #include <persistence/state/ui_options.hpp>
 #include <persistence/state/queue_options.hpp>
+#include <persistence/state/file_tracking_options.hpp>
 #include <persistence/state/local_filesystem_options.hpp>
 #include <persistence/state/localization_options.hpp>
 #include <persistence/state/log_options.hpp>
@@ -25,6 +26,7 @@ namespace Persistence
         std::map<std::string, SftpOptions> sftpOptions{};
         std::map<std::string, SessionOptions> sessions{};
         std::map<std::string, QueueOptions> queueOptions{};
+        FileTrackingOptions fileTrackingOptions{};
         LocalFilesystemOptions localFilesystemOptions{};
         UiOptions uiOptions{};
         LogOptions logOptions{};
@@ -45,6 +47,7 @@ namespace Persistence
             logOptions,
             localizationOptions,
             queueOptions,
+            fileTrackingOptions,
             localFilesystemOptions)
     )
 }
