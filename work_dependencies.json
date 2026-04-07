@@ -8,7 +8,7 @@
         },
         {
             "url": "https://github.com/NuiCpp/Nui.git",
-            "rev": "v3.3.0",
+            "rev": "v3.4.0",
             "branch": "main",
             "name": "Nui"
         },
@@ -32,7 +32,7 @@
         },
         {
             "url": "https://github.com/5cript/5cript-nui-components.git",
-            "rev": "49503761f712f2b3fe3ff165fd4590a9f3bc10ce",
+            "rev": "711492fb9bf023564ddbe02b069aa3185b5ae222",
             "branch": "main",
             "name": "5cript-nui-components"
         },
