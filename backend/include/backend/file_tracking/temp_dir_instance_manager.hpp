@@ -48,6 +48,8 @@ namespace FileTracking
      * | listInstances           | —                                   | {success, instances: [...]}    |
      * | getInstanceInfo         | instanceId: string                  | {success, instanceId, instanceDir} |
      * | manualCleanup           | —                                   | {success}                      |
+     * | countOrphaned           | —                                   | {success, count: int}          |
+     * | forceCleanup            | —                                   | {success, removed: int}        |
      *
      * ### Push events (instance → frontend)
      * Each instance emits @c "FileTracking::\<instanceId\>::onFileChanged"

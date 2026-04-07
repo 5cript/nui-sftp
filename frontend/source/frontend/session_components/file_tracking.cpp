@@ -8,6 +8,7 @@
 
 #include <script-nui-components/resizeable_table.hpp>
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/message_strip.hpp>
 #include <script-nui-components/switch.hpp>
 #include <script-nui-components/style_variant.hpp>
 
@@ -48,6 +49,9 @@ struct FileTrackingPanel::Implementation
 
     Nui::Observed<std::vector<TrackedEntry>> entries{};
     std::unordered_map<std::string, Nui::RpcClient::AutoUnregister> fileChangeListeners{};
+
+    Nui::Observed<int> orphanedCount{-1};
+    Nui::Observed<bool> cleanupRunning{false};
 
     std::shared_ptr<ScriptNuiComponents::ResizableTable> table{std::make_shared<ScriptNuiComponents::ResizableTable>(
         ScriptNuiComponents::ResizableTable::HeaderRow{
@@ -91,6 +95,124 @@ struct FileTrackingPanel::Implementation
         , confirmDialog{confirmDialog}
     {}
 
+    void refreshOrphanedCount()
+    {
+        Log::debug("FileTracking: refreshOrphanedCount() — calling FileTracking::countOrphaned");
+        Nui::RpcClient::callWithBackChannel(
+            "FileTracking::countOrphaned",
+            [this](Nui::val response)
+            {
+                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                {
+                    Log::error("FileTracking: countOrphaned RPC returned failure or no 'success' field");
+                    return;
+                }
+                const int cnt = response["count"].as<int>();
+                Log::debug(
+                    "FileTracking: countOrphaned returned count={}, current orphanedCount={}",
+                    cnt,
+                    orphanedCount.value()
+                );
+                orphanedCount = cnt;
+                Log::debug("FileTracking: orphanedCount set to {}, notifying observers", orphanedCount.value());
+                orphanedCount.eventContext().sync();
+            }
+        );
+    }
+
+    void triggerCleanup()
+    {
+        Log::debug("FileTracking: triggerCleanup() — setting cleanupRunning=true");
+        cleanupRunning = true;
+        Log::debug("FileTracking: cleanupRunning is now {}", cleanupRunning.value());
+        Nui::RpcClient::callWithBackChannel(
+            "FileTracking::forceCleanup",
+            [this](Nui::val response)
+            {
+                Log::debug("FileTracking: forceCleanup callback fired");
+                if (!response.hasOwnProperty("success"))
+                {
+                    Log::error("FileTracking: forceCleanup response has no 'success' field");
+                    cleanupRunning = false;
+                    return;
+                }
+                const bool ok = response["success"].as<bool>();
+                Log::debug("FileTracking: forceCleanup success={}", ok);
+                if (ok && response.hasOwnProperty("removed"))
+                    Log::info(
+                        "FileTracking: forceCleanup removed {} orphaned instance(s)", response["removed"].as<int>()
+                    );
+                cleanupRunning = false;
+                Log::debug("FileTracking: cleanupRunning reset to false");
+                if (ok)
+                    refreshOrphanedCount();
+            }
+        );
+    }
+
+    Nui::ElementRenderer renderHeader()
+    {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+
+        // clang-format off
+        return header{
+            class_ = "file-tracking-header",
+        }(
+            div{class_ = "file-tracking-header-stats"}(
+                span{class_ = "file-tracking-stat"}(
+                    span{class_ = "file-tracking-stat-label"}(
+                        Nui::Elements::text{std::string{language->get("fileTracking", "headerActive")}}()
+                    ),
+                    span{class_ = "file-tracking-stat-value"}(
+                        Nui::observe(entries).generate([this]() -> Nui::ElementRenderer
+                        {
+                            return Nui::Elements::text{fmt::format("{}", entries.value().size())}();
+                        })
+                    )
+                ),
+                span{class_ = "file-tracking-stat"}(
+                    span{class_ = "file-tracking-stat-label"}(
+                        Nui::Elements::text{std::string{language->get("fileTracking", "headerOrphaned")}}()
+                    ),
+                    span{class_ = "file-tracking-stat-value file-tracking-stat-orphaned"}(
+                        Nui::observe(orphanedCount).generate([this]() -> Nui::ElementRenderer
+                        {
+                            Log::debug("FileTracking: orphanedCount generate() called, value={}", orphanedCount.value());
+                            if (orphanedCount.value() < 0)
+                                return Nui::Elements::text{"–"}();
+                            return Nui::Elements::text{fmt::format("{}", orphanedCount.value())}();
+                        })
+                    )
+                )
+            ),
+            div{class_ = "file-tracking-header-actions"}(
+                ScriptNuiComponents::button({
+                    .text = Nui::observe(cleanupRunning).generate([](bool running) -> std::string
+                    {
+                        Log::debug("FileTracking: cleanupRunning text generate() called, running={}", running);
+                        return std::string{language->get("fileTracking", running ? "headerCleanupRunning" : "headerCleanupButton")};
+                    }),
+                    .attributes =
+                        {
+                            Nui::Attributes::class_ = "file-tracking-cleanup-btn",
+                            Nui::Attributes::onClick =
+                                [this](Nui::val)
+                            {
+                                if (!cleanupRunning.value())
+                                    triggerCleanup();
+                            },
+                            disabled = Nui::observe(cleanupRunning).generate([](bool running) { return running; }),
+                        },
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                })
+            )
+        );
+        // clang-format on
+    }
+
     ScriptNuiComponents::ResizableTable::TableRow buildRowForEntry(TrackedEntry const& entry)
     {
         using namespace ScriptNuiComponents;
@@ -101,9 +223,8 @@ struct FileTrackingPanel::Implementation
             entry.localPath.filename().generic_string(),
             entry.remotePath.generic_string(),
             ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.autoReupload](
-                    std::unique_ptr<ResizableTable::ISelfController>
-                ) -> Nui::ElementRenderer
+                [this, instanceIdStr, isChecked = entry.autoReupload](std::unique_ptr<ResizableTable::ISelfController>)
+                    -> Nui::ElementRenderer
                 {
                     return ScriptNuiComponents::switch_({
                         .isChecked = isChecked,
@@ -122,9 +243,8 @@ struct FileTrackingPanel::Implementation
                 },
             },
             ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.deleteRemote](
-                    std::unique_ptr<ResizableTable::ISelfController>
-                ) -> Nui::ElementRenderer
+                [this, instanceIdStr, isChecked = entry.deleteRemote](std::unique_ptr<ResizableTable::ISelfController>)
+                    -> Nui::ElementRenderer
                 {
                     return ScriptNuiComponents::switch_({
                         .isChecked = isChecked,
@@ -148,21 +268,24 @@ struct FileTrackingPanel::Implementation
                     return Nui::Elements::div{
                         Nui::Attributes::class_ = "file-tracking-status",
                         Nui::Attributes::style = "display:contents",
-                    }(
-                        Nui::observe(*uploadingObs).generate([](bool isUploading) -> Nui::ElementRenderer
-                        {
-                            if (isUploading)
-                                return Nui::Elements::text{
-                                    std::string{language->get("fileTracking", "statusUploading")}}();
-                            return Nui::Elements::text{
-                                std::string{language->get("fileTracking", "statusWatching")}}();
-                        })
-                    );
+                    }(Nui::observe(*uploadingObs)
+                            .generate(
+                                [](bool isUploading) -> Nui::ElementRenderer
+                                {
+                                    if (isUploading)
+                                        return Nui::Elements::text{
+                                            std::string{language->get("fileTracking", "statusUploading")}
+                                        }();
+                                    return Nui::Elements::text{
+                                        std::string{language->get("fileTracking", "statusWatching")}
+                                    }();
+                                }
+                            ));
                 },
             },
             ResizableTable::TableCell{
-                [this, instanceIdStr](std::unique_ptr<ResizableTable::ISelfController> controller)
-                    -> Nui::ElementRenderer
+                [this,
+                    instanceIdStr](std::unique_ptr<ResizableTable::ISelfController> controller) -> Nui::ElementRenderer
                 {
                     std::shared_ptr<ResizableTable::ISelfController> sharedCtrl = std::move(controller);
                     return ScriptNuiComponents::button({
@@ -232,6 +355,8 @@ void FileTrackingPanel::activate(OperationQueue* operationQueue, Ids::SessionId 
 {
     impl_->operationQueue = operationQueue;
     impl_->sessionId = std::move(sessionId);
+    Log::debug("FileTracking: activate() — triggering initial orphaned count refresh");
+    impl_->refreshOrphanedCount();
 }
 
 void FileTrackingPanel::deactivate()
@@ -241,6 +366,8 @@ void FileTrackingPanel::deactivate()
     impl_->entries.value().clear();
     impl_->operationQueue = nullptr;
     impl_->sessionId = {};
+    impl_->orphanedCount = -1;
+    impl_->cleanupRunning = false;
 }
 
 void FileTrackingPanel::startWatching(
@@ -409,6 +536,7 @@ Nui::ElementRenderer FileTrackingPanel::operator()()
         class_ = "file-tracking-panel",
         style = "width: 100%; height: 100%;",
     }(
+        impl_->renderHeader(),
         (*impl_->table)({})
     );
     // clang-format on
