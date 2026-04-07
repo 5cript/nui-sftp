@@ -114,6 +114,10 @@ fileTracking:
   stopButton: "Stopp"
   statusWatching: "Beobachtend"
   statusUploading: "Hochladen..."
+  headerActive: "Aktiv"
+  headerOrphaned: "Verwaist"
+  headerCleanupButton: "Verwaiste bereinigen"
+  headerCleanupRunning: "Bereinige…"
 settings:
   settingsClosedHeader: "Die meisten Einstellungen erfordern einen Neustart"
   settingsClosedText: "Im aktuellen Implementierungsstatus erfordern die meisten Einstellungsänderungen einen Neustart, um wirksam zu werden.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden.\nDies wird in Zukunft verbessert."

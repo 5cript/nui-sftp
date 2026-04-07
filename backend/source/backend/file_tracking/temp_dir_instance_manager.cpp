@@ -25,6 +25,124 @@ namespace FileTracking
          * @param skipIds         Set of instance IDs whose directories must not be touched.
          * @param retentionHours  Minimum age a dead directory must reach before deletion.
          */
+        /**
+         * @brief Classify a single subdirectory as orphaned or not.
+         *
+         * A directory is considered orphaned if:
+         *  - It is not in skipIds (not a live instance of this process), AND
+         *  - Its lock file exists but is not held by any live process, OR its
+         *    metadata already carries a @c deadAt timestamp.
+         *
+         * @param dirPath  Path to the candidate subdirectory.
+         * @param skipIds  IDs of live instances that must not be touched.
+         * @return true if the directory is orphaned, false otherwise.
+         */
+        bool isOrphanedDir(
+            std::filesystem::path const& dirPath,
+            std::vector<std::string> const& skipIds
+        )
+        {
+            namespace fs = std::filesystem;
+
+            auto const dirName = dirPath.filename().string();
+            for (auto const& sid : skipIds)
+                if (sid == dirName)
+                    return false;
+
+            auto const lockPath = dirPath / (dirName + ".lock");
+            if (!fs::exists(lockPath))
+                return false;
+
+            if (InstanceLock::isLockedByAnother(lockPath))
+                return false;
+
+            // Lock is not held — check if deadAt is already stamped
+            auto const metaPath = dirPath / "metadata.json";
+            if (fs::exists(metaPath))
+            {
+                try
+                {
+                    std::ifstream metaIn{metaPath};
+                    nlohmann::json meta;
+                    metaIn >> meta;
+                    if (meta.contains("deadAt") && !meta["deadAt"].is_null())
+                        return true; // deadAt stamp present → orphaned
+                }
+                catch (...) {}
+            }
+
+            // No deadAt yet but lock is free → also orphaned (dead process, no stamp written)
+            return true;
+        }
+
+        /**
+         * @brief Count orphaned instance directories under @p tempRootDir.
+         *
+         * @param tempRootDir  Root directory to scan.
+         * @param skipIds      IDs of live instances to skip.
+         * @return Number of orphaned directories found.
+         */
+        int countOrphanedInstanceDirs(
+            std::filesystem::path const& tempRootDir,
+            std::vector<std::string> const& skipIds
+        )
+        {
+            namespace fs = std::filesystem;
+
+            if (!fs::exists(tempRootDir))
+                return 0;
+
+            int count = 0;
+            std::error_code iterErr;
+            for (auto const& entry : fs::directory_iterator(tempRootDir, iterErr))
+            {
+                if (!entry.is_directory())
+                    continue;
+                if (isOrphanedDir(entry.path(), skipIds))
+                    ++count;
+            }
+            return count;
+        }
+
+        /**
+         * @brief Remove all orphaned instance directories under @p tempRootDir
+         *        immediately, regardless of any retention period.
+         *
+         * @param tempRootDir  Root directory to scan.
+         * @param skipIds      IDs of live instances that must not be deleted.
+         * @return Number of directories successfully removed.
+         */
+        int forceCleanOrphanedInstanceDirs(
+            std::filesystem::path const& tempRootDir,
+            std::vector<std::string> const& skipIds
+        )
+        {
+            namespace fs = std::filesystem;
+
+            if (!fs::exists(tempRootDir))
+                return 0;
+
+            int removed = 0;
+            std::error_code iterErr;
+            for (auto const& entry : fs::directory_iterator(tempRootDir, iterErr))
+            {
+                if (!entry.is_directory())
+                    continue;
+                auto const& dirPath = entry.path();
+                if (!isOrphanedDir(dirPath, skipIds))
+                    continue;
+
+                Log::info("forceCleanOrphanedInstanceDirs: removing orphaned instance '{}'", dirPath.filename().string());
+                std::error_code rmErr;
+                fs::remove_all(dirPath, rmErr);
+                if (rmErr)
+                    Log::warn("forceCleanOrphanedInstanceDirs: failed to remove '{}': {}", dirPath.filename().string(), rmErr.message());
+                else
+                    ++removed;
+            }
+            return removed;
+        }
+
         void scanAndCleanDeadInstanceDirs(
             std::filesystem::path const& tempRootDir,
             std::vector<std::string> const& skipIds,
@@ -269,6 +387,24 @@ namespace FileTracking
             {
                 manualCleanup();
                 reply({{"success", true}});
+            }
+        );
+
+        registerOnStrand(
+            "FileTracking::countOrphaned",
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                const int count = countOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
+                reply({{"success", true}, {"count", count}});
+            }
+        );
+
+        registerOnStrand(
+            "FileTracking::forceCleanup",
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                const int removed = forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
+                reply({{"success", true}, {"removed", removed}});
             }
         );
     }

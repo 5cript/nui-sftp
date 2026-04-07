@@ -113,6 +113,10 @@ fileTracking:
   stopButton: "Stop"
   statusWatching: "Watching"
   statusUploading: "Uploading..."
+  headerActive: "Active"
+  headerOrphaned: "Orphaned"
+  headerCleanupButton: "Clean Up Orphaned"
+  headerCleanupRunning: "Cleaning…"
 settings:
   settingsClosedHeader: "Most Settings Require Restart"
   settingsClosedText: "At current implementation status, most settings changes require a restart to take effect.\nPlease restart the application to apply the changes.\nThis will be improved in the future."
