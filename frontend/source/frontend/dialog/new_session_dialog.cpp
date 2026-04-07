@@ -31,6 +31,7 @@ struct NewSessionDialog::Implementation
     Nui::Observed<std::string> validationMessage{
         "Session name must be 1-5000 characters long and cannot contain \\ or / or \" characters."
     };
+    Nui::Observed<bool> showIconPicker{true};
     std::function<void(NewSessionDialog::ConfirmResult const&)> onConfirm;
 
     Implementation(std::string id)
@@ -80,39 +81,55 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
             .valueState = &impl_->nameValid,
             .validationMessage = &impl_->validationMessage,
         }),
-        span{}(language->getObserved("newSessionDialog", "iconLabel")),
-        Snc::select(Snc::SelectOptions<decltype(impl_->icon), std::vector<std::string>>{
-            .activeOption = impl_->icon,
-            .options = std::move(iconOptions),
-            .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
-            {
-                return div{style = "display: flex; align-items: center; gap: 5px;"}(
-                    observe(stateful.get()),
-                    [](std::string const& iconName){
-                        return fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName));
-                    }
-                );
-            },
-            .elementRenderer = [](std::string const& iconName) -> Nui::ElementRenderer
-            {
-                return div{style = "display: flex; align-items: center; gap: 5px;"}(
-                    fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName))
-                );
-            },
-            .makeId = [](){
-                return Nui::val::global("generateId")().as<std::string>();
-            }
-        })
+        div{
+            style = observe(impl_->showIconPicker).generate([](bool show) {
+                return show ? "display: contents;" : "display: none;";
+            })
+        }(
+            span{}(language->getObserved("newSessionDialog", "iconLabel")),
+            Snc::select(Snc::SelectOptions<decltype(impl_->icon), std::vector<std::string>>{
+                .activeOption = impl_->icon,
+                .options = std::move(iconOptions),
+                .popoverExtraClass = "new-session-icon-picker-popover",
+                .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
+                {
+                    return div{style = "display: flex; align-items: center; gap: 5px;"}(
+                        observe(stateful.get()),
+                        [](std::string const& iconName){
+                            return fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName));
+                        }
+                    );
+                },
+                .elementRenderer = [](std::string const& iconName) -> Nui::ElementRenderer
+                {
+                    return div{style = "display: flex; align-items: center; gap: 5px;"}(
+                        fragment(iconFromName(iconName), span{style = "color: var(--color);"}(iconName))
+                    );
+                },
+                .makeId = [](){
+                    return Nui::val::global("generateId")().as<std::string>();
+                }
+            })
+        )
     );
     // clang-format on
 }
 
-void NewSessionDialog::open(std::function<void(ConfirmResult const&)> onConfirm)
+void NewSessionDialog::open(OpenOptions options)
 {
-    impl_->onConfirm = onConfirm;
-    impl_->sessionName = std::string{Implementation::defaultName};
-    impl_->nameValid = ScriptNuiComponents::ValueState::Valid;
-    impl_->icon = "laptop";
+    impl_->onConfirm = std::move(options.onConfirm);
+    impl_->showIconPicker = options.showIconPicker;
+    impl_->icon = options.initialIcon;
+    if (options.initialName.empty())
+    {
+        impl_->sessionName = std::string{Implementation::defaultName};
+        impl_->nameValid = ScriptNuiComponents::ValueState::Valid;
+    }
+    else
+    {
+        impl_->sessionName = options.initialName;
+        checkInputValue(options.initialName);
+    }
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     impl_->dialog->open({

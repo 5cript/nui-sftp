@@ -125,6 +125,10 @@ settings:
   deleteSessionButton: "Delete Session"
   deleteSessionConfirmHeader: "Are you sure you want to delete this session?"
   deleteSessionConfirmText: "Deleting the session configuration cannot be undone"
+  renameSessionButton: "Rename Session"
+  copySessionButton: "Copy Session"
+  sessionNameAlreadyExistsHeader: "Session Name Already Exists"
+  sessionNameAlreadyExists: "A session with that name already exists"
   title: "Settings"
   generalSettings: "General Settings"
   loggingAndErrorReportingGroupHeader: "Logging and Error Reporting"
@@ -231,7 +235,7 @@ settings:
       exitTimeoutSecondsHelpText: "The time to wait for the local shell session to exit after sending a termination signal before forcefully killing it."
       cleanEnvironmentHelpText: "If enabled, the local shell session will start with a clean environment, without inheriting environment variables from the parent process."
 
-    host: "Host"
+    host: "Host / IP"
     port: "Port"
     user: "User"
     sshKeyPrivate: "SSH Private Key"
@@ -244,7 +248,7 @@ settings:
     sshKeyPublicHelpText: "The path to the SSH public key used for authentication. This is used to politely ask a server 'Do you have this public key?' before attempting authentication with the private key. If not specified, the private key will be used without asking."
     openSftpByDefaultHelpText: "If enabled, the SFTP channel will be opened immediately after establishing the connection."
   sessionSettings:
-    host: "Host"
+    host: "Host / IP"
     port: "Port"
     user: "User"
     sshKeyPrivate: "SSH Private Key"
