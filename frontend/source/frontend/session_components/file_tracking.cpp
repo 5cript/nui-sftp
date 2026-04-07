@@ -182,7 +182,7 @@ struct FileTrackingPanel::Implementation
                         {
                             Log::debug("FileTracking: orphanedCount generate() called, value={}", orphanedCount.value());
                             if (orphanedCount.value() < 0)
-                                return Nui::Elements::text{"–"}();
+                                return Nui::Elements::text{"-"}();
                             return Nui::Elements::text{fmt::format("{}", orphanedCount.value())}();
                         })
                     )
