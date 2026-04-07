@@ -6,6 +6,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <shlwapi.h>
 
 #include <string>
 
@@ -44,28 +45,11 @@ namespace
         }
     }
 
-    std::expected<void, std::string> checkAttachmentPolicy(std::filesystem::path const& path)
+    std::expected<void, std::string> checkExtensionPolicy(std::filesystem::path const& path)
     {
-        winrt::com_ptr<IAttachmentExecute> attach;
-        HRESULT hr = CoCreateInstance(CLSID_AttachmentServices, nullptr, CLSCTX_ALL, IID_PPV_ARGS(attach.put()));
-        if (FAILED(hr))
-            return {}; // COM unavailable — fail open, not fail closed
-
-        attach->SetFileName(path.wstring().c_str());
-
-        hr = attach->CheckPolicy();
-        if (hr == S_FALSE)
+        auto const ext = path.extension().wstring();
+        if (AssocIsDangerous(ext.c_str()))
             return std::unexpected{"File type is blocked by attachment policy"};
-        if (FAILED(hr))
-            return std::unexpected{
-                "Attachment policy check failed: HRESULT 0x" + [hr]()
-                {
-                    char buf[16];
-                    std::snprintf(buf, sizeof(buf), "%08lX", static_cast<unsigned long>(hr));
-                    return std::string{buf};
-                }()
-            };
-
         return {};
     }
 }
@@ -85,19 +69,21 @@ Opener& Opener::operator=(Opener&&) noexcept = default;
 
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)
 {
+    auto const pathWstr = path.wstring();
+
     // Refuse to open binary executables (content-based, not extension-based)
     DWORD binaryType{};
-    if (GetBinaryType(path.wstring().c_str(), &binaryType))
+    if (GetBinaryTypeW(pathWstr.c_str(), &binaryType))
         return std::unexpected{"File is a binary executable"};
 
     // Windows attachment policy (respects system/zone policy)
-    if (auto result = checkAttachmentPolicy(path); !result)
+    if (auto result = checkExtensionPolicy(path); !result)
         return result;
 
     if (openWith)
     {
         OPENASINFO info{};
-        info.pcszFile = path.wstring().c_str();
+        info.pcszFile = pathWstr.c_str();
         info.oaifInFlags = OAIF_EXEC | OAIF_ALLOW_REGISTRATION;
 
         HRESULT const hr = SHOpenWithDialog(nullptr, &info);
@@ -114,7 +100,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     else
     {
         INT_PTR const result = reinterpret_cast<INT_PTR>(
-            ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+            ShellExecuteW(nullptr, L"open", pathWstr.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
         );
         if (result <= 32)
             return std::unexpected{shellExecuteErrorToString(result)};
