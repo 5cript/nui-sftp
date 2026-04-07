@@ -40,6 +40,7 @@ jobs:
             boost-libs \
             aws-cli-v2 \
             github-cli \
+            sdbus-cpp \
             nlohmann-json
 
       - uses: actions/checkout@v6
