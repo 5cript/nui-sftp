@@ -215,6 +215,37 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
     }
+    , fileTrackingOptions{
+        .autoReupload = BoolSetting<>{
+            language->getObserved("settings", "general", "fileTrackingOptions", "autoReuploadHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                fileTrackingOptions.autoReupload.value(Persistence::FileTrackingOptions{}.autoReupload);
+                onChange();
+            },
+        },
+        .moveRemoteOnLocalMove = BoolSetting<>{
+            language->getObserved("settings", "general", "fileTrackingOptions", "moveRemoteOnLocalMoveHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                fileTrackingOptions.moveRemoteOnLocalMove.value(Persistence::FileTrackingOptions{}.moveRemoteOnLocalMove);
+                onChange();
+            },
+        },
+        .deleteRemoteOnLocalDelete = BoolSetting<>{
+            language->getObserved("settings", "general", "fileTrackingOptions", "deleteRemoteOnLocalDeleteHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                fileTrackingOptions.deleteRemoteOnLocalDelete.value(
+                    Persistence::FileTrackingOptions{}.deleteRemoteOnLocalDelete
+                );
+                onChange();
+            },
+        },
+    }
     , logOptions(onChange)
     , availableThemesListener{
         Nui::smartListen(
@@ -266,6 +297,11 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
     state.uiOptions.neverShowAgainDialogs = userInterface.neverShowAgainDialogs.value();
 
+    // File Tracking
+    state.fileTrackingOptions.autoReupload = fileTrackingOptions.autoReupload.value();
+    state.fileTrackingOptions.moveRemoteOnLocalMove = fileTrackingOptions.moveRemoteOnLocalMove.value();
+    state.fileTrackingOptions.deleteRemoteOnLocalDelete = fileTrackingOptions.deleteRemoteOnLocalDelete.value();
+
     // Local FS
     state.localFilesystemOptions.preventDeletion = localFilesystemOptions.preventDeletion.value();
     state.localFilesystemOptions.preventRename = localFilesystemOptions.preventRename.value();
@@ -291,6 +327,11 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
     userInterface.neverShowAgainDialogs.value(state.uiOptions.neverShowAgainDialogs);
+
+    // File Tracking
+    fileTrackingOptions.autoReupload.value(state.fileTrackingOptions.autoReupload);
+    fileTrackingOptions.moveRemoteOnLocalMove.value(state.fileTrackingOptions.moveRemoteOnLocalMove);
+    fileTrackingOptions.deleteRemoteOnLocalDelete.value(state.fileTrackingOptions.deleteRemoteOnLocalDelete);
 
     // Local FS
     localFilesystemOptions.preventDeletion.value(state.localFilesystemOptions.preventDeletion);
@@ -375,6 +416,18 @@ Nui::ElementRenderer GeneralSettings::render(
                 language->getObserved("settings", "general", "localFilesystemOptions", "temporaryDownloadsDirectory")
             )
         );
+
+        auto fileTrackingOptionsUi = fragment(
+            fileTrackingOptions.autoReupload(
+                language->getObserved("settings", "general", "fileTrackingOptions", "autoReupload")
+            ),
+            fileTrackingOptions.moveRemoteOnLocalMove(
+                language->getObserved("settings", "general", "fileTrackingOptions", "moveRemoteOnLocalMove")
+            ),
+            fileTrackingOptions.deleteRemoteOnLocalDelete(
+                language->getObserved("settings", "general", "fileTrackingOptions", "deleteRemoteOnLocalDelete")
+            )
+        );
         // clang-format on
 
         // clang-format off
@@ -407,6 +460,14 @@ Nui::ElementRenderer GeneralSettings::render(
                 .isCollapsed = collapsibleStates.localFilesystemOptions,
                 .content = std::move(localFilesystemOptionsUi),
                 .headerTitle = language->getObserved("settings", "localFilesystemOptionsGroupHeader"),
+                .addGroup = addGroup,
+                .removeGroup = removeGroup,
+                .onChangeGroup = onChange,
+            }),
+            group({
+                .isCollapsed = collapsibleStates.fileTrackingOptions,
+                .content = std::move(fileTrackingOptionsUi),
+                .headerTitle = language->getObserved("settings", "fileTrackingOptionsGroupHeader"),
                 .addGroup = addGroup,
                 .removeGroup = removeGroup,
                 .onChangeGroup = onChange,

@@ -34,6 +34,7 @@ struct TrackedEntry
     std::filesystem::path remotePath;
     std::filesystem::path localPath;
     bool autoReupload{true};
+    bool moveRemoteOnLocalMove{false};
     bool deleteRemote{false};
     std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
 };
@@ -67,6 +68,11 @@ struct FileTrackingPanel::Implementation
             },
             ScriptNuiComponents::ResizableTable::HeaderTableCell{
                 .content = std::string{language->get("fileTracking", "columnAutoReupload")},
+                .initialWidth = 120,
+                .resizeable = false,
+            },
+            ScriptNuiComponents::ResizableTable::HeaderTableCell{
+                .content = std::string{language->get("fileTracking", "columnMoveRemote")},
                 .initialWidth = 120,
                 .resizeable = false,
             },
@@ -235,6 +241,27 @@ struct FileTrackingPanel::Implementation
                                 if (ent.instanceId.value() == instanceIdStr)
                                 {
                                     ent.autoReupload = checked;
+                                    break;
+                                }
+                            }
+                        },
+                    });
+                },
+            },
+            ResizableTable::TableCell{
+                [this, instanceIdStr, isChecked = entry.moveRemoteOnLocalMove](
+                    std::unique_ptr<ResizableTable::ISelfController>
+                ) -> Nui::ElementRenderer
+                {
+                    return ScriptNuiComponents::switch_({
+                        .isChecked = isChecked,
+                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
+                        {
+                            for (auto& ent : entries.value())
+                            {
+                                if (ent.instanceId.value() == instanceIdStr)
+                                {
+                                    ent.moveRemoteOnLocalMove = checked;
                                     break;
                                 }
                             }
@@ -433,7 +460,7 @@ void FileTrackingPanel::startWatching(
 
             if (action == "Moved")
             {
-                if (!impl_->operationQueue)
+                if (!it->moveRemoteOnLocalMove || !impl_->operationQueue)
                     return;
 
                 const auto& oldFilename = payload["oldFilename"].as<std::string>();
@@ -513,12 +540,16 @@ void FileTrackingPanel::startWatching(
         }
     );
 
+    auto const& ftOpts = impl_->stateHolder->stateCache().fileTrackingOptions;
     impl_->entries.value().push_back(
         TrackedEntry{
             .instanceId = instanceId,
             .instanceDir = instanceDir,
             .remotePath = remotePath,
             .localPath = localPath,
+            .autoReupload = ftOpts.autoReupload,
+            .moveRemoteOnLocalMove = ftOpts.moveRemoteOnLocalMove,
+            .deleteRemote = ftOpts.deleteRemoteOnLocalDelete,
         }
     );
     impl_->table->addRow(impl_->buildRowForEntry(impl_->entries.value().back()));
