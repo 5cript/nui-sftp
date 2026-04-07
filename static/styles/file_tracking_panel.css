@@ -13,11 +13,9 @@ header.file-tracking-header {
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    background: linear-gradient(
-        to bottom,
-        color-mix(in srgb, var(--theme-color) 6%, var(--darker-background)),
-        var(--darker-background)
-    );
+    background: linear-gradient(to bottom,
+            color-mix(in srgb, var(--background-color-fields) 6%, var(--darker-background)),
+            var(--darker-background));
     border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--border-color, #3a3a3a) 65%);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
     flex-shrink: 0;
@@ -27,7 +25,7 @@ header.file-tracking-header {
 
 .file-tracking-header-stats {
     display: flex;
-    gap: 16px;
+    gap: 5px;
     flex: 1;
     min-width: 0;
 }
@@ -36,10 +34,12 @@ header.file-tracking-header {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 2px 8px;
+    padding: 6px 10px;
+    align-self: stretch;
     border-radius: 4px;
-    border: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.08));
+    border: 1px solid var(--script-nui-components-button-border-color-regular);
     font-size: 0.82em;
+    background: var(--script-nui-components-button-color-regular);
 }
 
 .file-tracking-stat-label {
