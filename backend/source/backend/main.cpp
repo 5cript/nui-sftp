@@ -9,7 +9,7 @@
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <utility/resources.hpp>
-#include <roar/filesystem/special_paths.hpp>
+#include <nui/backend/filesystem/special_paths.hpp>
 
 #include <nui/core.hpp>
 #include <nui/rpc.hpp>
@@ -109,8 +109,7 @@ namespace
                 const auto file = *fileOpt;
 
                 if (
-                    !pointsToWithinDir(resourceDir, file) &&
-                    !pointsToWithinDir(Roar::resolvePath("%state_home2%"), file)
+                    !pointsToWithinDir(resourceDir, file) && !pointsToWithinDir(Nui::resolvePath("%state_home2%"), file)
 #ifndef NDEBUG
                     && !pointsToWithinDir(SOURCE_DIR, file)
 #endif
@@ -261,7 +260,7 @@ void Main::registerRpc()
                 window_.getExecutor(),
                 window_,
                 hub_,
-                Roar::resolvePath(holder.stateCache().localFilesystemOptions.temporaryDownloadsDirectory.value_or(
+                Nui::resolvePath(holder.stateCache().localFilesystemOptions.temporaryDownloadsDirectory.value_or(
                     Persistence::LocalFilesystemOptions{}.temporaryDownloadsDirectory.value()
                 ))
             );

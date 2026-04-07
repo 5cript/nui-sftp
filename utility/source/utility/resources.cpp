@@ -1,5 +1,5 @@
 #include <utility/resources.hpp>
-#include <roar/filesystem/special_paths.hpp>
+#include <nui/backend/filesystem/special_paths.hpp>
 #include <constants/persistence.hpp>
 #ifndef NDEBUG
 #    include <build_environment.hpp>
@@ -88,7 +88,7 @@ namespace
 #endif
         searchPaths.push_back(relativeRoot);
         searchPaths.push_back(
-            Roar::resolvePath(std::filesystem::path{"%state_home2%"} / std::filesystem::path{Constants::appName})
+            Nui::resolvePath(std::filesystem::path{"%state_home2%"} / std::filesystem::path{Constants::appName})
         );
         return searchPaths;
     }
@@ -184,8 +184,7 @@ matchPatternInDir(std::filesystem::path const& baseDir, std::filesystem::path co
     return results;
 }
 
-std::vector<std::filesystem::path>
-findFilesInSearchPaths(
+std::vector<std::filesystem::path> findFilesInSearchPaths(
     std::vector<std::filesystem::path> const& searchPaths,
     std::filesystem::path const& relativePattern
 )
@@ -232,7 +231,9 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
         if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
         {
 #ifndef NDEBUG
-            return firstOf(findFilesInSearchPaths(transformedSearchPaths(resourceDir, "module_nui-sftp/bin"), relative));
+            return firstOf(
+                findFilesInSearchPaths(transformedSearchPaths(resourceDir, "module_nui-sftp/bin"), relative)
+            );
 #endif
             return firstOf(findFilesInSearchPaths(transformedSearchPaths(resourceDir, "frontend"), relative));
         }

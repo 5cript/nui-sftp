@@ -1,5 +1,5 @@
 #include <log/logger_backend.hpp>
-#include <roar/filesystem/special_paths.hpp>
+#include <nui/backend/filesystem/special_paths.hpp>
 #include <constants/persistence.hpp>
 
 #include <spdlog/spdlog.h>
@@ -16,7 +16,7 @@ namespace Log
 
     void Logger::setupGlobalSinks(Log::Level level, std::filesystem::path const& directory, bool disableFileLog)
     {
-        const auto sinkDir = Roar::resolvePath(directory);
+        const auto sinkDir = Nui::resolvePath(directory);
         const auto spdlogLevel = toSpdlogLevel(level);
 
         auto dist_sink = std::make_shared<spdlog::sinks::dist_sink_st>();
