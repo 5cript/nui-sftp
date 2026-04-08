@@ -35,6 +35,7 @@ struct Toolbar::Implementation
     Nui::Observed<std::vector<std::string>> layouts;
 
     Nui::ListenRemover<decltype(FrontendEvents::onSettingsChanged)> settingsChangedListener;
+    Nui::ListenRemover<decltype(FrontendEvents::onLayoutsChanged)> layoutsChangedListener;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -129,7 +130,7 @@ Toolbar::Toolbar(
 
 void Toolbar::connectLayoutsChanged()
 {
-    listen(
+    impl_->layoutsChangedListener = Nui::smartListen(
         impl_->events->onLayoutsChanged,
         [this](bool)
         {
