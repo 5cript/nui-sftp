@@ -26,6 +26,7 @@ struct SessionArea::Implementation
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
     ScriptNuiComponents::Tabs tabs;
+    Nui::ListenRemover<decltype(FrontendEvents::onNewSession)> newSessionListener{};
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -81,10 +82,11 @@ SessionArea::SessionArea(
         }
     );
 
-    listen(
+    impl_->newSessionListener = Nui::smartListen(
         events->onNewSession,
         [this](std::string const& name) -> void
         {
+            Log::info("onNewSession Event: Adding session with name '{}'", name);
             addSession(name);
         }
     );
@@ -112,34 +114,35 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(SessionArea);
 
 void SessionArea::registerRpc()
 {
-    Nui::RpcClient::registerFunction(
-        "SessionArea::processDied",
-        [this](Nui::val val)
-        {
-            auto const processId = val["id"].as<std::string>();
-            Log::info("Process with id '{}' terminated.", processId);
+    // TODO:
+    // Nui::RpcClient::registerFunction(
+    //     "SessionArea::processDied",
+    //     [this](Nui::val val)
+    //     {
+    //         auto const processId = val["id"].as<std::string>();
+    //         Log::info("Process with id '{}' terminated.", processId);
 
-            std::size_t index = 0;
-            int tabId = -1;
-            for (auto const& session : impl_->sessions.value())
-            {
-                if (session->getProcessIdIfExecutingEngine().value_or("") == processId)
-                {
-                    Log::info("Process with id '{}' found in session '{}'.", processId, session->name());
-                    tabId = session->tabId();
-                    break;
-                }
-                ++index;
-            }
+    //         std::size_t index = 0;
+    //         int tabId = -1;
+    //         for (auto const& session : impl_->sessions.value())
+    //         {
+    //             if (session->getProcessIdIfExecutingEngine().value_or("") == processId)
+    //             {
+    //                 Log::info("Process with id '{}' found in session '{}'.", processId, session->name());
+    //                 tabId = session->tabId();
+    //                 break;
+    //             }
+    //             ++index;
+    //         }
 
-            if (index < impl_->sessions.size())
-                removeSession(tabId);
-            else
-            {
-                Log::error("Process with id '{}' not found in any session.", processId);
-            }
-        }
-    );
+    //         if (index < impl_->sessions.value().size())
+    //             removeSession(tabId);
+    //         else
+    //         {
+    //             Log::error("Process with id '{}' not found in any session.", processId);
+    //         }
+    //     }
+    // );
 
     impl_->dropHandlerUnregister_ = Nui::RpcClient::autoRegisterFunction(
         "SessionArea::onFilesDropped",
@@ -181,7 +184,7 @@ void SessionArea::removeSession(int tabId)
 
     Log::info("Removing session: {}", impl_->sessions.value()[index]->name());
 
-    if (impl_->sessions.value()[index]->visible() && impl_->sessions.size() > 1)
+    if (impl_->sessions.value()[index]->visible() && impl_->sessions.value().size() > 1)
         setSelected(impl_->tabs.firstTabId());
 
     impl_->sessions.value()[index]->shutdown(
@@ -221,7 +224,7 @@ void SessionArea::setSelected(int tabId)
 
 std::optional<std::size_t> SessionArea::findSessionIndexByTabId(int tabId) const
 {
-    for (size_t i = 0; i != impl_->sessions.size(); ++i)
+    for (size_t i = 0; i != impl_->sessions.value().size(); ++i)
     {
         if (impl_->sessions.value()[i]->tabId() == tabId)
             return i;
@@ -379,7 +382,9 @@ Nui::ElementRenderer SessionArea::operator()()
                 class_ = "session-area-content"
             }(
                 range(impl_->sessions),
-                [](long long, auto& session) -> Nui::ElementRenderer {
+                [this](long long i, auto& session) -> Nui::ElementRenderer {
+                    Log::info("Rendering session '{}'", session->name());
+                    Log::info("Session number {} of {}", i + 1, impl_->sessions.value().size());
                     return (*session)();
                 }
             )

@@ -50,6 +50,7 @@ struct OperationQueue::Implementation
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
+    Nui::ListenRemover<decltype(paused)> pausedListener{};
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
     {
@@ -87,7 +88,7 @@ struct OperationQueue::Implementation
         , operations{}
         , autoCleanTimer{}
     {
-        Nui::listen(
+        pausedListener = Nui::smartListen(
             paused,
             [this](bool paused)
             {

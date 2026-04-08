@@ -74,7 +74,7 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
           )}
         , selfAlive_{std::make_shared<bool>(true)}
     {
-        Nui::listen(
+        stateWithInheritanceListen_ = Nui::smartListen(
             stateWithInheritance_,
             [this,
                 weakTable = std::weak_ptr<ScriptNuiComponents::ResizableTable>(table_),
@@ -225,5 +225,6 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
     std::shared_ptr<ScriptNuiComponents::ResizableTable> table_{};
 
     // Keep last:
+    Nui::ListenRemover<decltype(stateWithInheritance_)> stateWithInheritanceListen_{};
     std::shared_ptr<bool> selfAlive_;
 };

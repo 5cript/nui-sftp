@@ -66,10 +66,12 @@ struct Session::Implementation
     // File Explorer Things:
     NuiFileExplorer::FileGrid fileGrid;
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileExplorerElement;
+    Nui::ListenRemover<decltype(fileExplorerElement)> fileExplorerListener{};
 
     // Operation Queue for File Explorer
     OperationQueue operationQueue;
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> operationQueueElement;
+    Nui::ListenRemover<decltype(operationQueueElement)> operationQueueListener{};
 
     // Layout Engine Related
     std::weak_ptr<Nui::Dom::BasicElement> layoutHost;
@@ -82,11 +84,13 @@ struct Session::Implementation
 
     // Session Options
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
+    Nui::ListenRemover<decltype(sessionOptionsElement)> sessionOptionsListener{};
     SessionOptions sessionOptions;
 
     // File Tracking
     FileTrackingPanel fileTrackingPanel;
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
+    Nui::ListenRemover<decltype(fileTrackingElement)> fileTrackingListener{};
 
     // Shutdown & Connection Status:
     Nui::Observed<bool> inertEverything{false};
@@ -223,7 +227,7 @@ struct Session::Implementation
             ),
         });
 
-        Nui::listen(
+        sessionOptionsListener = Nui::smartListen(
             sessionOptionsElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
@@ -242,7 +246,7 @@ struct Session::Implementation
                 );
             }
         );
-        Nui::listen(
+        fileExplorerListener = Nui::smartListen(
             fileExplorerElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
@@ -267,7 +271,7 @@ struct Session::Implementation
                 );
             }
         );
-        Nui::listen(
+        operationQueueListener = Nui::smartListen(
             operationQueueElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
@@ -288,7 +292,7 @@ struct Session::Implementation
                 );
             }
         );
-        Nui::listen(
+        fileTrackingListener = Nui::smartListen(
             fileTrackingElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
@@ -491,8 +495,6 @@ Session::Session(
         Log::error("Unsupported frontendSessionManager engine type");
         return;
     }
-
-    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 std::optional<nlohmann::json> Session::getLayout() const
@@ -647,6 +649,7 @@ void Session::createSshEngine()
 
 void Session::createExecutingEngine()
 {
+    Log::info("Creating executing engine");
     impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
         std::make_unique<ExecutingTerminalEngine>(ExecutingTerminalEngine::Settings{
             .engineOptions = std::get<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine),
@@ -1028,11 +1031,12 @@ void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
 
 void Session::initializeLayout()
 {
-    Nui::WebApi::Console::log("Initializing session layout");
+    Log::info("Trying to initialize session layout...");
 
     Nui::val element;
     if (auto host = impl_->layoutHost.lock(); host)
     {
+        Log::info("Layout host found, initializing layout");
         element = host->val();
     }
     else
@@ -1266,6 +1270,7 @@ void Session::initializeLayout()
         )
     );
 
+    Log::info("Adding panel to content panel manager with layout id '{}'", impl_->sessionLayoutId);
     const auto addPanelResult = Nui::val::global("contentPanelManager").call<bool>("addPanel", addPanelArgument);
     if (!addPanelResult)
     {
@@ -1279,6 +1284,7 @@ void Session::initializeLayout()
         });
         closeSelf();
     }
+    Log::info("Panel added to content panel manager successfully");
 }
 
 Nui::ElementRenderer Session::operator()()
@@ -1295,9 +1301,16 @@ Nui::ElementRenderer Session::operator()()
             std::weak_ptr<Nui::Dom::BasicElement>&& elem
         ){
             impl_->layoutHost = elem.lock();
-            if (impl_->waitingForLayoutHost) {
-                initializeLayout();
-                impl_->waitingForLayoutHost = false;
+            try {
+                if (impl_->waitingForLayoutHost) {
+                    impl_->waitingForLayoutHost = false;
+                    Nui::globalEventContext.delayToAfterProcessing([this](){
+                        Log::info("Layout host attached to DOM, initializing layout");
+                        initializeLayout();
+                    });
+                }
+            } catch (const std::exception& e) {
+                Log::error("Error while initializing layout in layout host: {}", e.what());
             }
         }),
         "inert"_attr = observe(impl_->inertEverything).generate([this]() -> std::optional<std::string> {
