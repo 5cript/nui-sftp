@@ -46,6 +46,7 @@ else()
             pty/linux/pty.cpp
             linux/main_linux.cpp
             linux/opener_linux.cpp
+            process/fork_pool.cpp
     )
     target_link_libraries(
         backend

@@ -4,6 +4,7 @@
 #    include <backend/windows/main_windows.hpp>
 #else
 #    include <backend/linux/main_linux.hpp>
+#    include <backend/process/fork_pool.hpp>
 #endif
 
 #include <backend/process/process_store.hpp>
@@ -174,7 +175,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
     );
 }
 
-Main::Main(ProgramOptions options)
+Main::Main(ProgramOptions options, ForkPool* forkPool)
     : shuttingDown_{false}
     , programDir_{boost::dll::program_location().parent_path().string()}
     , stateHolder_{programDir_}
@@ -197,7 +198,7 @@ Main::Main(ProgramOptions options)
     , opener_{}
     , rpcFilesystem_{}
     , rpcSystem_{}
-    , processes_{window_.getExecutor(), window_, hub_}
+    , processes_{window_.getExecutor(), window_, hub_, forkPool}
     , prompter_{hub_}
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
     , childSignalTimer_{window_.getExecutor()}
@@ -210,6 +211,8 @@ Main::Main(ProgramOptions options)
 Main::~Main()
 {
     shuttingDown_ = true;
+    // No longer forward logs to the view:
+    Log::Detail::logger.detach();
     // sshSessionManager_->stopUpdateDispatching();
     childSignalTimer_.cancel();
 }
@@ -362,6 +365,11 @@ int main(int const argc, char const* const* argv)
     if (!options)
         return 0;
 
+    boost::asio::thread_pool ioPool{4};
+
+    ForkPool forkPool;
+    forkPool.start(ioPool.get_executor(), nullptr);
+
 #ifdef __linux__
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wc99-designator"
@@ -396,7 +404,7 @@ int main(int const argc, char const* const* argv)
     ssh_init();
 
     {
-        Main m{std::move(*options)};
+        Main m{std::move(*options), &forkPool};
         m.startChildSignalTimer();
         m.show();
     }

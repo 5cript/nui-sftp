@@ -11,6 +11,7 @@
 #    include <backend/pty/windows/conpty.hpp>
 #else
 #    include <backend/pty/linux/pty.hpp>
+#    include <backend/process/fork_pool.hpp>
 #endif
 
 using namespace std::chrono_literals;
@@ -30,13 +31,29 @@ namespace
     };
 }
 
-ProcessStore::ProcessStore(boost::asio::any_io_executor executor, Nui::Window& wnd, Nui::RpcHub& hub)
+ProcessStore::ProcessStore(
+    boost::asio::any_io_executor executor,
+    Nui::Window& wnd,
+    Nui::RpcHub& hub,
+    ForkPool* forkPool
+)
     : executor_{std::move(executor)}
     , wnd_{&wnd}
     , hub_{&hub}
     , processes_{}
     , uuidGenerator_{}
-{}
+    , forkPool_{forkPool}
+{
+#ifndef _WIN32
+    if (forkPool_)
+        forkPool_->setMessageHandler(
+            [this](nlohmann::json const& msg)
+            {
+                handleWorkerMessage(msg);
+            }
+        );
+#endif
+}
 ProcessStore::~ProcessStore()
 {}
 
@@ -50,14 +67,22 @@ std::string ProcessStore::emplace(
     Persistence::Termios const& termios,
 #endif
     bool isPty,
-    std::chrono::seconds defaultExitWaitTimeout)
+    std::chrono::seconds defaultExitWaitTimeout
+)
 {
     const auto processId = boost::uuids::to_string(uuidGenerator_());
-    processes_[processId] = std::make_shared<Process>(executor_, [this, processId]() {
-        wnd_->runInJavascriptThread([this, processId]() {
-            notifyChildExit(*hub_, processId);
-        });
-    });
+    processes_[processId] = std::make_shared<Process>(
+        executor_,
+        [this, processId]()
+        {
+            wnd_->runInJavascriptThread(
+                [this, processId]()
+                {
+                    notifyChildExit(*hub_, processId);
+                }
+            );
+        }
+    );
     processes_[processId]->attachState(ProcessAttachedState::ProcessInfo, ProcessInfo{isPty});
 
     if (isPty)
@@ -76,10 +101,14 @@ std::string ProcessStore::emplace(
             environment,
             defaultExitWaitTimeout,
             [launcher = std::make_shared<bp2::windows::default_launcher>(std::move(launcher))](
-                auto executor, auto const& executable, auto const& arguments, auto const& env) mutable {
+                auto executor, auto const& executable, auto const& arguments, auto const& env
+            ) mutable
+            {
                 return std::make_unique<bp2::process>(
-                    (*launcher)(executor, executable, arguments, bp2::process_environment{env}));
-            });
+                    (*launcher)(executor, executable, arguments, bp2::process_environment{env})
+                );
+            }
+        );
         pty2.closeOtherPipeEnd();
 #else
         using namespace PTY;
@@ -98,11 +127,14 @@ std::string ProcessStore::emplace(
             arguments,
             environment,
             defaultExitWaitTimeout,
-            [&pty2](auto executor, auto const& executable, auto const& arguments, auto const& env) {
+            [&pty2](auto executor, auto const& executable, auto const& arguments, auto const& env)
+            {
                 bp2::posix::default_launcher launcher;
                 return std::make_unique<bp2::process>(launcher(
-                    executor, executable, arguments, bp2::process_environment{env}, pty2.makeProcessLauncherInit()));
-            });
+                    executor, executable, arguments, bp2::process_environment{env}, pty2.makeProcessLauncherInit()
+                ));
+            }
+        );
 #endif
     }
     else
@@ -111,6 +143,69 @@ std::string ProcessStore::emplace(
     }
     return processId;
 }
+
+#ifndef _WIN32
+void ProcessStore::spawnDetached(std::string const& exe, std::vector<std::string> const& args)
+{
+    if (!forkPool_)
+        return;
+    forkPool_->send(
+        nlohmann::json{
+            {"command", "spawn"},
+            {"payload", {{"exe", exe}, {"args", args}}},
+        }
+    );
+}
+
+void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
+{
+    auto const type = msg.value("type", std::string{});
+    auto const procId = msg.value("id", std::string{});
+
+    Log::debug("Received message from fork pool worker: type='{}' id='{}' msg='{}'", type, procId, msg.dump());
+
+    if (type == "open")
+    {
+        wnd_->runInJavascriptThread(
+            [this, procId, msg]()
+            {
+                hub_->callRemote(msg["responseId"].get<std::string>(), nlohmann::json{{"id", procId}});
+            }
+        );
+    }
+    if (type == "stdout")
+    {
+        auto iter = forkPoolProcesses_.find(procId);
+        if (iter == forkPoolProcesses_.end())
+            return;
+        auto const receptacle = iter->second.stdoutReceptacle;
+        auto const data = msg.value("data", std::string{});
+        wnd_->runInJavascriptThread(
+            [this, receptacle, procId, data]()
+            {
+                hub_->callRemote(receptacle, nlohmann::json{{"id", procId}, {"data", data}});
+            }
+        );
+    }
+    else if (type == "exit")
+    {
+        auto iter = forkPoolProcesses_.find(procId);
+        if (iter == forkPoolProcesses_.end())
+            return;
+        forkPoolProcesses_.erase(iter);
+        wnd_->runInJavascriptThread(
+            [this, procId]()
+            {
+                hub_->callRemote("SessionArea::processDied", nlohmann::json{{"id", procId}});
+            }
+        );
+    }
+    else if (type == "error")
+    {
+        Log::error("ForkPool worker error for process {}: {}", procId, msg.value("message", std::string{}));
+    }
+}
+#endif
 
 void ProcessStore::pruneDeadProcesses()
 {
@@ -160,7 +255,8 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
 {
     hub.registerFunction(
         "ProcessStore::spawn",
-        [this, hub = &hub, wnd = &wnd](std::string const& responseId, nlohmann::json const& parameters) {
+        [this, hub = &hub, wnd = &wnd](std::string const& responseId, nlohmann::json const& parameters)
+        {
             try
             {
                 Log::debug("Spawning process with parameters: {}", parameters.dump(4));
@@ -201,6 +297,30 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                     termios = parameters.at("termios").get<Persistence::Termios>();
 
                 env.merge(environment);
+
+#ifndef _WIN32
+                if (isPty && forkPool_)
+                {
+                    const auto processId = boost::uuids::to_string(uuidGenerator_());
+                    forkPoolProcesses_.emplace(processId, ForkPoolProcess{stdoutReceptacle, stderrReceptacle});
+                    forkPool_->send(
+                        nlohmann::json{
+                            {"id", processId},
+                            {"command", "spawn"},
+                            {"payload",
+                                {
+                                    {"exe", command},
+                                    {"args", arguments},
+                                    {"env", env.environment()},
+                                    {"termios", termios},
+                                    {"responseId", responseId},
+                                }},
+                        }
+                    );
+                    return;
+                }
+#endif
+
                 auto id = std::make_shared<std::string>();
                 const auto processId =
                     emplace(command, arguments, std::move(env), std::move(termios), isPty, defaultExitWaitTimeout);
@@ -220,37 +340,59 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                     Log::info("Starting PTY reading");
                     auto& pty = processes_[processId]->getState<PtyType>(ProcessAttachedState::PseudoConsole);
                     pty.startReading(
-                        [wnd, hub, stdoutReceptacle, id](std::string_view message) {
-                            wnd->runInJavascriptThread([hub, stdoutReceptacle, id, msg = std::string{message}]() {
-                                hub->callRemote(
-                                    stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}});
-                            });
+                        [wnd, hub, stdoutReceptacle, id](std::string_view message)
+                        {
+                            wnd->runInJavascriptThread(
+                                [hub, stdoutReceptacle, id, msg = std::string{message}]()
+                                {
+                                    hub->callRemote(
+                                        stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    );
+                                }
+                            );
                         },
-                        [wnd, hub, stderrReceptacle, id](std::string_view message) {
-                            wnd->runInJavascriptThread([hub, stderrReceptacle, id, msg = std::string{message}]() {
-                                hub->callRemote(
-                                    stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}});
-                            });
-                        });
+                        [wnd, hub, stderrReceptacle, id](std::string_view message)
+                        {
+                            wnd->runInJavascriptThread(
+                                [hub, stderrReceptacle, id, msg = std::string{message}]()
+                                {
+                                    hub->callRemote(
+                                        stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    );
+                                }
+                            );
+                        }
+                    );
                 }
                 else
                 {
                     Log::info("Starting non-PTY reading");
                     processes_[processId]->startReading(
-                        [hub, stdoutReceptacle, id, wnd](std::string_view message) {
-                            wnd->runInJavascriptThread([hub, stdoutReceptacle, id, msg = std::string{message}]() {
-                                hub->callRemote(
-                                    stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}});
-                            });
+                        [hub, stdoutReceptacle, id, wnd](std::string_view message)
+                        {
+                            wnd->runInJavascriptThread(
+                                [hub, stdoutReceptacle, id, msg = std::string{message}]()
+                                {
+                                    hub->callRemote(
+                                        stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    );
+                                }
+                            );
                             return true;
                         },
-                        [hub, stderrReceptacle, id, wnd](std::string_view message) {
-                            wnd->runInJavascriptThread([hub, stderrReceptacle, id, msg = std::string{message}]() {
-                                hub->callRemote(
-                                    stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}});
-                            });
+                        [hub, stderrReceptacle, id, wnd](std::string_view message)
+                        {
+                            wnd->runInJavascriptThread(
+                                [hub, stderrReceptacle, id, msg = std::string{message}]()
+                                {
+                                    hub->callRemote(
+                                        stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    );
+                                }
+                            );
                             return true;
-                        });
+                        }
+                    );
                 }
             }
             catch (std::exception const& e)
@@ -259,14 +401,31 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 
     hub.registerFunction(
-        "ProcessStore::terminate", [this, hub = &hub](std::string const& responseId, nlohmann::json const& parameters) {
+        "ProcessStore::terminate",
+        [this, hub = &hub](std::string const& responseId, nlohmann::json const& parameters)
+        {
             try
             {
                 const auto id = parameters.at("id").get<std::string>();
                 Log::info("Terminating process with UUID: {}", id);
+
+#ifndef _WIN32
+                {
+                    auto iter = forkPoolProcesses_.find(id);
+                    if (iter != forkPoolProcesses_.end())
+                    {
+                        if (forkPool_)
+                            forkPool_->send(nlohmann::json{{"id", id}, {"command", "kill"}});
+                        forkPoolProcesses_.erase(iter);
+                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        return;
+                    }
+                }
+#endif
 
                 auto process = processes_.find(id);
                 if (process == processes_.end())
@@ -284,13 +443,31 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 
     hub.registerFunction(
-        "ProcessStore::exit", [this, hub = &hub](std::string const& responseId, std::string const& id) {
+        "ProcessStore::exit",
+        [this, hub = &hub](std::string const& responseId, std::string const& id)
+        {
             try
             {
                 Log::info("Exiting process with UUID: {}", id);
+
+#ifndef _WIN32
+                {
+                    auto iter = forkPoolProcesses_.find(id);
+                    if (iter != forkPoolProcesses_.end())
+                    {
+                        if (forkPool_)
+                            forkPool_->send(nlohmann::json{{"id", id}, {"command", "kill"}});
+                        forkPoolProcesses_.erase(iter);
+                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        return;
+                    }
+                }
+#endif
+
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
@@ -307,13 +484,34 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 
     hub.registerFunction(
         "ProcessStore::write",
-        [this, hub = &hub](std::string const& responseId, std::string const& id, std::string const& data) {
+        [this, hub = &hub](std::string const& responseId, std::string const& id, std::string const& data)
+        {
             try
             {
+#ifndef _WIN32
+                {
+                    auto iter = forkPoolProcesses_.find(id);
+                    if (iter != forkPoolProcesses_.end())
+                    {
+                        if (forkPool_)
+                            forkPool_->send(
+                                nlohmann::json{
+                                    {"id", id},
+                                    {"command", "stdin"},
+                                    {"payload", {{"data", data}}},
+                                }
+                            );
+                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        return;
+                    }
+                }
+#endif
+
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
@@ -342,10 +540,13 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 
     hub.registerFunction(
-        "ProcessStore::ptyProcesses", [this, hub = &hub](std::string const& responseId, std::string const& id) {
+        "ProcessStore::ptyProcesses",
+        [this, hub = &hub](std::string const& responseId, std::string const& id)
+        {
             try
             {
                 auto process = processes_.find(id);
@@ -395,14 +596,36 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 
     hub.registerFunction(
         "ProcessStore::ptyResize",
-        [this, hub = &hub](std::string const& responseId, std::string const& id, int cols, int rows) {
+        [this, hub = &hub](std::string const& responseId, std::string const& id, int cols, int rows)
+        {
             try
             {
                 Log::debug("Resizing PTY with UUID: {} to cols: {}, rows: {}", id, cols, rows);
+
+#ifndef _WIN32
+                {
+                    auto iter = forkPoolProcesses_.find(id);
+                    if (iter != forkPoolProcesses_.end())
+                    {
+                        if (forkPool_)
+                            forkPool_->send(
+                                nlohmann::json{
+                                    {"id", id},
+                                    {"command", "resize"},
+                                    {"payload", {{"cols", cols}, {"rows", rows}}},
+                                }
+                            );
+                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        return;
+                    }
+                }
+#endif
+
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
@@ -432,5 +655,6 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
                 return;
             }
-        });
+        }
+    );
 }
