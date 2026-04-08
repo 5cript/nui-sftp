@@ -6,6 +6,55 @@
 
 #include <fstream>
 
+#ifndef _WIN32
+#    include <sys/stat.h>
+#    include <pwd.h>
+#    include <grp.h>
+#endif
+#ifdef __linux__
+#    include <fcntl.h>
+#endif
+
+namespace
+{
+#ifndef _WIN32
+    void fillFromPosixStat(SharedData::DirectoryEntry& entry, struct stat const& st)
+    {
+        entry.uid = static_cast<std::uint32_t>(st.st_uid);
+        entry.gid = static_cast<std::uint32_t>(st.st_gid);
+        entry.size = static_cast<std::uint64_t>(st.st_size);
+        entry.atime = static_cast<std::uint64_t>(st.st_atim.tv_sec);
+        entry.atimeNsec = static_cast<std::uint32_t>(st.st_atim.tv_nsec);
+        entry.mtime = static_cast<std::uint64_t>(st.st_mtim.tv_sec);
+        entry.mtimeNsec = static_cast<std::uint32_t>(st.st_mtim.tv_nsec);
+
+        char pwdBuf[1024];
+        struct passwd pwd{};
+        struct passwd* pwdResult = nullptr;
+        if (::getpwuid_r(st.st_uid, &pwd, pwdBuf, sizeof(pwdBuf), &pwdResult) == 0 && pwdResult)
+            entry.owner = pwdResult->pw_name;
+
+        char grpBuf[1024];
+        struct group grp{};
+        struct group* grpResult = nullptr;
+        if (::getgrgid_r(st.st_gid, &grp, grpBuf, sizeof(grpBuf), &grpResult) == 0 && grpResult)
+            entry.group = grpResult->gr_name;
+    }
+#endif
+
+#ifdef __linux__
+    void fillBirthTime(SharedData::DirectoryEntry& entry, char const* path, int statxFlags)
+    {
+        struct statx stx{};
+        if (::statx(AT_FDCWD, path, statxFlags, STATX_BTIME, &stx) == 0 && (stx.stx_mask & STATX_BTIME))
+        {
+            entry.createTime = static_cast<std::uint64_t>(stx.stx_btime.tv_sec);
+            entry.createTimeNsec = static_cast<std::uint32_t>(stx.stx_btime.tv_nsec);
+        }
+    }
+#endif
+}
+
 RpcFilesystem::RpcFilesystem(
     boost::asio::any_io_executor executor,
     Nui::Window& wnd,
@@ -204,25 +253,52 @@ void RpcFilesystem::registerListFiles()
                 }
                 for (const auto& entry : iter)
                 {
-                    fileList.push_back(
-                        nlohmann::json(
-                            SharedData::DirectoryEntry{
-                                .path = [&entry, fileNameOnly]() -> std::string
-                                {
-                                    if (fileNameOnly)
-                                    {
-                                        const auto u8String = entry.path().filename().generic_u8string();
-                                        return {u8String.begin(), u8String.end()};
-                                    }
-                                    const auto u8String = entry.path().generic_u8string();
-                                    return {u8String.begin(), u8String.end()};
-                                }(),
-                                .type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type()),
-                                .size = entry.is_regular_file() ? entry.file_size() : 0,
-                                .resolvedType = SharedData::fileTypeFromStdFilesystemType(entry.status().type()),
-                            }
-                        )
-                    );
+                    const auto entryPath = entry.path();
+                    const auto entryPathStr = entryPath.c_str();
+
+                    SharedData::DirectoryEntry dirEntry{};
+                    const auto u8 = fileNameOnly ? entryPath.filename().generic_u8string()
+                                                 : entryPath.generic_u8string();
+                    dirEntry.path = std::string{u8.begin(), u8.end()};
+                    dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
+                    dirEntry.permissions = entry.symlink_status().permissions();
+
+#ifndef _WIN32
+                    struct stat lstSt{};
+                    if (::lstat(entryPathStr, &lstSt) == 0)
+                        fillFromPosixStat(dirEntry, lstSt);
+#    ifdef __linux__
+                    fillBirthTime(dirEntry, entryPathStr, AT_SYMLINK_NOFOLLOW);
+#    endif
+#endif
+
+                    auto resolved = std::make_shared<SharedData::DirectoryEntry>();
+                    {
+                        std::error_code pathEc;
+                        auto canonical = std::filesystem::canonical(entryPath, pathEc);
+                        if (!pathEc)
+                            resolved->path = std::move(canonical);
+                        else
+                        {
+                            auto target = std::filesystem::read_symlink(entryPath, pathEc);
+                            if (!pathEc)
+                                resolved->path = std::move(target);
+                        }
+                    }
+                    resolved->type = SharedData::fileTypeFromStdFilesystemType(entry.status().type());
+                    resolved->permissions = entry.status().permissions();
+
+#ifndef _WIN32
+                    struct stat stSt{};
+                    if (::stat(entryPathStr, &stSt) == 0)
+                        fillFromPosixStat(*resolved, stSt);
+#    ifdef __linux__
+                    fillBirthTime(*resolved, entryPathStr, 0 /*follow symlinks*/);
+#    endif
+#endif
+
+                    dirEntry.resolvedTarget = std::move(resolved);
+                    fileList.push_back(nlohmann::json(dirEntry));
                 }
 
                 Log::info("Successfully listed files in directory '{}'", directoryPath.generic_string());
