@@ -42,35 +42,42 @@ namespace PTY
 
         void asyncRead()
         {
-            stream->async_wait(boost::asio::posix::stream_descriptor::wait_read, [this](boost::system::error_code ec) {
-                if (ec)
+            stream->async_wait(
+                boost::asio::posix::stream_descriptor::wait_read,
+                [this](boost::system::error_code ec)
                 {
-                    stopReading();
-                    return;
+                    if (ec)
+                    {
+                        stopReading();
+                        return;
+                    }
+
+                    stream->async_read_some(
+                        boost::asio::buffer(buffer),
+                        [this](boost::system::error_code ec, std::size_t bytesRead)
+                        {
+                            if (ec)
+                            {
+                                stopReading();
+                                return;
+                            }
+
+                            if (bytesRead == 0)
+                            {
+                                stopReading();
+                                return;
+                            }
+
+                            std::string_view data{buffer.data(), bytesRead};
+
+                            if (onStdout)
+                                onStdout(data);
+
+                            asyncRead();
+                        }
+                    );
                 }
-
-                stream->async_read_some(
-                    boost::asio::buffer(buffer), [this](boost::system::error_code ec, std::size_t bytesRead) {
-                        if (ec)
-                        {
-                            stopReading();
-                            return;
-                        }
-
-                        if (bytesRead == 0)
-                        {
-                            stopReading();
-                            return;
-                        }
-
-                        std::string_view data{buffer.data(), bytesRead};
-
-                        if (onStdout)
-                            onStdout(data);
-
-                        asyncRead();
-                    });
-            });
+            );
         }
 
         Implementation(boost::asio::any_io_executor executor)
@@ -89,7 +96,8 @@ namespace PTY
     boost::system::error_code PseudoTerminal::LauncherInit::on_exec_setup(
         boost::process::v2::posix::default_launcher&,
         const std::filesystem::path&,
-        const char* const*)
+        const char* const*
+    )
     {
         // master is auto closed by boost::process
         if (!login_tty(terminal_->impl_->slave))
@@ -102,7 +110,8 @@ namespace PTY
     boost::system::error_code PseudoTerminal::LauncherInit::on_setup(
         boost::process::v2::posix::default_launcher& launcher,
         const std::filesystem::path&,
-        const char* const*)
+        const char* const*
+    )
     {
         // preserve fd for child:
         launcher.fd_whitelist.push_back(terminal_->impl_->slave);
@@ -113,7 +122,8 @@ namespace PTY
     void PseudoTerminal::LauncherInit::on_error(
         boost::process::v2::posix::default_launcher&,
         const std::filesystem::path&,
-        const char* const*)
+        const char* const*
+    )
     {
         Log::error("Failed to create pty");
 
@@ -124,7 +134,8 @@ namespace PTY
     void PseudoTerminal::LauncherInit::on_success(
         boost::process::v2::posix::default_launcher&,
         const std::filesystem::path&,
-        const char* const*)
+        const char* const*
+    )
     {
         close(terminal_->impl_->slave);
     }
@@ -215,7 +226,8 @@ namespace PTY
 
     void PseudoTerminal::startReading(
         std::function<void(std::string_view)> onStdout,
-        std::function<void(std::string_view)> onStderr)
+        std::function<void(std::string_view)> onStderr
+    )
     {
         if (impl_->master == 0)
             return;
@@ -260,9 +272,14 @@ namespace PTY
                 if (entry.is_directory())
                 {
                     const auto id = entry.path().filename().string();
-                    if (!std::all_of(id.begin(), id.end(), [](char c) {
-                            return std::isdigit(c);
-                        }))
+                    if (!std::all_of(
+                            id.begin(),
+                            id.end(),
+                            [](char c)
+                            {
+                                return std::isdigit(c);
+                            }
+                        ))
                     {
                         continue;
                     }
@@ -286,10 +303,12 @@ namespace PTY
                         std::string content;
                         std::getline(cmdlineFile, content, '\0');
 
-                        processes.push_back(PtyProcess{
-                            .pid = std::stoi(id),
-                            .cmdline = content,
-                        });
+                        processes.push_back(
+                            PtyProcess{
+                                .pid = std::stoi(id),
+                                .cmdline = content,
+                            }
+                        );
                     }
                 }
             }
@@ -300,9 +319,14 @@ namespace PTY
             }
         }
 
-        std::sort(processes.begin(), processes.end(), [](PtyProcess const& a, PtyProcess const& b) {
-            return a.pid < b.pid;
-        });
+        std::sort(
+            processes.begin(),
+            processes.end(),
+            [](PtyProcess const& a, PtyProcess const& b)
+            {
+                return a.pid < b.pid;
+            }
+        );
         return processes;
     }
 

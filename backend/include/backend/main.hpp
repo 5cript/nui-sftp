@@ -24,10 +24,12 @@
 #include <atomic>
 #include <mutex>
 
+class ForkPool;
+
 class Main
 {
   public:
-    Main(ProgramOptions options);
+    Main(ProgramOptions options, ForkPool* forkPool = nullptr);
     ~Main();
 
     Main(Main const&) = delete;
