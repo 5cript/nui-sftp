@@ -1,5 +1,6 @@
 #include <ssh/sftp_session.hpp>
 #include <ssh/session.hpp>
+#include <ssh/file_information.hpp>
 
 #include <fcntl.h>
 
@@ -116,7 +117,9 @@ namespace SecureShell
                             sftp_stat(session_, fullPath.c_str()), sftp_attributes_free
                         };
                         if (targetAttrs != nullptr)
-                            entry.resolvedType = static_cast<SharedData::FileType>(targetAttrs->type);
+                            entry.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(
+                                fromSftpAttributes(targetAttrs.get())
+                            );
                     }
                 }
 

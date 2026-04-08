@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace SharedData
@@ -96,8 +97,8 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         std::string acl{};
-        // For symlinks: the type of the symlink target (if known). nullopt means unknown.
-        std::optional<FileType> resolvedType{std::nullopt};
+        // For symlinks: the full entry of the symlink target (if known). nullptr means unknown.
+        std::shared_ptr<DirectoryEntry> resolvedTarget{nullptr};
 
         bool isDirectory() const
         {
@@ -107,8 +108,8 @@ namespace SharedData
         bool isDirectoryLike() const
         {
             return type == FileType::Directory ||
-                   (type == FileType::Symlink && resolvedType.has_value() &&
-                    *resolvedType == FileType::Directory);
+                   (type == FileType::Symlink && resolvedTarget &&
+                    resolvedTarget->type == FileType::Directory);
         }
         bool isRegularFile() const
         {

@@ -523,16 +523,43 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                         .path = file["path"].as<std::string>(),
                         .type = fileType,
                         .size = file["size"].as<std::uint64_t>(),
-                        .resolvedType = [&]() -> std::optional<SharedData::FileType>
+                        .uid = file["uid"].as<std::uint32_t>(),
+                        .gid = file["gid"].as<std::uint32_t>(),
+                        .owner = file["owner"].as<std::string>(),
+                        .group = file["group"].as<std::string>(),
+                        .permissions = static_cast<std::filesystem::perms>(file["permissions"].as<int>()),
+                        .atime = file["atime"].as<std::uint64_t>(),
+                        .atimeNsec = file["atimeNsec"].as<std::uint32_t>(),
+                        .createTime = file["createTime"].as<std::uint64_t>(),
+                        .createTimeNsec = file["createTimeNsec"].as<std::uint32_t>(),
+                        .mtime = file["mtime"].as<std::uint64_t>(),
+                        .mtimeNsec = file["mtimeNsec"].as<std::uint32_t>(),
+                        .resolvedTarget = [&]() -> std::shared_ptr<SharedData::DirectoryEntry>
                         {
                             if (fileType != SharedData::FileType::Symlink)
-                                return std::nullopt;
-                            if (!file.hasOwnProperty("resolvedType") || file["resolvedType"].isNull() ||
-                                file["resolvedType"].isUndefined())
-                                return std::nullopt;
-                            return SharedData::fileTypeFromStdFilesystemType(
-                                static_cast<std::filesystem::file_type>(file["resolvedType"].as<int>())
-                            );
+                                return nullptr;
+                            if (!file.hasOwnProperty("resolvedTarget") || file["resolvedTarget"].isNull() ||
+                                file["resolvedTarget"].isUndefined())
+                                return nullptr;
+                            const auto target = file["resolvedTarget"];
+                            return std::make_shared<SharedData::DirectoryEntry>(SharedData::DirectoryEntry{
+                                .path = target["path"].as<std::string>(),
+                                .type = SharedData::fileTypeFromStdFilesystemType(
+                                    static_cast<std::filesystem::file_type>(target["type"].as<int>())
+                                ),
+                                .size = target["size"].as<std::uint64_t>(),
+                                .uid = target["uid"].as<std::uint32_t>(),
+                                .gid = target["gid"].as<std::uint32_t>(),
+                                .owner = target["owner"].as<std::string>(),
+                                .group = target["group"].as<std::string>(),
+                                .permissions = static_cast<std::filesystem::perms>(target["permissions"].as<int>()),
+                                .atime = target["atime"].as<std::uint64_t>(),
+                                .atimeNsec = target["atimeNsec"].as<std::uint32_t>(),
+                                .createTime = target["createTime"].as<std::uint64_t>(),
+                                .createTimeNsec = target["createTimeNsec"].as<std::uint32_t>(),
+                                .mtime = target["mtime"].as<std::uint64_t>(),
+                                .mtimeNsec = target["mtimeNsec"].as<std::uint32_t>(),
+                            });
                         }(),
                     }
                 );

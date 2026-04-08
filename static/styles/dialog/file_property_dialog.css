@@ -2,6 +2,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px 1rem;
+    overflow: hidden;
 
     /* direct descendant divs do subgrid */
     >div {
@@ -12,5 +13,11 @@
         >input {
             width: 400px;
         }
+    }
+}
+
+#FilePropertyDialog_0 {
+    &>.script-nui-dialog-body {
+        overflow: hidden;
     }
 }

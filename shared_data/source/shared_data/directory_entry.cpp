@@ -22,7 +22,7 @@ namespace SharedData
             {"mtime", entry.mtime},
             {"mtimeNsec", entry.mtimeNsec},
             {"acl", entry.acl},
-            {"resolvedType", entry.resolvedType ? nlohmann::json(*entry.resolvedType) : nlohmann::json(nullptr)},
+            {"resolvedTarget", entry.resolvedTarget ? nlohmann::json(*entry.resolvedTarget) : nlohmann::json(nullptr)},
         };
     }
     void from_json(nlohmann::json const& j, DirectoryEntry& entry)
@@ -44,11 +44,11 @@ namespace SharedData
         j.at("mtime").get_to(entry.mtime);
         j.at("mtimeNsec").get_to(entry.mtimeNsec);
         j.at("acl").get_to(entry.acl);
-        if (j.contains("resolvedType") && !j.at("resolvedType").is_null())
+        if (j.contains("resolvedTarget") && !j.at("resolvedTarget").is_null())
         {
-            FileType rt{};
-            j.at("resolvedType").get_to(rt);
-            entry.resolvedType = rt;
+            DirectoryEntry target{};
+            j.at("resolvedTarget").get_to(target);
+            entry.resolvedTarget = std::make_shared<DirectoryEntry>(std::move(target));
         }
     }
 }
