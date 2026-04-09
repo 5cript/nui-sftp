@@ -365,12 +365,13 @@ int main(int const argc, char const* const* argv)
     if (!options)
         return 0;
 
-    boost::asio::thread_pool ioPool{4};
+#ifdef __linux__
 
+    boost::asio::thread_pool ioPool{4};
     ForkPool forkPool;
     forkPool.start(ioPool.get_executor(), nullptr);
+    ForkPool* forkPoolPtr = &forkPool;
 
-#ifdef __linux__
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wc99-designator"
     struct sigaction sa{
@@ -401,10 +402,14 @@ int main(int const argc, char const* const* argv)
 #    pragma clang diagnostic pop
 #endif
 
+#ifdef _WIN32
+    ForkPool* forkPoolPtr = nullptr;
+#endif
+
     ssh_init();
 
     {
-        Main m{std::move(*options), &forkPool};
+        Main m{std::move(*options), forkPoolPtr};
         m.startChildSignalTimer();
         m.show();
     }
