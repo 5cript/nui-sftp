@@ -116,6 +116,14 @@ namespace Log
         return fromSpdlogLevel(spdlog::get_level());
     }
 
+    void Logger::detach()
+    {
+        std::scoped_lock lock{guard_};
+        rpcHub_ = nullptr;
+        rpcHubPrelim_ = nullptr;
+        stash_.clear();
+    }
+
     void Logger::logImpl(Log::Level level, std::string const& msg)
     {
         decltype(rpcHub_) hub;

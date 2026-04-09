@@ -34,6 +34,8 @@ namespace Log
             logImpl(level, buf);
         }
 
+        void detach();
+
       private:
         void logImpl(Log::Level level, std::string const& msg);
 

@@ -47,6 +47,7 @@ target_sources(
         terminal/terminal_channel.cpp
         terminal/frontend_session_manager.cpp
         terminal/executing_engine.cpp
+        terminal/executing_channel.cpp
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
