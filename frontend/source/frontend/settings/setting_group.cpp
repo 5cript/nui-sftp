@@ -116,7 +116,7 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
                         {
                             return Nui::Elements::span{}(
                                 observe(option.get()),
-                                [&option](std::optional<std::string> const& value) -> std::string
+                                [](std::optional<std::string> const& value) -> std::string
                                 {
                                     if (!value)
                                         return "</>";
