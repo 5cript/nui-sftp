@@ -9,6 +9,14 @@
 #include <memory>
 #include <string>
 
+/**
+ * @brief Terminal engine that manages local processes as channels.
+ *
+ * open() succeeds immediately (no connection to establish).
+ * Each createChannel() call spawns one new process via ProcessStore::spawn.
+ * The process UUID returned by the backend is used as the ChannelId so that
+ * write/resize/close operations can be routed without an extra lookup layer.
+ */
 class ExecutingTerminalEngine : public TerminalEngine
 {
   public:
@@ -23,35 +31,31 @@ class ExecutingTerminalEngine : public TerminalEngine
     ExecutingTerminalEngine(Settings settings);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(ExecutingTerminalEngine);
 
+    /** @brief Signals success immediately — local processes need no prior connection. */
     void open(std::function<void(bool, std::string const&)> onOpen) override;
     void dispose(std::function<void()> onDisposeComplete) override;
+
+    /** @brief Returns the engine-level identifier (not a process UUID). */
     std::string id() const;
+
     std::string engineName() const override
     {
         return "local";
     }
 
-    // TODO: Map these onto createChannel/closeChannel once multi-channel support is implemented for local processes.
-    void write(std::string const& data);
-    void resize(int cols, int rows);
-    void setStdoutHandler(std::function<void(std::string const&)> handler);
-    void setStderrHandler(std::function<void(std::string const&)> handler);
-
-    // TerminalEngine channel interface — not yet implemented for local processes.
     void createChannel(
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
         std::function<void(Ids::ChannelId const&)> onChannelLoss
     ) override;
+
     void createSftpChannel(
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
     ) override;
+
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) override;
     ChannelInterface* channel(Ids::ChannelId const& channelId) override;
-
-  private:
-    void updatePtyProcs();
 
   private:
     struct Implementation;

@@ -1,37 +1,25 @@
-#include <exception>
 #include <frontend/terminal/executing_engine.hpp>
+#include <frontend/terminal/executing_channel.hpp>
 #include <frontend/nlohmann_compat.hpp>
 #include <log/log.hpp>
-#include <nui/frontend/api/timer.hpp>
 
 #include <nui/rpc.hpp>
+
+#include <unordered_map>
 
 using namespace std::string_literals;
 
 struct ExecutingTerminalEngine::Implementation
 {
     ExecutingTerminalEngine::Settings settings;
-    std::string id;
+    std::string engineId;
 
-    Nui::RpcClient::AutoUnregister stdoutReceiver;
-    Nui::RpcClient::AutoUnregister stderrReceiver;
+    std::unordered_map<Ids::ChannelId, ExecutingChannel, Ids::IdHash> channels;
 
-    std::string processId;
-
-    std::function<void(std::string const&)> stdoutHandler;
-    std::function<void(std::string const&)> stderrHandler;
-
-    Nui::TimerHandle procInfoTimer;
-
-    Implementation(ExecutingTerminalEngine::Settings&& settings)
+    explicit Implementation(ExecutingTerminalEngine::Settings&& settings)
         : settings{std::move(settings)}
-        , id{Nui::val::global("generateId")().as<std::string>()}
-        , stdoutReceiver{}
-        , stderrReceiver{}
-        , processId{}
-        , stdoutHandler{}
-        , stderrHandler{}
-        , procInfoTimer{}
+        , engineId{Nui::val::global("generateId")().as<std::string>()}
+        , channels{}
     {}
 };
 
@@ -41,55 +29,104 @@ ExecutingTerminalEngine::ExecutingTerminalEngine(Settings settings)
 ExecutingTerminalEngine::~ExecutingTerminalEngine()
 {
     if (!moveDetector_.wasMoved())
-    {
         dispose([]() {});
-    }
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(ExecutingTerminalEngine);
 
 void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen)
 {
-    impl_->stdoutReceiver = Nui::RpcClient::autoRegisterFunction(
-        "execTerminalStdout_" + impl_->id,
-        [this](Nui::val val)
+    // Local processes need no prior connection — signal success immediately.
+    onOpen(true, impl_->engineId);
+}
+
+void ExecutingTerminalEngine::dispose(std::function<void()> onDisposeComplete)
+{
+    // Exit every active process. Since each dispose() is async we fire them all and
+    // call onDisposeComplete once the last one finishes (or immediately if empty).
+    if (impl_->channels.empty())
+    {
+        onDisposeComplete();
+        return;
+    }
+
+    auto remaining = std::make_shared<std::size_t>(impl_->channels.size());
+    auto complete = std::make_shared<std::function<void()>>(std::move(onDisposeComplete));
+
+    for (auto& [id, chan] : impl_->channels)
+    {
+        chan.dispose(
+            [remaining, complete]()
+            {
+                if (--(*remaining) == 0)
+                    (*complete)();
+            }
+        );
+    }
+    impl_->channels.clear();
+}
+
+std::string ExecutingTerminalEngine::id() const
+{
+    // Returns the engine-level ID, not a process UUID.
+    // SessionArea::processDied matching will therefore never fire for this engine,
+    // which is correct — channel exit is handled per-channel via execTerminalExit_.
+    return impl_->engineId;
+}
+
+void ExecutingTerminalEngine::createChannel(
+    std::function<void(std::string const&)> handler,
+    std::function<void(std::string const&)> errorHandler,
+    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss
+)
+{
+    // Generate a stable local ID for the RPC receptacle names so that stdout/stderr
+    // receivers can be registered before ProcessStore::spawn is called, ensuring no
+    // output is lost even if the process produces output immediately on start.
+    const std::string localId = Nui::val::global("generateId")().as<std::string>();
+    const std::string stdoutReceptacle = "execTerminalStdout_" + localId;
+    const std::string stderrReceptacle = "execTerminalStderr_" + localId;
+    Log::info(
+        "ExecutingTerminalEngine::createChannel called, localId={}, stdoutReceptacle={}, stderrReceptacle={}",
+        localId,
+        stdoutReceptacle,
+        stderrReceptacle
+    );
+
+    // Register stdout receiver. The handler lambda writes decoded data to xterm.js
+    // via the TerminalChannel (FrontendSessionManager wires this up).
+    auto stdoutReceiver = Nui::RpcClient::autoRegisterFunction(
+        stdoutReceptacle,
+        [handler](Nui::val val)
         {
             if (val.hasOwnProperty("data"))
-            {
-                const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
-                if (impl_->stdoutHandler)
-                    impl_->stdoutHandler(data);
-            }
+                handler(Nui::val::global("atob")(val["data"]).as<std::string>());
             else
-                Log::error("execTerminalStdout_" + impl_->id + " received an empty message");
+                Log::error("execTerminalStdout received message without data field");
         }
     );
 
-    impl_->stderrReceiver = Nui::RpcClient::autoRegisterFunction(
-        "execTerminalStderr_" + impl_->id,
-        [this](Nui::val val)
+    auto stderrReceiver = Nui::RpcClient::autoRegisterFunction(
+        stderrReceptacle,
+        [errorHandler](Nui::val val)
         {
             if (val.hasOwnProperty("data"))
-            {
-                const std::string data = Nui::val::global("atob")(val["data"]).as<std::string>();
-                if (impl_->stderrHandler)
-                    impl_->stderrHandler(data);
-            }
+                errorHandler(Nui::val::global("atob")(val["data"]).as<std::string>());
             else
-                Log::error("execTerminalStderr_" + impl_->id + " received an empty message");
+                Log::error("execTerminalStderr received message without data field");
         }
     );
 
+    // Build the spawn parameters the same way the old single-channel engine did.
     Nui::val obj = Nui::val::object();
-
     obj.set("command", impl_->settings.engineOptions.command.generic_string());
+
     if (impl_->settings.engineOptions.arguments)
     {
         Nui::val args = Nui::val::array();
         for (auto const& arg : *impl_->settings.engineOptions.arguments)
-        {
             args.call<void>("push", arg);
-        }
         obj.set("arguments", args);
     }
     else
@@ -101,9 +138,7 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
     {
         Nui::val env = Nui::val::object();
         for (auto const& [key, value] : *impl_->settings.engineOptions.environment)
-        {
             env.set(key.c_str(), value);
-        }
         obj.set("environment", env);
     }
     else
@@ -114,9 +149,8 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
     obj.set("defaultExitWaitTimeout", impl_->settings.engineOptions.exitTimeoutSeconds);
     obj.set("cleanEnvironment", impl_->settings.engineOptions.cleanEnvironment);
     obj.set("isPty", impl_->settings.engineOptions.isPty);
-
-    obj.set("stdout", "execTerminalStdout_" + impl_->id);
-    obj.set("stderr", "execTerminalStderr_" + impl_->id);
+    obj.set("stdout", stdoutReceptacle);
+    obj.set("stderr", stderrReceptacle);
     try
     {
         obj.set("termios", asVal(impl_->settings.termios));
@@ -126,138 +160,90 @@ void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)>
         Log::error("Failed to serialize termios: {}", exc.what());
     }
 
+    // Move the receivers into shared_ptrs so the spawn callback can move them into
+    // the channel even though the callback is a std::function (no move-only captures).
+    auto sharedStdout = std::make_shared<Nui::RpcClient::AutoUnregister>(std::move(stdoutReceiver));
+    auto sharedStderr = std::make_shared<Nui::RpcClient::AutoUnregister>(std::move(stderrReceiver));
+
+    Log::info("ExecutingTerminalEngine: calling ProcessStore::spawn for localId={}", localId);
     Nui::RpcClient::callWithBackChannel(
         "ProcessStore::spawn",
-        [this, onOpen = std::move(onOpen)](Nui::val val)
+        [this,
+            localId,
+            sharedStdout = std::move(sharedStdout),
+            sharedStderr = std::move(sharedStderr),
+            onCreated = std::move(onCreated),
+            onChannelLoss = std::move(onChannelLoss)](Nui::val val)
         {
+            Log::info("ExecutingTerminalEngine: ProcessStore::spawn response received for localId={}", localId);
             if (!val.hasOwnProperty("id"))
             {
-                Log::error("ProcessStore::spawn callback did not return an id");
-                if (val.hasOwnProperty("error"))
-                    Log::error(val["error"].as<std::string>());
-                return onOpen(false, val["error"].as<std::string>());
+                Log::error(
+                    "ProcessStore::spawn did not return an id: {}",
+                    val.hasOwnProperty("error") ? val["error"].as<std::string>() : "(no error field)"
+                );
+                onCreated(std::nullopt, val.hasOwnProperty("error") ? val["error"].as<std::string>() : "spawn failed");
+                return;
             }
-            // TODO: Use typed id
-            std::string id = val["id"].as<std::string>();
-            impl_->processId = id;
 
-            onOpen(true, id);
-            updatePtyProcs();
+            const std::string processId = val["id"].as<std::string>();
+            Log::info("ExecutingTerminalEngine: spawn succeeded, processId={}", processId);
+            const Ids::ChannelId channelId = Ids::makeChannelId(processId);
+
+            // Register the per-process exit receiver.  The backend sends to
+            // "execTerminalExit_<processId>" when the process terminates.
+            auto exitReceiver = Nui::RpcClient::autoRegisterFunction(
+                "execTerminalExit_" + processId,
+                [this, channelId, onChannelLoss](Nui::val)
+                {
+                    Log::info("ExecutingTerminalEngine: process '{}' exited.", channelId.value());
+                    onChannelLoss(channelId);
+                    impl_->channels.erase(channelId);
+                }
+            );
+            auto sharedExit = std::make_shared<Nui::RpcClient::AutoUnregister>(std::move(exitReceiver));
+
+            impl_->channels.emplace(
+                channelId,
+                ExecutingChannel{channelId, std::move(*sharedStdout), std::move(*sharedStderr), std::move(*sharedExit)}
+            );
+
+            Log::info(
+                "ExecutingTerminalEngine: channel emplace done, calling onCreated for channelId={}", channelId.value()
+            );
+            onCreated(channelId, "");
         },
         obj
     );
 }
 
-void ExecutingTerminalEngine::dispose(std::function<void()> onDisposeComplete)
-{
-    Nui::RpcClient::callWithBackChannel(
-        "ProcessStore::exit",
-        [onDisposeComplete = std::move(onDisposeComplete)](Nui::val)
-        {
-            // TODO: handle error
-            onDisposeComplete();
-        },
-        impl_->processId
-    );
-
-    impl_->stdoutReceiver.reset();
-    impl_->stderrReceiver.reset();
-}
-
-void ExecutingTerminalEngine::resize(int cols, int rows)
-{
-    Nui::RpcClient::callWithBackChannel(
-        "ProcessStore::ptyResize",
-        [](Nui::val)
-        {
-            // TODO: handle error
-        },
-        impl_->processId,
-        cols,
-        rows
-    );
-}
-
-void ExecutingTerminalEngine::updatePtyProcs()
-{
-    Log::info("updatePtyProcs");
-    if (!impl_->procInfoTimer.hasActiveTimer())
-    {
-        Nui::setTimeout(
-            500,
-            [this]()
-            {
-                Nui::RpcClient::callWithBackChannel(
-                    "ProcessStore::ptyProcesses",
-                    [this](Nui::val val)
-                    {
-                        if (val.hasOwnProperty("latest"))
-                        {
-                            Log::info("onProcessChange: {}", Nui::JSON::stringify(val));
-                            if (impl_->settings.onProcessChange)
-                                impl_->settings.onProcessChange(val["latest"]["cmdline"].as<std::string>());
-                        }
-                        else
-                        {
-                            Log::warn("ptyProcesses did not return latest: {}", Nui::JSON::stringify(val));
-                        }
-                    },
-                    impl_->processId
-                );
-            },
-            [this](Nui::TimerHandle&& handle)
-            {
-                impl_->procInfoTimer = std::move(handle);
-            }
-        );
-    }
-}
-
-std::string ExecutingTerminalEngine::id() const
-{
-    return impl_->processId;
-}
-
-void ExecutingTerminalEngine::write(std::string const& data)
-{
-    if (!data.empty() && (data.back() == '\r' || data.back() == '\n'))
-        updatePtyProcs();
-
-    Nui::RpcClient::callWithBackChannel(
-        "ProcessStore::write", [](Nui::val) {}, impl_->processId, Nui::val::global("btoa")(data).as<std::string>()
-    );
-}
-
-void ExecutingTerminalEngine::setStdoutHandler(std::function<void(std::string const&)> handler)
-{
-    impl_->stdoutHandler = std::move(handler);
-}
-void ExecutingTerminalEngine::setStderrHandler(std::function<void(std::string const&)> handler)
-{
-    impl_->stderrHandler = std::move(handler);
-}
-
-// TODO: Implement once multi-channel support for local processes is added.
-void ExecutingTerminalEngine::createChannel(
-    std::function<void(std::string const&)>,
-    std::function<void(std::string const&)>,
-    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
-    std::function<void(Ids::ChannelId const&)>
-)
-{
-    onCreated(std::nullopt, "Multi-channel not yet implemented for local processes");
-}
 void ExecutingTerminalEngine::createSftpChannel(
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
 )
 {
-    onCreated(std::nullopt, "SFTP not supported by local process engine");
+    onCreated(std::nullopt, "SFTP is not supported by the local process engine");
 }
-void ExecutingTerminalEngine::closeChannel(Ids::ChannelId const&, std::function<void()> onClose)
+
+void ExecutingTerminalEngine::closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose)
 {
-    onClose();
+    auto iter = impl_->channels.find(channelId);
+    if (iter == impl_->channels.end())
+    {
+        onClose();
+        return;
+    }
+
+    iter->second.dispose(
+        [this, channelId, onClose = std::move(onClose)]()
+        {
+            impl_->channels.erase(channelId);
+            onClose();
+        }
+    );
 }
-ChannelInterface* ExecutingTerminalEngine::channel(Ids::ChannelId const&)
+
+ChannelInterface* ExecutingTerminalEngine::channel(Ids::ChannelId const& channelId)
 {
-    return nullptr;
+    auto iter = impl_->channels.find(channelId);
+    return iter != impl_->channels.end() ? &iter->second : nullptr;
 }
