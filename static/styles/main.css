@@ -15,7 +15,6 @@
 @import "./dialog/confirm_dialog.css";
 @import "./dialog/input_dialog.css";
 @import "../../../styles/nui-file-explorer/file_grid.css";
-@import "../../../styles/nui-file-explorer/dropdown_menu.css";
 @import "../../../styles/5cript-nui-components/themes/light.css";
 @import "../../../styles/5cript-nui-components/button.css";
 @import "../../../styles/5cript-nui-components/color_picker.css";
