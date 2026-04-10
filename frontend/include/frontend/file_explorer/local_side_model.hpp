@@ -48,6 +48,8 @@ class LocalSideModel
     }
     void requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback) override;
 
+    bool showRootEntry() const override;
+
     // --- IDrivesProvider ---
     NuiFileExplorer::IDrivesProvider* drivesProvider() override;
     void requestDrives(std::function<void(std::vector<PlaceEntry>)> callback) override;

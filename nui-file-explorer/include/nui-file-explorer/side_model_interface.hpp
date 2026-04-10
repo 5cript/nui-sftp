@@ -186,6 +186,17 @@ namespace NuiFileExplorer
         }
 
         /**
+         * @brief Returns true if the root entry ("/") should be shown in the places panel.
+         *        Defaults to false; override to enable on non-Windows engines.
+         *
+         * @return bool
+         */
+        virtual bool showRootEntry() const
+        {
+            return false;
+        }
+
+        /**
          * @brief Optional interface: provides drive/volume entries (Windows-specific).
          *
          * @return Pointer to the provider or nullptr if not supported.
