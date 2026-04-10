@@ -7,7 +7,7 @@ ExecutingChannel::ExecutingChannel(
     Nui::RpcClient::AutoUnregister stdoutReceiver,
     Nui::RpcClient::AutoUnregister stderrReceiver,
     Nui::RpcClient::AutoUnregister exitReceiver,
-    std::function<void(std::string const&)> onProcessChange
+    std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange
 )
     : channelId_{std::move(channelId)}
     , stdoutReceiver_{std::move(stdoutReceiver)}
@@ -57,7 +57,7 @@ void ExecutingChannel::updatePtyProcs()
                     if (val.hasOwnProperty("latest"))
                     {
                         if (onProcessChange_)
-                            onProcessChange_(fmt::format(
+                            onProcessChange_(channelId_, fmt::format(
                                 "{} ({})",
                                 val["latest"]["cmdline"].as<std::string>(),
                                 val["latest"]["pid"].as<int>()

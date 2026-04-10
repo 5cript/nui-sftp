@@ -341,6 +341,23 @@ class ContentPanelManager {
         return undefined;
     }
 
+    renameTerminalById = (panelId: string, channelId: ChannelId, title: string) => {
+        const dock = this.getDockPanelById(panelId);
+        if (!dock) {
+            console.error(`renameTerminalById: no dock panel found for id ${panelId}`);
+            return;
+        }
+        for (const widget of dock.widgets()) {
+            const channelElement = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
+            if (channelElement) {
+                widget.title.label = title;
+                widget.title.caption = title;
+                return;
+            }
+        }
+        console.error(`renameTerminalById: could not find terminal widget with channel id ${channelId}`);
+    }
+
     closeTerminalByNode = (panelId: string, node: HTMLElement) => {
         const dock = this.getDockPanelById(panelId);
         if (!dock) {

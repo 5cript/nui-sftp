@@ -4,6 +4,7 @@
 #include <frontend/terminal/terminal_engine.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 #include <persistence/state/session_options.hpp>
+#include <ids/ids.hpp>
 #include <nui/utility/move_detector.hpp>
 
 #include <memory>
@@ -24,7 +25,7 @@ class ExecutingTerminalEngine : public TerminalEngine
     {
         Persistence::ExecutingSessionOptions engineOptions;
         Persistence::Termios termios;
-        std::function<void(std::string)> onProcessChange;
+        std::function<void(Ids::ChannelId const&, std::string)> onProcessChange;
     };
 
   public:

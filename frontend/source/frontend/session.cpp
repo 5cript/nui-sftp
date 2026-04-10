@@ -673,10 +673,12 @@ void Session::createExecutingEngine()
             .engineOptions = std::get<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine),
             .termios = impl_->engineOptions.termios.value(),
             .onProcessChange =
-                [this](std::string const& cmdline)
+                [this](Ids::ChannelId const& channelId, std::string const& cmdline)
             {
                 Log::info("Tab title changed: {}", cmdline);
                 *impl_->tabTitle = impl_->disambiguateTitle(this, cmdline);
+                Nui::val::global("contentPanelManager")
+                    .call<void>("renameTerminalById", impl_->sessionLayoutId, channelId.value(), cmdline);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
         }),
