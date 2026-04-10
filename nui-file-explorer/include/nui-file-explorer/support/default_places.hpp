@@ -28,6 +28,6 @@ namespace NuiFileExplorer
         void registerRpc();
 
         Nui::RpcHub* hub_;
-        Nui::RpcHub::AutoUnregister listPlaces_;
+        std::unique_ptr<Nui::RpcHub::AutoUnregister> listPlaces_{};
     };
 }

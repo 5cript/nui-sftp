@@ -9,7 +9,7 @@ namespace NuiFileExplorer
     }
     void RecentFileProvider::registerRpc()
     {
-        listRecent_ = hub_->autoRegisterFunction(
+        listRecent_ = std::make_unique<Nui::RpcHub::AutoUnregister>(hub_->autoRegisterFunction(
             "NuiFileExplorer::RecentFiles::list",
             [hub = hub_](std::string responseId)
             {
@@ -17,6 +17,6 @@ namespace NuiFileExplorer
                 std::string message = "Not implemented";
                 hub->callRemote(responseId, {{"success", false}, {"error", message}});
             }
-        );
+        ));
     }
 }

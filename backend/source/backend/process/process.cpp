@@ -35,6 +35,7 @@ struct Process::Implementation
     std::mutex awaitExit;
     std::condition_variable exitCondition;
     bool exited;
+    bool exitRequested{false};
 
     std::map<int, std::unique_ptr<void, void (*)(void*)>> stateCache;
 
@@ -61,13 +62,16 @@ struct Process::Implementation
         std::shared_ptr<Process> proc,
         boost::asio::readable_pipe Process::Implementation::* pipe,
         std::function<bool(std::string_view)> Process::Implementation::* onRead,
-        std::vector<char> Process::Implementation::* buffer)
+        std::vector<char> Process::Implementation::* buffer
+    )
     {
         auto& pipeRef = proc->impl_.get()->*pipe;
         pipeRef.async_read_some(
             boost::asio::buffer(proc->impl_.get()->*buffer),
             [weak = proc->weak_from_this(), pipe, onRead, buffer](
-                boost::system::error_code ec, std::size_t bytesTransferred) mutable {
+                boost::system::error_code ec, std::size_t bytesTransferred
+            ) mutable
+            {
                 auto self = weak.lock();
                 if (!self)
                     return;
@@ -88,7 +92,8 @@ struct Process::Implementation
                 }
 
                 self->impl_->read(self, pipe, onRead, buffer);
-            });
+            }
+        );
     }
 
     void write(std::shared_ptr<Process> proc, std::shared_ptr<std::string>&& data)
@@ -100,7 +105,8 @@ struct Process::Implementation
             proc->impl_->stdinPipe,
             boost::asio::buffer(*data),
             [weak = proc->weak_from_this(),
-             data = std::move(data)](boost::system::error_code ec, std::size_t bytesTransferred) mutable {
+                data = std::move(data)](boost::system::error_code ec, std::size_t bytesTransferred) mutable
+            {
                 if (ec)
                     return;
 
@@ -111,7 +117,8 @@ struct Process::Implementation
                 *data = data->substr(bytesTransferred);
 
                 self->impl_->write(self, std::move(data));
-            });
+            }
+        );
     }
 
     void notifyExit()
@@ -154,9 +161,14 @@ std::optional<int> Process::exitSync(std::optional<std::chrono::seconds> exitWai
 
     {
         std::unique_lock lock{impl_->awaitExit};
-        impl_->exitCondition.wait_for(lock, waitTimeout * 2, [this] {
-            return impl_->exited;
-        });
+        impl_->exitCondition.wait_for(
+            lock,
+            waitTimeout * 2,
+            [this]
+            {
+                return impl_->exited;
+            }
+        );
     }
     return impl_->exitCode;
 }
@@ -172,10 +184,13 @@ bool Process::exit(std::optional<std::chrono::seconds> exitWaitTimeout)
 {
     if (!impl_->child)
         return false;
+    if (impl_->exitRequested)
+        return false;
     if (!impl_->child->running())
     {
         if (!impl_->exitCode)
         {
+            impl_->exitRequested = true;
             boost::system::error_code ec;
             impl_->child->wait(ec);
             impl_->exitCode = impl_->child->exit_code();
@@ -189,32 +204,39 @@ bool Process::exit(std::optional<std::chrono::seconds> exitWaitTimeout)
         impl_->exited = false;
     }
 
+    impl_->exitRequested = true;
     impl_->child->request_exit();
     impl_->exitWaitTimer.expires_after(exitWaitTimeout.value_or(impl_->defaultExitWaitTimeout));
-    impl_->exitWaitTimer.async_wait([weak = weak_from_this()](boost::system::error_code ec) {
-        if (ec)
-            return;
-
-        auto self = weak.lock();
-        if (!self)
-            return;
-
-        self->impl_->child->terminate();
-    });
-    impl_->child->async_wait([weak = weak_from_this()](auto ec, auto code) {
-        auto self = weak.lock();
-        if (!self)
-            return;
-
-        self->impl_->exitWaitTimer.cancel();
-        if (ec)
+    impl_->exitWaitTimer.async_wait(
+        [weak = weak_from_this()](boost::system::error_code ec)
         {
-            return self->terminate();
-        }
+            if (ec)
+                return;
 
-        self->impl_->exitCode = code;
-        self->impl_->notifyExit();
-    });
+            auto self = weak.lock();
+            if (!self)
+                return;
+
+            self->impl_->child->terminate();
+        }
+    );
+    impl_->child->async_wait(
+        [weak = weak_from_this()](auto ec, auto code)
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
+            self->impl_->exitWaitTimer.cancel();
+            if (ec)
+            {
+                return self->terminate();
+            }
+
+            self->impl_->exitCode = code;
+            self->impl_->notifyExit();
+        }
+    );
 
     return true;
 }
@@ -264,7 +286,9 @@ void Process::spawn(
         boost::asio::any_io_executor,
         boost::filesystem::path const& executable,
         std::vector<std::string> const& args,
-        std::unordered_map<bp2::environment::key, bp2::environment::value>)> launcher)
+        std::unordered_map<bp2::environment::key, bp2::environment::value>
+    )> launcher
+)
 {
     impl_->defaultExitWaitTimeout = defaultExitWaitTimeout;
     if (impl_->isRunning())
@@ -298,7 +322,8 @@ void Process::spawn(
             executable,
             arguments,
             bp2::process_environment{env},
-            bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe));
+            bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
+        );
     }
     else
     {
@@ -308,29 +333,26 @@ void Process::spawn(
 #ifdef _WIN32
     if (impl_->child->running())
     {
-        impl_->child->async_wait([weak = weak_from_this()](auto ec, auto code) {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            if (ec)
+        impl_->child->async_wait(
+            [self = shared_from_this()](auto ec, auto code)
             {
-                // Likely right?
-                return;
-            }
+                if (ec)
+                    return;
 
-            self->impl_->exitCode = code;
-            self->impl_->notifyExit();
-            if (self->impl_->onExit)
-                self->impl_->onExit();
-        });
+                self->impl_->exitCode = code;
+                self->impl_->notifyExit();
+                if (self->impl_->onExit)
+                    self->impl_->onExit();
+            }
+        );
     }
 #endif
 }
 
 void Process::startReading(
     std::function<bool(std::string_view)> onStdout,
-    std::function<bool(std::string_view)> onStderr)
+    std::function<bool(std::string_view)> onStderr
+)
 {
     impl_->onStdout = std::move(onStdout);
     impl_->onStderr = std::move(onStderr);
@@ -339,13 +361,15 @@ void Process::startReading(
         shared_from_this(),
         &Process::Implementation::stdoutPipe,
         &Process::Implementation::onStdout,
-        &Process::Implementation::stdoutBuffer);
+        &Process::Implementation::stdoutBuffer
+    );
 
     impl_->read(
         shared_from_this(),
         &Process::Implementation::stderrPipe,
         &Process::Implementation::onStderr,
-        &Process::Implementation::stderrBuffer);
+        &Process::Implementation::stderrBuffer
+    );
 }
 
 bool Process::running() const

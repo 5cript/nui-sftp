@@ -466,6 +466,11 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                     hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
+                auto& proc = process->second;
+                if (proc->getState<ProcessInfo>(ProcessAttachedState::ProcessInfo).isPty)
+                {
+                    proc->getState<ConPTY::PseudoConsole>(ProcessAttachedState::PseudoConsole).stopReading();
+                }
 
                 process->second->exit(0s);
                 processes_.erase(process);
@@ -506,6 +511,11 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 {
                     hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
+                }
+                auto& proc = process->second;
+                if (proc->getState<ProcessInfo>(ProcessAttachedState::ProcessInfo).isPty)
+                {
+                    proc->getState<ConPTY::PseudoConsole>(ProcessAttachedState::PseudoConsole).stopReading();
                 }
 
                 process->second->exit();

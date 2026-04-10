@@ -41,7 +41,7 @@ namespace NuiFileExplorer
 
     void WindowsDrivesProvider::registerRpc()
     {
-        listDrives_ = hub_->autoRegisterFunction(
+        listDrives_ = std::make_unique<Nui::RpcHub::AutoUnregister>(hub_->autoRegisterFunction(
             "NuiFileExplorer::Drives::list",
             [hub = hub_](std::string responseId)
             {
@@ -70,6 +70,6 @@ namespace NuiFileExplorer
                 }
                 hub->callRemote(responseId, {{"success", true}, {"drives", result}});
             }
-        );
+        ));
     }
 }

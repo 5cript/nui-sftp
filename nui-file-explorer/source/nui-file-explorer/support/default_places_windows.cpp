@@ -34,13 +34,13 @@ namespace NuiFileExplorer
         };
 
         FolderDef const windowsFolders[] = {
-            {"Home",      &FOLDERID_Profile},
-            {"Desktop",   &FOLDERID_Desktop},
+            {"Home", &FOLDERID_Profile},
+            {"Desktop", &FOLDERID_Desktop},
             {"Downloads", &FOLDERID_Downloads},
             {"Documents", &FOLDERID_Documents},
-            {"Music",     &FOLDERID_Music},
-            {"Pictures",  &FOLDERID_Pictures},
-            {"Videos",    &FOLDERID_Videos},
+            {"Music", &FOLDERID_Music},
+            {"Pictures", &FOLDERID_Pictures},
+            {"Videos", &FOLDERID_Videos},
         };
     }
 
@@ -53,7 +53,7 @@ namespace NuiFileExplorer
 
     void DefaultPlacesProvider::registerRpc()
     {
-        listPlaces_ = hub_->autoRegisterFunction(
+        listPlaces_ = std::make_unique<Nui::RpcHub::AutoUnregister>(hub_->autoRegisterFunction(
             "NuiFileExplorer::DefaultPlaces::list",
             [hub = hub_](std::string responseId)
             {
@@ -71,6 +71,6 @@ namespace NuiFileExplorer
                 }
                 hub->callRemote(responseId, {{"success", true}, {"places", result}});
             }
-        );
+        ));
     }
 }
