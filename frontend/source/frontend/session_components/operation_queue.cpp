@@ -372,7 +372,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         if (added.insertRefresh)
             remoteRefresh = [this]()
             {
-                impl_->remoteModel->onRefresh();
+                if (impl_->remoteModel)
+                    impl_->remoteModel->onRefresh();
             };
 
         Log::info("Operation of type '{}' added to frontend queue", Utility::enumToString(added.type));

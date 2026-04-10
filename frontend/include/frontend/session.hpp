@@ -92,11 +92,11 @@ class Session
     void createExecutingEngine();
     void createSshEngine();
 
-    NuiFileExplorer::Side& remoteFileGridSide();
     NuiFileExplorer::Side& localFileGridSide();
+    NuiFileExplorer::Side* remoteFileGridSide();
 
-    RemoteSideModel& remoteSideModel();
     LocalSideModel& localSideModel();
+    RemoteSideModel* remoteSideModel();
 
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 

@@ -281,6 +281,18 @@ void LocalSideModel::onTransfer(
     if (items.empty())
         return;
 
+    if (!remoteModel_)
+    {
+        Log::error("Cannot transfer items: remote model is not set");
+        confirmDialog_->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = "File Transfer Failed",
+            .text = "Remote side is not available",
+            .buttons = ConfirmDialog::Button::Ok,
+        });
+        return;
+    }
+
     Log::info("Upload items requested: {}", items.size());
     for (const auto& item : items)
     {
@@ -844,7 +856,7 @@ void LocalSideModel::setRemoteModel(SideModel* model)
 
 bool LocalSideModel::isComplete() const
 {
-    return remoteModel_ != nullptr && SideModel::isComplete();
+    return SideModel::isComplete();
 }
 
 void LocalSideModel::generatePathBoxSuggestions(

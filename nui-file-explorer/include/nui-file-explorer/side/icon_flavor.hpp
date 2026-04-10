@@ -21,7 +21,7 @@ namespace NuiFileExplorer
       public:
         static constexpr std::chrono::milliseconds boxDragMinimumTimeToDifferentiateClick{150};
 
-        IconFlavor(Side& impl, Side& otherSide);
+        IconFlavor(Side& impl, Side* otherSide);
         ~IconFlavor();
         IconFlavor(const IconFlavor&) = delete;
         IconFlavor& operator=(const IconFlavor&) = delete;

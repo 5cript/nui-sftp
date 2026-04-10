@@ -9,7 +9,7 @@
 
 namespace NuiFileExplorer
 {
-    TableFlavor::TableFlavor(Side& side, Side& otherSide)
+    TableFlavor::TableFlavor(Side& side, Side* otherSide)
         : FlavorImplementation{side, otherSide}
         , columnPixelWidths_{std::vector<std::optional<int>>(columnCount, std::nullopt)}
         , lastContainerWidth_{0.0}
