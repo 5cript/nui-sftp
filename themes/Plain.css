@@ -1,0 +1,11 @@
+:root[data-custom-theme="Plain"] {
+    --theme-color: #5c77e0;
+}
+
+:root[data-custom-theme="Plain"][data-theme="light"] {
+    --theme-color: #5c77e0;
+}
+
+.nui-file-grid-background {
+    --background-image: unset !important;
+}

@@ -2,4 +2,6 @@
     --theme-color: #5c77e0;
 }
 
-:root[data-custom-theme="Blue"][data-theme="light"] {}
+:root[data-custom-theme="Blue"][data-theme="light"] {
+    --theme-color: #5c77e0;
+}
