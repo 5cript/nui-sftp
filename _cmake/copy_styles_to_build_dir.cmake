@@ -1,7 +1,6 @@
 if (NOT OMIT_FRONTEND_BUILD)
     add_custom_command(
         OUTPUT
-            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/dropdown_menu.css"
             "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
@@ -19,7 +18,6 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/nui-file-explorer"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/5cript-nui-components"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes"
-        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/dropdown_menu.css" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/dropdown_menu.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/carousel.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
@@ -35,7 +33,6 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/message_strip.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         DEPENDS
-            "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/dropdown_menu.css"
             "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/carousel.css"
@@ -56,7 +53,6 @@ if (NOT OMIT_FRONTEND_BUILD)
         nui-sftp-style-copy
         ALL
         DEPENDS
-            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/dropdown_menu.css"
             "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
