@@ -47,9 +47,7 @@ bool FrontendSessionManager::guardDisposal() const
     return false;
 }
 
-void FrontendSessionManager::forEachChannel(
-    std::function<bool(Ids::ChannelId const&, TerminalChannel&)> const& handler
-)
+void FrontendSessionManager::forEachChannel(std::function<bool(Ids::ChannelId const&, TerminalChannel&)> const& handler)
 {
     if (guardDisposal())
         return;
@@ -202,7 +200,13 @@ void FrontendSessionManager::closeChannel(Ids::ChannelId const& channelId)
     if (auto found = impl_->channels.find(channelId); found != impl_->channels.end())
     {
         Log::info("Closing channel: '{}'", channelId.value());
-        impl_->channels.erase(found);
+        found->second->dispose(
+            [this, channelId]()
+            {
+                impl_->channels.erase(channelId);
+            },
+            true // also close backend resources immediately
+        );
     }
 }
 
@@ -212,6 +216,17 @@ void FrontendSessionManager::closeAllChannels()
         return;
 
     Log::info("Closing all channels");
+    for (auto& [id, channel] : impl_->channels)
+    {
+        Log::info("Disposing channel as part of closeAllChannels: '{}'", id.value());
+        channel->dispose(
+            []()
+            {
+                Log::info("Disposed channel as part of closeAllChannels");
+            },
+            true // also close backend resources immediately
+        );
+    }
     impl_->channels.clear();
 }
 

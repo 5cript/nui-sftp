@@ -57,11 +57,14 @@ void ExecutingChannel::updatePtyProcs()
                     if (val.hasOwnProperty("latest"))
                     {
                         if (onProcessChange_)
-                            onProcessChange_(channelId_, fmt::format(
-                                "{} ({})",
-                                val["latest"]["cmdline"].as<std::string>(),
-                                val["latest"]["pid"].as<int>()
-                            ));
+                            onProcessChange_(
+                                channelId_,
+                                fmt::format(
+                                    "{} ({})",
+                                    val["latest"]["cmdline"].as<std::string>(),
+                                    val["latest"]["pid"].as<int>()
+                                )
+                            );
                     }
                     else
                     {
@@ -85,6 +88,8 @@ void ExecutingChannel::resize(int cols, int rows)
 
 void ExecutingChannel::dispose(std::function<void()> onExit)
 {
+    Log::info("ExecutingChannel: disposing channelId={}", channelId_.value());
+
     // Unregister receivers before telling the backend to exit so no stale
     // callbacks fire after the process is gone.
     stdoutReceiver_.reset();
