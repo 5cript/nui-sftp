@@ -200,6 +200,39 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
             }
         );
     }
+    else if (type == "listProcesses")
+    {
+        const auto responseId = msg.value("responseId", std::string{});
+        if (msg.contains("error"))
+        {
+            const auto errMsg = msg["error"].get<std::string>();
+            wnd_->runInJavascriptThread(
+                [this, responseId, errMsg]()
+                {
+                    hub_->callRemote(responseId, nlohmann::json{{"error", errMsg}});
+                }
+            );
+            return;
+        }
+        const auto procsList = msg["procs"];
+        wnd_->runInJavascriptThread(
+            [this, responseId, procsList]()
+            {
+                if (procsList.empty())
+                {
+                    hub_->callRemote(responseId, nlohmann::json{{"error", "No processes found"}});
+                    return;
+                }
+                nlohmann::json j = nlohmann::json::object();
+                j["latest"] = {
+                    {"pid", procsList.front()["pid"]},
+                    {"cmdline", procsList.front()["cmdline"]},
+                };
+                j["all"] = procsList;
+                hub_->callRemote(responseId, j);
+            }
+        );
+    }
     else if (type == "error")
     {
         Log::error("ForkPool worker error for process {}: {}", procId, msg.value("message", std::string{}));
@@ -549,6 +582,25 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
         {
             try
             {
+#ifndef _WIN32
+                {
+                    auto iter = forkPoolProcesses_.find(id);
+                    if (iter != forkPoolProcesses_.end())
+                    {
+                        if (forkPool_)
+                            forkPool_->send(
+                                nlohmann::json{
+                                    {"id", id},
+                                    {"command", "listProcesses"},
+                                    {"payload", {{"responseId", responseId}}},
+                                }
+                            );
+                        else
+                            hub->callRemote(responseId, nlohmann::json{{"error", "No fork pool available"}});
+                        return;
+                    }
+                }
+#endif
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {

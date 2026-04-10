@@ -3,6 +3,7 @@
 #include <frontend/terminal/channel_interface.hpp>
 #include <ids/ids.hpp>
 #include <nui/rpc.hpp>
+#include <nui/frontend/api/timer.hpp>
 
 #include <functional>
 #include <string>
@@ -18,16 +19,18 @@ class ExecutingChannel : public ChannelInterface
 {
   public:
     /**
-     * @param channelId       The process UUID returned by ProcessStore::spawn.
-     * @param stdoutReceiver  Already-registered receiver for stdout data.
-     * @param stderrReceiver  Already-registered receiver for stderr data.
-     * @param exitReceiver    Already-registered receiver for process exit.
+     * @param channelId        The process UUID returned by ProcessStore::spawn.
+     * @param stdoutReceiver   Already-registered receiver for stdout data.
+     * @param stderrReceiver   Already-registered receiver for stderr data.
+     * @param exitReceiver     Already-registered receiver for process exit.
+     * @param onProcessChange  Called with the current foreground process cmdline after writes.
      */
     ExecutingChannel(
         Ids::ChannelId channelId,
         Nui::RpcClient::AutoUnregister stdoutReceiver,
         Nui::RpcClient::AutoUnregister stderrReceiver,
-        Nui::RpcClient::AutoUnregister exitReceiver
+        Nui::RpcClient::AutoUnregister exitReceiver,
+        std::function<void(std::string const&)> onProcessChange
     );
     ~ExecutingChannel() override = default;
     ExecutingChannel(ExecutingChannel&&) = default;
@@ -55,8 +58,12 @@ class ExecutingChannel : public ChannelInterface
     }
 
   private:
+    void updatePtyProcs();
+
     Ids::ChannelId channelId_;
     Nui::RpcClient::AutoUnregister stdoutReceiver_;
     Nui::RpcClient::AutoUnregister stderrReceiver_;
     Nui::RpcClient::AutoUnregister exitReceiver_;
+    std::function<void(std::string const&)> onProcessChange_;
+    Nui::TimerHandle procInfoTimer_;
 };
