@@ -1,7 +1,5 @@
 #include <nui-file-explorer/support/recent_files.hpp>
 
-#include <gtk/gtk.h>
-
 namespace NuiFileExplorer
 {
     RecentFileProvider::RecentFileProvider(Nui::RpcHub& hub)
