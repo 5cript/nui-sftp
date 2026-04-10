@@ -196,7 +196,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
         wnd_->runInJavascriptThread(
             [this, procId]()
             {
-                hub_->callRemote("SessionArea::processDied", nlohmann::json{{"id", procId}});
+                hub_->callRemote("execTerminalExit_" + procId, nlohmann::json{{"id", procId}});
             }
         );
     }
@@ -266,7 +266,7 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, std::string const& id)
 
     process->second->exit();
     processes_.erase(process);
-    hub.callRemote("SessionArea::processDied", nlohmann::json{{"id", id}});
+    hub.callRemote("execTerminalExit_" + id, nlohmann::json{{"id", id}});
 }
 
 void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
@@ -278,7 +278,7 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
             process->exit();
             const auto idCopy = id;
             processes_.erase(id);
-            hub.callRemote("SessionArea::processDied", nlohmann::json{{"id", idCopy}, {"pid", pid}});
+            hub.callRemote("execTerminalExit_" + idCopy, nlohmann::json{{"id", idCopy}, {"pid", pid}});
             return;
         }
     }
