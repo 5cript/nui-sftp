@@ -69,7 +69,8 @@ Opener& Opener::operator=(Opener&&) noexcept = default;
 
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)
 {
-    auto const pathWstr = path.wstring();
+    const auto pathStrU16 = path.native();
+    const auto pathWstr = std::wstring{pathStrU16.begin(), pathStrU16.end()};
 
     // Refuse to open binary executables (content-based, not extension-based)
     DWORD binaryType{};
@@ -82,20 +83,21 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
 
     if (openWith)
     {
-        OPENASINFO info{};
-        info.pcszFile = pathWstr.c_str();
-        info.oaifInFlags = OAIF_EXEC | OAIF_ALLOW_REGISTRATION;
+        if (!std::filesystem::exists(path) || !path.is_absolute())
+            return std::unexpected{"File not found"};
 
-        HRESULT const hr = SHOpenWithDialog(nullptr, &info);
-        if (FAILED(hr))
-            return std::unexpected{
-                "SHOpenWithDialog failed: HRESULT 0x" + [hr]()
-                {
-                    char buf[16];
-                    std::snprintf(buf, sizeof(buf), "%08lX", static_cast<unsigned long>(hr));
-                    return std::string{buf};
-                }()
-            };
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        SHELLEXECUTEINFOW sei = {sizeof(sei)};
+        sei.nShow = SW_SHOWNORMAL;
+        sei.lpVerb = L"openas";
+        sei.lpFile = pathWstr.c_str();
+        sei.fMask = SEE_MASK_INVOKEIDLIST; // add this line in your code
+        const auto winBoolResult = ShellExecuteExW(&sei);
+        if (!winBoolResult)
+        {
+            const auto error = GetLastError();
+            return std::unexpected{"ShellExecuteExW failed: " + shellExecuteErrorToString(error)};
+        }
     }
     else
     {
