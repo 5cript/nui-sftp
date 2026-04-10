@@ -23,14 +23,14 @@ class ExecutingChannel : public ChannelInterface
      * @param stdoutReceiver   Already-registered receiver for stdout data.
      * @param stderrReceiver   Already-registered receiver for stderr data.
      * @param exitReceiver     Already-registered receiver for process exit.
-     * @param onProcessChange  Called with the current foreground process cmdline after writes.
+     * @param onProcessChange  Called with the channel id and current foreground process cmdline after writes.
      */
     ExecutingChannel(
         Ids::ChannelId channelId,
         Nui::RpcClient::AutoUnregister stdoutReceiver,
         Nui::RpcClient::AutoUnregister stderrReceiver,
         Nui::RpcClient::AutoUnregister exitReceiver,
-        std::function<void(std::string const&)> onProcessChange
+        std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange
     );
     ~ExecutingChannel() override = default;
     ExecutingChannel(ExecutingChannel&&) = default;
@@ -64,6 +64,6 @@ class ExecutingChannel : public ChannelInterface
     Nui::RpcClient::AutoUnregister stdoutReceiver_;
     Nui::RpcClient::AutoUnregister stderrReceiver_;
     Nui::RpcClient::AutoUnregister exitReceiver_;
-    std::function<void(std::string const&)> onProcessChange_;
+    std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange_;
     Nui::TimerHandle procInfoTimer_;
 };
