@@ -90,8 +90,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/_cmake/dependencies.cmake")
 
 set(PREJS_FILE "${CMAKE_SOURCE_DIR}/frontend/source/frontend/js/module.js")
 
+add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
 if (EMSCRIPTEN)
-    add_subdirectory("${CMAKE_SOURCE_DIR}/nui-file-explorer/source/nui-file-explorer")
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components")
     add_subdirectory("${CMAKE_SOURCE_DIR}/frontend/source/frontend")
 else()

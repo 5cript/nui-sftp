@@ -6,6 +6,8 @@
 #include <nui-file-explorer/side/side_settings.hpp>
 #include <nui-file-explorer/side/selection_manager.hpp>
 
+#include <nui/frontend/val.hpp>
+
 #include <script-nui-components/popup_menu.hpp>
 #include <script-nui-components/dropdown_menu.hpp>
 
@@ -48,6 +50,10 @@ namespace NuiFileExplorer
         std::weak_ptr<Nui::Dom::BasicElement> sideElement{};
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};
         std::weak_ptr<Nui::Dom::BasicElement> searchTextBox{};
+
+        Nui::Observed<bool> isPlacesWide{false};
+        Nui::Observed<std::optional<bool>> isPlacesOpen{std::nullopt};
+        Nui::val resizeObserver{Nui::val::undefined()};
 
         Nui::Observed<std::vector<std::filesystem::path>> pathBoxSuggestions{};
         std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
@@ -194,9 +200,30 @@ namespace NuiFileExplorer
         {
             namespace Snc = ScriptNuiComponents;
 
-            newItemMenu.setOnOpen([this]() { sortMenu.close(); viewMenu.close(); contextMenuPopup.close(); });
-            sortMenu.setOnOpen([this]() { newItemMenu.close(); viewMenu.close(); contextMenuPopup.close(); });
-            viewMenu.setOnOpen([this]() { newItemMenu.close(); sortMenu.close(); contextMenuPopup.close(); });
+            newItemMenu.setOnOpen(
+                [this]()
+                {
+                    sortMenu.close();
+                    viewMenu.close();
+                    contextMenuPopup.close();
+                }
+            );
+            sortMenu.setOnOpen(
+                [this]()
+                {
+                    newItemMenu.close();
+                    viewMenu.close();
+                    contextMenuPopup.close();
+                }
+            );
+            viewMenu.setOnOpen(
+                [this]()
+                {
+                    newItemMenu.close();
+                    sortMenu.close();
+                    contextMenuPopup.close();
+                }
+            );
 
             newItemMenu.setItems({
                 Snc::PopupMenu::item(

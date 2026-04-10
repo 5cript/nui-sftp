@@ -1,6 +1,14 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 
+#include <ui5-sap-icons/icons/home.hpp>
+#include <ui5-sap-icons/icons/desktop-mobile.hpp>
+#include <ui5-sap-icons/icons/download.hpp>
+#include <ui5-sap-icons/icons/documents.hpp>
+#include <ui5-sap-icons/icons/picture.hpp>
+#include <ui5-sap-icons/icons/video.hpp>
+#include <ui5-sap-icons/icons/folder.hpp>
+
 #include <utility/language.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
@@ -14,6 +22,26 @@
 #include <iterator>
 
 using namespace std::string_literals;
+
+namespace
+{
+    Nui::ElementRenderer iconForPlaceName(std::string const& name)
+    {
+        if (name == "Home")
+            return Ui5Icons::home();
+        if (name == "Desktop")
+            return Ui5Icons::desktop_mobile();
+        if (name == "Downloads")
+            return Ui5Icons::download();
+        if (name == "Documents")
+            return Ui5Icons::documents();
+        if (name == "Pictures")
+            return Ui5Icons::picture();
+        if (name == "Videos")
+            return Ui5Icons::video();
+        return Ui5Icons::folder();
+    }
+}
 
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
@@ -63,7 +91,63 @@ RemoteSideModel::RemoteSideModel(
           },
           0.,
       }
+    , favorites_{std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>(
+          [this]()
+          {
+              std::vector<std::filesystem::path> paths;
+              paths.reserve(uiOptions_.remoteFavorites.size());
+              for (auto const& str : uiOptions_.remoteFavorites)
+                  paths.emplace_back(str);
+              return paths;
+          }()
+      )}
 {}
+
+void RemoteSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
+{
+    onFavoritesChanged_ = std::move(callback);
+}
+
+std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> RemoteSideModel::favorites() const
+{
+    return favorites_;
+}
+
+void RemoteSideModel::addFavorite(std::filesystem::path const& path)
+{
+    auto& favs = favorites_->value();
+    if (std::find(favs.begin(), favs.end(), path) != favs.end())
+        return;
+    favorites_->push_back(path);
+
+    if (onFavoritesChanged_)
+    {
+        std::vector<std::string> strs;
+        strs.reserve(favorites_->value().size());
+        for (auto const& fav : favorites_->value())
+            strs.push_back(fav.generic_string());
+        onFavoritesChanged_(std::move(strs));
+    }
+}
+
+void RemoteSideModel::removeFavorite(std::filesystem::path const& path)
+{
+    auto& favs = favorites_->value();
+    const auto it = std::find(favs.begin(), favs.end(), path);
+    if (it == favs.end())
+        return;
+    favs.erase(it);
+    favorites_->modifyNow();
+
+    if (onFavoritesChanged_)
+    {
+        std::vector<std::string> strs;
+        strs.reserve(favorites_->value().size());
+        for (auto const& fav : favorites_->value())
+            strs.push_back(fav.generic_string());
+        onFavoritesChanged_(std::move(strs));
+    }
+}
 
 std::vector<NuiFileExplorer::ContextMenuItem>
 RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
@@ -72,7 +156,30 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
     const bool hasItems = !selectedItems.empty();
     const bool singleItem = selectedItems.size() == 1;
 
-    return {
+    std::vector<NuiFileExplorer::ContextMenuItem> items;
+
+    if (singleItem && selectedItems.front().isDirectoryLike() && selectedItems.front().path.filename() != "..")
+    {
+        const auto& selPath = selectedItems.front().fullPath;
+        const auto& favs = favorites_->value();
+        const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
+        items.push_back(
+            Snc::PopupMenu::item(
+                isFav ? "Remove from Favorites" : "Add to Favorites",
+                {},
+                [this, selPath, isFav]()
+                {
+                    if (isFav)
+                        removeFavorite(selPath);
+                    else
+                        addFavorite(selPath);
+                }
+            )
+        );
+        items.push_back(Snc::PopupMenu::separator());
+    }
+
+    const std::vector<NuiFileExplorer::ContextMenuItem> baseItems = {
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "download"),
             {},
@@ -148,6 +255,9 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             !singleItem
         ),
     };
+
+    items.insert(items.end(), baseItems.begin(), baseItems.end());
+    return items;
 }
 
 void RemoteSideModel::setLocalModel(SideModel* model)
@@ -1093,4 +1203,32 @@ void RemoteSideModel::onFileWatchAdded(
         localPath.generic_string(),
         openWith
     );
+}
+
+// --- IPlacesProvider ---
+
+void RemoteSideModel::setRemoteUsername(std::string username)
+{
+    remoteUsername_ = std::move(username);
+}
+
+void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
+{
+    const std::string home = "/home/" + remoteUsername_;
+    const std::vector<std::pair<std::string, std::string>> defaults = {
+        {"Home",      home},
+        {"Desktop",   home + "/Desktop"},
+        {"Downloads", home + "/Downloads"},
+        {"Documents", home + "/Documents"},
+        {"Pictures",  home + "/Pictures"},
+        {"Videos",    home + "/Videos"},
+        {"Music",     home + "/Music"},
+    };
+
+    std::vector<PlaceEntry> entries;
+    entries.reserve(defaults.size());
+    for (auto const& [name, path] : defaults)
+        entries.push_back({.icon = iconForPlaceName(name), .name = name, .path = path});
+
+    callback(std::move(entries));
 }

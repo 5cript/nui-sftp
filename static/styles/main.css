@@ -116,6 +116,7 @@
     --nui-file-grid-context-menu-item-hover-background: var(--background-color);
     --nui-file-grid-context-menu-item-hover-color: var(--color);
     --nui-file-grid-table-sort-highlight: var(--color);
+    --nui-file-grid-places-highlight-contrast: #000;
 
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
@@ -150,6 +151,7 @@
     --nui-file-grid-color: var(--color);
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
+    --nui-file-grid-places-highlight-contrast: var(--color);
 }
 
 .login-form>div {

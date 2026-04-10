@@ -4,9 +4,41 @@
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
+#include <ui5-sap-icons/icons/home.hpp>
+#include <ui5-sap-icons/icons/desktop-mobile.hpp>
+#include <ui5-sap-icons/icons/download.hpp>
+#include <ui5-sap-icons/icons/documents.hpp>
+#include <ui5-sap-icons/icons/picture.hpp>
+#include <ui5-sap-icons/icons/video.hpp>
+#include <ui5-sap-icons/icons/folder.hpp>
+#include <ui5-sap-icons/icons/database.hpp>
+
+#include <nui/frontend/api/console.hpp>
 #include <nui/rpc.hpp>
 
+#include <algorithm>
+
 using namespace std::string_literals;
+
+namespace
+{
+    Nui::ElementRenderer iconForPlaceName(std::string const& name)
+    {
+        if (name == "Home")
+            return Ui5Icons::home();
+        if (name == "Desktop")
+            return Ui5Icons::desktop_mobile();
+        if (name == "Downloads")
+            return Ui5Icons::download();
+        if (name == "Documents")
+            return Ui5Icons::documents();
+        if (name == "Pictures")
+            return Ui5Icons::picture();
+        if (name == "Videos")
+            return Ui5Icons::video();
+        return Ui5Icons::folder();
+    }
+}
 
 LocalSideModel::LocalSideModel(
     Persistence::UiOptions uiOptions,
@@ -67,7 +99,141 @@ LocalSideModel::LocalSideModel(
           },
           0.,
       }
+    , favorites_{std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>(
+          [this]()
+          {
+              std::vector<std::filesystem::path> paths;
+              paths.reserve(uiOptions_.localFavorites.size());
+              for (auto const& str : uiOptions_.localFavorites)
+                  paths.emplace_back(str);
+              return paths;
+          }()
+      )}
 {}
+
+void LocalSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
+{
+    onFavoritesChanged_ = std::move(callback);
+}
+
+// --- IPlacesProvider ---
+
+void LocalSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
+{
+    Nui::RpcClient::callWithBackChannel(
+        "NuiFileExplorer::DefaultPlaces::list",
+        [callback = std::move(callback)](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+            {
+                Log::error("DefaultPlaces::list failed");
+                callback({});
+                return;
+            }
+            std::vector<PlaceEntry> entries;
+            const auto places = val["places"];
+            const auto len = places["length"].as<int>();
+            entries.reserve(len);
+            for (int idx = 0; idx < len; ++idx)
+            {
+                auto const placeName = places[idx]["name"].as<std::string>();
+                entries.push_back({
+                    .icon = iconForPlaceName(placeName),
+                    .name = placeName,
+                    .path = places[idx]["path"].as<std::string>(),
+                });
+            }
+            callback(std::move(entries));
+        }
+    );
+}
+
+// --- IDrivesProvider ---
+
+NuiFileExplorer::IDrivesProvider* LocalSideModel::drivesProvider()
+{
+#ifdef _WIN32
+    return this;
+#else
+    return nullptr;
+#endif
+}
+
+void LocalSideModel::requestDrives(std::function<void(std::vector<PlaceEntry>)> callback)
+{
+#ifdef _WIN32
+    Nui::RpcClient::callWithBackChannel(
+        "NuiFileExplorer::Drives::list",
+        [callback = std::move(callback)](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+            {
+                Log::error("Drives::list failed");
+                callback({});
+                return;
+            }
+            std::vector<PlaceEntry> entries;
+            const auto drives = val["drives"];
+            const auto len = drives["length"].as<int>();
+            entries.reserve(len);
+            for (int idx = 0; idx < len; ++idx)
+            {
+                entries.push_back({
+                    .icon = Ui5Icons::database(),
+                    .name = drives[idx]["name"].as<std::string>(),
+                    .path = drives[idx]["path"].as<std::string>(),
+                });
+            }
+            callback(std::move(entries));
+        }
+    );
+#else
+    callback({});
+#endif
+}
+
+// --- IFavoritesProvider ---
+
+std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> LocalSideModel::favorites() const
+{
+    return favorites_;
+}
+
+void LocalSideModel::addFavorite(std::filesystem::path const& path)
+{
+    auto& favs = favorites_->value();
+    if (std::find(favs.begin(), favs.end(), path) != favs.end())
+        return;
+    favorites_->push_back(path);
+
+    if (onFavoritesChanged_)
+    {
+        std::vector<std::string> strs;
+        strs.reserve(favorites_->value().size());
+        for (auto const& fav : favorites_->value())
+            strs.push_back(fav.generic_string());
+        onFavoritesChanged_(std::move(strs));
+    }
+}
+
+void LocalSideModel::removeFavorite(std::filesystem::path const& path)
+{
+    auto& favs = favorites_->value();
+    const auto it = std::find(favs.begin(), favs.end(), path);
+    if (it == favs.end())
+        return;
+    favs.erase(it);
+    favorites_->modifyNow();
+
+    if (onFavoritesChanged_)
+    {
+        std::vector<std::string> strs;
+        strs.reserve(favorites_->value().size());
+        for (auto const& fav : favorites_->value())
+            strs.push_back(fav.generic_string());
+        onFavoritesChanged_(std::move(strs));
+    }
+}
 
 void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
@@ -761,6 +927,27 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
                     onTransfer(selectedItems, std::nullopt);
                 },
                 !hasItems
+            )
+        );
+        items.push_back(Snc::PopupMenu::separator());
+    }
+
+    if (singleItem && selectedItems.front().isDirectoryLike() && selectedItems.front().path.filename() != "..")
+    {
+        const auto& selPath = selectedItems.front().fullPath;
+        const auto& favs = favorites_->value();
+        const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
+        items.push_back(
+            Snc::PopupMenu::item(
+                isFav ? "Remove from Favorites" : "Add to Favorites",
+                {},
+                [this, selPath, isFav]()
+                {
+                    if (isFav)
+                        removeFavorite(selPath);
+                    else
+                        addFavorite(selPath);
+                }
             )
         );
         items.push_back(Snc::PopupMenu::separator());

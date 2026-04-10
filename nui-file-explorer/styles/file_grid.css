@@ -82,6 +82,94 @@
     flex: 1;
 }
 
+.nui-file-grid-side-middle {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.nui-file-grid-places {
+    min-width: 180px;
+    max-width: 250px;
+    flex-shrink: 0;
+    align-self: stretch;
+    overflow-y: auto;
+    border-right: 1px solid var(--nui-file-grid-border-color);
+    background-color: var(--nui-file-grid-background-color);
+    padding: 6px 0;
+    font-size: 12px;
+}
+
+.nui-file-grid-places-section-header {
+    padding: 6px 10px 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    opacity: 0.55;
+    user-select: none;
+}
+
+.nui-file-grid-places-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    padding: 5px 14px;
+    cursor: pointer;
+
+    &:hover {
+        background-color: var(--nui-file-grid-places-highlight, var(--theme-color, #60a5fa));
+        color: var(--nui-file-grid-places-highlight-contrast, #000);
+    }
+}
+
+.nui-file-grid-places-item-icon {
+    font-size: 1em;
+    display: flex;
+    align-items: center;
+
+    &>svg {
+        fill: currentColor;
+        width: 16px;
+        height: 16px;
+    }
+}
+
+.nui-file-grid-places-item-label {
+    height: 100%;
+    padding: 0;
+    text-align: center;
+    position: relative;
+    /* just looks wrong without this offset, probably a webkit rendering quirk */
+    top: 1px;
+}
+
+.nui-file-grid-places-remove-btn {
+    margin-left: auto;
+    opacity: 0.5;
+    font-size: 0.8em;
+    cursor: pointer;
+    padding: 0 2px;
+    display: flex;
+    align-items: center;
+    ;
+
+    .nui-file-grid-places-item:hover & {
+        opacity: 0.6;
+    }
+
+    &>svg {
+        height: 12px;
+        width: 12px;
+        fill: currentColor;
+    }
+
+    &:hover {
+        opacity: 1 !important;
+    }
+}
+
 .nui-file-grid-context-menu-item {
     padding: 0.5em;
     border-bottom: 1px solid var(--nui-file-grid-border-color);

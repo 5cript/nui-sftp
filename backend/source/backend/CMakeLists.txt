@@ -78,6 +78,7 @@ target_link_libraries(
     backend
     PUBLIC
         nui-backend
+        nui-file-explorer-support
         efsw-static
         Boost::filesystem
         Boost::process
