@@ -7,9 +7,23 @@
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/places_provider_interface.hpp>
+#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
-class LocalSideModel : public SideModel
+#include <nui/event_system/observed_value.hpp>
+
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+class LocalSideModel
+    : public SideModel
+    , public NuiFileExplorer::IPlacesProvider
+    , public NuiFileExplorer::IDrivesProvider
+    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     LocalSideModel(
@@ -18,6 +32,34 @@ class LocalSideModel : public SideModel
         InputDialog* inputDialog,
         FilePropertyDialog* filePropertyDialog
     );
+
+    /**
+     * @brief Sets the callback invoked whenever the favorites list changes. The callback
+     *        receives the updated list as strings so the caller can persist it.
+     *
+     * @param callback Invoked on every add/remove.
+     */
+    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
+
+    // --- IPlacesProvider ---
+    NuiFileExplorer::IPlacesProvider* placesProvider() override
+    {
+        return this;
+    }
+    void requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback) override;
+
+    // --- IDrivesProvider ---
+    NuiFileExplorer::IDrivesProvider* drivesProvider() override;
+    void requestDrives(std::function<void(std::vector<PlaceEntry>)> callback) override;
+
+    // --- IFavoritesProvider ---
+    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
+    {
+        return this;
+    }
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
+    void addFavorite(std::filesystem::path const& path) override;
+    void removeFavorite(std::filesystem::path const& path) override;
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
@@ -70,4 +112,6 @@ class LocalSideModel : public SideModel
   private:
     SideModel* remoteModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
+    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
 };

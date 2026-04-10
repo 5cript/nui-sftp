@@ -17,10 +17,12 @@
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/text_input.hpp>
+#include <nui/frontend/utility/functions.hpp>
 #include <ui5-sap-icons/icons/show.hpp>
 #include <ui5-sap-icons/icons/hide.hpp>
 #include <ui5-sap-icons/icons/refresh.hpp>
 #include <ui5-sap-icons/icons/search.hpp>
+#include <ui5-sap-icons/icons/menu.hpp>
 
 using namespace std::string_literals;
 
@@ -57,12 +59,44 @@ namespace NuiFileExplorer
         : impl_(std::make_unique<SideImplementation>(std::move(settings), std::move(model)))
         , iconFlavor_{}
         , tableFlavor_{}
+        , places_{}
     {}
     void Side::initialize(Side* otherSide)
     {
         iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
         tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
         impl_->otherSide = otherSide;
+
+        if (impl_->model->placesProvider() || impl_->model->favoritesProvider() || impl_->model->drivesProvider())
+        {
+            places_ = std::make_unique<Places>(
+                *impl_->model,
+                [this](std::filesystem::path const& path)
+                {
+                    impl_->model->navigateTo(path);
+                }
+            );
+
+            impl_->resizeObserver = Nui::val::global("ResizeObserver")
+                                        .new_(
+                                            Nui::bind(
+                                                [this](Nui::val entries, Nui::val)
+                                                {
+                                                    const auto width = entries[0]["contentRect"]["width"].as<double>();
+                                                    const bool wide = width >= 400.0;
+                                                    if (wide != impl_->isPlacesWide.value())
+                                                    {
+                                                        impl_->isPlacesWide = wide;
+                                                        // Auto-open inline panel when crossing into wide mode,
+                                                        // auto-close popup when crossing into narrow mode.
+                                                        Nui::globalEventContext.executeActiveEventsImmediately();
+                                                    }
+                                                },
+                                                std::placeholders::_1,
+                                                std::placeholders::_2
+                                            )
+                                        );
+        }
     }
     Side::~Side() = default;
     Side::Side(Side&&) = default;
@@ -156,7 +190,14 @@ namespace NuiFileExplorer
         // clang-format off
         return div {
             class_ = "nui-file-grid-side",
-            reference = impl_->sideElement,
+            reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
+                impl_->sideElement = ref;
+                if (!impl_->resizeObserver.isNull() && !impl_->resizeObserver.isUndefined())
+                {
+                    if (auto elem = ref.lock(); elem)
+                        impl_->resizeObserver.call<void>("observe", elem->val());
+                }
+            },
             style = [this]() -> std::optional<std::string> {
                 if (model().isLeft())
                     return "border-right: 1px solid var(--nui-file-grid-border-color);";
@@ -175,31 +216,38 @@ namespace NuiFileExplorer
             }(),
             headMenu(),
             impl_->contextMenuPopup(),
+            // placesPanel(),
             div{
-                class_ = "nui-file-grid-side-content",
-                style = [this]() -> std::string {
-                    if (model().isLeft())
-                        return "padding-right: 1px;";
-                    return "padding-left: 1px;";
-                }(),
-                reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
-                    impl_->scrollContainer = ref;
-                }
+                class_ = "nui-file-grid-side-middle"
             }(
+                // Inline places panel (wide mode, or always-open toggle)
+                placesPanel(),
                 div{
-                    style = "width: 100%; height: 100%",
-                    "contextmenu"_event = [this](Nui::val event) {
-                        onContextMenu(nullptr, event);
+                    class_ = "nui-file-grid-side-content",
+                    style = [this]() -> std::string {
+                        if (model().isLeft())
+                            return "padding-right: 1px;";
+                        return "padding-left: 1px;";
+                    }(),
+                    reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
+                        impl_->scrollContainer = ref;
                     }
                 }(
-                    observe(impl_->flavor),
-                    [this]() -> Nui::ElementRenderer {
-                        if (impl_->flavor.value() == Flavor::Icons)
-                            return (*iconFlavor_)();
-                        if (impl_->flavor.value() == Flavor::Table)
-                            return (*tableFlavor_)();
-                        return div{}();
-                    }
+                    div{
+                        style = "width: 100%; height: 100%",
+                        "contextmenu"_event = [this](Nui::val event) {
+                            onContextMenu(nullptr, event);
+                        }
+                    }(
+                        observe(impl_->flavor),
+                        [this]() -> Nui::ElementRenderer {
+                            if (impl_->flavor.value() == Flavor::Icons)
+                                return (*iconFlavor_)();
+                            if (impl_->flavor.value() == Flavor::Table)
+                                return (*tableFlavor_)();
+                            return div{}();
+                        }
+                    )
                 )
             ),
             [this]() -> Nui::ElementRenderer {
@@ -455,6 +503,23 @@ namespace NuiFileExplorer
         return div{
             class_ = "nui-file-grid-head"
         }(
+            // Burger button: always visible when a places panel exists
+            [this]() -> Nui::ElementRenderer {
+                if (!places_)
+                    return Nui::nil();
+                return Snc::button({
+                    .icon = Ui5Icons::menu(),
+                    .attributes = {
+                        onClick = [this]() {
+                            Nui::WebApi::Console::log("Toggling places panel.");
+                            if (!impl_->isPlacesOpen.value().has_value())
+                                impl_->isPlacesOpen = !impl_->isPlacesWide.value(); // if we don't have a state for open vs. closed, just open it as a popup. Otherwise, toggle the state.
+                            else
+                                impl_->isPlacesOpen = !*impl_->isPlacesOpen.value();
+                        }
+                    }
+                });
+            }(),
             impl_->newItemMenu("New",  "nfe-new-"  + sideStr),
             impl_->sortMenu("Sort", "nfe-sort-" + sideStr),
             impl_->viewMenu("View", "nfe-view-" + sideStr),
@@ -477,6 +542,37 @@ namespace NuiFileExplorer
             filter()
         );
         // clang-format on
+    }
+
+    Nui::ElementRenderer Side::placesPanel()
+    {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+
+        if (!places_)
+            return Nui::nil();
+
+        // clang-format off
+        return div{
+            class_ = "nui-file-grid-places",
+            style = observe(impl_->isPlacesOpen, impl_->isPlacesWide).generate([](std::optional<bool> isOpen, bool isWide) {
+                const auto decidingBool = isOpen.has_value() ? isOpen.value() : isWide;
+                Nui::WebApi::Console::log("Generating places panel style with isOpen={} and isWide={}, decides={}", isOpen, isWide, decidingBool);
+                return fmt::format("display: {};", decidingBool ? "block" : "none");
+            }),
+            onClick = [](Nui::val event) {
+                event.call<void>("stopPropagation");
+            }
+        }(
+            (*places_)()
+        );
+        // clang-format on
+    }
+
+    Places* Side::places()
+    {
+        return places_.get();
     }
 
     void Side::onPathBoxSuggestionHit(std::filesystem::path const& path)

@@ -42,6 +42,8 @@ struct GeneralSettings
         BoolSetting<> fileGridPathBarOnTop;
         MapSetting<> fileGridExtensionIcons;
         ListSetting<false, std::set> neverShowAgainDialogs;
+        ListSetting<> localFavorites;
+        ListSetting<> remoteFavorites;
     } userInterface;
 
     struct LocalFilesystemOptions

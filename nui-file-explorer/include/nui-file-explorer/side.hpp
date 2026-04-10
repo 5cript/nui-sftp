@@ -7,6 +7,7 @@
 #include <nui-file-explorer/side/side_settings.hpp>
 #include <nui-file-explorer/side/side_implementation.hpp>
 #include <nui-file-explorer/side/icon_flavor.hpp>
+#include <nui-file-explorer/side/places.hpp>
 #include <nui-file-explorer/side/table_flavor.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -121,6 +122,13 @@ namespace NuiFileExplorer
          */
         bool closeMenus();
 
+        /**
+         * @brief Access the places panel, might return nullptr
+         *
+         * @return Places*
+         */
+        Places* places();
+
         Nui::ElementRenderer operator()();
 
       private:
@@ -135,8 +143,12 @@ namespace NuiFileExplorer
         void onPathBoxSuggestionHit(std::filesystem::path const& path);
 
       private:
+        Nui::ElementRenderer placesPanel();
+
+      private:
         std::unique_ptr<SideImplementation> impl_;
         std::unique_ptr<IconFlavor> iconFlavor_;
         std::unique_ptr<TableFlavor> tableFlavor_;
+        std::unique_ptr<Places> places_;
     };
 }

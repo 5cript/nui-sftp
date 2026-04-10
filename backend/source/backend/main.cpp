@@ -244,6 +244,11 @@ void Main::registerRpc()
     sshSessionManager_->registerRpc();
     registerInitialWarningGetter();
 
+    defaultPlacesProvider_ = std::make_unique<NuiFileExplorer::DefaultPlacesProvider>(hub_);
+#ifdef _WIN32
+    windowsDrivesProvider_ = std::make_unique<NuiFileExplorer::WindowsDrivesProvider>(hub_);
+#endif
+
     stateHolder_.load(
         [this](
             std::optional<std::string> const& error,

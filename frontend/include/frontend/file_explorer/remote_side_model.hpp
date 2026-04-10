@@ -8,11 +8,24 @@
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/favorites_provider_interface.hpp>
+#include <nui-file-explorer/places_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
+
+#include <nui/event_system/observed_value.hpp>
+
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 class FileTrackingPanel;
 
-class RemoteSideModel : public SideModel
+class RemoteSideModel
+    : public SideModel
+    , public NuiFileExplorer::IPlacesProvider
+    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     RemoteSideModel(
@@ -21,6 +34,32 @@ class RemoteSideModel : public SideModel
         InputDialog* inputDialog,
         FilePropertyDialog* filePropertyDialog
     );
+
+    /**
+     * @brief Sets the callback invoked whenever the favorites list changes. The callback
+     *        receives the updated list as strings so the caller can persist it.
+     *
+     * @param callback Invoked on every add/remove.
+     */
+    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
+
+    // --- IPlacesProvider ---
+    NuiFileExplorer::IPlacesProvider* placesProvider() override
+    {
+        return this;
+    }
+    void requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback) override;
+
+    void setRemoteUsername(std::string username);
+
+    // --- IFavoritesProvider ---
+    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
+    {
+        return this;
+    }
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
+    void addFavorite(std::filesystem::path const& path) override;
+    void removeFavorite(std::filesystem::path const& path) override;
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
@@ -107,7 +146,10 @@ class RemoteSideModel : public SideModel
     );
 
   private:
+    std::string remoteUsername_;
     SideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
+    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
 };

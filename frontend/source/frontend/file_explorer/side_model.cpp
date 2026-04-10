@@ -65,6 +65,12 @@ void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::Directo
         }
     );
 
+    for (auto& entry : *directoryEntries)
+    {
+        if (entry.fullPath.empty())
+            entry.fullPath = *currentPath_ / entry.path;
+    }
+
     std::vector<NuiFileExplorer::Item> items{};
     std::transform(
         begin(*directoryEntries),

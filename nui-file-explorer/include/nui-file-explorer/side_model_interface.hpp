@@ -2,6 +2,8 @@
 
 #include <nui-file-explorer/item.hpp>
 #include <nui-file-explorer/flavor.hpp>
+#include <nui-file-explorer/places_provider_interface.hpp>
+#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui/event_system/observed_value.hpp>
 #include <nui-file-explorer/context_menu_item.hpp>
 
@@ -172,5 +174,35 @@ namespace NuiFileExplorer
          * @return std::vector<ContextMenuItem>
          */
         virtual std::vector<ContextMenuItem> contextMenuItems(std::vector<Item> const& selectedItems) = 0;
+
+        /**
+         * @brief Optional interface: provides default system places (XDG / Windows known folders).
+         *
+         * @return Pointer to the provider or nullptr if not supported.
+         */
+        virtual IPlacesProvider* placesProvider()
+        {
+            return nullptr;
+        }
+
+        /**
+         * @brief Optional interface: provides drive/volume entries (Windows-specific).
+         *
+         * @return Pointer to the provider or nullptr if not supported.
+         */
+        virtual IDrivesProvider* drivesProvider()
+        {
+            return nullptr;
+        }
+
+        /**
+         * @brief Optional interface: manages user-defined favorite paths.
+         *
+         * @return Pointer to the provider or nullptr if not supported.
+         */
+        virtual IFavoritesProvider* favoritesProvider()
+        {
+            return nullptr;
+        }
     };
 }

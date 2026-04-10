@@ -182,6 +182,33 @@ struct Session::Implementation
         if (fileGrid.rightModel())
             fileGrid.rightModel()->dropMetadata(sessionLayoutId);
 
+        static_cast<LocalSideModel*>(&fileGrid.leftModel())
+            ->setOnFavoritesChanged(
+                [stateHolder](std::vector<std::string> favs)
+                {
+                    stateHolder->loadModifySave(
+                        [favs = std::move(favs)](Persistence::State& state)
+                        {
+                            state.uiOptions.localFavorites = favs;
+                        }
+                    );
+                }
+            );
+        if (auto* remote = static_cast<RemoteSideModel*>(fileGrid.rightModel()); remote)
+        {
+            remote->setOnFavoritesChanged(
+                [stateHolder](std::vector<std::string> favs)
+                {
+                    stateHolder->loadModifySave(
+                        [favs = std::move(favs)](Persistence::State& state)
+                        {
+                            state.uiOptions.remoteFavorites = favs;
+                        }
+                    );
+                }
+            );
+        }
+
         using namespace ScriptNuiComponents;
         using namespace std::string_literals;
 
@@ -774,12 +801,15 @@ void Session::openSftp(std::string const& username)
             {
                 remoteSideModel()->operationQueue(&impl_->operationQueue);
                 remoteSideModel()->setFileTracking(&impl_->fileTrackingPanel);
+                remoteSideModel()->setRemoteUsername(username);
                 remoteFileGridSide()->path(
                     fmt::format(
                         fmt::runtime(opts.sftpOptions->defaultDirectory.value_or("/home/{user}").generic_string()),
                         fmt::arg("user", username)
                     )
                 );
+                if (auto* places = remoteFileGridSide()->places(); places)
+                    places->reloadDefaultPlaces();
             }
             openLocalFilesystem();
         }

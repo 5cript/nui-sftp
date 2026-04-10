@@ -12,6 +12,10 @@
 #include <backend/opener.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
+#include <nui-file-explorer/support/default_places.hpp>
+#ifdef _WIN32
+#    include <nui-file-explorer/support/windows_drives.hpp>
+#endif
 
 #include <boost/asio/steady_timer.hpp>
 #include <nui/core.hpp>
@@ -69,6 +73,11 @@ class Main
     AppWideEvents events_;
     ThemeFinder themeFinder_;
     std::once_flag rpcAliveOnce_;
+
+    std::unique_ptr<NuiFileExplorer::DefaultPlacesProvider> defaultPlacesProvider_;
+#ifdef _WIN32
+    std::unique_ptr<NuiFileExplorer::WindowsDrivesProvider> windowsDrivesProvider_;
+#endif
 
     struct PlatformSpecifics;
     std::unique_ptr<PlatformSpecifics> platformSpecifics_;

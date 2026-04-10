@@ -81,6 +81,7 @@ namespace SharedData
         using FileType = SharedData::FileType;
 
         std::filesystem::path path{};
+        std::filesystem::path fullPath{};
         std::filesystem::path longName{};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
@@ -108,8 +109,7 @@ namespace SharedData
         bool isDirectoryLike() const
         {
             return type == FileType::Directory ||
-                   (type == FileType::Symlink && resolvedTarget &&
-                    resolvedTarget->type == FileType::Directory);
+                (type == FileType::Symlink && resolvedTarget && resolvedTarget->type == FileType::Directory);
         }
         bool isRegularFile() const
         {
