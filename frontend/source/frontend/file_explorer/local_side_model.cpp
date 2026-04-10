@@ -148,48 +148,54 @@ void LocalSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEn
     );
 }
 
+bool LocalSideModel::showRootEntry() const
+{
+    return STRINGIZE_EXPANDED(BROWSER_ENGINE) != "webview2"s;
+}
+
 // --- IDrivesProvider ---
 
 NuiFileExplorer::IDrivesProvider* LocalSideModel::drivesProvider()
 {
-#ifdef _WIN32
-    return this;
-#else
-    return nullptr;
-#endif
+    if (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)
+        return this;
+    else
+        return nullptr;
 }
 
 void LocalSideModel::requestDrives(std::function<void(std::vector<PlaceEntry>)> callback)
 {
-#ifdef _WIN32
-    Nui::RpcClient::callWithBackChannel(
-        "NuiFileExplorer::Drives::list",
-        [callback = std::move(callback)](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+    if (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)
+    {
+        Nui::RpcClient::callWithBackChannel(
+            "NuiFileExplorer::Drives::list",
+            [callback = std::move(callback)](Nui::val val)
             {
-                Log::error("Drives::list failed");
-                callback({});
-                return;
+                if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+                {
+                    Log::error("Drives::list failed");
+                    callback({});
+                    return;
+                }
+                std::vector<PlaceEntry> entries;
+                const auto drives = val["drives"];
+                const auto len = drives["length"].as<int>();
+                entries.reserve(len);
+                for (int idx = 0; idx < len; ++idx)
+                {
+                    entries.push_back({
+                        .icon = Ui5Icons::database(),
+                        .name = drives[idx]["name"].as<std::string>(),
+                        .path = drives[idx]["path"].as<std::string>(),
+                    });
+                }
+                callback(std::move(entries));
             }
-            std::vector<PlaceEntry> entries;
-            const auto drives = val["drives"];
-            const auto len = drives["length"].as<int>();
-            entries.reserve(len);
-            for (int idx = 0; idx < len; ++idx)
-            {
-                entries.push_back({
-                    .icon = Ui5Icons::database(),
-                    .name = drives[idx]["name"].as<std::string>(),
-                    .path = drives[idx]["path"].as<std::string>(),
-                });
-            }
-            callback(std::move(entries));
-        }
-    );
-#else
+        );
+        return;
+    }
+
     callback({});
-#endif
 }
 
 // --- IFavoritesProvider ---

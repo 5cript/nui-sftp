@@ -145,21 +145,23 @@ namespace NuiFileExplorer
                     }
                 );
             }(),
-#ifndef _WIN32
             // --- Devices section ---
-            div{}(
-                div{class_ = "nui-file-grid-places-section-header"}("Devices"),
-                div{
-                    class_ = "nui-file-grid-places-item",
-                    onClick = [this]() {
-                        impl_->onNavigate("/");
-                    }
-                }(
-                    span{class_ = "nui-file-grid-places-item-icon"}(Ui5Icons::home()),
-                    span{}("Root")
-                )
-            ),
-#endif
+            [this]() -> Nui::ElementRenderer {
+                if (!impl_->model->showRootEntry())
+                    return Nui::nil();
+                return div{}(
+                    div{class_ = "nui-file-grid-places-section-header"}("Devices"),
+                    div{
+                        class_ = "nui-file-grid-places-item",
+                        onClick = [this]() {
+                            impl_->onNavigate("/");
+                        }
+                    }(
+                        span{class_ = "nui-file-grid-places-item-icon"}(Ui5Icons::home()),
+                        span{}("Root")
+                    )
+                );
+            }(),
             // --- Drives section ---
             [this, drivesProv]() -> Nui::ElementRenderer {
                 if (!drivesProv)
