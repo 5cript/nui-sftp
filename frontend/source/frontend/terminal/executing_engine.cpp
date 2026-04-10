@@ -203,9 +203,13 @@ void ExecutingTerminalEngine::createChannel(
             );
             auto sharedExit = std::make_shared<Nui::RpcClient::AutoUnregister>(std::move(exitReceiver));
 
-            impl_->channels.emplace(
+            impl_->channels.try_emplace(
                 channelId,
-                ExecutingChannel{channelId, std::move(*sharedStdout), std::move(*sharedStderr), std::move(*sharedExit)}
+                channelId,
+                std::move(*sharedStdout),
+                std::move(*sharedStderr),
+                std::move(*sharedExit),
+                impl_->settings.onProcessChange
             );
 
             Log::info(

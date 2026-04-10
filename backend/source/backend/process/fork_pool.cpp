@@ -10,9 +10,12 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -52,8 +55,8 @@ namespace
         int writeFd{-1};
         int sigFd{-1};
         FdJsonIo io;
-        std::unordered_map<std::string, WProc> procs;  // id  -> WProc
-        std::unordered_map<int, std::string> fdToId;   // pty master fd -> id
+        std::unordered_map<std::string, WProc> procs; // id  -> WProc
+        std::unordered_map<int, std::string> fdToId; // pty master fd -> id
         bool running{true};
 
         WorkerState(int readFd_, int writeFd_)
@@ -197,6 +200,8 @@ namespace
                     handleResize(procId, msg["payload"]);
                 else if (cmd == "kill")
                     handleKill(procId);
+                else if (cmd == "listProcesses")
+                    handleListProcesses(procId, msg["payload"]);
                 else
                     spdlog::warn("[worker] unknown command '{}' id='{}'", cmd, procId);
             }
@@ -252,7 +257,9 @@ namespace
             if (::openpty(&master, &slave, nullptr, &ttyOpts, &ws) == -1)
             {
                 spdlog::error("[worker] openpty failed for id='{}': {}", procId, std::strerror(errno));
-                sendJson({{"id", procId}, {"type", "error"}, {"message", std::string{"openpty: "} + std::strerror(errno)}});
+                sendJson(
+                    {{"id", procId}, {"type", "error"}, {"message", std::string{"openpty: "} + std::strerror(errno)}}
+                );
                 return;
             }
 
@@ -288,7 +295,9 @@ namespace
                 ::close(master);
                 ::close(slave);
                 spdlog::error("[worker] fork failed for id='{}': {}", procId, std::strerror(errno));
-                sendJson({{"id", procId}, {"type", "error"}, {"message", std::string{"fork: "} + std::strerror(errno)}});
+                sendJson(
+                    {{"id", procId}, {"type", "error"}, {"message", std::string{"fork: "} + std::strerror(errno)}}
+                );
                 return;
             }
 
@@ -298,11 +307,7 @@ namespace
                 ::close(master);
                 if (::login_tty(slave) == -1)
                     ::_exit(127);
-                ::execve(
-                    exe.c_str(),
-                    const_cast<char* const*>(argv.data()),
-                    const_cast<char* const*>(envp.data())
-                );
+                ::execve(exe.c_str(), const_cast<char* const*>(argv.data()), const_cast<char* const*>(envp.data()));
                 ::_exit(127);
             }
 
@@ -373,6 +378,88 @@ namespace
             };
             spdlog::debug("[worker] resize cols={} rows={} for id='{}'", ws.ws_col, ws.ws_row, procId);
             ::ioctl(it->second.ptyMaster, TIOCSWINSZ, &ws);
+        }
+
+        void handleListProcesses(std::string const& procId, nlohmann::json const& payload)
+        {
+            const auto responseId = payload.value("responseId", std::string{});
+
+            const auto it = procs.find(procId);
+            if (it == procs.end() || it->second.ptyMaster < 0)
+            {
+                sendJson(
+                    {{"id", procId},
+                        {"type", "listProcesses"},
+                        {"responseId", responseId},
+                        {"error", "no such process"}}
+                );
+                return;
+            }
+
+            char slaveName[256];
+            if (::ptsname_r(it->second.ptyMaster, slaveName, sizeof(slaveName)) != 0)
+            {
+                sendJson(
+                    {{"id", procId},
+                        {"type", "listProcesses"},
+                        {"responseId", responseId},
+                        {"error", std::string{"ptsname_r: "} + std::strerror(errno)}}
+                );
+                return;
+            }
+
+            nlohmann::json procsList = nlohmann::json::array();
+            try
+            {
+                for (const auto& entry : std::filesystem::directory_iterator("/proc"))
+                {
+                    try
+                    {
+                        if (!entry.is_directory())
+                            continue;
+                        const std::string pidStr = entry.path().filename().string();
+                        if (!std::all_of(
+                                pidStr.begin(),
+                                pidStr.end(),
+                                [](unsigned char chr)
+                                {
+                                    return std::isdigit(chr);
+                                }
+                            ))
+                            continue;
+                        const auto fdPath = entry.path() / "fd" / "0";
+                        if (!std::filesystem::is_symlink(fdPath))
+                            continue;
+                        std::error_code ec;
+                        const auto target = std::filesystem::read_symlink(fdPath, ec);
+                        if (ec || target.string() != slaveName)
+                            continue;
+                        std::ifstream cmdlineFile{entry.path() / "cmdline"};
+                        if (!cmdlineFile)
+                            continue;
+                        std::string cmdline;
+                        std::getline(cmdlineFile, cmdline, '\0');
+                        procsList.push_back({{"pid", std::stoi(pidStr)}, {"cmdline", cmdline}});
+                    }
+                    catch (...)
+                    {
+                        continue;
+                    }
+                }
+            }
+            catch (...)
+            {}
+
+            std::sort(
+                procsList.begin(),
+                procsList.end(),
+                [](nlohmann::json const& a, nlohmann::json const& b)
+                {
+                    return a["pid"].get<int>() < b["pid"].get<int>();
+                }
+            );
+
+            sendJson({{"id", procId}, {"type", "listProcesses"}, {"responseId", responseId}, {"procs", procsList}});
         }
 
         void handleKill(std::string const& procId)
@@ -456,9 +543,8 @@ namespace
             auto logPath = Nui::resolvePath("%state_home2%/nui-sftp/logs/worker.log");
             std::error_code mkdirEc;
             std::filesystem::create_directories(logPath.parent_path(), mkdirEc);
-            auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                logPath.string(), 2 * 1024 * 1024, 3, true
-            );
+            auto fileSink =
+                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath.string(), 2 * 1024 * 1024, 3, true);
             fileSink->set_level(spdlog::level::trace);
             auto logger = std::make_shared<spdlog::logger>("worker", std::move(fileSink));
             logger->set_level(spdlog::level::trace);

@@ -18,6 +18,7 @@ import {
 interface addPanelArguments {
     host: HTMLElement;
     id: string;
+    engineType: string;
     layoutString: string;
     terminalFactory: () => HTMLElement;
     terminalDelete: (channelId: ChannelId | undefined) => any;
@@ -97,19 +98,21 @@ class ContentPanelManager {
         this.lastAddRequest = undefined;
     }
 
-    private makeDefaultDock(id: string): DockPanel {
+    private makeDefaultDock(id: string, engineType: string): DockPanel {
         let term = new Terminal('Terminal', this.terminalFactory, this.terminalDelete);
         let explorer = new FileExplorer('FileExplorer', this.fileExplorerFactory, this.fileExplorerDelete);
-        let queue = new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
-        let fileTracking = new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
 
         let dock = new DockPanel({
             addButtonEnabled: true,
         });
         dock.addWidget(term);
         dock.addWidget(explorer, { mode: 'split-right', ref: term });
-        dock.addWidget(queue, { mode: "split-bottom", ref: term });
-        dock.addWidget(fileTracking, { mode: "tab-after", ref: queue });
+        if (engineType == 'ssh') {
+            let queue = new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
+            let fileTracking = new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
+            dock.addWidget(queue, { mode: "split-bottom", ref: term });
+            dock.addWidget(fileTracking, { mode: "tab-after", ref: queue });
+        }
         dock.id = 'dock_' + id;
         this.modifyDefaultLayout(dock);
 
@@ -266,7 +269,7 @@ class ContentPanelManager {
 
         let dock: DockPanel;
         if (layoutString === "" || layoutString === undefined || layoutString === null) {
-            dock = this.makeDefaultDock(id);
+            dock = this.makeDefaultDock(id, args.engineType);
         } else {
             dock = this.makeDockFromLayout(id, layoutString);
         }

@@ -185,7 +185,7 @@ struct Session::Implementation
         using namespace ScriptNuiComponents;
         using namespace std::string_literals;
 
-        tabAddMenu.setItems({
+        auto tabAddMenuItems = std::vector<PopupMenu::Entry>{
             PopupMenu::sectionHeader("New Tab"),
             PopupMenu::item(
                 language->get("sessionFrontend", "terminal"),
@@ -208,59 +208,66 @@ struct Session::Implementation
                     Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-explorer"s);
                 }
             ),
-            PopupMenu::item(
-                language->get("sessionFrontend", "operationQueue"),
-                {},
-                [this]()
-                {
-                    tabAddMenu.close();
-                    // There can only be one!
-                    if (operationQueueElement.value())
-                        return;
-                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "operation-queue"s);
-                }
-            ),
-            PopupMenu::item(
-                language->get("sessionFrontend", "sessionOptions"),
-                {},
-                [this]()
-                {
-                    tabAddMenu.close();
-                    // There can only be one!
-                    if (sessionOptionsElement.value())
-                        return;
-                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "session-options"s);
-                }
-            ),
-            PopupMenu::item(
-                language->get("sessionFrontend", "fileTracking"),
-                {},
-                [this]()
-                {
-                    tabAddMenu.close();
-                    // There can only be one!
-                    if (fileTrackingElement.value())
-                        return;
-                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-tracking"s);
-                }
-            ),
-        });
+            // Not needed currently:
+            // PopupMenu::item(
+            //     language->get("sessionFrontend", "sessionOptions"),
+            //     {},
+            //     [this]()
+            //     {
+            //         tabAddMenu.close();
+            //         // There can only be one!
+            //         if (sessionOptionsElement.value())
+            //             return;
+            //         Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "session-options"s);
+            //     }
+            // ),
+        };
+
+        if (std::holds_alternative<Persistence::SshSessionOptions>(engineOptions.engine))
+        {
+            tabAddMenuItems.push_back(
+                PopupMenu::item(
+                    language->get("sessionFrontend", "operationQueue"),
+                    {},
+                    [this]()
+                    {
+                        tabAddMenu.close();
+                        // There can only be one!
+                        if (operationQueueElement.value())
+                            return;
+                        Nui::val::global("contentPanelManager")
+                            .call<void>("fullfillLastAddRequest", "operation-queue"s);
+                    }
+                )
+            );
+            tabAddMenuItems.push_back(
+                PopupMenu::item(
+                    language->get("sessionFrontend", "fileTracking"),
+                    {},
+                    [this]()
+                    {
+                        tabAddMenu.close();
+                        // There can only be one!
+                        if (fileTrackingElement.value())
+                            return;
+                        Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-tracking"s);
+                    }
+                )
+            );
+        }
+
+        tabAddMenu.setItems(std::move(tabAddMenuItems));
 
         sessionOptionsListener = Nui::smartListen(
             sessionOptionsElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
-                sessionOptionsElement.eventContext().delayToAfterProcessing(
-                    [this, elem]()
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "sessionOptions"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
                     {
-                        tabAddMenu.modifyItemByLabel(
-                            language->get("sessionFrontend", "sessionOptions"),
-                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                            {
-                                if (mi)
-                                    mi->disabled = dis;
-                            }
-                        );
+                        if (mi)
+                            mi->disabled = dis;
                     }
                 );
             }
@@ -270,22 +277,15 @@ struct Session::Implementation
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
                 Nui::WebApi::Console::log("fileExplorerElement changed.");
-                fileExplorerElement.eventContext().delayToAfterProcessing(
-                    [this, elem]()
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "fileExplorer"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
                     {
-                        tabAddMenu.modifyItemByLabel(
-                            language->get("sessionFrontend", "fileExplorer"),
-                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                            {
-                                if (mi)
-                                {
-                                    Nui::WebApi::Console::log(
-                                        "Menu item found, modifying disabled to " + std::to_string(dis)
-                                    );
-                                    mi->disabled = dis;
-                                }
-                            }
-                        );
+                        if (mi)
+                        {
+                            Nui::WebApi::Console::log("Menu item found, modifying disabled to " + std::to_string(dis));
+                            mi->disabled = dis;
+                        }
                     }
                 );
             }
@@ -296,17 +296,12 @@ struct Session::Implementation
             {
                 Nui::WebApi::Console::log("operationQueueElement changed.");
 
-                operationQueueElement.eventContext().delayToAfterProcessing(
-                    [this, elem]()
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "operationQueue"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
                     {
-                        tabAddMenu.modifyItemByLabel(
-                            language->get("sessionFrontend", "operationQueue"),
-                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                            {
-                                if (mi)
-                                    mi->disabled = dis;
-                            }
-                        );
+                        if (mi)
+                            mi->disabled = dis;
                     }
                 );
             }
@@ -315,17 +310,12 @@ struct Session::Implementation
             fileTrackingElement,
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
-                fileTrackingElement.eventContext().delayToAfterProcessing(
-                    [this, elem]()
+                tabAddMenu.modifyItemByLabel(
+                    language->get("sessionFrontend", "fileTracking"),
+                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
                     {
-                        tabAddMenu.modifyItemByLabel(
-                            language->get("sessionFrontend", "fileTracking"),
-                            [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                            {
-                                if (mi)
-                                    mi->disabled = dis;
-                            }
-                        );
+                        if (mi)
+                            mi->disabled = dis;
                     }
                 );
             }
@@ -1130,6 +1120,7 @@ void Session::initializeLayout()
     auto addPanelArgument = Nui::val::object();
     addPanelArgument.set("host", element);
     addPanelArgument.set("id", impl_->sessionLayoutId);
+    addPanelArgument.set("engineType", impl_->frontendSessionManager.value()->engine().engineName());
     addPanelArgument.set("layoutString", layout ? Nui::val(layout->dump()) : Nui::val::undefined());
     addPanelArgument.set(
         "terminalFactory",

@@ -165,7 +165,7 @@ namespace NuiFileExplorer
                         if (impl_->rightSide)
                             return "grid-template-columns: 1fr 1fr";
                         return "grid-template-columns: 1fr";
-                    },
+                    }(),
                     reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
                         impl_->grid = elem;
                     }
