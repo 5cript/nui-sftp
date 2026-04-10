@@ -15,7 +15,7 @@ namespace NuiFileExplorer
     struct FileGrid::Implementation
     {
         Side leftSide;
-        Side rightSide;
+        std::optional<Side> rightSide;
 
         Nui::Observed<bool> swapSides{false};
         std::function<void(std::string const&)> onError{};
@@ -43,7 +43,12 @@ namespace NuiFileExplorer
             std::unique_ptr<ISideModel> rightModel
         )
             : leftSide{leftSettings, std::move(leftModel)}
-            , rightSide{rightSettings, std::move(rightModel)}
+            , rightSide{std::make_optional<Side>(rightSettings, std::move(rightModel))}
+        {}
+
+        Implementation(SideSettings const& leftSettings, std::unique_ptr<ISideModel> leftModel)
+            : leftSide{leftSettings, std::move(leftModel)}
+            , rightSide{std::nullopt}
         {}
     };
 
@@ -57,8 +62,13 @@ namespace NuiFileExplorer
               std::make_unique<Implementation>(leftSettings, std::move(leftModel), rightSettings, std::move(rightModel))
           )
     {
-        impl_->leftSide.initialize(impl_->rightSide);
-        impl_->rightSide.initialize(impl_->leftSide);
+        impl_->leftSide.initialize(&impl_->rightSide.value());
+        impl_->rightSide->initialize(&impl_->leftSide);
+    }
+    FileGrid::FileGrid(SideSettings const& leftSettings, std::unique_ptr<ISideModel> leftModel)
+        : impl_(std::make_unique<Implementation>(leftSettings, std::move(leftModel)))
+    {
+        impl_->leftSide.initialize(nullptr);
     }
     FileGrid::~FileGrid()
     {
@@ -75,9 +85,9 @@ namespace NuiFileExplorer
     {
         return impl_->leftSide;
     }
-    Side& FileGrid::rightSide()
+    Side* FileGrid::rightSide()
     {
-        return impl_->rightSide;
+        return impl_->rightSide ? &impl_->rightSide.value() : nullptr;
     }
 
     void FileGrid::onError(std::function<void(std::string const&)> const& callback)
@@ -88,13 +98,15 @@ namespace NuiFileExplorer
     void FileGrid::onUneventfulClick()
     {
         impl_->leftSide.onUneventfulClick();
-        impl_->rightSide.onUneventfulClick();
+        if (impl_->rightSide)
+            impl_->rightSide->onUneventfulClick();
     }
 
     void FileGrid::closeMenus()
     {
         impl_->leftSide.closeMenus();
-        impl_->rightSide.closeMenus();
+        if (impl_->rightSide)
+            impl_->rightSide->closeMenus();
     }
 
     void FileGrid::swapSides(bool doSwap)
@@ -107,9 +119,9 @@ namespace NuiFileExplorer
     {
         return impl_->leftSide.model();
     }
-    ISideModel& FileGrid::rightModel()
+    ISideModel* FileGrid::rightModel()
     {
-        return impl_->rightSide.model();
+        return impl_->rightSide ? &impl_->rightSide->model() : nullptr;
     }
 
     Nui::ElementRenderer FileGrid::operator()(std::vector<Nui::Attribute>&& attributes)
@@ -142,7 +154,7 @@ namespace NuiFileExplorer
             observe(impl_->swapSides),
             [this]() -> Nui::ElementRenderer {
                 auto* left = &impl_->leftSide;
-                auto* right = &impl_->rightSide;
+                auto* right = impl_->rightSide ? &impl_->rightSide.value() : nullptr;
 
                 if (impl_->swapSides.value())
                     std::swap(left, right);
@@ -154,7 +166,7 @@ namespace NuiFileExplorer
                     }
                 }(
                     (*left)(),
-                    (*right)(),
+                    right ? (*right)() : Nui::nil(),
                     div{
                         class_ = "nui-file-grid-divider",
                         reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {

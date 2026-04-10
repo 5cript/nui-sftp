@@ -37,7 +37,13 @@ namespace NuiFileExplorer
         Side(Side&&);
         Side& operator=(Side&&);
 
-        void initialize(Side& otherSide);
+        /**
+         * @brief Initialize passing a pointer to the other side, so that they can interact with each other if needed.
+         *
+         * @param otherSide Other side of the file grid. Its optionally can be nullptr if the file grid only has one
+         * side.
+         */
+        void initialize(Side* otherSide);
 
         ISideModel& model();
 

@@ -12,7 +12,7 @@ namespace NuiFileExplorer
     class FlavorImplementation
     {
       public:
-        FlavorImplementation(Side& side, Side& otherSide);
+        FlavorImplementation(Side& side, Side* otherSide);
         virtual ~FlavorImplementation() = default;
 
         virtual Nui::ElementRenderer operator()() = 0;
@@ -21,7 +21,7 @@ namespace NuiFileExplorer
 
       protected:
         SideImplementation& impl() const;
-        SideImplementation& otherImpl() const;
+        SideImplementation* otherImpl() const;
         Side* side_;
         Side* otherSide_;
         Nui::Attribute allowDrop = Nui::Attributes::EventFactory{"dragover"} = [](Nui::WebApi::DragEvent event)

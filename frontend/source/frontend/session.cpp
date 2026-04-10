@@ -127,28 +127,46 @@ struct Session::Implementation
         , options{this->engineOptions.terminalOptions.value()}
         , inputDialog{inputDialog}
         , confirmDialog{confirmDialog}
-        , fileGrid{{
-              .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-              .showHiddenFiles = uiOptions.showHiddenFilesLocally,
-              .onShowHiddenFilesChanged = [this](bool value) {
-                  this->stateHolder->loadModifySave([value](Persistence::State& state) {
-                      state.uiOptions.showHiddenFilesLocally = value;
-                  });
-              },
-         }, {
-                .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-                .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
-                .onShowHiddenFilesChanged = [this](bool value) {
-                    this->stateHolder->loadModifySave([value](Persistence::State& state) {
-                        state.uiOptions.showHiddenFilesRemotely = value;
-                    });
+        , fileGrid{[this, &engineOptions, &uiOptions, confirmDialog, inputDialog, filePropertyDialog]() -> NuiFileExplorer::FileGrid {
+            if (std::holds_alternative<Persistence::SshSessionOptions>(engineOptions.engine))
+            {
+                return {{
+                    .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
+                    .showHiddenFiles = uiOptions.showHiddenFilesLocally,
+                    .onShowHiddenFilesChanged = [this](bool value) {
+                        this->stateHolder->loadModifySave([value](Persistence::State& state) {
+                            state.uiOptions.showHiddenFilesLocally = value;
+                        });
+                    },
+                }, {
+                        .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
+                        .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
+                        .onShowHiddenFilesChanged = [this](bool value) {
+                            this->stateHolder->loadModifySave([value](Persistence::State& state) {
+                                state.uiOptions.showHiddenFilesRemotely = value;
+                            });
+                        },
                 },
-         },
-            std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
-            std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
-        }
+                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
+                    std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
+                };
+            } else {
+                // Local only
+                return {{
+                    .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
+                    .showHiddenFiles = uiOptions.showHiddenFilesLocally,
+                    .onShowHiddenFilesChanged = [this](bool value) {
+                        this->stateHolder->loadModifySave([value](Persistence::State& state) {
+                            state.uiOptions.showHiddenFilesLocally = value;
+                        });
+                    },
+                },
+                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog)
+                };
+            }
+        }()}
         , fileExplorerElement{}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(&fileGrid.rightModel())}
+        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(fileGrid.rightModel())}
         , operationQueueElement{}
         , layoutHost{}
         , layoutName{std::move(layoutName)}
@@ -161,7 +179,8 @@ struct Session::Implementation
         , disambiguateTitle{std::move(disambiguateTitle)}
     {
         fileGrid.leftModel().dropMetadata(sessionLayoutId);
-        fileGrid.rightModel().dropMetadata(sessionLayoutId);
+        if (fileGrid.rightModel())
+            fileGrid.rightModel()->dropMetadata(sessionLayoutId);
 
         using namespace ScriptNuiComponents;
         using namespace std::string_literals;
@@ -417,7 +436,7 @@ void Session::onChannelLoss(Ids::ChannelId const& id)
     );
 }
 
-NuiFileExplorer::Side& Session::remoteFileGridSide()
+NuiFileExplorer::Side* Session::remoteFileGridSide()
 {
     return impl_->fileGrid.rightSide();
 }
@@ -514,14 +533,14 @@ std::optional<nlohmann::json> Session::getLayout() const
                     {"flavor", fileGridFlavorToString(impl_->fileGrid.leftSide().flavor())},
                 },
             },
-            {
-                "rightSide",
-                {
-                    {"flavor", fileGridFlavorToString(impl_->fileGrid.rightSide().flavor())},
-                },
-            },
         },
     }};
+    if (impl_->fileGrid.rightSide())
+    {
+        layoutObject["__extra"]["fileGrid"]["rightSide"] = {
+            {"flavor", fileGridFlavorToString(impl_->fileGrid.rightSide()->flavor())},
+        };
+    }
     return layoutObject;
 }
 
@@ -541,20 +560,29 @@ void Session::setupFileGrid()
         }
     );
 
-    remoteSideModel().setItemUpdateFunction(
-        [this](bool sorted, bool reapplySelection)
-        {
-            remoteFileGridSide().updateItems(sorted, reapplySelection);
-        }
-    );
+    if (remoteSideModel())
+    {
+        remoteSideModel()->setItemUpdateFunction(
+            [this](bool sorted, bool reapplySelection)
+            {
+                if (remoteFileGridSide())
+                    remoteFileGridSide()->updateItems(sorted, reapplySelection);
+            }
+        );
+    }
     localSideModel().setItemUpdateFunction(
         [this](bool sorted, bool reapplySelection)
         {
             localFileGridSide().updateItems(sorted, reapplySelection);
         }
     );
-    remoteSideModel().setLocalModel(&localSideModel());
-    localSideModel().setRemoteModel(&remoteSideModel());
+    if (remoteSideModel())
+    {
+        remoteSideModel()->setLocalModel(&localSideModel());
+        localSideModel().setRemoteModel(remoteSideModel());
+    }
+    else
+        localSideModel().setRemoteModel(nullptr);
 }
 
 void Session::saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents)
@@ -724,19 +752,41 @@ void Session::openSftp(std::string const& username)
             Log::info("Opening SFTP by default");
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
             auto fileEngine = std::make_shared<FileEngine>(sshTerminalEngine);
-            remoteSideModel().engine(fileEngine);
+
+            if (!remoteSideModel())
+            {
+                Log::error(
+                    "Remote side model is not available, cannot open SFTP. This is a bug and should not happen by "
+                    "design."
+                );
+                impl_->confirmDialog->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = "SFTP Initialization Failed",
+                    .text = "Remote side model is not available, cannot open SFTP. This is a bug and should not happen "
+                            "by design.",
+                    .buttons = ConfirmDialog::Button::Ok,
+                    .neverShowAgainId = "sftpInitializationFailed",
+                });
+            }
+
+            if (remoteSideModel())
+                remoteSideModel()->engine(fileEngine);
             localSideModel().engine(std::move(fileEngine));
-            impl_->operationQueue.activate(remoteSideModel().engine(), sshTerminalEngine->sshSessionId());
+            if (remoteSideModel())
+                impl_->operationQueue.activate(remoteSideModel()->engine(), sshTerminalEngine->sshSessionId());
             impl_->fileTrackingPanel.activate(&impl_->operationQueue, sshTerminalEngine->sshSessionId());
-            remoteSideModel().operationQueue(&impl_->operationQueue);
-            remoteSideModel().setFileTracking(&impl_->fileTrackingPanel);
             localSideModel().operationQueue(&impl_->operationQueue);
-            remoteFileGridSide().path(
-                fmt::format(
-                    fmt::runtime(opts.sftpOptions->defaultDirectory.value_or("/home/{user}").generic_string()),
-                    fmt::arg("user", username)
-                )
-            );
+            if (remoteSideModel())
+            {
+                remoteSideModel()->operationQueue(&impl_->operationQueue);
+                remoteSideModel()->setFileTracking(&impl_->fileTrackingPanel);
+                remoteFileGridSide()->path(
+                    fmt::format(
+                        fmt::runtime(opts.sftpOptions->defaultDirectory.value_or("/home/{user}").generic_string()),
+                        fmt::arg("user", username)
+                    )
+                );
+            }
             openLocalFilesystem();
         }
     }
@@ -895,7 +945,8 @@ void Session::closeSelf()
             impl_->closeSelf(this);
     };
 
-    if (!isExecutingEngine && (impl_->frontendSessionManager.value() || remoteSideModel().engine()))
+    if (!isExecutingEngine &&
+        (impl_->frontendSessionManager.value() || (remoteSideModel() && remoteSideModel()->engine())))
     {
         Log::info("Session shutdown started.");
 
@@ -917,7 +968,7 @@ void Session::closeSelf()
         };
 
         // Not necessary, because the session destruction will take care of it:
-        // if (auto fileEngine = remoteSideModel().engine(); fileEngine)
+        // if (auto fileEngine = remoteSideModel()->engine(); fileEngine)
         // {
         //     Log::info("Disposing file engine.");
         //     fileEngine->dispose(terminalDispose);
@@ -1020,9 +1071,10 @@ void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
                 NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["leftSide"]["flavor"].get<std::string>())
             );
         }
-        if (fileGridExtra.contains("rightSide") && fileGridExtra["rightSide"].contains("flavor"))
+        if (fileGridExtra.contains("rightSide") && fileGridExtra["rightSide"].contains("flavor") &&
+            impl_->fileGrid.rightSide())
         {
-            impl_->fileGrid.rightSide().flavor(
+            impl_->fileGrid.rightSide()->flavor(
                 NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["rightSide"]["flavor"].get<std::string>())
             );
         }
@@ -1322,9 +1374,11 @@ Nui::ElementRenderer Session::operator()()
     // clang-format on
 }
 
-RemoteSideModel& Session::remoteSideModel()
+RemoteSideModel* Session::remoteSideModel()
 {
-    return static_cast<RemoteSideModel&>(remoteFileGridSide().model());
+    if (!remoteFileGridSide())
+        return nullptr;
+    return static_cast<RemoteSideModel*>(&remoteFileGridSide()->model());
 }
 LocalSideModel& Session::localSideModel()
 {

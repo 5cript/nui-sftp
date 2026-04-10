@@ -58,11 +58,11 @@ namespace NuiFileExplorer
         , iconFlavor_{}
         , tableFlavor_{}
     {}
-    void Side::initialize(Side& otherSide)
+    void Side::initialize(Side* otherSide)
     {
         iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
         tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
-        impl_->otherSide = &otherSide;
+        impl_->otherSide = otherSide;
     }
     Side::~Side() = default;
     Side::Side(Side&&) = default;

@@ -10,17 +10,17 @@
 
 namespace NuiFileExplorer
 {
-    FlavorImplementation::FlavorImplementation(Side& side, Side& otherSide)
+    FlavorImplementation::FlavorImplementation(Side& side, Side* otherSide)
         : side_{&side}
-        , otherSide_{&otherSide}
+        , otherSide_{otherSide}
     {}
     SideImplementation& FlavorImplementation::impl() const
     {
         return *side_->impl_;
     }
-    SideImplementation& FlavorImplementation::otherImpl() const
+    SideImplementation* FlavorImplementation::otherImpl() const
     {
-        return *otherSide_->impl_;
+        return otherSide_ ? &*otherSide_->impl_ : nullptr;
     }
     void FlavorImplementation::onDrop(Nui::WebApi::DragEvent event, std::optional<Item> const& droppedOnItem)
     {
@@ -44,11 +44,14 @@ namespace NuiFileExplorer
                 return;
             }
             Nui::WebApi::Console::log("External items dropped: ", eventExtracted->externDroppedItems->size());
-            otherSide_->model().onDropExternal(
-                *eventExtracted->externDroppedItems,
-                eventExtracted->internalDropSubdir,
-                eventExtracted->issueWebkitWarning
-            );
+            if (otherImpl())
+            {
+                otherSide_->model().onDropExternal(
+                    *eventExtracted->externDroppedItems,
+                    eventExtracted->internalDropSubdir,
+                    eventExtracted->issueWebkitWarning
+                );
+            }
             return;
         }
 
@@ -57,9 +60,12 @@ namespace NuiFileExplorer
             if (side_->model().isLeft() != *eventExtracted->isInternalDropFromLeftSide)
             {
                 // its a transfer!
-                otherSide_->model().onTransfer(
-                    otherImpl().selectionManager.selectedItems(), eventExtracted->internalDropSubdir
-                );
+                if (otherImpl())
+                {
+                    otherSide_->model().onTransfer(
+                        otherImpl()->selectionManager.selectedItems(), eventExtracted->internalDropSubdir
+                    );
+                }
             }
             else
             {

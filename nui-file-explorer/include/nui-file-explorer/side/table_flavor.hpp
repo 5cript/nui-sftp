@@ -18,7 +18,7 @@ namespace NuiFileExplorer
     class TableFlavor : public FlavorImplementation
     {
       public:
-        TableFlavor(Side& impl, Side& otherSide);
+        TableFlavor(Side& impl, Side* otherSide);
         ~TableFlavor();
         Nui::ElementRenderer operator()() override;
 

@@ -14,7 +14,7 @@ using namespace std::chrono_literals;
 
 namespace NuiFileExplorer
 {
-    IconFlavor::IconFlavor(Side& side, Side& otherSide)
+    IconFlavor::IconFlavor(Side& side, Side* otherSide)
         : FlavorImplementation{side, otherSide}
     {}
 
