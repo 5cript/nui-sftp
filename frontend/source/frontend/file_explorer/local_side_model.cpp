@@ -748,17 +748,25 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
     const bool hasItems = !selectedItems.empty();
     const bool singleItem = selectedItems.size() == 1;
 
-    return {
-        Snc::PopupMenu::item(
-            language->get("fileExplorer", "contextMenu", "upload"),
-            {},
-            [this, selectedItems]()
-            {
-                onTransfer(selectedItems, std::nullopt);
-            },
-            !hasItems
-        ),
-        Snc::PopupMenu::separator(),
+    std::vector<NuiFileExplorer::ContextMenuItem> items;
+
+    if (remoteModel_)
+    {
+        items.push_back(
+            Snc::PopupMenu::item(
+                language->get("fileExplorer", "contextMenu", "upload"),
+                {},
+                [this, selectedItems]()
+                {
+                    onTransfer(selectedItems, std::nullopt);
+                },
+                !hasItems
+            )
+        );
+        items.push_back(Snc::PopupMenu::separator());
+    }
+
+    const auto remainingItems = std::vector<NuiFileExplorer::ContextMenuItem>{
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "open"),
             {},
@@ -806,6 +814,9 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             !singleItem
         ),
     };
+
+    items.insert(items.end(), remainingItems.begin(), remainingItems.end());
+    return items;
 }
 
 void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)

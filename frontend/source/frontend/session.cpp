@@ -502,7 +502,7 @@ Session::Session(
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
     {
         createExecutingEngine();
-        // what about files?
+        setupFileGrid();
     }
     else if (std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine))
     {
@@ -696,6 +696,8 @@ void Session::createExecutingEngine()
     impl_->frontendSessionManager.value()->open(
         std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
     );
+
+    openLocalFilesystem();
 }
 
 Session::~Session() = default;

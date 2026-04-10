@@ -161,19 +161,24 @@ namespace NuiFileExplorer
 
                 return div{
                     class_ = "nui-file-grid-content",
+                    style = [this](){
+                        if (impl_->rightSide)
+                            return "grid-template-columns: 1fr 1fr";
+                        return "grid-template-columns: 1fr";
+                    },
                     reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
                         impl_->grid = elem;
                     }
                 }(
                     (*left)(),
                     right ? (*right)() : Nui::nil(),
-                    div{
+                    right ? div{
                         class_ = "nui-file-grid-divider",
                         reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
                             impl_->divider = elem;
                         }
-                    }(),
-                    div{
+                    }() : Nui::nil(),
+                    right ? div{
                         class_ = "nui-file-grid-grabber",
                         reference = [this](std::weak_ptr<Nui::Dom::BasicElement> elem) {
                             impl_->grabber = elem;
@@ -243,7 +248,7 @@ namespace NuiFileExplorer
                         !("mousedown"_event = [this](Nui::WebApi::MouseEvent) {
                             impl_->dragging = true;
                         })
-                    }()
+                    }() : Nui::nil()
                 );
             }
         );
