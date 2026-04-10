@@ -187,13 +187,11 @@
     }
 }
 
+/* ── Base: layout + outer shadow only; glass layers live in ::before/::after ── */
 .nui-file-grid-item-icons {
     display: flex;
     flex-direction: column;
     align-items: center;
-
-    border:
-        1px solid rgba(255, 255, 255, 0.35);
 
     position: relative;
     padding: 12px 0;
@@ -201,23 +199,13 @@
     font-weight: 600;
 
     border-radius: 14px;
-
-    background:
-        linear-gradient(145deg,
-            rgba(255, 255, 255, 0.35),
-            rgba(255, 255, 255, 0.05));
-
-    backdrop-filter: blur(10px) saturate(140%);
-    -webkit-backdrop-filter: blur(10px) saturate(140%);
-
-    box-shadow:
-        inset 1px 1px 0 rgba(255, 255, 255, 0.5),
-        inset -1px -1px 0 rgba(255, 255, 255, 0.1),
-        0 10px 25px rgba(0, 0, 0, 0.35);
-
-    transition: transform 120ms ease, box-shadow 120ms ease;
-    /* Important for the sheen effect */
+    border: none;
+    background: transparent;
     overflow: hidden;
+    isolation: isolate;
+
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+    transition: transform 120ms ease, box-shadow 120ms ease;
 
     &[data-type="Symbolic Link"] {
         color: var(--nui-file-grid-symbolic-link-color, rgb(0, 242, 255));
@@ -244,22 +232,66 @@
     }
 }
 
-.nui-file-grid-item-icons.is-muted {
-    opacity: 0.55;
+/* ── Liquid glass layer: blurred backdrop + turbulence displacement ── */
+.nui-file-grid-item-icons::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    isolation: isolate;
+
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
 
     background:
         linear-gradient(145deg,
-            rgba(255, 255, 255, 0.15),
+            rgba(255, 255, 255, 0.32),
+            rgba(255, 255, 255, 0.05));
+
+    transition: background 120ms ease;
+}
+
+/* ── Specular highlight border ── */
+.nui-file-grid-item-icons::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    box-shadow:
+        inset 2px 2px 0px -1px rgba(255, 255, 255, 0.75),
+        inset 0 0 4px 1px rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+    transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+/* ── Content above pseudo layers ── */
+.nui-file-grid-item-icons>* {
+    position: relative;
+    z-index: 1;
+}
+
+.nui-file-grid-item-icons.is-muted {
+    opacity: 0.55;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+    filter: saturate(70%) brightness(85%);
+}
+
+.nui-file-grid-item-icons.is-muted::after {
+    background:
+        linear-gradient(145deg,
+            rgba(255, 255, 255, 0.12),
             rgba(255, 255, 255, 0.02));
+}
 
+.nui-file-grid-item-icons.is-muted::before {
     border-color: rgba(255, 255, 255, 0.18);
-
     box-shadow:
         inset 1px 1px 0 rgba(255, 255, 255, 0.25),
-        inset -1px -1px 0 rgba(0, 0, 0, 0.25),
-        0 6px 14px rgba(0, 0, 0, 0.45);
-
-    filter: saturate(70%) brightness(85%);
+        inset -1px -1px 0 rgba(0, 0, 0, 0.25);
 }
 
 .nui-file-grid-item-icons.is-highlighted {
@@ -267,6 +299,7 @@
     z-index: 1;
 }
 
+/* Rainbow border overrides the specular ::before when highlighted */
 .nui-file-grid-item-icons.is-highlighted::before {
     content: "";
     position: absolute;
@@ -286,6 +319,9 @@
     -webkit-mask:
         linear-gradient(#000 0 0) padding-box,
         linear-gradient(#000 0 0);
+    mask:
+        linear-gradient(#000 0 0) padding-box,
+        linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
 
@@ -293,34 +329,30 @@
     z-index: 0;
 }
 
-.nui-file-grid-item-icons>* {
-    position: relative;
-    z-index: 1;
-}
-
-/* @keyframes nui-prismatic-spin {
-    to {
-        transform: rotate(360deg);
-    }
-} */
-
 .nui-file-grid-item-icons:hover {
     transform: translateY(-2px);
-    box-shadow:
-        inset 1px 1px 0 rgba(255, 255, 255, 0.6),
-        inset -1px -1px 0 rgba(255, 255, 255, 0.15),
-        0 14px 30px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
 }
 
-.nui-file-grid-item-icons:is(.selected) {
+.nui-file-grid-item-icons:hover::before {
+    box-shadow:
+        inset 2px 2px 0px -1px rgba(255, 255, 255, 0.9),
+        inset 0 0 5px 1px rgba(255, 255, 255, 0.6);
+    border-color: rgba(255, 255, 255, 0.55);
+}
+
+.nui-file-grid-item-icons:is(.selected)::after {
     background:
         linear-gradient(145deg,
             rgba(255, 255, 255, 0.8),
             rgba(255, 255, 255, 0.35));
+}
+
+.nui-file-grid-item-icons:is(.selected)::before {
     border: 1px solid var(--nui-file-grid-border-color);
 }
 
-.nui-file-grid-item-icons.drop-hovered {
+.nui-file-grid-item-icons.drop-hovered::after {
     background:
         linear-gradient(145deg,
             hsla(241, 82%, 49%, 0.55),
