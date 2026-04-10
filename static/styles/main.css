@@ -147,6 +147,15 @@
         background-color: var(--background-color);
     }
 
+    & .nui-file-grid-item-icons:is(.selected)::after {
+        background:
+            linear-gradient(145deg,
+                color-mix(in srgb, var(--theme-color) 80%, rgba(0, 0, 0, 0.1)),
+                color-mix(in srgb, var(--theme-color) 80%, rgba(0, 0, 0, 0.3)));
+    }
+
+    --script-nui-components-switch-color-inactive: var(--border-color-fields);
+
     --nui-file-grid-color: var(--color);
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
