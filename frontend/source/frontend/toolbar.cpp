@@ -186,7 +186,7 @@ Nui::ElementRenderer Toolbar::operator()()
         iconPanel({
             .icon = [](){
                 return img{
-                    src = "nui://app.example/nui-sftp-logo.svg",
+                    src = "nui://app.example/icons/nui-sftp-logo.svg",
                     style = "width: 32px; height: 32px;",
                 }();
             }(),
