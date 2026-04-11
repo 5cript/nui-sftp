@@ -12,6 +12,14 @@
 #include <ui5-sap-icons/icons/video.hpp>
 #include <ui5-sap-icons/icons/folder.hpp>
 #include <ui5-sap-icons/icons/database.hpp>
+#include <ui5-sap-icons/icons/upload.hpp>
+#include <ui5-sap-icons/icons/open-folder.hpp>
+#include <ui5-sap-icons/icons/open-command-field.hpp>
+#include <ui5-sap-icons/icons/delete.hpp>
+#include <ui5-sap-icons/icons/edit.hpp>
+#include <ui5-sap-icons/icons/detail-view.hpp>
+#include <ui5-sap-icons/icons/add-favorite.hpp>
+#include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <nui/frontend/api/console.hpp>
 #include <nui/rpc.hpp>
@@ -927,7 +935,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         items.push_back(
             Snc::PopupMenu::item(
                 language->get("fileExplorer", "contextMenu", "upload"),
-                {},
+                Ui5Icons::upload(),
                 [this, selectedItems]()
                 {
                     onTransfer(selectedItems, std::nullopt);
@@ -946,7 +954,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         items.push_back(
             Snc::PopupMenu::item(
                 isFav ? "Remove from Favorites" : "Add to Favorites",
-                {},
+                isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
                 [this, selPath, isFav]()
                 {
                     if (isFav)
@@ -962,7 +970,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
     const auto remainingItems = std::vector<NuiFileExplorer::ContextMenuItem>{
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "open"),
-            {},
+            Ui5Icons::open_folder(),
             [this, selectedItems]()
             {
                 onOpen(selectedItems.front(), false);
@@ -971,7 +979,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWith"),
-            {},
+            Ui5Icons::open_command_field(),
             [this, selectedItems]()
             {
                 onOpen(selectedItems.front(), true);
@@ -981,7 +989,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "delete"),
-            {},
+            Ui5Icons::delete_(),
             [this, selectedItems]()
             {
                 onDelete(selectedItems);
@@ -990,7 +998,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "rename"),
-            {},
+            Ui5Icons::edit(),
             [this, selectedItems]()
             {
                 onRename(selectedItems.front());
@@ -999,7 +1007,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "properties"),
-            {},
+            Ui5Icons::detail_view(),
             [this, selectedItems]()
             {
                 onProperties(selectedItems.front());
