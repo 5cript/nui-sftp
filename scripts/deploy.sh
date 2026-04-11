@@ -71,15 +71,6 @@ if [ "$NOLINK" = false ]; then
         # Dont create a symlink on windows or if NOLINK is true
         ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
     else
-        # Convert to Windows path
-        WIN_INSTALL_TARGET=$(cygpath -w "${INSTALL_TARGET}")
-
-        powershell -Command "
-        \$WshShell = New-Object -ComObject WScript.Shell;
-        \$Shortcut = \$WshShell.CreateShortcut('${WIN_INSTALL_TARGET}\\${EXECUTABLE_NAME}.lnk');
-        \$Shortcut.TargetPath = '.\\bin\\${EXECUTABLE_NAME}';
-        \$Shortcut.WorkingDirectory = '${WIN_INSTALL_TARGET}';
-        \$Shortcut.Save();
-        "
+        # TODO?
     fi
 fi
