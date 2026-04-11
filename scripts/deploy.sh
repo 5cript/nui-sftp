@@ -72,5 +72,6 @@ if [ "$NOLINK" = false ]; then
         ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
     else
         # TODO?
+        :
     fi
 fi
