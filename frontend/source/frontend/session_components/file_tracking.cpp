@@ -471,6 +471,18 @@ void FileTrackingPanel::startWatching(
                 std::filesystem::path oldRelPath = oldLocalPath.lexically_relative(instanceDir);
                 std::filesystem::path newRelPath = newLocalPath.lexically_relative(instanceDir);
 
+                // Check that newRelPath is inside the instanceDir to avoid arbitrary remote renames
+                if (newRelPath.empty() || newRelPath.string().starts_with(".."))
+                {
+                    Log::warn(
+                        "FileTracking: ignoring move event for instance {} because new path is outside instance dir: "
+                        "{}",
+                        instanceId.value(),
+                        newRelPath.generic_string()
+                    );
+                    return;
+                }
+
                 std::filesystem::path oldRemotePath = remotePath.parent_path() / oldRelPath;
                 std::filesystem::path newRemotePath = remotePath.parent_path() / newRelPath;
 
