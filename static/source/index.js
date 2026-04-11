@@ -7,10 +7,17 @@ import { ContentPanelManager } from "./content_panel_manager.ts";
         return crypto.randomUUID();
     }
     globalThis.contentPanelManager = new ContentPanelManager();
+    const parseColorToRGBA = (colorString) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = colorString;
+        ctx.fillRect(0, 0, 1, 1);
+        const [red, green, blue, alpha] = ctx.getImageData(0, 0, 1, 1).data;
+        return { r: red, g: green, b: blue, a: alpha };
+    };
     globalThis.colorStringToRGBAObject = (colorString) => {
-        const rgb = getRGBColor(colorString);
-        const alpha = getAlpha(colorString);
-        return { r: rgb.r, g: rgb.g, b: rgb.b, a: alpha * 255 };
+        return parseColorToRGBA(colorString);
     };
 
     globalThis.decodeUtf8Base64 = (base64) => {
