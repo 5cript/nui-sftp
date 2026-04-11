@@ -24,24 +24,24 @@ namespace NuiFileExplorer
         struct PlaceDef
         {
             char const* name;
-            char const* envVar;   // nullptr for Home (uses HOME directly)
+            char const* envVar; // nullptr for Home (uses HOME directly)
             char const* fallback; // relative to HOME
         };
 
         constexpr PlaceDef xdgPlaces[] = {
-            {"Home",      nullptr,            ""},
-            {"Desktop",   "XDG_DESKTOP_DIR",  "Desktop"},
-            {"Downloads", "XDG_DOWNLOAD_DIR",  "Downloads"},
+            {"Home", nullptr, ""},
+            {"Desktop", "XDG_DESKTOP_DIR", "Desktop"},
+            {"Downloads", "XDG_DOWNLOAD_DIR", "Downloads"},
             {"Documents", "XDG_DOCUMENTS_DIR", "Documents"},
-            {"Music",     "XDG_MUSIC_DIR",     "Music"},
-            {"Pictures",  "XDG_PICTURES_DIR",  "Pictures"},
-            {"Videos",    "XDG_VIDEOS_DIR",    "Videos"},
+            {"Music", "XDG_MUSIC_DIR", "Music"},
+            {"Pictures", "XDG_PICTURES_DIR", "Pictures"},
+            {"Videos", "XDG_VIDEOS_DIR", "Videos"},
         };
     }
 
     DefaultPlacesProvider::DefaultPlacesProvider(Nui::RpcHub& hub)
         : hub_{&hub}
-        , listPlaces_{hub.autoRegisterFunction(
+        , listPlaces_{std::make_unique<Nui::RpcHub::AutoUnregister>(hub.autoRegisterFunction(
               "NuiFileExplorer::DefaultPlaces::list",
               [hubPtr = &hub](std::string responseId)
               {
@@ -71,7 +71,7 @@ namespace NuiFileExplorer
                   }
                   hubPtr->callRemote(responseId, {{"success", true}, {"places", result}});
               }
-          )}
+          ))}
     {}
     DefaultPlacesProvider::~DefaultPlacesProvider() = default;
 
