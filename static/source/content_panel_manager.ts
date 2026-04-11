@@ -78,6 +78,7 @@ class ContentPanelManager {
                     first.sizes = [0.5, 0.5];
                 }
             }
+            main.sizes = [0.42, 0.58];
         }
         dock.restoreLayout(saved);
     }
