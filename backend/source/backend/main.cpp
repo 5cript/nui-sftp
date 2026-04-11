@@ -109,16 +109,17 @@ namespace
                 }
                 const auto file = *fileOpt;
 
-                if (
-                    !pointsToWithinDir(resourceDir, file) && !pointsToWithinDir(Nui::resolvePath("%state_home2%"), file)
-#ifndef NDEBUG
-                    && !pointsToWithinDir(SOURCE_DIR, file)
-#endif
-                )
-                {
-                    Log::error("Path points outside of program directory: '{}'", file.string());
-                    return makeResponse(404, "Not Found", "Not Found");
-                }
+                //                 if (
+                //                     !pointsToWithinDir(resourceDir, file) &&
+                //                     !pointsToWithinDir(Nui::resolvePath("%state_home2%"), file)
+                // #ifndef NDEBUG
+                //                     && !pointsToWithinDir(SOURCE_DIR, file)
+                // #endif
+                //                 )
+                //                 {
+                //                     Log::error("Path points outside of program directory: '{}'", file.string());
+                //                     return makeResponse(404, "Not Found", "Not Found");
+                //                 }
 
                 // Check if file exists and return 404 if not
                 if (!std::filesystem::exists(file))

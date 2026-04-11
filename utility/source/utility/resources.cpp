@@ -180,7 +180,7 @@ matchPatternInDir(std::filesystem::path const& baseDir, std::filesystem::path co
             segments.push_back(s);
     }
     std::vector<std::filesystem::path> results;
-    matchPatternInDirImpl(baseDir, segments, 0, {}, results);
+    matchPatternInDirImpl(baseDir.generic_string(), segments, 0, {}, results);
     return results;
 }
 

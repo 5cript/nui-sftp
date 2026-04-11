@@ -59,7 +59,7 @@ fi
 # Assets (Images, icons, language files)...
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/file.png" "${INSTALL_TARGET}/assets/icons/"
-cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/"
+cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/icons/"
 
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
 if [ "$OMIT_FRONTEND" = false ]; then
