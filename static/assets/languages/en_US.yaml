@@ -23,6 +23,7 @@ fileExplorer:
 newSessionDialog:
   title: "Create New Session"
   validationMessage: "Please fill in all required fields."
+  sessionTypeLabel: "Session Type:"
   iconLabel: "Session Icon:"
   sessionNameLabel: "Session Name:"
 operationQueue:
@@ -227,6 +228,7 @@ settings:
     environmentVariables: "Environment Variables"
     exitTimeoutSeconds: "Exit Timeout Seconds"
     cleanEnvironment: "Clean Environment"
+    terminalEngineTypeShell: "Local Shell"
     executingSessionOptions:
       isPtyHelpText: "If enabled, a pseudo-terminal (PTY) device will be created for the local shell session. This is strongly recommended for interactive sessions."
       commandHelpText: "The command to execute for the local shell sessions."

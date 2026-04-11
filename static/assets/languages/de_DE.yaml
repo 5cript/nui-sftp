@@ -23,6 +23,7 @@ fileExplorer:
 newSessionDialog:
   title: "Neue Sitzung erstellen"
   validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."
+  sessionTypeLabel: "Sitzungstyp:"
   iconLabel: "Sitzungssymbol:"
   sessionNameLabel: "Sitzungsname:"
 sideModel:
@@ -230,6 +231,7 @@ settings:
     environmentVariables: "Umgebungsvariablen"
     exitTimeoutSeconds: "Beendigungstimeout (Sekunden)"
     cleanEnvironment: "Saubere Umgebung"
+    terminalEngineTypeShell: "Lokale Shell"
     executingSessionOptions:
       isPtyHelpText: "Wenn aktiviert, wird für die lokale Shell Sitzung ein Pseudo Terminal (PTY) angelegt. Dies wird für interaktive Sitzungen stark empfohlen."
       commandHelpText: "Der Befehl, der für die lokalen Shell Sitzungen ausgeführt wird."

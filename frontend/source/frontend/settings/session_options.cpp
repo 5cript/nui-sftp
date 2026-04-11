@@ -32,7 +32,7 @@ SessionOptions::SessionOptions(
           [](Persistence::TerminalEngineType const& v)
           {
             if (v == Persistence::TerminalEngineType::shell)
-                return "Shell (CURRENTLY BROKEN)"s;
+                return language->get("settings", "sessionOptions", "terminalEngineTypeShell");
             return Utility::enumToString(v);
           }
       }

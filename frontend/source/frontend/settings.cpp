@@ -760,8 +760,11 @@ void Settings::addNewSession()
         .onConfirm = [this](auto const& result)
         {
             Log::info("New session created: {}.", result.sessionName);
+            const auto engineType = result.sessionType == NewSessionDialog::SessionType::ssh
+                ? Persistence::TerminalEngineType::ssh
+                : Persistence::TerminalEngineType::shell;
             impl_->stateHolder->stateCache().sessions[result.sessionName] =
-                Persistence::SessionOptions::create(result.iconName);
+                Persistence::SessionOptions::create(result.iconName, engineType);
 
             impl_->stateHolder->save(
                 [this, result](std::optional<std::string> const& error)

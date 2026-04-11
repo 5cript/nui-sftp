@@ -31,9 +31,19 @@ namespace Persistence
         return option;
     }
 
-    SessionOptions SessionOptions::create(std::optional<std::string> icon)
+    SessionOptions SessionOptions::create(std::optional<std::string> icon, TerminalEngineType type)
     {
-        // By default create an ssh session, that is the most likely to be wanted:
+        if (type == TerminalEngineType::shell)
+        {
+            return SessionOptions{
+                .type = TerminalEngineType::shell,
+                .icon = icon.value_or(""),
+                .engine = defaultBashSessionOption(),
+                .terminalOptions = Reference{"default"},
+                .termios = Reference{"default"},
+                .queueOptions = Reference{"default"},
+            };
+        }
         return SessionOptions{
             .type = TerminalEngineType::ssh,
             .icon = icon.value_or(""),

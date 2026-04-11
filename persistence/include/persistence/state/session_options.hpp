@@ -96,7 +96,10 @@ namespace Persistence
             }
         }
 
-        static SessionOptions create(std::optional<std::string> icon = std::nullopt);
+        static SessionOptions create(
+            std::optional<std::string> icon = std::nullopt,
+            TerminalEngineType type = TerminalEngineType::ssh
+        );
     };
     BOOST_DESCRIBE_STRUCT(
         SessionOptions,
