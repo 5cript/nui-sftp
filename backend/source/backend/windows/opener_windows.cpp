@@ -78,8 +78,10 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
         return std::unexpected{"File is a binary executable"};
 
     // Windows attachment policy (respects system/zone policy)
-    if (auto result = checkExtensionPolicy(path); !result)
-        return result;
+    // If I keep this, it prevents opening of folders:
+
+    // if (auto result = checkExtensionPolicy(path); !result)
+    //     return result;
 
     if (openWith)
     {

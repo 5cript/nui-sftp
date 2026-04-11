@@ -1090,7 +1090,9 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
     std::string const& instanceDirStr
 )
 {
-    std::filesystem::path instanceDir{instanceDirStr};
+    std::string normalizedDirStr = instanceDirStr;
+    std::replace(normalizedDirStr.begin(), normalizedDirStr.end(), '\\', '/');
+    std::filesystem::path instanceDir{normalizedDirStr};
 
     Log::info("FileTracking: createInstance succeeded, id={}, dir={}", instanceId.value(), instanceDirStr);
 

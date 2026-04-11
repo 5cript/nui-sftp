@@ -94,9 +94,9 @@ namespace FileTracking
 
             nlohmann::json payload = {
                 {"action", Utility::enumToString(toFileAction(action))},
-                {"directory", dir},
-                {"filename", filename},
-                {"oldFilename", oldFilename},
+                {"directory", std::filesystem::path(dir).generic_string()},
+                {"filename", std::filesystem::path(filename).generic_string()},
+                {"oldFilename", std::filesystem::path(oldFilename).generic_string()},
             };
 
             boost::asio::post(
