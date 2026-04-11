@@ -8,6 +8,12 @@
 class NewSessionDialog
 {
   public:
+    enum class SessionType
+    {
+        ssh,
+        shell
+    };
+
     NewSessionDialog(std::string id);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(NewSessionDialog);
 
@@ -17,13 +23,16 @@ class NewSessionDialog
     {
         std::string sessionName{};
         std::string iconName{};
+        SessionType sessionType{SessionType::ssh};
     };
     struct OpenOptions
     {
         std::function<void(ConfirmResult const&)> onConfirm;
         bool showIconPicker{true};
+        bool showSessionTypePicker{true};
         std::string initialName{};
         std::string initialIcon{"laptop"};
+        SessionType initialSessionType{SessionType::ssh};
     };
     void open(OpenOptions options);
 

@@ -28,10 +28,12 @@ struct NewSessionDialog::Implementation
     Nui::Observed<std::string> sessionName{std::string{defaultName}};
     Nui::Observed<ScriptNuiComponents::ValueState> nameValid{ScriptNuiComponents::ValueState::Valid};
     Nui::Observed<std::string> icon{"laptop"};
+    Nui::Observed<std::string> sessionType{"ssh"};
     Nui::Observed<std::string> validationMessage{
         "Session name must be 1-5000 characters long and cannot contain \\ or / or \" characters."
     };
     Nui::Observed<bool> showIconPicker{true};
+    Nui::Observed<bool> showSessionTypePicker{true};
     std::function<void(NewSessionDialog::ConfirmResult const&)> onConfirm;
 
     Implementation(std::string id)
@@ -82,6 +84,33 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
             .validationMessage = &impl_->validationMessage,
         }),
         div{
+            style = observe(impl_->showSessionTypePicker).generate([](bool show) {
+                return show ? "display: contents;" : "display: none;";
+            })
+        }(
+            span{}(language->getObserved("newSessionDialog", "sessionTypeLabel")),
+            Snc::select(Snc::SelectOptions<decltype(impl_->sessionType), std::vector<std::string>>{
+                .activeOption = impl_->sessionType,
+                .options = std::vector<std::string>{"ssh", "shell"},
+                .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
+                {
+                    return span{}(
+                        observe(stateful.get()),
+                        [](std::string const& typeStr) -> Nui::ElementRenderer {
+                            return span{}(typeStr == "ssh" ? "SSH" : "Local Shell");
+                        }
+                    );
+                },
+                .elementRenderer = [](std::string const& typeStr) -> Nui::ElementRenderer
+                {
+                    return span{}(typeStr == "ssh" ? "SSH" : "Local Shell");
+                },
+                .makeId = [](){
+                    return Nui::val::global("generateId")().as<std::string>();
+                }
+            })
+        ),
+        div{
             style = observe(impl_->showIconPicker).generate([](bool show) {
                 return show ? "display: contents;" : "display: none;";
             })
@@ -119,7 +148,9 @@ void NewSessionDialog::open(OpenOptions options)
 {
     impl_->onConfirm = std::move(options.onConfirm);
     impl_->showIconPicker = options.showIconPicker;
+    impl_->showSessionTypePicker = options.showSessionTypePicker;
     impl_->icon = options.initialIcon;
+    impl_->sessionType = options.initialSessionType == SessionType::ssh ? "ssh" : "shell";
     if (options.initialName.empty())
     {
         impl_->sessionName = std::string{Implementation::defaultName};
@@ -149,6 +180,7 @@ void NewSessionDialog::open(OpenOptions options)
                     ConfirmResult{
                         .sessionName = impl_->sessionName.value(),
                         .iconName = impl_->icon.value(),
+                        .sessionType = impl_->sessionType.value() == "ssh" ? SessionType::ssh : SessionType::shell,
                     }
                 );
             }
