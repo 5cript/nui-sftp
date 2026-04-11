@@ -216,7 +216,7 @@ struct Session::Implementation
             PopupMenu::sectionHeader("New Tab"),
             PopupMenu::item(
                 language->get("sessionFrontend", "terminal"),
-                {},
+                std::string{},
                 [this]()
                 {
                     Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "terminal"s);
@@ -225,7 +225,7 @@ struct Session::Implementation
             ),
             PopupMenu::item(
                 language->get("sessionFrontend", "fileExplorer"),
-                {},
+                std::string{},
                 [this]()
                 {
                     tabAddMenu.close();
@@ -255,7 +255,7 @@ struct Session::Implementation
             tabAddMenuItems.push_back(
                 PopupMenu::item(
                     language->get("sessionFrontend", "operationQueue"),
-                    {},
+                    std::string{},
                     [this]()
                     {
                         tabAddMenu.close();
@@ -270,7 +270,7 @@ struct Session::Implementation
             tabAddMenuItems.push_back(
                 PopupMenu::item(
                     language->get("sessionFrontend", "fileTracking"),
-                    {},
+                    std::string{},
                     [this]()
                     {
                         tabAddMenu.close();

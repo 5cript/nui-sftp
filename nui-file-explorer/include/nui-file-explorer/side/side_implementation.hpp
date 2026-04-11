@@ -228,7 +228,7 @@ namespace NuiFileExplorer
             newItemMenu.setItems({
                 Snc::PopupMenu::item(
                     "File",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         this->model->onNewItem(Item::Type::Regular);
@@ -236,7 +236,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Folder",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         this->model->onNewItem(Item::Type::Directory);
@@ -247,7 +247,7 @@ namespace NuiFileExplorer
             sortMenu.setItems({
                 Snc::PopupMenu::item(
                     "Name Ascending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Name, true};
@@ -257,7 +257,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Name Descending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Name, false};
@@ -267,7 +267,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Size Ascending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Size, true};
@@ -277,7 +277,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Size Descending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Size, false};
@@ -287,7 +287,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Info Ascending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Info, true};
@@ -297,7 +297,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Info Descending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Info, false};
@@ -307,7 +307,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Modification Time Ascending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Mtime, true};
@@ -317,7 +317,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Modification Time Descending",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         sorting = {SortCriterion::Mtime, false};
@@ -330,7 +330,7 @@ namespace NuiFileExplorer
             viewMenu.setItems({
                 Snc::PopupMenu::item(
                     "Icons",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         flavor = Flavor::Icons;
@@ -340,7 +340,7 @@ namespace NuiFileExplorer
                 ),
                 Snc::PopupMenu::item(
                     "Table",
-                    {},
+                    std::string{},
                     [this]()
                     {
                         flavor = Flavor::Table;

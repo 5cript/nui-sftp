@@ -8,6 +8,14 @@
 #include <ui5-sap-icons/icons/picture.hpp>
 #include <ui5-sap-icons/icons/video.hpp>
 #include <ui5-sap-icons/icons/folder.hpp>
+#include <ui5-sap-icons/icons/open-folder.hpp>
+#include <ui5-sap-icons/icons/open-command-field.hpp>
+#include <ui5-sap-icons/icons/synchronize.hpp>
+#include <ui5-sap-icons/icons/delete.hpp>
+#include <ui5-sap-icons/icons/edit.hpp>
+#include <ui5-sap-icons/icons/detail-view.hpp>
+#include <ui5-sap-icons/icons/add-favorite.hpp>
+#include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <utility/language.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
@@ -166,7 +174,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         items.push_back(
             Snc::PopupMenu::item(
                 isFav ? "Remove from Favorites" : "Add to Favorites",
-                {},
+                isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
                 [this, selPath, isFav]()
                 {
                     if (isFav)
@@ -182,7 +190,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
     const std::vector<NuiFileExplorer::ContextMenuItem> baseItems = {
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "download"),
-            {},
+            Ui5Icons::download(),
             [this, selectedItems]()
             {
                 onTransfer(selectedItems, std::nullopt);
@@ -192,7 +200,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "open"),
-            {},
+            Ui5Icons::open_folder(),
             [this, selectedItems]()
             {
                 onDownloadAndOpen(selectedItems.front(), false);
@@ -201,7 +209,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWith"),
-            {},
+            Ui5Icons::open_command_field(),
             [this, selectedItems]()
             {
                 onDownloadAndOpen(selectedItems.front(), true);
@@ -210,7 +218,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openAndSync"),
-            {},
+            Ui5Icons::synchronize(),
             [this, selectedItems]()
             {
                 onWatchDownloadAndOpen(selectedItems.front(), false);
@@ -219,7 +227,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWithAndSync"),
-            {},
+            Ui5Icons::synchronize(),
             [this, selectedItems]()
             {
                 onWatchDownloadAndOpen(selectedItems.front(), true);
@@ -229,7 +237,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "delete"),
-            {},
+            Ui5Icons::delete_(),
             [this, selectedItems]()
             {
                 onDelete(selectedItems);
@@ -238,7 +246,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "rename"),
-            {},
+            Ui5Icons::edit(),
             [this, selectedItems]()
             {
                 onRename(selectedItems.front());
@@ -247,7 +255,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "properties"),
-            {},
+            Ui5Icons::detail_view(),
             [this, selectedItems]()
             {
                 onProperties(selectedItems.front());
