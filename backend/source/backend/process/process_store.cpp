@@ -458,8 +458,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                         return;
                     }
                 }
-#endif
-
+#else
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
@@ -475,6 +474,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 process->second->exit(0s);
                 processes_.erase(process);
                 hub->callRemote(responseId, nlohmann::json{{"success", true}});
+#endif
             }
             catch (std::exception const& e)
             {
@@ -504,8 +504,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                         return;
                     }
                 }
-#endif
-
+#else
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
@@ -521,6 +520,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 process->second->exit();
                 processes_.erase(process);
                 hub->callRemote(responseId, nlohmann::json{{"success", true}});
+#endif
             }
             catch (std::exception const& e)
             {
