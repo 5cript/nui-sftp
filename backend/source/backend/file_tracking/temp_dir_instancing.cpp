@@ -92,6 +92,17 @@ namespace FileTracking
             if (filename.ends_with(".filepart"))
                 return;
 
+#ifdef _WIN32
+            // On Windows I get updates to directories when things get deleted/created within them etc.
+            // ignore it:
+            if (action == efsw::Actions::Modified)
+            {
+                std::filesystem::path path = std::filesystem::path(dir) / filename;
+                if (std::filesystem::is_directory(path))
+                    return;
+            }
+#endif
+
             nlohmann::json payload = {
                 {"action", Utility::enumToString(toFileAction(action))},
                 {"directory", std::filesystem::path(dir).generic_string()},

@@ -441,6 +441,12 @@ void FileTrackingPanel::startWatching(
                     std::filesystem::path relPath = changedLocalPath.lexically_relative(instanceDir);
                     std::filesystem::path changedRemotePath = remotePath.parent_path() / relPath;
 
+                    Log::info(
+                        "FileTracking: enqueueing remote delete for instance {} due to local deletion: {}",
+                        instanceId.value(),
+                        changedRemotePath.generic_string()
+                    );
+
                     impl_->operationQueue->enqueueDelete(
                         {changedRemotePath},
                         true,
@@ -452,7 +458,8 @@ void FileTrackingPanel::startWatching(
                                     instanceId.value(),
                                     info
                                 );
-                        }
+                        },
+                        SharedData::OperationMode::PriorityQueued
                     );
                 }
                 return;

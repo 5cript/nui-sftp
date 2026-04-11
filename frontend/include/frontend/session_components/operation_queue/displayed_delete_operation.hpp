@@ -38,6 +38,13 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         return false;
     }
 
+    void state(SharedData::OperationState newState) override
+    {
+        OperationCard::state(newState);
+        if (isCompletedState())
+            progressBar_.setZeroAsComplete();
+    }
+
     void setProgress(SharedData::BulkDeleteProgress const& progress)
     {
         if (currentFile.value() != progress.currentFile)
@@ -63,11 +70,10 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                 span{}(
                     observe(currentFile),
                     [this](){
-                        return fmt::format("Deleting: '{}'", currentFile.value());
+                        return fmt::format("Deleting: '{}'", currentFile.value().empty() ? removePath_.generic_string() : currentFile.value());
                     }
                 ),
-                progressBar_(),
-                div{}()
+                progressBar_("grid-column: 3 / 5;")
             );
         // clang-format on
     }
