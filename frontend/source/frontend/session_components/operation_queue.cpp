@@ -467,7 +467,12 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         }
         else if (added.type == SharedData::OperationType::Delete)
         {
-            Log::info("Creating delete operation card for operation id: {}", added.operationId.value());
+            using namespace std::string_literals;
+            Log::info(
+                "Creating delete operation card for operation id: {}. path: {}",
+                added.operationId.value(),
+                added.remotePath ? added.remotePath->generic_string() : "???"s
+            );
             return std::make_unique<DisplayedDeleteOperation>(
                 added.operationId,
                 *impl_->confirmDialog,

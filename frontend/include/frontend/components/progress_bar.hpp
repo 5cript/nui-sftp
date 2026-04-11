@@ -3,6 +3,8 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
+#include <string>
+
 namespace Components
 {
     class ProgressBar
@@ -20,7 +22,7 @@ namespace Components
 
         ROAR_PIMPL_SPECIAL_FUNCTIONS(ProgressBar);
 
-        Nui::ElementRenderer operator()() const;
+        Nui::ElementRenderer operator()(std::string const& extraStyleOptions = "") const;
 
         /**
          * Set the progress of the progress bar.

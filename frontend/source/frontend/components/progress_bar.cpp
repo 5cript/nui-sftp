@@ -127,7 +127,7 @@ namespace Components
         recalculate();
     }
 
-    Nui::ElementRenderer ProgressBar::operator()() const
+    Nui::ElementRenderer ProgressBar::operator()(std::string const& extraStyleOptions) const
     {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
@@ -137,7 +137,7 @@ namespace Components
         // clang-format off
         return div{
             class_ = "progress-bar",
-            style = fmt::format("height: {};", impl_->height)
+            style = fmt::format("height: {}; {}", impl_->height, extraStyleOptions)
         }(
             // bar fill
             div{

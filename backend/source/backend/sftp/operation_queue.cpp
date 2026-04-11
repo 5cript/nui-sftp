@@ -715,8 +715,9 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     }
     const auto statResult = statFut.get();
     const bool isDirectory = statResult.has_value() && statResult->isDirectoryLike();
+    const auto isBulk = recursive && isDirectory;
 
-    if (recursive && isDirectory)
+    if (isBulk)
     {
         const auto scanId = Ids::generateOperationId();
 
