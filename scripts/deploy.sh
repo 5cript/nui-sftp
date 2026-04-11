@@ -27,6 +27,11 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
+# Optional: directory containing extra icons (e.g. extracted icons.tar.gz).
+# When set, all contents are copied into assets/icons/ and folder_main.png is
+# placed directly in assets/icons/ for quick access.
+ICONS_SOURCE="${ICONS_SOURCE:-}"
+
 # On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
 # Also set a variable for future reference.
 
@@ -60,6 +65,15 @@ fi
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/file.png" "${INSTALL_TARGET}/assets/icons/"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/icons/"
+
+# Extra icons bundle (e.g. OS folder icons).
+if [ -n "${ICONS_SOURCE}" ] && [ -d "${ICONS_SOURCE}" ]; then
+    cp -r "${ICONS_SOURCE}/." "${INSTALL_TARGET}/assets/icons/"
+    # Also expose folder_main directly in assets/icons/ for easy lookup.
+    if [ -f "${ICONS_SOURCE}/os_folders/windows/11/folder_main.png" ]; then
+        cp "${ICONS_SOURCE}/os_folders/windows/11/folder_main.png" "${INSTALL_TARGET}/assets/icons/folder_main.png"
+    fi
+fi
 
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
 if [ "$OMIT_FRONTEND" = false ]; then
