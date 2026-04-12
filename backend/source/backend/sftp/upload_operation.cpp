@@ -2,6 +2,9 @@
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
+
+#include <chrono>
+#include <filesystem>
 #include <tuple>
 
 UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperationOptions options)
@@ -219,6 +222,34 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
     }
 
     const auto target = std::filesystem::read_symlink(options_.localPath);
+
+    // sftp_symlink fails if the link path already exists. If we're allowed to overwrite,
+    // remove whatever is there first (file or link — directories are left alone since
+    // that almost certainly isn't what the user wants).
+    if (options_.mayOverwrite)
+    {
+        auto statFut = sftp_->lstat(options_.remotePath);
+        if (statFut.wait_for(options_.futureTimeout) == std::future_status::ready)
+        {
+            const auto statResult = statFut.get();
+            if (statResult.has_value() && statResult->type != SharedData::FileType::Directory)
+            {
+                auto rmFut = sftp_->removeFile(options_.remotePath);
+                if (rmFut.wait_for(options_.futureTimeout) == std::future_status::ready)
+                {
+                    const auto rmResult = rmFut.get();
+                    if (!rmResult.has_value())
+                    {
+                        Log::warn(
+                            "UploadOperation: Could not remove existing '{}' before symlink: {}.",
+                            options_.remotePath.generic_string(),
+                            rmResult.error().message
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     auto fut = sftp_->createSymLink(target, options_.remotePath);
     const auto futureStatus = fut.wait_for(options_.futureTimeout);
@@ -588,6 +619,48 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
     {
         Log::error("Failed to rename remote sftp file: {}", result.error().message);
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
+    }
+
+    // Preserve the local file's mtime on the remote file so subsequent syncs
+    // don't see the file as modified (best-effort; a failure is only a warning).
+    {
+        std::error_code errc{};
+        const auto ftime = std::filesystem::last_write_time(options_.localPath, errc);
+        if (!errc)
+        {
+            const auto sctime = std::chrono::file_clock::to_sys(ftime);
+            const auto mtimeSecs = static_cast<uint32_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(sctime.time_since_epoch()).count()
+            );
+            sftp_attributes_struct attrs{};
+            attrs.flags = SSH_FILEXFER_ATTR_ACMODTIME;
+            attrs.atime = mtimeSecs;
+            attrs.mtime = mtimeSecs;
+            auto mtimeFut = sftp_->stat(options_.remotePath, &attrs);
+            if (mtimeFut.wait_for(options_.futureTimeout) != std::future_status::ready)
+            {
+                Log::warn(
+                    "UploadOperation: Timed out setting mtime on '{}'.",
+                    options_.remotePath.generic_string()
+                );
+            }
+            else if (const auto mtimeResult = mtimeFut.get(); !mtimeResult.has_value())
+            {
+                Log::warn(
+                    "UploadOperation: Failed to set mtime on '{}': {}.",
+                    options_.remotePath.generic_string(),
+                    mtimeResult.error().message
+                );
+            }
+        }
+        else
+        {
+            Log::warn(
+                "UploadOperation: Could not read local mtime for '{}': {}.",
+                options_.localPath.generic_string(),
+                errc.message()
+            );
+        }
     }
 
     Log::debug(

@@ -3,6 +3,7 @@
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
+#include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/error_or_success.hpp>
@@ -368,7 +369,23 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                     static_cast<DeleteOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
                 else
-                    Log::error("Scan operation completed but no following BulkOperation to set results to.");
+                {
+                    const auto cbIt = syncScanCallbacks_.find(id.value());
+                    if (cbIt != syncScanCallbacks_.end())
+                    {
+                        auto* scan = static_cast<ScanOperation*>(operation.get());
+                        auto entries = scan->ejectEntries();
+                        // Pre-compute absolute fullPaths from parent chain
+                        for (auto& entry : entries)
+                            entry.fullPath = SharedData::fullPath(entries, entry);
+                        const auto totalBytes = scan->totalBytes();
+                        auto callback = std::move(cbIt->second);
+                        syncScanCallbacks_.erase(cbIt);
+                        callback(std::move(entries), totalBytes);
+                    }
+                    else
+                        Log::error("Scan operation completed but no following BulkOperation to set results to.");
+                }
             }
             else if (operation->type() == SharedData::OperationType::LocalScan)
             {
@@ -378,7 +395,22 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                     static_cast<BulkUploadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
                 }
                 else
-                    Log::error("Scan operation completed but no following BulkOperation to set results to.");
+                {
+                    const auto cbIt = syncScanCallbacks_.find(id.value());
+                    if (cbIt != syncScanCallbacks_.end())
+                    {
+                        auto* scan = static_cast<LocalScanOperation*>(operation.get());
+                        auto entries = scan->ejectEntries();
+                        for (auto& entry : entries)
+                            entry.fullPath = SharedData::fullPath(entries, entry);
+                        const auto totalBytes = scan->totalBytes();
+                        auto callback = std::move(cbIt->second);
+                        syncScanCallbacks_.erase(cbIt);
+                        callback(std::move(entries), totalBytes);
+                    }
+                    else
+                        Log::error("LocalScan operation completed but no following BulkOperation to set results to.");
+                }
             }
 
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
@@ -586,12 +618,26 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     // Assumed in strand
 
     std::error_code ec;
-    const auto stat = std::filesystem::status(localPath, ec);
+    // lstat-style: do not follow links here so dangling symlinks can still be uploaded as
+    // symlinks (UploadOperation::handleSymlink recreates the literal on the remote).
+    const auto symStat = std::filesystem::symlink_status(localPath, ec);
 
     if (ec)
     {
         Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
+    }
+
+    const bool isSymlink = std::filesystem::is_symlink(symStat);
+    std::filesystem::file_status stat = symStat;
+    if (!isSymlink)
+    {
+        stat = std::filesystem::status(localPath, ec);
+        if (ec)
+        {
+            Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
+            return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
+        }
     }
 
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
@@ -600,7 +646,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
-    if (stat.type() == std::filesystem::file_type::regular)
+    // Symlinks always go through the single-file UploadOperation path so handleSymlink() can
+    // recreate them on the remote — regardless of whether the target exists or is a directory.
+    if (isSymlink || stat.type() == std::filesystem::file_type::regular)
     {
         auto opts = resolveUploadOptions(transferOptions, resolvedTimeout);
         opts.remotePath = remotePath;
@@ -820,6 +868,88 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     );
 
     return {};
+}
+
+void OperationQueue::addSyncScanOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId remoteScanId,
+    Ids::OperationId localScanId,
+    std::filesystem::path const& remotePath,
+    std::filesystem::path const& localPath
+)
+{
+    // Register completion callbacks that emit onSyncScanResult to the frontend.
+    syncScanCallbacks_[remoteScanId.value()] =
+        [weak = weak_from_this(), remoteScanId](std::vector<SharedData::DirectoryEntry> entries, std::uint64_t totalBytes)
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->hub_->callRemote(
+            self->rpcName("onSyncScanResult"),
+            SharedData::SyncScanResult{
+                .operationId = remoteScanId,
+                .isLocal = false,
+                .totalBytes = totalBytes,
+                .entries = std::move(entries),
+            }
+        );
+    };
+
+    syncScanCallbacks_[localScanId.value()] =
+        [weak = weak_from_this(), localScanId](std::vector<SharedData::DirectoryEntry> entries, std::uint64_t totalBytes)
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->hub_->callRemote(
+            self->rpcName("onSyncScanResult"),
+            SharedData::SyncScanResult{
+                .operationId = localScanId,
+                .isLocal = true,
+                .totalBytes = totalBytes,
+                .entries = std::move(entries),
+            }
+        );
+    };
+
+    // Queue remote scan
+    auto remoteScan = std::make_unique<ScanOperation>(
+        sftp,
+        ScanOperation::ScanOperationOptions{
+            .progressCallback = makeScanProgressCallback("onScanProgress", remoteScanId),
+            .remotePath = remotePath,
+            .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+        }
+    );
+    priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
+
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = remoteScanId,
+            .type = SharedData::OperationType::Scan,
+            .mode = SharedData::OperationMode::PriorityQueued,
+            .remotePath = remotePath,
+        }
+    );
+
+    // Queue local scan
+    auto localScan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
+        .progressCallback = makeScanProgressCallback("onLocalScanProgress", localScanId),
+        .localPath = localPath,
+    });
+    priorityOperations_.emplace_back(localScanId, std::move(localScan));
+
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = localScanId,
+            .type = SharedData::OperationType::LocalScan,
+            .mode = SharedData::OperationMode::PriorityQueued,
+            .localPath = localPath,
+        }
+    );
 }
 
 void OperationQueue::registerRpc()

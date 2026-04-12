@@ -1,6 +1,12 @@
 #include <frontend/sync_dialog/sync_progress_dialog.hpp>
+#include <frontend/session_components/operation_queue.hpp>
 #include <frontend/components/icon_panel.hpp>
 #include <frontend/components/progress_bar.hpp>
+#include <frontend/svgs/decline.hpp>
+
+#include <shared_data/file_operations/scan_progress.hpp>
+#include <shared_data/file_operations/sync_scan_result.hpp>
+#include <shared_data/sync_phase.hpp>
 
 #include <nui/event_system/event_context.hpp>
 #include <nui/event_system/observed_value.hpp>
@@ -8,34 +14,35 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
-#include <nui/frontend/utility/functions.hpp>
-#include <nui/frontend/val.hpp>
 #include <nui/utility/move_detector.hpp>
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
 
-#include <shared_data/sync_phase.hpp>
+#include <script-nui-components/button.hpp>
+#include <script-nui-components/style_variant.hpp>
 
 #include <fmt/format.h>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 struct SyncProgressDialog::Implementation
 {
     Nui::Observed<bool> open_{false};
     Nui::Observed<SharedData::SyncPhase> phase_{SharedData::SyncPhase::Idle};
 
-    // Listing counters
+    // Listing counters (updated via scan progress callbacks)
     Nui::Observed<std::uint64_t> localListed_{0ull};
     Nui::Observed<std::uint64_t> remoteListed_{0ull};
 
-    // Comparing counter
+    // Comparing counter — will be populated when the diff step is added
     Nui::Observed<std::uint64_t> compared_{0ull};
 
-    // Hashing progress bar (total becomes known when comparing finishes)
+    // Hashing progress bar — total becomes known when comparing finishes
     Components::ProgressBar hashProgressBar_{Components::ProgressBar::Settings{
         .height = "10px",
         .min = 0,
@@ -45,13 +52,38 @@ struct SyncProgressDialog::Implementation
 
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
-    std::function<void()> onDone_{};
 
+    std::function<void(
+        std::vector<SharedData::DirectoryEntry> localEntries,
+        std::vector<SharedData::DirectoryEntry> remoteEntries
+    )>
+        onDone_{};
+
+    // Intermediate storage while waiting for both scans to complete
+    std::optional<std::vector<SharedData::DirectoryEntry>> localEntries_{};
+    std::optional<std::vector<SharedData::DirectoryEntry>> remoteEntries_{};
+
+    // Cancelled flag; replaced on each open() to invalidate stale captures
     std::shared_ptr<bool> cancelToken_{std::make_shared<bool>(false)};
+
+    void checkBothComplete(SyncProgressDialog* /*dlg*/)
+    {
+        if (!localEntries_ || !remoteEntries_)
+            return;
+
+        // TODO: add Comparing phase here when hash/diff step is implemented
+        phase_ = SharedData::SyncPhase::Done;
+        open_ = false;
+        Nui::globalEventContext.executeActiveEventsImmediately();
+
+        if (onDone_)
+            onDone_(std::move(*localEntries_), std::move(*remoteEntries_));
+    }
 };
 
-SyncProgressDialog::SyncProgressDialog()
-    : impl_{std::make_unique<Implementation>()}
+SyncProgressDialog::SyncProgressDialog(OperationQueue* operationQueue)
+    : operationQueue_{operationQueue}
+    , impl_{std::make_unique<Implementation>()}
 {}
 
 SyncProgressDialog::~SyncProgressDialog() = default;
@@ -61,10 +93,13 @@ SyncProgressDialog& SyncProgressDialog::operator=(SyncProgressDialog&&) = defaul
 void SyncProgressDialog::open(
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
-    std::function<void()> onDone
+    std::function<void(
+        std::vector<SharedData::DirectoryEntry> localEntries,
+        std::vector<SharedData::DirectoryEntry> remoteEntries
+    )> onDone
 )
 {
-    // Cancel any in-progress simulation
+    // Cancel any in-progress scan
     *impl_->cancelToken_ = true;
     auto token = std::make_shared<bool>(false);
     impl_->cancelToken_ = token;
@@ -75,136 +110,51 @@ void SyncProgressDialog::open(
 
     // Reset state
     impl_->phase_ = SharedData::SyncPhase::Listing;
-    impl_->localListed_ = 0;
-    impl_->remoteListed_ = 0;
-    impl_->compared_ = 0;
+    impl_->localListed_ = 0ull;
+    impl_->remoteListed_ = 0ull;
+    impl_->compared_ = 0ull;
     impl_->hashProgressBar_.max(0);
+    impl_->localEntries_.reset();
+    impl_->remoteEntries_.reset();
     impl_->open_ = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    // --- Demo simulation ---
-
-    // Tick listing every 120ms, 8 ticks each side
-    for (int idx = 1; idx <= 8; ++idx)
-    {
-        Nui::val::global("setTimeout")
-            .call<void>(
-                "call",
-                Nui::val::global("window"),
-                Nui::bind(
-                    [this, token, idx](Nui::val)
-                    {
-                        if (*token)
-                            return;
-                        impl_->localListed_ = static_cast<std::uint64_t>(idx * 3);
-                        impl_->remoteListed_ = static_cast<std::uint64_t>(idx * 3 + 1);
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    },
-                    std::placeholders::_1
-                ),
-                idx * 120
-            );
-    }
-
-    // Switch to Comparing at ~1100ms
-    Nui::val::global("setTimeout")
-        .call<void>(
-            "call",
-            Nui::val::global("window"),
-            Nui::bind(
-                [this, token](Nui::val)
-                {
-                    if (*token)
-                        return;
-                    impl_->phase_ = SharedData::SyncPhase::Comparing;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
-                std::placeholders::_1
-            ),
-            1100
-        );
-
-    // Tick comparing every 150ms, 6 ticks
-    for (int idx = 1; idx <= 6; ++idx)
-    {
-        Nui::val::global("setTimeout")
-            .call<void>(
-                "call",
-                Nui::val::global("window"),
-                Nui::bind(
-                    [this, token, idx](Nui::val)
-                    {
-                        if (*token)
-                            return;
-                        impl_->compared_ = static_cast<std::uint64_t>(idx * 4);
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    },
-                    std::placeholders::_1
-                ),
-                1100 + idx * 150
-            );
-    }
-
-    // Switch to Hashing at ~2100ms, set known total = 5
-    Nui::val::global("setTimeout")
-        .call<void>(
-            "call",
-            Nui::val::global("window"),
-            Nui::bind(
-                [this, token](Nui::val)
-                {
-                    if (*token)
-                        return;
-                    impl_->hashProgressBar_.max(5);
-                    impl_->phase_ = SharedData::SyncPhase::Hashing;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
-                std::placeholders::_1
-            ),
-            2100
-        );
-
-    // Hash files one by one, 250ms apart
-    for (int idx = 1; idx <= 5; ++idx)
-    {
-        Nui::val::global("setTimeout")
-            .call<void>(
-                "call",
-                Nui::val::global("window"),
-                Nui::bind(
-                    [this, token, idx](Nui::val)
-                    {
-                        if (*token)
-                            return;
-                        impl_->hashProgressBar_.setProgress(idx);
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    },
-                    std::placeholders::_1
-                ),
-                2100 + idx * 250
-            );
-    }
-
-    // Done at ~3500ms
-    Nui::val::global("setTimeout")
-        .call<void>(
-            "call",
-            Nui::val::global("window"),
-            Nui::bind(
-                [this, token](Nui::val)
-                {
-                    if (*token)
-                        return;
-                    impl_->phase_ = SharedData::SyncPhase::Done;
-                    impl_->open_ = false;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                    if (impl_->onDone_)
-                        impl_->onDone_();
-                },
-                std::placeholders::_1
-            ),
-            3500
-        );
+    operationQueue_->enqueueSyncScans(
+        impl_->localPath_,
+        impl_->remotePath_,
+        // onRemoteProgress
+        [this, token](SharedData::ScanProgress const& progress)
+        {
+            if (*token)
+                return;
+            impl_->remoteListed_ = progress.totalScanned;
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        },
+        // onLocalProgress
+        [this, token](SharedData::ScanProgress const& progress)
+        {
+            if (*token)
+                return;
+            impl_->localListed_ = progress.totalScanned;
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        },
+        // onRemoteComplete
+        [this, token](SharedData::SyncScanResult result)
+        {
+            if (*token)
+                return;
+            impl_->remoteEntries_ = std::move(result.entries);
+            impl_->checkBothComplete(this);
+        },
+        // onLocalComplete
+        [this, token](SharedData::SyncScanResult result)
+        {
+            if (*token)
+                return;
+            impl_->localEntries_ = std::move(result.entries);
+            impl_->checkBothComplete(this);
+        }
+    );
 }
 
 void SyncProgressDialog::cancel()
@@ -213,6 +163,8 @@ void SyncProgressDialog::cancel()
     impl_->cancelToken_ = std::make_shared<bool>(false);
     impl_->open_ = false;
     impl_->phase_ = SharedData::SyncPhase::Idle;
+    impl_->localEntries_.reset();
+    impl_->remoteEntries_.reset();
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
@@ -223,6 +175,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
     using namespace Nui::Attributes::Literals;
     using Nui::Elements::div;
     using Nui::Elements::span;
+    namespace Snc = ScriptNuiComponents;
 
     using namespace std::string_literals;
     // clang-format off
@@ -251,10 +204,13 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                         ));
                     }
                 ),
-                button{
-                    class_ = "icon-button sync-close-x",
-                    onClick = [this](Nui::val) { cancel(); }
-                }("x")
+                Snc::button({
+                    .icon = GeneratedSvgs::decline(),
+                    .attributes = {
+                        onClick = [this]() { cancel(); }
+                    },
+                    .styleVariant = Snc::StyleVariant::Transparent,
+                })
             ),
 
             // Body
@@ -288,6 +244,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                         );
                     }
 
+                    // Comparing phase — placeholder for future diff/hash step
                     if (phase == SharedData::SyncPhase::Comparing)
                     {
                         return div{class_ = "sync-progress-step"}(
@@ -304,6 +261,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                         );
                     }
 
+                    // Hashing phase — placeholder for future hash-based comparison
                     if (phase == SharedData::SyncPhase::Hashing)
                     {
                         return div{class_ = "sync-progress-step"}(
@@ -321,10 +279,13 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
             // Footer
             div{class_ = "sync-dialog-footer"}(
                 div{class_ = "sync-footer-actions"}(
-                    button{
-                        class_ = "icon-button",
-                        onClick = [this](Nui::val) { cancel(); }
-                    }("Cancel")
+                    Snc::button({
+                        .text = "Cancel"s,
+                        .attributes = {
+                            onClick = [this]() { cancel(); }
+                        },
+                        .styleVariant = Snc::StyleVariant::Danger,
+                    })
                 )
             )
         )

@@ -9,6 +9,7 @@
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
+#include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
@@ -26,6 +27,7 @@
 #include <frontend/components/svg/scan.hpp>
 #include <frontend/components/svg/scan_animated.hpp>
 
+#include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
@@ -83,6 +85,32 @@ class OperationQueue
     );
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
+    /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
+     *         Automatically removed when the operation completes.
+     */
+    void addTransferProgressCallback(Ids::OperationId const& opId, std::function<void(double fraction)> callback);
+    void unpause();
+    /** @brief Observable pause state — observe() it to react to pause/unpause changes. */
+    Nui::Observed<bool>& pausedState();
+
+    /** @brief Enqueues a priority remote scan and a priority local scan for sync comparison.
+     *         All callbacks are registered before the backend RPC is called to avoid missing progress.
+     *
+     * @param localPath        Local directory root to scan.
+     * @param remotePath       Remote directory root to scan.
+     * @param onRemoteProgress Called on each remote scan progress update.
+     * @param onLocalProgress  Called on each local scan progress update.
+     * @param onRemoteComplete Called with the remote scan result when it finishes.
+     * @param onLocalComplete  Called with the local scan result when it finishes.
+     */
+    void enqueueSyncScans(
+        std::filesystem::path localPath,
+        std::filesystem::path remotePath,
+        std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
+        std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
+        std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
+        std::function<void(SharedData::SyncScanResult)> onLocalComplete
+    );
 
     Nui::ElementRenderer operator()();
 

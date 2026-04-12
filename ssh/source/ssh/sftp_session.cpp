@@ -113,6 +113,15 @@ namespace SecureShell
                     if (entry.type == SharedData::FileType::Symlink)
                     {
                         const auto fullPath = (path / entry.path).generic_string();
+
+                        // Raw link literal (what readlink returns) — used by the sync diff to
+                        // compare symlinks by target without resolving them.
+                        std::unique_ptr<char, decltype(&ssh_string_free_char)> linkLiteral{
+                            sftp_readlink(session_, fullPath.c_str()), ssh_string_free_char
+                        };
+                        if (linkLiteral)
+                            entry.linkTarget = std::filesystem::path{static_cast<const char*>(linkLiteral.get())};
+
                         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> targetAttrs{
                             sftp_stat(session_, fullPath.c_str()), sftp_attributes_free
                         };

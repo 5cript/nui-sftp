@@ -3,7 +3,12 @@
 
 #include <ssh/sftp_session.hpp>
 
+#include <chrono>
 #include <filesystem>
+
+#ifndef _WIN32
+#    include <sys/stat.h>
+#endif
 
 LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     : localPath_{std::move(options.localPath)}
@@ -27,23 +32,66 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             auto const& entry = *iter;
             const auto status = entry.symlink_status();
             SharedData::DirectoryEntry::FileType type;
-            if (std::filesystem::is_directory(status))
+            const bool isSymlink = std::filesystem::is_symlink(status);
+            if (isSymlink)
+            {
+#ifdef _WIN32
+                // Windows symlinks require elevated privileges to create and are rarely used by
+                // ordinary users. Skipping them here keeps sync predictable on Windows.
+                continue;
+#else
+                type = SharedData::DirectoryEntry::FileType::Symlink;
+#endif
+            }
+            else if (std::filesystem::is_directory(status))
                 type = SharedData::DirectoryEntry::FileType::Directory;
             else if (std::filesystem::is_regular_file(status))
                 type = SharedData::DirectoryEntry::FileType::Regular;
-            else if (std::filesystem::is_symlink(status))
-                type = SharedData::DirectoryEntry::FileType::Symlink;
             else
             {
                 // Dont add anything thats not uploadable:
                 continue;
             }
 
+            std::uint64_t mtimeSecs = 0;
+            if (isSymlink)
+            {
+#ifndef _WIN32
+                // For symlinks we want the link's own mtime (lstat), not the target's.
+                struct ::stat st{};
+                if (::lstat(entry.path().c_str(), &st) == 0)
+                    mtimeSecs = static_cast<std::uint64_t>(st.st_mtime);
+#endif
+            }
+            else
+            {
+                std::error_code errc{};
+                const auto ftime = entry.last_write_time(errc);
+                if (!errc)
+                {
+                    const auto sctime = std::chrono::file_clock::to_sys(ftime);
+                    mtimeSecs = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::seconds>(sctime.time_since_epoch()).count()
+                    );
+                }
+            }
+
+            std::optional<std::filesystem::path> linkTarget{};
+            if (isSymlink)
+            {
+                std::error_code errc{};
+                auto target = std::filesystem::read_symlink(entry.path(), errc);
+                if (!errc)
+                    linkTarget = std::move(target);
+            }
+
             entries.push_back(
                 SharedData::DirectoryEntry{
                     .path = entry.path().filename(),
                     .type = type,
-                    .size = entry.is_regular_file() ? entry.file_size() : 0
+                    .size = entry.is_regular_file() ? entry.file_size() : 0,
+                    .mtime = mtimeSecs,
+                    .linkTarget = std::move(linkTarget),
                 }
             );
         }

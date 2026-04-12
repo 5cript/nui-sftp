@@ -82,6 +82,10 @@ const fakeFilesystem = finalizeFakeFs({
                     file('shortcut2.lnk', 'Fake shortcut content')
                 ]),
                 symlink('link_to_doc1.txt', '/home/user/Documents/doc1.txt'),
+                // Fixtures used by upload/download symlink tests:
+                symlink('link_to_file1.txt', '/home/test/file1.txt'),
+                symlink('link_to_documents', '/home/test/Documents'),
+                symlink('dangling_link', '/home/test/does_not_exist.txt'),
                 file('file1.txt', 'Fake file content'),
                 file('file2.txt', 'Fake file content'),
                 file('large.txt', (() => {
@@ -521,17 +525,18 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
+                    // Dangling links are legal: return just the raw target literal even when
+                    // nothing exists at the target path.
                     const target = result.target;
                     const find2 = fakeFilesystem.find(target);
 
                     if (find2 === undefined) {
-                        logMessage('Target not found');
-                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        logMessage('Target not found (dangling link) — returning literal anyway');
+                        sftpStream.name(reqid, [{ filename: target, longname: target, attrs: {} }]);
+                        return;
                     }
 
                     sftpStream.name(reqid, [{ filename: target, longname: makeLongName(find2), attrs: find2.stat }]);
-
-                    // sftpStream.name(reqid, [{ filename: path, longname: 'foo', attrs: {} }]);
                 });
 
                 sftpStream.on('SYMLINK', (reqid, targetPath, linkPath) => {
@@ -540,12 +545,8 @@ const server = new Server({
 
                     logMessage('SYMLINK', targetPath, linkPath);
 
-                    const target = fakeFilesystem.find(targetPath);
-                    if (target === undefined) {
-                        // It is unclear whether the target must exist or not
-                        logMessage('Target not found');
-                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
-                    }
+                    // The target is allowed to not exist — dangling links are a valid scenario
+                    // on real SFTP servers and the sync dialog explicitly relies on this.
 
                     const link = fakeFilesystem.find(linkPath);
                     if (link !== undefined) {
@@ -553,7 +554,7 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     };
 
-                    const element = symlink(pathUtil.filename(linkPath), targetPath);
+                    const element = symlink(pathUtil.basename(linkPath), targetPath);
                     fakeFilesystem.insertDeep(pathUtil.dirname(linkPath), element);
 
                     sftpStream.status(reqid, STATUS_CODE.OK);

@@ -6,6 +6,7 @@ namespace SharedData
     {
         j = nlohmann::json{
             {"path", entry.path},
+            {"fullPath", entry.fullPath},
             {"longName", entry.longName},
             {"flags", entry.flags},
             {"type", entry.type},
@@ -22,12 +23,15 @@ namespace SharedData
             {"mtime", entry.mtime},
             {"mtimeNsec", entry.mtimeNsec},
             {"acl", entry.acl},
+            {"linkTarget", entry.linkTarget ? nlohmann::json(entry.linkTarget->generic_string()) : nlohmann::json(nullptr)},
             {"resolvedTarget", entry.resolvedTarget ? nlohmann::json(*entry.resolvedTarget) : nlohmann::json(nullptr)},
         };
     }
     void from_json(nlohmann::json const& j, DirectoryEntry& entry)
     {
         j.at("path").get_to(entry.path);
+        if (auto it = j.find("fullPath"); it != j.end())
+            it->get_to(entry.fullPath);
         j.at("longName").get_to(entry.longName);
         j.at("flags").get_to(entry.flags);
         j.at("type").get_to(entry.type);
@@ -44,10 +48,16 @@ namespace SharedData
         j.at("mtime").get_to(entry.mtime);
         j.at("mtimeNsec").get_to(entry.mtimeNsec);
         j.at("acl").get_to(entry.acl);
-        if (j.contains("resolvedTarget") && !j.at("resolvedTarget").is_null())
+        if (auto it = j.find("linkTarget"); it != j.end() && !it->is_null())
+        {
+            std::string tgt;
+            it->get_to(tgt);
+            entry.linkTarget = std::filesystem::path{tgt};
+        }
+        if (auto it = j.find("resolvedTarget"); it != j.end() && !it->is_null())
         {
             DirectoryEntry target{};
-            j.at("resolvedTarget").get_to(target);
+            it->get_to(target);
             entry.resolvedTarget = std::make_shared<DirectoryEntry>(std::move(target));
         }
     }
