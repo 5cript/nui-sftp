@@ -1,5 +1,7 @@
 #include <persistence/state/session_options.hpp>
 #include <frontend/session.hpp>
+#include <frontend/sync_dialog/sync_dialog.hpp>
+#include <frontend/sync_dialog/sync_progress_dialog.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
@@ -92,6 +94,10 @@ struct Session::Implementation
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
     Nui::ListenRemover<decltype(fileTrackingElement)> fileTrackingListener{};
 
+    // Sync Dialog
+    SyncDialog syncDialog;
+    SyncProgressDialog syncProgressDialog;
+
     // Shutdown & Connection Status:
     Nui::Observed<bool> inertEverything{false};
     Nui::Observed<bool> isInLostConnectionState{false};
@@ -176,8 +182,17 @@ struct Session::Implementation
         , sessionOptions{stateHolder, events, this->initialName, this->sessionLayoutId, confirmDialog}
         , fileTrackingPanel{stateHolder, events, confirmDialog}
         , fileTrackingElement{}
+        , syncDialog{confirmDialog, &this->operationQueue}
+        , syncProgressDialog{}
         , disambiguateTitle{std::move(disambiguateTitle)}
     {
+        syncDialog.setOnRecompare(
+            [this](std::filesystem::path loc, std::filesystem::path rem, std::function<void()> onDone) {
+                syncProgressDialog.open(std::move(loc), std::move(rem), std::move(onDone));
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        );
+
         fileGrid.leftModel().dropMetadata(sessionLayoutId);
         if (fileGrid.rightModel())
             fileGrid.rightModel()->dropMetadata(sessionLayoutId);
@@ -600,6 +615,14 @@ void Session::setupFileGrid()
     }
     else
         localSideModel().setRemoteModel(nullptr);
+
+    auto onSync = [this](std::filesystem::path loc, std::filesystem::path rem) {
+        impl_->syncDialog.open(std::move(loc), std::move(rem));
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    };
+    localFileGridSide().setOnSynchronize(onSync);
+    if (remoteFileGridSide())
+        remoteFileGridSide()->setOnSynchronize(onSync);
 }
 
 void Session::saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents)
@@ -1394,7 +1417,9 @@ Nui::ElementRenderer Session::operator()()
             return impl_->inertEverything.value() ? "true"s : std::optional<std::string>{std::nullopt};
         })
     }(
-        impl_->tabAddMenu()
+        impl_->tabAddMenu(),
+        impl_->syncDialog(),
+        impl_->syncProgressDialog()
     );
     // clang-format on
 }

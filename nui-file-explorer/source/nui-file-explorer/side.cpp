@@ -23,6 +23,7 @@
 #include <ui5-sap-icons/icons/refresh.hpp>
 #include <ui5-sap-icons/icons/search.hpp>
 #include <ui5-sap-icons/icons/menu.hpp>
+#include <ui5-sap-icons/icons/synchronize.hpp>
 
 using namespace std::string_literals;
 
@@ -456,7 +457,33 @@ namespace NuiFileExplorer
         if (impl_->otherSide)
             impl_->otherSide->closeMenus();
 
-        impl_->contextMenuPopup.setItems(impl_->model->contextMenuItems(clickItems));
+        auto menuItems = impl_->model->contextMenuItems(clickItems);
+
+        if (impl_->onSynchronize && impl_->otherSide && clickItems.size() == 1 &&
+            clickItems[0].isDirectoryLike())
+        {
+            const auto otherSelected = impl_->otherSide->selectedItems();
+            if (otherSelected.size() == 1 && otherSelected[0].isDirectoryLike())
+            {
+                namespace Snc = ScriptNuiComponents;
+                const bool thisIsLocal = impl_->model->isLeft();
+                const auto localPath =
+                    thisIsLocal ? clickItems[0].fullPath : otherSelected[0].fullPath;
+                const auto remotePath =
+                    thisIsLocal ? otherSelected[0].fullPath : clickItems[0].fullPath;
+                menuItems.push_back(Snc::PopupMenu::separator());
+                menuItems.push_back(Snc::PopupMenu::item(
+                    "Synchronize...",
+                    Ui5Icons::synchronize(),
+                    [this, localPath, remotePath]()
+                    {
+                        impl_->onSynchronize(localPath, remotePath);
+                    }
+                ));
+            }
+        }
+
+        impl_->contextMenuPopup.setItems(std::move(menuItems));
 
         const auto mouseEvent = Nui::WebApi::MouseEvent{event};
         impl_->contextMenuPopup.openAt(mouseEvent.clientX(), mouseEvent.clientY());
@@ -471,6 +498,13 @@ namespace NuiFileExplorer
     std::filesystem::path Side::path()
     {
         return model().currentPath().value();
+    }
+
+    void Side::setOnSynchronize(
+        std::function<void(std::filesystem::path, std::filesystem::path)> callback
+    )
+    {
+        impl_->onSynchronize = std::move(callback);
     }
 
     std::vector<std::filesystem::path> Side::selectedPaths() const

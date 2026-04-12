@@ -89,6 +89,19 @@ namespace NuiFileExplorer
         std::vector<Item> selectedItems() const;
 
         /**
+         * @brief Sets a callback invoked when both sides have exactly one directory-like item
+         *        selected and the user triggers the "Synchronize..." context menu entry.
+         *        The callback receives (localPath, remotePath) regardless of which side's
+         *        context menu was opened.
+         *
+         * @param callback Called with (localPath, remotePath).
+         */
+        void setOnSynchronize(
+            std::function<void(std::filesystem::path localPath, std::filesystem::path remotePath)>
+                callback
+        );
+
+        /**
          * @brief Returns the paths of all selected items.
          */
         std::vector<std::filesystem::path> selectedPaths() const;

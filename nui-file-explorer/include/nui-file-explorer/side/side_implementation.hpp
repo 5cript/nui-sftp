@@ -60,6 +60,7 @@ namespace NuiFileExplorer
         std::weak_ptr<Nui::Dom::BasicElement> pathBoxElement{};
 
         std::vector<Item> copiedFiles{};
+        std::function<void(std::filesystem::path, std::filesystem::path)> onSynchronize{};
 
         ScriptNuiComponents::DropdownMenu newItemMenu{};
         ScriptNuiComponents::DropdownMenu sortMenu{};
