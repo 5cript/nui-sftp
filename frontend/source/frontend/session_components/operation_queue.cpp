@@ -18,8 +18,11 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/svg.hpp>
+#include <nui/frontend/api/json.hpp>
 #include <nui/rpc.hpp>
 #include <fmt/format.h>
+
+#include <nlohmann/json.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/switch.hpp>
@@ -50,6 +53,10 @@ struct OperationQueue::Implementation
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
+    std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
+    // Keyed by operationId.value(); used for sync scan progress + completion routing.
+    std::unordered_map<std::string, std::function<void(SharedData::ScanProgress const&)>> syncScanProgressCallbacks;
+    std::unordered_map<std::string, std::function<void(SharedData::SyncScanResult)>> syncScanCompletionCallbacks;
     Nui::ListenRemover<decltype(paused)> pausedListener{};
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
@@ -345,6 +352,34 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
             [this](Nui::val val)
             {
                 onOperationCompleted(std::move(val));
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onSyncScanResult", impl_->sessionId.value()),
+            [this](Nui::val val)
+            {
+                SharedData::SyncScanResult result{};
+                try
+                {
+                    const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
+                    result = json.get<SharedData::SyncScanResult>();
+                }
+                catch (std::exception const& exc)
+                {
+                    Log::error("Failed to parse SyncScanResult: {}", exc.what());
+                    return;
+                }
+                const auto cbIt = impl_->syncScanCompletionCallbacks.find(result.operationId.value());
+                if (cbIt != impl_->syncScanCompletionCallbacks.end())
+                {
+                    auto callback = std::move(cbIt->second);
+                    impl_->syncScanCompletionCallbacks.erase(cbIt);
+                    impl_->syncScanProgressCallbacks.erase(result.operationId.value());
+                    callback(std::move(result));
+                }
             }
         )
     );
@@ -650,53 +685,32 @@ void OperationQueue::onDownloadProgress(SharedData::TransferProgress const& prog
         return;
     }
     card->setProgress(progress);
+    {
+        const auto cbIt = impl_->transferProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->transferProgressCallbacks.end() && progress.max > progress.min)
+            cbIt->second(static_cast<double>(progress.current - progress.min) / (progress.max - progress.min));
+    }
 }
 
 void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
 {
-    // Log::debug(
-    //     "Received scan progress for operation id: {} - totalBytes: {}, currentIndex: {}, totalItems: {}",
-    //     progress.operationId.value(),
-    //     progress.totalBytes,
-    //     progress.currentIndex,
-    //     progress.totalScanned
-    // );
+    // Route to any registered per-operation callback (e.g. from enqueueSyncScans).
+    {
+        const auto cbIt = impl_->syncScanProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->syncScanProgressCallbacks.end())
+            cbIt->second(progress);
+    }
 
     auto* operation = impl_->findOperation(progress.operationId);
     if (!operation)
-    {
-        Log::error("Received scan progress for unknown operation id: {}", progress.operationId.value());
-        return;
-    }
-    if (operation->type() == SharedData::OperationType::Scan)
-    {
-        auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
-        if (!renderer)
-        {
-            Log::error(
-                "Received scan progress for operation id: {} which has no scan renderer", progress.operationId.value()
-            );
-            return;
-        }
-        renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
-        return;
-    }
-    else if (operation->type() == SharedData::OperationType::LocalScan)
+        return; // Scan-only operations (for sync) may not be in the display map — that is fine.
+
+    if (operation->type() == SharedData::OperationType::Scan ||
+        operation->type() == SharedData::OperationType::LocalScan)
     {
         auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
-        if (!renderer)
-        {
-            Log::error(
-                "Received scan progress for operation id: {} which has no scan renderer", progress.operationId.value()
-            );
-            return;
-        }
-        renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
-    }
-    else
-    {
-        Log::error("Received scan progress for operation id: {} which is not a scan", progress.operationId.value());
-        return;
+        if (renderer)
+            renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
     }
 }
 
@@ -754,6 +768,11 @@ void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progre
         return;
     }
     renderer->setProgress(progress);
+    {
+        const auto cbIt = impl_->transferProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->transferProgressCallbacks.end() && progress.max > progress.min)
+            cbIt->second(static_cast<double>(progress.current - progress.min) / (progress.max - progress.min));
+    }
 }
 
 void OperationQueue::onBulkUploadProgress(SharedData::BulkProgress const& progress)
@@ -851,6 +870,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                 static_cast<int>(completed.reason)
             );
     }
+    impl_->transferProgressCallbacks.erase(completed.operationId.value());
     auto cbIt = impl_->completionCallbacks.find(completed.operationId.value());
     if (cbIt != impl_->completionCallbacks.end())
     {
@@ -865,6 +885,79 @@ void OperationQueue::onOperationCompleted(Nui::val val)
 void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback)
 {
     impl_->completionCallbacks[opId.value()] = std::move(callback);
+}
+
+void OperationQueue::addTransferProgressCallback(
+    Ids::OperationId const& opId,
+    std::function<void(double fraction)> callback
+)
+{
+    impl_->transferProgressCallbacks[opId.value()] = std::move(callback);
+}
+
+Nui::Observed<bool>& OperationQueue::pausedState()
+{
+    return impl_->paused;
+}
+
+void OperationQueue::unpause()
+{
+    if (!impl_->paused.value())
+        return;
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
+        [this](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (result)
+            {
+                impl_->paused = false;
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        },
+        false
+    );
+}
+
+void OperationQueue::enqueueSyncScans(
+    std::filesystem::path localPath,
+    std::filesystem::path remotePath,
+    std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
+    std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
+    std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
+    std::function<void(SharedData::SyncScanResult)> onLocalComplete
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue sync scans");
+        return;
+    }
+
+    const auto remoteScanId = Ids::generateOperationId();
+    const auto localScanId = Ids::generateOperationId();
+
+    // Register callbacks before hitting the backend so no events are missed.
+    impl_->syncScanProgressCallbacks[remoteScanId.value()] = std::move(onRemoteProgress);
+    impl_->syncScanProgressCallbacks[localScanId.value()] = std::move(onLocalProgress);
+    impl_->syncScanCompletionCallbacks[remoteScanId.value()] = std::move(onRemoteComplete);
+    impl_->syncScanCompletionCallbacks[localScanId.value()] = std::move(onLocalComplete);
+
+    impl_->fileEngine->addSyncScans(
+        localPath,
+        remotePath,
+        remoteScanId,
+        localScanId,
+        [remoteScanId, localScanId](bool success, std::string const& info)
+        {
+            if (!success)
+                Log::error(
+                    "Failed to enqueue sync scans (remoteId={}, localId={}): {}",
+                    remoteScanId.value(),
+                    localScanId.value(),
+                    info
+                );
+        }
+    );
 }
 
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)

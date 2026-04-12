@@ -434,4 +434,139 @@ namespace Test
         ASSERT_TRUE(std::filesystem::exists(localPath));
         EXPECT_EQ(std::filesystem::file_size(localPath), 1024u * 1024u);
     }
+
+    // ---- Symlink handling --------------------------------------------------
+    //
+    // Remote symlinks must be recreated as local symlinks, not downloaded as files.
+    // The fixtures are defined in sftp_server.mjs:
+    //   /home/test/link_to_file1.txt -> /home/test/file1.txt   (link to file)
+    //   /home/test/link_to_documents -> /home/test/Documents   (link to directory)
+    //   /home/test/dangling_link     -> /home/test/does_not_exist.txt
+
+    namespace
+    {
+        inline DownloadOperation::WorkStatus
+        runDownloadToCompletion(DownloadOperation& op, int maxIterations = 100)
+        {
+            DownloadOperation::WorkStatus last{};
+            for (int i = 0; i < maxIterations; ++i)
+            {
+                auto result = op.work();
+                EXPECT_TRUE(result.has_value()) << "work() failed unexpectedly";
+                if (!result.has_value())
+                    return last;
+                last = result.value();
+                if (last == DownloadOperation::WorkStatus::Complete)
+                    return last;
+            }
+            return last;
+        }
+    }
+
+    TEST_F(DownloadOperationTests, DownloadRemoteSymlinkToFileCreatesLocalSymlink)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "link_to_file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/link_to_file1.txt",
+                .localPath = localPath,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)))
+            << "expected a local symlink at " << localPath.string();
+        // And the link must not have been materialized as a regular file containing the target's bytes.
+        EXPECT_FALSE(std::filesystem::is_regular_file(std::filesystem::symlink_status(localPath)));
+    }
+
+    TEST_F(DownloadOperationTests, DownloadRemoteSymlinkToDirectoryCreatesLocalSymlink)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "link_to_documents";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/link_to_documents",
+                .localPath = localPath,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)));
+        // It must NOT be a real directory full of downloaded content.
+        EXPECT_FALSE(std::filesystem::is_directory(std::filesystem::symlink_status(localPath)));
+    }
+
+    TEST_F(DownloadOperationTests, DownloadRemoteSymlinkWithSkipSymlinkCreatesNothing)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "skipped_link";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/link_to_file1.txt",
+                .localPath = localPath,
+                .symlinkHandling = Persistence::SymlinkHandling::SkipSymlink,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+
+        EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(localPath)))
+            << "SkipSymlink must not create any local entry";
+    }
+
+    TEST_F(DownloadOperationTests, DownloadRemoteSymlinkWithFollowSymlinkDownloadsTargetContent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "followed_link";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/link_to_file1.txt",
+                .localPath = localPath,
+                .symlinkHandling = Persistence::SymlinkHandling::FollowSymlink,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+
+        // With FollowSymlink we expect a regular file whose bytes match the link target.
+        EXPECT_TRUE(std::filesystem::is_regular_file(std::filesystem::symlink_status(localPath)));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, DownloadDanglingRemoteSymlinkCreatesLocalSymlink)
+    {
+        // Even when the remote link points nowhere, downloading it must still result in a
+        // local symlink containing the same literal target. The UX requirement: syncing a
+        // dangling link should not surface as an error.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "dangling_link";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/dangling_link",
+                .localPath = localPath,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+        EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)));
+    }
 }

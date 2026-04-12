@@ -56,6 +56,7 @@ void Session::start()
             self->registerRpcSftpAddDownloadOperation();
             self->registerRpcSftpAddUploadOperation();
             self->registerRpcSftpAddRenameOperation();
+            self->registerRpcSftpAddSyncScanOperation();
             self->registerOperationQueuePauseUnpause();
             self->registerRpcSftpDeleteFiles();
             self->registerRpcSftpRename();
@@ -856,6 +857,52 @@ void Session::registerOperationQueuePauseUnpause()
             }
         );
 }
+void Session::registerRpcSftpAddSyncScanOperation()
+{
+    on(fmt::format("Session::{}::sftp::addSyncScan", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::string const& remoteScanIdString,
+                std::string const& localScanIdString,
+                std::string const& remotePath,
+                std::string const& localPath
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        remoteScanIdString,
+                        localScanIdString,
+                        remotePath,
+                        localPath](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        self->operationQueue_->addSyncScanOperation(
+                            *channel,
+                            Ids::makeOperationId(remoteScanIdString),
+                            Ids::makeOperationId(localScanIdString),
+                            remotePath,
+                            localPath
+                        );
+
+                        self->resetQueueThrottle();
+                        reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
 void Session::registerRpcSftpPreDeleteChecks()
 {
     on(fmt::format("Session::{}::sftp::preDeleteChecks", id_.value()))

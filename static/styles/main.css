@@ -120,6 +120,11 @@
 
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
+
+    /* Sync dialog progress (dark) */
+    --sync-progress-color: rgba(76, 175, 80, 0.22);
+    --sync-done-color:     rgba(76, 175, 80, 0.18);
+    --sync-error-color:    rgba(231, 76, 60, 0.18);
 }
 
 :root[data-theme="light"] {
@@ -161,6 +166,11 @@
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
     --nui-file-grid-places-highlight-contrast: var(--color);
+
+    /* Sync dialog progress (light) */
+    --sync-progress-color: rgba(56, 142, 60, 0.18);
+    --sync-done-color:     rgba(56, 142, 60, 0.15);
+    --sync-error-color:    rgba(198, 40, 40, 0.15);
 }
 
 .login-form>div {

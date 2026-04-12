@@ -186,6 +186,53 @@ void FileEngine::createFile(
     );
 }
 
+void FileEngine::addSyncScans(
+    std::filesystem::path const& localPath,
+    std::filesystem::path const& remotePath,
+    Ids::OperationId remoteScanId,
+    Ids::OperationId localScanId,
+    std::function<void(bool success, std::string const& info)> onComplete
+)
+{
+    Log::info(
+        "Requesting to add sync scan: local='{}' remote='{}'",
+        localPath.generic_string(),
+        remotePath.generic_string()
+    );
+    lazyOpen(
+        [this, localPath, remotePath, remoteScanId, localScanId, onComplete = std::move(onComplete)](
+            auto const& channelId, std::string const& info
+        )
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add sync scan, no channel");
+                onComplete(false, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addSyncScan", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed to add sync scan: {}", val["error"].as<std::string>());
+                        onComplete(false, val["error"].as<std::string>());
+                        return;
+                    }
+                    onComplete(true, "Success");
+                },
+                channelId.value().value(),
+                remoteScanId.value(),
+                localScanId.value(),
+                remotePath.generic_string(),
+                localPath.generic_string()
+            );
+        }
+    );
+}
+
 void FileEngine::addDownload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
@@ -239,8 +286,8 @@ void FileEngine::addDownload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                remotePath.path.generic_string(),
-                localPath.path.generic_string(),
+                (!remotePath.fullPath.empty() ? remotePath.fullPath : remotePath.path).generic_string(),
+                (!localPath.fullPath.empty() ? localPath.fullPath : localPath.path).generic_string(),
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
                 insertRefresh,
@@ -301,8 +348,8 @@ void FileEngine::addUpload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                localPath.path.generic_string(),
-                remotePath.path.generic_string(),
+                (!localPath.fullPath.empty() ? localPath.fullPath : localPath.path).generic_string(),
+                (!remotePath.fullPath.empty() ? remotePath.fullPath : remotePath.path).generic_string(),
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
                 insertRefresh,

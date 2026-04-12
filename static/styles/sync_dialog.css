@@ -48,10 +48,6 @@
     margin-left: 4px;
 }
 
-.sync-close-x {
-    font-size: 0.85rem;
-    font-weight: 700;
-}
 
 /* ---- Body ---- */
 
@@ -66,24 +62,29 @@
 .sync-settings-panel {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
-    padding: 10px 16px;
+    gap: 8px;
+    padding: 10px 12px;
     border-bottom: 2px solid var(--foreground-border-color);
     align-items: flex-start;
 }
 
-.sync-settings-group {
+/* Card wrapper for each settings group */
+.sync-settings-card {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 8px 12px;
+    background-color: var(--darker-background);
+    border-radius: 8px;
+    border: 1px solid var(--foreground-border-color);
 }
 
 .sync-settings-label {
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.7;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
 }
 
 .sync-settings-switches {
@@ -187,7 +188,7 @@
 }
 
 .sync-diff-row:hover {
-    background-color: var(--hover-color);
+    filter: brightness(1.06);
 }
 
 /* Diff cells */
@@ -217,6 +218,11 @@
     font-size: 0.72rem;
     opacity: 0.55;
     flex-shrink: 0;
+}
+
+.sync-diff-cell .meta.date {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
 }
 
 .sync-diff-cell.empty {
@@ -266,6 +272,35 @@
     display: flex;
     gap: 8px;
     align-items: center;
+}
+
+.sync-queue-status {
+    display: flex;
+    align-items: center;
+}
+
+.sync-queue-running-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    font-weight: 500;
+}
+
+.sync-queue-running-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--theme-color, #4caf50);
+    box-shadow: 0 0 6px var(--theme-color, #4caf50);
+    animation: sync-queue-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sync-queue-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
 }
 
 /* ---- Progress Dialog ---- */

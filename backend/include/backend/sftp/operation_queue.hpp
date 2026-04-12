@@ -8,11 +8,14 @@
 #include <backend/rpc_helper.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
+#include <shared_data/directory_entry.hpp>
 
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <atomic>
@@ -89,6 +92,23 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /** @brief Queues a remote scan and a local scan as priority operations for sync comparison.
+     *         When each scan completes the results are sent to the frontend via onSyncScanResult.
+     *
+     * @param sftp          SFTP session to use for the remote scan.
+     * @param remoteScanId  Pre-assigned operation ID for the remote scan.
+     * @param localScanId   Pre-assigned operation ID for the local scan.
+     * @param remotePath    Remote directory root to scan.
+     * @param localPath     Local directory root to scan.
+     */
+    void addSyncScanOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId remoteScanId,
+        Ids::OperationId localScanId,
+        std::filesystem::path const& remotePath,
+        std::filesystem::path const& localPath
+    );
+
     void registerRpc();
 
     bool paused() const;
@@ -127,4 +147,7 @@ class OperationQueue
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
     int parallelism_{1};
+    // Keyed by operationId.value(). Called when a sync-only scan completes and ejects its results.
+    std::map<std::string, std::function<void(std::vector<SharedData::DirectoryEntry>, std::uint64_t)>>
+        syncScanCallbacks_{};
 };

@@ -183,12 +183,20 @@ struct Session::Implementation
         , fileTrackingPanel{stateHolder, events, confirmDialog}
         , fileTrackingElement{}
         , syncDialog{confirmDialog, &this->operationQueue}
-        , syncProgressDialog{}
+        , syncProgressDialog{&this->operationQueue}
         , disambiguateTitle{std::move(disambiguateTitle)}
     {
         syncDialog.setOnRecompare(
-            [this](std::filesystem::path loc, std::filesystem::path rem, std::function<void()> onDone) {
-                syncProgressDialog.open(std::move(loc), std::move(rem), std::move(onDone));
+            [this](
+                std::filesystem::path loc,
+                std::filesystem::path rem,
+                std::function<void(
+                    std::vector<SharedData::DirectoryEntry>,
+                    std::vector<SharedData::DirectoryEntry>
+                )> onResult
+            )
+            {
+                syncProgressDialog.open(std::move(loc), std::move(rem), std::move(onResult));
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
@@ -617,7 +625,15 @@ void Session::setupFileGrid()
         localSideModel().setRemoteModel(nullptr);
 
     auto onSync = [this](std::filesystem::path loc, std::filesystem::path rem) {
-        impl_->syncDialog.open(std::move(loc), std::move(rem));
+        impl_->syncProgressDialog.open(
+            loc,
+            rem,
+            [this, loc, rem](auto localEntries, auto remoteEntries)
+            {
+                impl_->syncDialog.open(loc, rem, std::move(localEntries), std::move(remoteEntries));
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        );
         Nui::globalEventContext.executeActiveEventsImmediately();
     };
     localFileGridSide().setOnSynchronize(onSync);

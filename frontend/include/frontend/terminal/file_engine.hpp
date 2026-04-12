@@ -31,6 +31,24 @@ class FileEngine
     createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
     void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
 
+    /** @brief Queues both a remote and a local scan as priority operations for sync comparison.
+     *         The pre-generated IDs are used by the backend; the frontend registers listeners
+     *         for those IDs before calling this so that no progress events are missed.
+     *
+     * @param localPath     Local directory root.
+     * @param remotePath    Remote directory root.
+     * @param remoteScanId  Pre-generated operation ID for the remote scan.
+     * @param localScanId   Pre-generated operation ID for the local scan.
+     * @param onComplete    Called on success/failure with (success, info).
+     */
+    void addSyncScans(
+        std::filesystem::path const& localPath,
+        std::filesystem::path const& remotePath,
+        Ids::OperationId remoteScanId,
+        Ids::OperationId localScanId,
+        std::function<void(bool success, std::string const& info)> onComplete
+    );
+
     void addDownload(
         NuiFileExplorer::Item const& remotePath,
         NuiFileExplorer::Item const& localPath,
