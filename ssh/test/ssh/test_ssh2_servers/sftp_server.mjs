@@ -352,16 +352,15 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                     }
 
+                    // STAT follows symlinks — return the target's attrs (or NO_SUCH_FILE for
+                    // a dangling link). Only ONE reply must be sent per request.
                     if (result.type === 'symlink') {
-                        const target = result.target;
-                        const find2 = fakeFilesystem.find(target);
-
+                        const find2 = fakeFilesystem.find(result.target);
                         if (find2 === undefined) {
-                            logMessage('Target not found');
-                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                            logMessage('Target not found (dangling link)');
+                            return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                         }
-
-                        sftpStream.attrs(reqid, find2.stat);
+                        return sftpStream.attrs(reqid, find2.stat);
                     }
 
                     sftpStream.attrs(reqid, result.stat);
@@ -539,14 +538,16 @@ const server = new Server({
                     sftpStream.name(reqid, [{ filename: target, longname: makeLongName(find2), attrs: find2.stat }]);
                 });
 
-                sftpStream.on('SYMLINK', (reqid, targetPath, linkPath) => {
-                    targetPath = resolveFileName(targetPath);
+                // ssh2 emits SYMLINK arguments in OpenSSH wire order: (linkPath, target),
+                // NOT (target, linkPath) as the standard SFTP v3 spec reads. libssh's
+                // sftp_symlink sends in the OpenSSH order by default.
+                sftpStream.on('SYMLINK', (reqid, linkPath, targetPath) => {
                     linkPath = resolveFileName(linkPath);
+                    targetPath = resolveFileName(targetPath);
 
-                    logMessage('SYMLINK', targetPath, linkPath);
+                    logMessage('SYMLINK link=', linkPath, 'target=', targetPath);
 
-                    // The target is allowed to not exist — dangling links are a valid scenario
-                    // on real SFTP servers and the sync dialog explicitly relies on this.
+                    // Target is allowed to not exist — dangling links are a valid scenario.
 
                     const link = fakeFilesystem.find(linkPath);
                     if (link !== undefined) {
@@ -554,8 +555,11 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     };
 
+                    // insertDeep(path, entry) inserts `entry` into the directory whose
+                    // last path segment matches the final path component — i.e. pass the
+                    // FULL link path (including the leaf name), not the parent directory.
                     const element = symlink(pathUtil.basename(linkPath), targetPath);
-                    fakeFilesystem.insertDeep(pathUtil.dirname(linkPath), element);
+                    fakeFilesystem.insertDeep(linkPath, element);
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
                 });
@@ -571,7 +575,14 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
-                    Object.assign(result.stat, attrs);
+                    // Apply fields selectively — ssh2 may surface a default 'size: 0' when the
+                    // client didn't send ACMODSIZE, and blindly Object.assigning would truncate
+                    // the visible file size to 0. Only copy the fields we actually care about.
+                    if (attrs.atime !== undefined) result.stat.atime = attrs.atime;
+                    if (attrs.mtime !== undefined) result.stat.mtime = attrs.mtime;
+                    if (attrs.mode !== undefined) result.stat.mode = attrs.mode;
+                    if (attrs.uid !== undefined) result.stat.uid = attrs.uid;
+                    if (attrs.gid !== undefined) result.stat.gid = attrs.gid;
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
                 });
