@@ -1,0 +1,346 @@
+/* Sync Dialog — mirrors the visual style of settings.css */
+
+/* Make all inline SVG icons inherit the surrounding text/accent color */
+.sync-dialog svg {
+    fill: currentColor;
+}
+
+.sync-dialog-blocker {
+    z-index: 9;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: stretch;
+}
+
+.sync-dialog {
+    font-size: 14px;
+    margin: 40px;
+    border-radius: 12px;
+    flex-grow: 1;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    background-color: var(--background-color);
+    overflow: hidden;
+}
+
+/* ---- Header ---- */
+
+.sync-dialog-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    padding: 12px 16px;
+    align-items: center;
+    gap: 12px;
+    font-size: 1.5rem;
+    background-color: var(--darker-background);
+}
+
+.sync-dialog-title {
+    font-size: 1rem;
+    font-weight: 600;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    margin-left: 4px;
+}
+
+.sync-close-x {
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+/* ---- Body ---- */
+
+.sync-dialog-body {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    overflow: hidden;
+}
+
+/* Settings panel */
+
+.sync-settings-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 10px 16px;
+    border-bottom: 2px solid var(--foreground-border-color);
+    align-items: flex-start;
+}
+
+.sync-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sync-settings-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+
+.sync-settings-switches {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* 2-column grid variant for "Match by" criteria */
+.sync-settings-switches-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 12px;
+    row-gap: 4px;
+}
+
+.sync-settings-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+
+/* Diff column headers */
+
+.sync-diff-header {
+    display: grid;
+    grid-template-columns: 1fr 44px 1fr;
+    padding: 4px 16px;
+    border-bottom: 1px solid var(--foreground-border-color);
+    background-color: var(--background-color);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.sync-diff-col-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+}
+
+.sync-diff-col-label-right {
+    text-align: right;
+}
+
+/* Diff body */
+
+.sync-diff-body {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Sections */
+
+.sync-diff-section {
+    display: contents;
+}
+
+.sync-diff-section-rows {
+    display: contents;
+}
+
+.sync-diff-section-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    background-color: var(--darker-background);
+    border-bottom: 1px solid var(--foreground-border-color);
+    cursor: pointer;
+    user-select: none;
+}
+
+.sync-diff-section-header:hover {
+    filter: brightness(1.08);
+}
+
+.sync-diff-section-header svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+/* Diff rows */
+
+.sync-diff-row {
+    display: grid;
+    grid-template-columns: 1fr 44px 1fr;
+    height: 36px;
+    align-items: center;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--subtle-border-color, rgba(128, 128, 128, 0.12));
+}
+
+.sync-diff-row:hover {
+    background-color: var(--hover-color);
+}
+
+/* Diff cells */
+
+.sync-diff-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0 4px;
+}
+
+.sync-diff-cell-right {
+    flex-direction: row-reverse;
+    text-align: right;
+}
+
+.sync-diff-cell .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    font-size: 0.85rem;
+}
+
+.sync-diff-cell .meta {
+    font-size: 0.72rem;
+    opacity: 0.55;
+    flex-shrink: 0;
+}
+
+.sync-diff-cell.empty {
+    opacity: 0.3;
+    font-style: italic;
+    justify-content: center;
+}
+
+/* Arrow column */
+
+.sync-diff-arrow {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.sync-diff-arrow svg {
+    width: 18px;
+    height: 18px;
+}
+
+.sync-diff-arrow.upload {
+    color: var(--accent-upload, #4a9eff);
+}
+
+.sync-diff-arrow.download {
+    color: var(--accent-download, #4caf50);
+}
+
+.sync-diff-arrow.delete {
+    color: var(--accent-delete, #e74c3c);
+}
+
+/* ---- Footer ---- */
+
+.sync-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 10px 16px;
+    border-top: 1px solid var(--foreground-border-color);
+    background-color: var(--background-color);
+}
+
+.sync-footer-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* ---- Progress Dialog ---- */
+
+.sync-progress-dialog {
+    max-width: 480px;
+    margin: auto;
+    align-self: center;
+}
+
+.sync-progress-body {
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 120px;
+    justify-content: center;
+}
+
+.sync-progress-step {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sync-progress-step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.sync-progress-step-label {
+    font-size: 0.95rem;
+}
+
+/* CSS spinner */
+.sync-progress-spinner {
+    width: 18px;
+    height: 18px;
+    border: 3px solid var(--foreground-border-color);
+    border-top-color: var(--theme-color, #4a9eff);
+    border-radius: 50%;
+    animation: sync-spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes sync-spin {
+    to { transform: rotate(360deg); }
+}
+
+.sync-progress-counters {
+    display: flex;
+    gap: 24px;
+    padding-left: 28px;
+}
+
+.sync-progress-counter {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sync-progress-counter-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.6;
+}
+
+.sync-progress-counter-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+

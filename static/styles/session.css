@@ -6,7 +6,7 @@
     height: 100%;
 }
 
-.terminal-session>div:not(.script-nui-popup-menu-container) {
+.terminal-session>div:not(.script-nui-popup-menu-container):not(.sync-dialog-blocker):not(.sync-progress-dialog-blocker) {
     height: 100%;
     width: 100%;
 }

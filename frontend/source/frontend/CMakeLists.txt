@@ -44,6 +44,8 @@ target_sources(
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
+        sync_dialog/sync_dialog.cpp
+        sync_dialog/sync_progress_dialog.cpp
         terminal/terminal_channel.cpp
         terminal/frontend_session_manager.cpp
         terminal/executing_engine.cpp
@@ -142,6 +144,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/sync_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
