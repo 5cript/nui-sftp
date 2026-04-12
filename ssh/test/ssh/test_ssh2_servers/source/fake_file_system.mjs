@@ -28,13 +28,30 @@ const fdsProto = {
     }
 }
 
+// POSIX file-type bits. libssh parses the SFTPv3 permissions field to derive the entry's
+// type — without these bits, a symlink would be reported as a regular file on the wire.
+const S_IFREG = 0o100000;
+const S_IFDIR = 0o040000;
+const S_IFLNK = 0o120000;
+
+// Like object spread, but drops keys whose value is undefined. Needed because ssh2 parses
+// SFTP attrs into an object where unset fields are `undefined`, which would clobber our
+// defaults (e.g. make `mtime` undefined and crash date formatting in makeLongName).
+const defined = (obj) => {
+    if (!obj) return {};
+    const out = {};
+    for (const k of Object.keys(obj)) if (obj[k] !== undefined) out[k] = obj[k];
+    return out;
+};
+
 const file = (name, contentString, stat) => {
     const result = {
         type: 'file',
         name: name,
         stat: {
-            ...(stat || {}),
-            ...defaultStat
+            ...defaultStat,
+            ...defined(stat),
+            mode: ((stat && stat.mode) || 0o644) | S_IFREG,
         },
         content: contentString || '',
     };
@@ -50,8 +67,8 @@ const directory = ({ name, stat }, children) => {
         name: name,
         stat: {
             ...defaultStat,
-            ...(stat || {}),
-            mode: 0o755
+            ...defined(stat),
+            mode: 0o755 | S_IFDIR
         },
         children: children || [],
         insert: function (entry) {
@@ -138,8 +155,8 @@ const symlink = (name, target, stat) => {
         target: target,
         stat: {
             ...defaultStat,
-            ...(stat || {}),
-            mode: 0o777
+            ...defined(stat),
+            mode: 0o777 | S_IFLNK
         }
     }
     Object.setPrototypeOf(result, fdsProto);
