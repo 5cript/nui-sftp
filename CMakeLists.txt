@@ -132,6 +132,7 @@ else()
         add_subdirectory(ssh/test/ssh)
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
+        add_subdirectory(shared_data/test/shared_data)
     endif()
 
     if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)

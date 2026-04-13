@@ -45,7 +45,19 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
-    auto iter = std::filesystem::directory_iterator(path, std::filesystem::directory_options::skip_permission_denied);
+    std::error_code iterErrc{};
+    auto iter = std::filesystem::directory_iterator(
+        path, std::filesystem::directory_options::skip_permission_denied, iterErrc
+    );
+    if (iterErrc)
+    {
+        Log::error(
+            "LocalScanOperation: Failed to open directory '{}': {}", path.generic_string(), iterErrc.message()
+        );
+        return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
+            {.type = ErrorType::FilesystemError, .extraInfo = iterErrc.message()}
+        );
+    }
     const auto end = std::filesystem::directory_iterator();
 
     const auto relDir = [&]() -> std::filesystem::path {

@@ -3,6 +3,8 @@ add_library(
     STATIC
         directory_entry.cpp
         ignore_rules.cpp
+        sync/diff.cpp
+        sync/enqueue_minimizer.cpp
 )
 
 target_include_directories(shared-data PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../include" "${CMAKE_CURRENT_SOURCE_DIR}/../../../ssh/include")

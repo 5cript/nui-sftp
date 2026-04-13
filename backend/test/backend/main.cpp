@@ -2,6 +2,10 @@
 
 #include "test_download_operation.hpp"
 #include "test_upload_operation.hpp"
+#include "test_scan_operation.hpp"
+#include "test_local_scan_operation.hpp"
+#include "test_bulk_download_operation.hpp"
+#include "test_bulk_upload_operation.hpp"
 #include "test_file_tracking.hpp"
 
 #include <log/log.hpp>
