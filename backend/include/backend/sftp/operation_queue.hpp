@@ -110,7 +110,8 @@ class OperationQueue
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
         bool respectIgnoreFiles,
-        bool recursive
+        bool recursive,
+        bool ignoreHidden
     );
 
     void registerRpc();

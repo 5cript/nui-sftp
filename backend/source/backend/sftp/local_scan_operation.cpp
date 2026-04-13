@@ -30,6 +30,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     , progressCallback_{std::move(options.progressCallback)}
     , respectIgnoreFiles_{options.respectIgnoreFiles}
     , recursive_{options.recursive}
+    , ignoreHidden_{options.ignoreHidden}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
@@ -131,6 +132,12 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             }
 
             const auto filename = entry.path().filename();
+            if (ignoreHidden_)
+            {
+                const auto name = filename.string();
+                if (!name.empty() && name.front() == '.')
+                    continue;
+            }
             if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
             {
                 const auto childRel = relDir.empty() ? filename : (relDir / filename);

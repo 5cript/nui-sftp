@@ -105,11 +105,38 @@ class OperationQueue
      * @param onRemoteComplete Called with the remote scan result when it finishes.
      * @param onLocalComplete  Called with the local scan result when it finishes.
      */
+    /** @brief Fires a remote-side createDirectory RPC.  Used by the sync dialog in
+     *         non-recursive mode where transferring a missing directory must not
+     *         turn into a recursive bulk upload that could clobber existing files.
+     *         Fire-and-forget (no operation ID, no queue entry).
+     */
+    void createRemoteDirectory(
+        std::filesystem::path const& path,
+        std::function<void(bool success, std::string const& info)> onComplete
+    );
+
+    /** @brief Fires a local-side createDirectory RPC (mirror of createRemoteDirectory). */
+    void createLocalDirectory(
+        std::filesystem::path const& path,
+        std::function<void(bool success, std::string const& info)> onComplete
+    );
+
+    /** @brief Shows a restore button in the queue header for a minimized SyncDialog.
+     *         The button pulses once on call (and on subsequent calls) to catch the user's eye.
+     *
+     * @param onRestore Callback invoked when the user clicks the restore button.
+     */
+    void showMinimizedSync(std::function<void()> onRestore);
+
+    /** @brief Hides the minimized-sync restore button (e.g. when the dialog is closed or reopened). */
+    void hideMinimizedSync();
+
     void enqueueSyncScans(
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         bool respectIgnoreFiles,
         bool recursive,
+        bool ignoreHidden,
         std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
         std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
         std::function<void(SharedData::SyncScanResult)> onRemoteComplete,

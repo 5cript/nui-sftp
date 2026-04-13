@@ -27,6 +27,8 @@
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/switch.hpp>
 
+#include <ui5-sap-icons/icons/synchronize.hpp>
+
 #include <chrono>
 #include <functional>
 #include <string_view>
@@ -58,6 +60,14 @@ struct OperationQueue::Implementation
     std::unordered_map<std::string, std::function<void(SharedData::ScanProgress const&)>> syncScanProgressCallbacks;
     std::unordered_map<std::string, std::function<void(SharedData::SyncScanResult)>> syncScanCompletionCallbacks;
     Nui::ListenRemover<decltype(paused)> pausedListener{};
+
+    // Minimized-sync restore button state.  `minimizedSyncVisible` drives
+    // display; `minimizedSyncShine` is bumped each time we (re)minimize the
+    // dialog so the Snc::button shine replays.  `minimizedSyncRestore` is the
+    // callback invoked when the user clicks the restore button.
+    Nui::Observed<bool> minimizedSyncVisible{false};
+    Nui::Observed<int> minimizedSyncShine{0};
+    std::function<void()> minimizedSyncRestore{};
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
     {
@@ -923,6 +933,7 @@ void OperationQueue::enqueueSyncScans(
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
     bool recursive,
+    bool ignoreHidden,
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
     std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
@@ -951,6 +962,7 @@ void OperationQueue::enqueueSyncScans(
         localScanId,
         respectIgnoreFiles,
         recursive,
+        ignoreHidden,
         [remoteScanId, localScanId](bool success, std::string const& info)
         {
             if (!success)
@@ -962,6 +974,62 @@ void OperationQueue::enqueueSyncScans(
                 );
         }
     );
+}
+
+void OperationQueue::createRemoteDirectory(
+    std::filesystem::path const& path,
+    std::function<void(bool, std::string const&)> onComplete
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot create remote directory");
+        onComplete(false, "No file engine set");
+        return;
+    }
+    impl_->fileEngine->createDirectory(path, std::move(onComplete));
+}
+
+void OperationQueue::createLocalDirectory(
+    std::filesystem::path const& path,
+    std::function<void(bool, std::string const&)> onComplete
+)
+{
+    Nui::val args = Nui::val::object();
+    args.set("path", path.generic_string());
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::createDirectory",
+        [onComplete = std::move(onComplete)](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+            {
+                onComplete(false, "Invalid response from backend");
+                return;
+            }
+            if (!val["success"].as<bool>())
+            {
+                onComplete(false, val["error"].as<std::string>());
+                return;
+            }
+            onComplete(true, "Success");
+        },
+        args
+    );
+}
+
+void OperationQueue::showMinimizedSync(std::function<void()> onRestore)
+{
+    impl_->minimizedSyncRestore = std::move(onRestore);
+    impl_->minimizedSyncVisible = true;
+    impl_->minimizedSyncShine = impl_->minimizedSyncShine.value() + 1;
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::hideMinimizedSync()
+{
+    impl_->minimizedSyncVisible = false;
+    impl_->minimizedSyncRestore = {};
+    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
@@ -1103,6 +1171,37 @@ Nui::ElementRenderer OperationQueue::operator()()
                     style = "align-self: stretch"
                 },
             }),
+            // Conditional render: avoid creating the button in the DOM until
+            // a minimize actually happens.  If we instead toggled visibility
+            // via `style=display:none`, the button's shine-color `style` and
+            // the visibility `style` would both bind to the element's `style`
+            // attribute and the last-wins merge clobbered `display:none`,
+            // leaving the button visible on page load.
+            fragment(
+                observe(impl_->minimizedSyncVisible),
+                [this]() -> Nui::ElementRenderer {
+                    if (!impl_->minimizedSyncVisible.value())
+                        return Nui::nil();
+                    namespace Snc = ScriptNuiComponents;
+                    return Snc::button({
+                        .text = language->getObserved("operationQueue", "resumeMinimizedSync"),
+                        .icon = Ui5Icons::synchronize(),
+                        .attributes = {
+                            style = "align-self: stretch;",
+                            Nui::Attributes::title = language->get("operationQueue", "restoreMinimizedSyncTitle"),
+                            onClick = [this]() {
+                                if (impl_->minimizedSyncRestore)
+                                    impl_->minimizedSyncRestore();
+                            },
+                        },
+                        .styleVariant = Snc::StyleVariant::Regular,
+                        .shine = Snc::ShineOptions{
+                            .trigger = &impl_->minimizedSyncShine,
+                            .color = "rgba(80, 220, 120, 0.9)",
+                        },
+                    });
+                }
+            ),
             div{
                 class_ = "opq-summary"
             }(
