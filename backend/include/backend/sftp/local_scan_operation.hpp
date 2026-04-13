@@ -22,6 +22,8 @@ class LocalScanOperation : public Operation
             progressCallback = [](auto, auto, auto) {};
         std::filesystem::path localPath{};
         bool respectIgnoreFiles{false};
+        /// When false, only the root directory is listed; subdirectories are not descended into.
+        bool recursive{true};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -96,6 +98,8 @@ class LocalScanOperation : public Operation
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
     bool respectIgnoreFiles_;
+    bool recursive_;
+    bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
 };

@@ -21,6 +21,8 @@ class ScanOperation : public Operation
         std::filesystem::path remotePath{};
         std::chrono::seconds futureTimeout{5};
         bool respectIgnoreFiles{false};
+        /// When false, only the root directory is listed; subdirectories are not descended into.
+        bool recursive{true};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -94,6 +96,8 @@ class ScanOperation : public Operation
         progressCallback_;
     std::chrono::seconds futureTimeout_;
     bool respectIgnoreFiles_;
+    bool recursive_;
+    bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
 };

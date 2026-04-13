@@ -192,6 +192,7 @@ void FileEngine::addSyncScans(
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
     bool respectIgnoreFiles,
+    bool recursive,
     std::function<void(bool success, std::string const& info)> onComplete
 )
 {
@@ -201,7 +202,7 @@ void FileEngine::addSyncScans(
         remotePath.generic_string()
     );
     lazyOpen(
-        [this, localPath, remotePath, remoteScanId, localScanId, respectIgnoreFiles,
+        [this, localPath, remotePath, remoteScanId, localScanId, respectIgnoreFiles, recursive,
             onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
@@ -228,7 +229,8 @@ void FileEngine::addSyncScans(
                 localScanId.value(),
                 remotePath.generic_string(),
                 localPath.generic_string(),
-                respectIgnoreFiles
+                respectIgnoreFiles,
+                recursive
             );
         }
     );

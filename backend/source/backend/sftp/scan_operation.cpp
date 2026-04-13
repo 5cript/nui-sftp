@@ -12,6 +12,7 @@ ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOption
     , progressCallback_{std::move(options.progressCallback)}
     , futureTimeout_{options.futureTimeout}
     , respectIgnoreFiles_{options.respectIgnoreFiles}
+    , recursive_{options.recursive}
 {}
 
 ScanOperation::~ScanOperation() = default;
@@ -52,6 +53,10 @@ namespace
 std::expected<std::vector<SharedData::DirectoryEntry>, ScanOperation::Error>
 ScanOperation::scanner(std::filesystem::path const& path)
 {
+    if (!recursive_ && rootScanned_)
+        return std::vector<SharedData::DirectoryEntry>{};
+    rootScanned_ = true;
+
     auto fut = sftp_->listDirectory(path);
     fut.wait_for(futureTimeout_);
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)

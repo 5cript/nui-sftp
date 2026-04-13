@@ -191,6 +191,7 @@ struct Session::Implementation
                 std::filesystem::path loc,
                 std::filesystem::path rem,
                 bool respectIgnoreFiles,
+                bool recursive,
                 std::function<void(
                     std::vector<SharedData::DirectoryEntry>,
                     std::vector<SharedData::DirectoryEntry>
@@ -198,7 +199,7 @@ struct Session::Implementation
             )
             {
                 syncProgressDialog.open(
-                    std::move(loc), std::move(rem), respectIgnoreFiles, std::move(onResult)
+                    std::move(loc), std::move(rem), respectIgnoreFiles, recursive, std::move(onResult)
                 );
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
@@ -631,6 +632,7 @@ void Session::setupFileGrid()
         impl_->syncProgressDialog.open(
             loc,
             rem,
+            true,
             true,
             [this, loc, rem](auto localEntries, auto remoteEntries)
             {

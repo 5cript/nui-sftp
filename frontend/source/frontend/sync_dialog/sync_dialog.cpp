@@ -192,6 +192,7 @@ struct SyncDialog::Implementation
         std::filesystem::path,
         std::filesystem::path,
         bool respectIgnoreFiles,
+        bool recursive,
         std::function<void(
             std::vector<SharedData::DirectoryEntry>,
             std::vector<SharedData::DirectoryEntry>
@@ -220,6 +221,21 @@ struct SyncDialog::Implementation
 
         auto localMap = buildEntryMap(localPath_, localEntries_);
         auto remoteMap = buildEntryMap(remotePath_, remoteEntries_);
+
+        if (!recursive_.value())
+        {
+            // Non-recursive mode: drop everything below the root directory.  The scans
+            // themselves always recurse (cheaper than a separate top-level-only scan path);
+            // we filter here so toggling the switch is immediate and does not require a
+            // new recompare.
+            const auto isNested = [](std::string const& relKey) {
+                return relKey.find('/') != std::string::npos;
+            };
+            for (auto mapIt = localMap.begin(); mapIt != localMap.end();)
+                mapIt = isNested(mapIt->first) ? localMap.erase(mapIt) : std::next(mapIt);
+            for (auto mapIt = remoteMap.begin(); mapIt != remoteMap.end();)
+                mapIt = isNested(mapIt->first) ? remoteMap.erase(mapIt) : std::next(mapIt);
+        }
 
         auto makeLocalItem = [](SharedData::DirectoryEntry const& entry, std::string const& relKey) {
             SharedData::DirectoryEntry item = entry;
@@ -522,6 +538,7 @@ void SyncDialog::setOnRecompare(
         std::filesystem::path,
         std::filesystem::path,
         bool respectIgnoreFiles,
+        bool recursive,
         std::function<void(
             std::vector<SharedData::DirectoryEntry>,
             std::vector<SharedData::DirectoryEntry>
@@ -732,7 +749,9 @@ Nui::ElementRenderer SyncDialog::operator()()
                             div{class_ = "sync-settings-switch-row"}(
                                 Snc::switch_({
                                     .isChecked = impl_->recursive_,
-                                    .onChange = [this](bool val, auto const&) { impl_->recursive_ = val; }
+                                    .onChange = [this, onSettingChange](bool val, auto const&) {
+                                        impl_->recursive_ = val; onSettingChange();
+                                    }
                                 }),
                                 span{}("Recursive")
                             ),
@@ -920,6 +939,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                                     impl_->localPath_,
                                     impl_->remotePath_,
                                     impl_->respectIgnore_.value(),
+                                    impl_->recursive_.value(),
                                     [this](auto localE, auto remoteE) {
                                         open(
                                             impl_->localPath_,
