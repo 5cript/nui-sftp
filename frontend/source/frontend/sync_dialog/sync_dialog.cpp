@@ -16,6 +16,8 @@
 #include <script-nui-components/switch.hpp>
 #include <script-nui-components/select.hpp>
 #include <script-nui-components/style_variant.hpp>
+#include <script-nui-components/tree.hpp>
+#include <script-nui-components/tree_fold.hpp>
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
 #include <ui5-sap-icons/icons/upload.hpp>
@@ -182,6 +184,12 @@ struct SyncDialog::Implementation
     Nui::Observed<std::vector<SyncItem>> downloadItems_{};
     Nui::Observed<std::vector<SyncItem>> deleteItems_{};
 
+    // One tree per diff list; holds per-node expansion state across recompares.
+    // Options (row renderer etc.) are built in the ctor and never reassigned.
+    ScriptNuiComponents::Tree uploadTree_{};
+    ScriptNuiComponents::Tree downloadTree_{};
+    ScriptNuiComponents::Tree deleteTree_{};
+
     Nui::Observed<bool> uploadCollapsed_{false};
     Nui::Observed<bool> downloadCollapsed_{false};
     Nui::Observed<bool> deleteCollapsed_{false};
@@ -203,7 +211,46 @@ struct SyncDialog::Implementation
     explicit Implementation(ConfirmDialog* confirmDialog, OperationQueue* operationQueue)
         : confirmDialog_{confirmDialog}
         , operationQueue_{operationQueue}
-    {}
+    {
+        initTrees();
+    }
+
+    void initTrees()
+    {
+        namespace Snc = ScriptNuiComponents;
+        uploadTree_ = Snc::Tree{Snc::Tree::Options{
+            .rowContent = makeTreeRowRenderer(uploadItems_),
+            .rowAttributes = makeTreeRowAttributes(),
+            .showCheckboxes = false,
+            .showIcons = false,
+        }};
+        downloadTree_ = Snc::Tree{Snc::Tree::Options{
+            .rowContent = makeTreeRowRenderer(downloadItems_),
+            .rowAttributes = makeTreeRowAttributes(),
+            .showCheckboxes = false,
+            .showIcons = false,
+            .mirror = true,
+        }};
+        deleteTree_ = Snc::Tree{Snc::Tree::Options{
+            .rowContent = makeTreeRowRenderer(deleteItems_),
+            .rowAttributes = makeTreeRowAttributes(),
+            .showCheckboxes = false,
+            .showIcons = false,
+        }};
+    }
+
+    ScriptNuiComponents::Tree::RowContentRenderer
+    makeTreeRowRenderer(Nui::Observed<std::vector<SyncItem>>& listObs);
+
+    ScriptNuiComponents::Tree::RowAttributeProvider makeTreeRowAttributes();
+
+    /** @brief Feeds the current item vectors into the trees.  Called after any
+     *         modification of uploadItems_/downloadItems_/deleteItems_.  The
+     *         trees' keyed merge preserves per-node expansion state.
+     */
+    void refreshTrees();
+
+    void enqueueSingleByRelKey(Nui::Observed<std::vector<SyncItem>>& list, std::string const& relKey);
 
     void recomputeDiff()
     {
@@ -216,6 +263,7 @@ struct SyncDialog::Implementation
             uploadItems_ = std::move(uploads);
             downloadItems_ = std::move(downloads);
             deleteItems_ = std::move(deletes);
+            refreshTrees();
             return;
         }
 
@@ -248,6 +296,16 @@ struct SyncDialog::Implementation
             return NuiFileExplorer::Item{item};
         };
 
+        auto makeItem = [](SyncItemAction action, std::optional<NuiFileExplorer::Item> localI,
+                           std::optional<NuiFileExplorer::Item> remoteI, std::string relKey) {
+            SyncItem item{};
+            item.action = action;
+            item.localItem = std::move(localI);
+            item.remoteItem = std::move(remoteI);
+            item.relKey = std::move(relKey);
+            return item;
+        };
+
         // --- Entries that exist locally ---
         for (auto const& [relKey, localEntry] : localMap)
         {
@@ -255,9 +313,11 @@ struct SyncDialog::Implementation
             if (remIt == remoteMap.end())
             {
                 if (actionUpload_.value() && direction_ != SyncDirection::Download)
-                    uploads.push_back({SyncItemAction::Upload, makeLocalItem(localEntry, relKey), std::nullopt});
+                    uploads.push_back(
+                        makeItem(SyncItemAction::Upload, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
                 else if (actionDelete_.value() && direction_ == SyncDirection::Download)
-                    deletes.push_back({SyncItemAction::DeleteLocal, makeLocalItem(localEntry, relKey), std::nullopt});
+                    deletes.push_back(makeItem(
+                        SyncItemAction::DeleteLocal, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
             }
             else
             {
@@ -274,20 +334,20 @@ struct SyncDialog::Implementation
                     (direction_ == SyncDirection::Both && localNewer))
                 {
                     if (actionUpload_.value())
-                        uploads.push_back({
+                        uploads.push_back(makeItem(
                             SyncItemAction::Upload,
                             makeLocalItem(localEntry, relKey),
                             makeRemoteItem(remoteEntry, relKey),
-                        });
+                            relKey));
                 }
                 else
                 {
                     if (actionDownload_.value())
-                        downloads.push_back({
+                        downloads.push_back(makeItem(
                             SyncItemAction::Download,
                             makeLocalItem(localEntry, relKey),
                             makeRemoteItem(remoteEntry, relKey),
-                        });
+                            relKey));
                 }
             }
         }
@@ -299,14 +359,17 @@ struct SyncDialog::Implementation
                 continue;
 
             if (actionDownload_.value() && direction_ != SyncDirection::Upload)
-                downloads.push_back({SyncItemAction::Download, std::nullopt, makeRemoteItem(remoteEntry, relKey)});
+                downloads.push_back(
+                    makeItem(SyncItemAction::Download, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
             else if (actionDelete_.value() && direction_ == SyncDirection::Upload)
-                deletes.push_back({SyncItemAction::DeleteRemote, std::nullopt, makeRemoteItem(remoteEntry, relKey)});
+                deletes.push_back(
+                    makeItem(SyncItemAction::DeleteRemote, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
         }
 
         uploadItems_ = std::move(uploads);
         downloadItems_ = std::move(downloads);
         deleteItems_ = std::move(deletes);
+        refreshTrees();
     }
 
     /** @brief Enqueues a single item from one of the three diff lists at priority.
@@ -324,6 +387,7 @@ struct SyncDialog::Implementation
         items[index].progress = progress;
         const auto itemCopy = items[index];
         list = std::move(items);
+        refreshTrees();
         Nui::globalEventContext.executeActiveEventsImmediately();
 
         auto onComplete = [this, progress](std::optional<Ids::OperationId> const& opId, std::string const&)
@@ -432,6 +496,7 @@ struct SyncDialog::Implementation
             itm.progress = std::make_shared<Nui::Observed<double>>(0.0);
         downloadItems_ = std::move(downloads);
 
+        refreshTrees();
         Nui::globalEventContext.executeActiveEventsImmediately();
 
         auto hookProgress = [this](std::shared_ptr<Nui::Observed<double>> prog)
@@ -518,6 +583,197 @@ struct SyncDialog::Implementation
     }
 };
 
+// ---- Tree integration ------------------------------------------------------
+
+namespace
+{
+    /** @brief Pull a SyncItem out of a Tree row's userData (pointer type is
+     *         expected, may be null — callers must check).
+     */
+    SyncItem const* userDataAsSyncItem(std::any const& userData)
+    {
+        auto const* ptr = std::any_cast<SyncItem const*>(&userData);
+        return ptr ? *ptr : nullptr;
+    }
+}
+
+ScriptNuiComponents::Tree::RowContentRenderer
+SyncDialog::Implementation::makeTreeRowRenderer(Nui::Observed<std::vector<SyncItem>>& listObs)
+{
+    return [this, &listObs](ScriptNuiComponents::Tree::RowContext const& ctx) -> Nui::ElementRenderer {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+
+        SyncItem const* itemPtr = userDataAsSyncItem(ctx.userData);
+        if (!itemPtr)
+        {
+            // Directory row — the tree provides the chevron + caller fills in a
+            // label based on the directory's basename derived from the NodeId.
+            const auto& fullKey = ctx.id;
+            std::string_view view{fullKey};
+            if (!view.empty() && view.back() == '/')
+                view.remove_suffix(1);
+            const auto slash = view.rfind('/');
+            const auto basename = (slash == std::string_view::npos) ? view : view.substr(slash + 1);
+            return div{class_ = "sync-diff-row sync-diff-row--directory"}(
+                span{class_ = "sync-diff-cell sync-diff-cell--directory"}(
+                    span{class_ = "name"}(std::string{basename})),
+                div{class_ = "sync-diff-arrow"}(),
+                span{class_ = "sync-diff-cell sync-diff-cell--directory"}()
+            );
+        }
+
+        SyncItem const& itm = *itemPtr;
+        std::string arrowClass;
+        Nui::ElementRenderer arrowIcon = Nui::nil();
+        switch (itm.action)
+        {
+            case SyncItemAction::Upload:
+                arrowClass = "upload";
+                arrowIcon = Ui5Icons::arrow_right();
+                break;
+            case SyncItemAction::Download:
+                arrowClass = "download";
+                arrowIcon = Ui5Icons::arrow_left();
+                break;
+            case SyncItemAction::DeleteLocal:
+            case SyncItemAction::DeleteRemote:
+                arrowClass = "delete";
+                arrowIcon = Ui5Icons::delete_();
+                break;
+        }
+
+        const std::string relKeyCopy = itm.relKey;
+
+        // Single click target: the centre arrow / trashcan icon.  Hover
+        // brightens and a press scales it down — see `sync_dialog.css`.
+        auto makeArrow = [&]() {
+            return div{
+                class_ = fmt::format("sync-diff-arrow sync-diff-arrow--clickable {}", arrowClass),
+                "title"_attr = std::string{"Sync this item now"},
+                onClick = [this, &listObs, relKeyCopy](Nui::val event) {
+                    event.call<void>("stopPropagation");
+                    enqueueSingleByRelKey(listObs, relKeyCopy);
+                },
+            }(std::move(arrowIcon));
+        };
+
+        // Progress overlay is painted by `.sync-diff-row::before` via the
+        // `--sync-row-bg` CSS custom property set here.  Keeping it on
+        // `.sync-diff-row`'s own `style` (not the outer tree row) avoids
+        // clobbering the tree's `--depth` var.
+        if (itm.progress)
+        {
+            auto prog = itm.progress;
+            return div{
+                class_ = "sync-diff-row",
+                style = Nui::observe(*prog).generate([prog]() -> std::string {
+                    const double val = prog->value();
+                    if (val > 1.0)
+                        return "--sync-row-bg: var(--sync-done-color, rgba(76,175,80,0.18));";
+                    if (val < 0.0)
+                        return "--sync-row-bg: var(--sync-error-color, rgba(231,76,60,0.18));";
+                    const int pct = static_cast<int>(val * 100.0);
+                    return fmt::format(
+                        "--sync-row-bg: linear-gradient(to right,"
+                        " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
+                        " transparent {}%);",
+                        pct, pct);
+                })
+            }(
+                renderItemCell(itm.localItem, false),
+                makeArrow(),
+                renderItemCell(itm.remoteItem, true)
+            );
+        }
+
+        return div{class_ = "sync-diff-row"}(
+            renderItemCell(itm.localItem, false),
+            makeArrow(),
+            renderItemCell(itm.remoteItem, true)
+        );
+    };
+}
+
+ScriptNuiComponents::Tree::RowAttributeProvider SyncDialog::Implementation::makeTreeRowAttributes()
+{
+    // Unused for now.  Kept as a seam in case we later want to add per-row
+    // classes / data attrs on the outer tree row.  The progress background is
+    // rendered via a `::before` pseudo-element on `.sync-diff-row` driven by a
+    // local CSS variable (see `sync_dialog.css`), so it stays off the tree
+    // row's inline style and does not clobber the tree's `--depth` variable.
+    return {};
+}
+
+void SyncDialog::Implementation::refreshTrees()
+{
+    namespace Snc = ScriptNuiComponents;
+
+    auto fold = [](std::vector<SyncItem> const& items) {
+        return Snc::foldByRelKey<SyncItem>(
+            items,
+            [](SyncItem const& item) -> std::string_view { return item.relKey; },
+            [](SyncItem const& item) -> std::any { return static_cast<SyncItem const*>(&item); });
+    };
+
+    // The fold captures pointers into the Observed's underlying vector; Observed
+    // stores its value in-place and the pointers stay valid for as long as the
+    // vector isn't reassigned.  setRoots() consumes the nodes synchronously so
+    // the pointers only need to survive until the tree finishes its keyed merge.
+    uploadTree_.setRoots(fold(uploadItems_.value()));
+    downloadTree_.setRoots(fold(downloadItems_.value()));
+    deleteTree_.setRoots(fold(deleteItems_.value()));
+}
+
+void SyncDialog::Implementation::enqueueSingleByRelKey(
+    Nui::Observed<std::vector<SyncItem>>& list, std::string const& relKey)
+{
+    auto const& items = list.value();
+    std::size_t targetIdx = items.size();
+    for (std::size_t idx = 0; idx < items.size(); ++idx)
+    {
+        if (items[idx].relKey == relKey)
+        {
+            targetIdx = idx;
+            break;
+        }
+    }
+    if (targetIdx == items.size())
+        return;
+
+    enqueueSingle(list, targetIdx);
+
+    // Backend always transfers the whole subtree for a directory-level
+    // operation, but only the triggering SyncItem gets a progress observer
+    // from enqueueSingle.  Share it with every descendant SyncItem (by
+    // relKey prefix) so their rows reflect the same gradient/done/error
+    // state instead of staying indefinitely "pending".
+    auto updated = list.value();
+    if (targetIdx >= updated.size())
+        return;
+    auto targetProgress = updated[targetIdx].progress;
+    if (!targetProgress)
+        return;
+    const std::string prefix = relKey + "/";
+    bool anyChanged = false;
+    for (auto& item : updated)
+    {
+        if (item.relKey.size() > prefix.size() && item.relKey.starts_with(prefix))
+        {
+            item.progress = targetProgress;
+            anyChanged = true;
+        }
+    }
+    if (anyChanged)
+    {
+        list = std::move(updated);
+        refreshTrees();
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+}
+
 // ---- SyncDialog -------------------------------------------------------------
 
 SyncDialog::SyncDialog(ConfirmDialog* confirmDialog, OperationQueue* operationQueue)
@@ -590,84 +846,10 @@ Nui::ElementRenderer SyncDialog::operator()()
         Nui::globalEventContext.executeActiveEventsImmediately();
     };
 
-    // Factory producing a row renderer bound to a specific diff list so that the per-row
-    // Play button can enqueue just that item at priority.
-    auto makeRowRenderer = [&](Nui::Observed<std::vector<SyncItem>>& listObs)
-    {
-        return [this, &listObs](long long idx, SyncItem const& itm) -> Nui::ElementRenderer
-        {
-            using namespace Nui::Elements;
-            using namespace Nui::Attributes;
-            using Nui::Elements::div;
-            namespace Snc = ScriptNuiComponents;
-
-            std::string arrowClass;
-            Nui::ElementRenderer arrowIcon = Nui::nil();
-            switch (itm.action)
-            {
-                case SyncItemAction::Upload:
-                    arrowClass = "upload";
-                    arrowIcon = Ui5Icons::arrow_right();
-                    break;
-                case SyncItemAction::Download:
-                    arrowClass = "download";
-                    arrowIcon = Ui5Icons::arrow_left();
-                    break;
-                case SyncItemAction::DeleteLocal:
-                case SyncItemAction::DeleteRemote:
-                    arrowClass = "delete";
-                    arrowIcon = Ui5Icons::delete_();
-                    break;
-            }
-
-            const auto rowIndex = static_cast<std::size_t>(idx);
-            auto playButton = Snc::button({
-                .icon = Ui5Icons::play(),
-                .attributes = {
-                    onClick = [this, &listObs, rowIndex](Nui::val event) {
-                        event.call<void>("stopPropagation");
-                        impl_->enqueueSingle(listObs, rowIndex);
-                    }
-                },
-                .styleVariant = Snc::StyleVariant::Transparent,
-            });
-
-            if (itm.progress)
-            {
-                auto prog = itm.progress;
-                return div{
-                    class_ = "sync-diff-row",
-                    style = observe(*prog).generate([prog]() -> std::string
-                    {
-                        const double val = prog->value();
-                        if (val > 1.0)
-                            return "background: var(--sync-done-color, rgba(76,175,80,0.18));";
-                        if (val < 0.0)
-                            return "background: var(--sync-error-color, rgba(231,76,60,0.18));";
-                        const int pct = static_cast<int>(val * 100.0);
-                        return fmt::format(
-                            "background: linear-gradient(to right,"
-                            " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
-                            " transparent {}%);",
-                            pct, pct
-                        );
-                    })
-                }(
-                    renderItemCell(itm.localItem, false),
-                    div{class_ = fmt::format("sync-diff-arrow {}", arrowClass)}(std::move(arrowIcon)),
-                    renderItemCell(itm.remoteItem, true),
-                    div{class_ = "sync-diff-row-action"}(std::move(playButton))
-                );
-            }
-
-            return div{class_ = "sync-diff-row"}(
-                renderItemCell(itm.localItem, false),
-                div{class_ = fmt::format("sync-diff-arrow {}", arrowClass)}(std::move(arrowIcon)),
-                renderItemCell(itm.remoteItem, true),
-                div{class_ = "sync-diff-row-action"}(std::move(playButton))
-            );
-        };
-    };
+    // Row content is now rendered inside the tree — see
+    // `Implementation::makeTreeRowRenderer`.  The 4-cell grid layout lives in
+    // `.sync-diff-row` and is unchanged; the tree wraps it with indent +
+    // chevron outside.
 
     // clang-format off
     return div{
@@ -842,8 +1024,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 return impl_->uploadCollapsed_.value() ? "display: none;"s : ""s;
                             })
                         }(
-                            Nui::range(impl_->uploadItems_),
-                            makeRowRenderer(impl_->uploadItems_)
+                            impl_->uploadTree_()
                         )
                     ),
 
@@ -879,8 +1060,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 return impl_->downloadCollapsed_.value() ? "display: none;"s : ""s;
                             })
                         }(
-                            Nui::range(impl_->downloadItems_),
-                            makeRowRenderer(impl_->downloadItems_)
+                            impl_->downloadTree_()
                         )
                     ),
 
@@ -916,8 +1096,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 return impl_->deleteCollapsed_.value() ? "display: none;"s : ""s;
                             })
                         }(
-                            Nui::range(impl_->deleteItems_),
-                            makeRowRenderer(impl_->deleteItems_)
+                            impl_->deleteTree_()
                         )
                     )
                 )

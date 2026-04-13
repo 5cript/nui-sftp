@@ -178,42 +178,72 @@
 
 /* Diff rows */
 
-.sync-diff-row {
+.script-nui-tree__content > .sync-diff-row {
+    /* Symmetric three-column grid: equal flexible cells flank the fixed-width
+       arrow column, so the arrow lands at the row's true horizontal centre. */
     display: grid;
-    grid-template-columns: 1fr 44px 1fr 32px;
-    height: 36px;
+    grid-template-columns: 1fr 44px 1fr;
+    grid-template-rows: 100%;
     align-items: center;
-    padding: 0 8px;
+    /* Absolute, edge-to-edge over the ENTIRE tree row.  Content cell is
+       position:relative so `left` / `right` are relative to it.  The negative
+       offsets reach back through the tree's left-side fixtures (indent +
+       chevron + gap) and forward through the tree row's own padding-right,
+       so the 5-column grid's centre sits at the tree row's exact centre
+       regardless of depth. */
+    position: absolute;
+    left: calc(-1 * var(--row-left-fixtures, 0px));
+    right: calc(-1 * var(--row-padding-right, 4px));
+    top: 0;
+    bottom: 0;
     border-bottom: 1px solid var(--subtle-border-color, rgba(128, 128, 128, 0.12));
 }
 
-.sync-diff-row:hover {
+/* Progress overlay: driven by the `--sync-row-bg` inline CSS variable the
+   row renderer sets.  Keeping the progress paint on a `::before` keeps the
+   row's main `style` attribute free of reactive CSS so the tree can own
+   `--depth` without collisions. */
+.script-nui-tree__content > .sync-diff-row::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--sync-row-bg, transparent);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.script-nui-tree__content > .sync-diff-row > * {
+    position: relative;
+    z-index: 1;
+}
+
+/* Push the local cell's content past the tree's chevron + indent area. */
+.script-nui-tree__content > .sync-diff-row > .sync-diff-cell:first-child {
+    padding-left: calc(var(--row-left-fixtures, 0px) + 4px);
+}
+
+/* ─────────── Mirrored layout for the Download tree ─────────────────────── */
+
+.script-nui-tree--mirrored .script-nui-tree__content > .sync-diff-row {
+    /* Flip the edge-to-edge offsets: reach forward through the indent/chevron
+       area (now on the right) and back through the tree's small left padding. */
+    left: calc(-1 * var(--row-padding-right, 4px));
+    right: calc(-1 * var(--row-left-fixtures, 0px));
+}
+
+/* In mirrored mode, the chevron is on the right.  Reset the local cell's
+   left-padding (no chevron in front of it) and push the right-aligned remote
+   cell's text away so the chevron doesn't crowd it instead. */
+.script-nui-tree--mirrored .sync-diff-row > .sync-diff-cell:first-child {
+    padding-left: 4px;
+}
+
+.script-nui-tree--mirrored .sync-diff-row > .sync-diff-cell.sync-diff-cell-right {
+    padding-right: calc(var(--row-left-fixtures, 0px) + 4px);
+}
+
+.script-nui-tree__row:hover .sync-diff-row {
     filter: brightness(1.06);
-}
-
-/* Per-row action button (priority-sync a single item) */
-.sync-diff-row-action {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    opacity: 0;
-    transition: opacity 0.12s ease-in-out;
-}
-
-.sync-diff-row:hover .sync-diff-row-action {
-    opacity: 1;
-}
-
-.sync-diff-row-action button {
-    padding: 2px;
-    min-width: 0;
-    width: 22px;
-    height: 22px;
-}
-
-.sync-diff-row-action svg {
-    width: 14px;
-    height: 14px;
 }
 
 /* Diff cells */
@@ -280,6 +310,25 @@
 
 .sync-diff-arrow.delete {
     color: var(--accent-delete, #e74c3c);
+}
+
+/* Clickable variant — the arrow/trashcan icon doubles as a sync trigger, so
+   it gets a cursor, a brighter hover state, and a slight scale "press" feel.
+   The hidden-then-hover-visible Play button remains available as a secondary
+   affordance in the right/left corner of the row. */
+.sync-diff-arrow--clickable {
+    cursor: pointer;
+    border-radius: 4px;
+    transition: filter 0.12s ease, transform 0.08s ease, background-color 0.12s ease;
+}
+
+.sync-diff-arrow--clickable:hover {
+    filter: brightness(1.5);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.sync-diff-arrow--clickable:active {
+    transform: scale(0.92);
 }
 
 /* ---- Footer ---- */

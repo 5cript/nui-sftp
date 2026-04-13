@@ -13,6 +13,7 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dropdown_menu.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/nui-file-explorer"
@@ -30,6 +31,7 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dropdown_menu.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dropdown_menu.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/message_strip.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         DEPENDS
@@ -45,6 +47,7 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dropdown_menu.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/message_strip.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css"
     )
@@ -65,6 +68,7 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/popup_menu.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/dropdown_menu.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
     )
