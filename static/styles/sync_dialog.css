@@ -25,6 +25,32 @@
     grid-template-rows: auto 1fr auto;
     background-color: var(--background-color);
     overflow: hidden;
+    /* Decorative scrollbar rail: a consistent surface on the right edge of
+       every dialog child, so the overlay scrollbar (which WebKitGTK insists
+       on floating over content) has somewhere to sit that looks intentional.
+       Applied per-child rather than on `.sync-dialog` itself — the
+       scrollbar lives inside `.sync-diff-body`, so padding the parent would
+       shift it inboard and leave the rail empty. */
+    /* Rail width = app scrollbar width + a few extra pixels of breathing room
+       so content never butts right up against the rail or the scrollbar. */
+    --sync-dialog-rail-width: calc(var(--app-scrollbar-size, 10px) + 3px);
+    --sync-dialog-rail-color: color-mix(in srgb, var(--background-color) 80%, white 4%);
+    position: relative;
+}
+
+/* Paint the rail as a full-height column on the right edge of the dialog.
+   Children's own right padding keeps their content clear of this band; the
+   overlay scrollbar on `.sync-diff-body` floats on top of it. */
+.sync-dialog::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--sync-dialog-rail-width);
+    background: var(--sync-dialog-rail-color);
+    pointer-events: none;
+    z-index: 0;
 }
 
 /* ---- Header ---- */
@@ -33,10 +59,17 @@
     display: grid;
     grid-template-columns: auto 1fr auto auto;
     padding: 12px 16px;
+    /* `margin-right` (not padding) so the element — and its solid dark
+       background — actually stops before the rail, letting the rail show
+       through.  Padding-right would keep content inboard but leave the
+       background covering the rail. */
+    margin-right: var(--sync-dialog-rail-width);
     align-items: center;
     gap: 12px;
     font-size: 1.5rem;
     background-color: var(--darker-background);
+    position: relative;
+    z-index: 1;
 }
 
 .sync-dialog-title {
@@ -114,6 +147,9 @@
     display: grid;
     grid-template-columns: 1fr 44px 1fr 32px;
     padding: 4px 16px;
+    /* Same reasoning as `.sync-dialog-header`: `margin-right` exposes the
+       rail through the element's solid background. */
+    margin-right: var(--sync-dialog-rail-width);
     border-bottom: 1px solid var(--foreground-border-color);
     background-color: var(--background-color);
     position: sticky;
@@ -138,6 +174,13 @@
 .sync-diff-body {
     overflow-y: auto;
     overflow-x: hidden;
+    /* Reserve the rail width on the scrollable element itself.  Content
+       (tree rows, chevrons) ends at `width - rail`, leaving the right-hand
+       band free for the overlay scrollbar to float on top of the rail. */
+    padding-right: var(--sync-dialog-rail-width);
+    scrollbar-gutter: stable;
+    position: relative;
+    z-index: 1;
 }
 
 /* Sections */
@@ -153,13 +196,21 @@
 .sync-diff-section-header {
     position: sticky;
     top: 0;
-    z-index: 1;
+    /* Must beat every stacking-context peer inside the scroll area:
+       - `.sync-diff-col-label` (z-index: 2) is the LOCAL/REMOTE column header
+       - tree chevrons and row children use z-index: 1
+       DOM order would otherwise let the later-painted tree rows bleed
+       through at sticky-overlap time, since equal z-indexes break ties by
+       document order.  Pick a value high enough to clear both peers. */
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 5px 12px;
     font-size: 0.8rem;
     font-weight: 700;
+    /* `--darker-background` is a solid color — the prior see-through
+       impression was a z-index ordering bug, not an alpha one. */
     background-color: var(--darker-background);
     border-bottom: 1px solid var(--foreground-border-color);
     cursor: pointer;
@@ -338,8 +389,13 @@
     justify-content: flex-end;
     align-items: center;
     padding: 10px 16px;
+    /* Same reasoning as `.sync-dialog-header`: `margin-right` exposes the
+       rail through the element's solid background. */
+    margin-right: var(--sync-dialog-rail-width);
     border-top: 1px solid var(--foreground-border-color);
     background-color: var(--background-color);
+    position: relative;
+    z-index: 1;
 }
 
 .sync-footer-actions {
@@ -351,6 +407,14 @@
 .sync-queue-status {
     display: flex;
     align-items: center;
+}
+
+.sync-footer-summary {
+    margin-left: auto;
+    font-size: 0.8rem;
+    opacity: 0.75;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 .sync-queue-running-indicator {

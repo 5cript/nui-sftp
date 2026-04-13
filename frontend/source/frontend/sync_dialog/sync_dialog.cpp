@@ -68,6 +68,51 @@ namespace
         return fmt::format("{:%Y-%m-%d}", floor<days>(tp));
     }
 
+    struct SyncTotals
+    {
+        std::size_t count{0};
+        std::uint64_t bytes{0};
+    };
+
+    /** @brief Returns the byte count of the side that's actually being transferred
+     *         for @p itm.  Directories (size==0) and missing sides contribute 0.
+     */
+    std::uint64_t transferBytes(SyncItem const& itm)
+    {
+        switch (itm.action)
+        {
+            case SyncItemAction::Upload:
+                return itm.localItem ? itm.localItem->size : 0ull;
+            case SyncItemAction::Download:
+                return itm.remoteItem ? itm.remoteItem->size : 0ull;
+            case SyncItemAction::DeleteLocal:
+                return itm.localItem ? itm.localItem->size : 0ull;
+            case SyncItemAction::DeleteRemote:
+                return itm.remoteItem ? itm.remoteItem->size : 0ull;
+        }
+        return 0ull;
+    }
+
+    /** @brief Sums item count + transfer bytes for @p items.  When @p selected
+     *         is non-null, only items whose relKey is in the set contribute (the
+     *         set holds leaf relKeys only — directory rows naturally get skipped).
+     */
+    SyncTotals computeTotals(
+        std::vector<SyncItem> const& items,
+        std::unordered_set<std::string> const* selected = nullptr
+    )
+    {
+        SyncTotals total{};
+        for (auto const& itm : items)
+        {
+            if (selected && !selected->contains(itm.relKey))
+                continue;
+            ++total.count;
+            total.bytes += transferBytes(itm);
+        }
+        return total;
+    }
+
     Nui::ElementRenderer renderItemCell(std::optional<NuiFileExplorer::Item> const& item, bool alignRight)
     {
         using namespace Nui::Elements;
@@ -246,6 +291,9 @@ struct SyncDialog::Implementation
             .showCheckboxes = true,
             .showIcons = false,
             .selected = uploadSelected_,
+            .showCollapseAllButton = true,
+            .showSelectAllButton = true,
+            .showDeselectAllButton = true,
         }};
         downloadTree_ = Snc::Tree{Snc::Tree::Options{
             .rowContent = makeTreeRowRenderer(downloadItems_, /*mirrored=*/true),
@@ -254,6 +302,9 @@ struct SyncDialog::Implementation
             .showIcons = false,
             .mirror = true,
             .selected = downloadSelected_,
+            .showCollapseAllButton = true,
+            .showSelectAllButton = true,
+            .showDeselectAllButton = true,
         }};
         deleteTree_ = Snc::Tree{Snc::Tree::Options{
             .rowContent = makeTreeRowRenderer(deleteItems_, /*mirrored=*/false),
@@ -261,6 +312,9 @@ struct SyncDialog::Implementation
             .showCheckboxes = true,
             .showIcons = false,
             .selected = deleteSelected_,
+            .showCollapseAllButton = true,
+            .showSelectAllButton = true,
+            .showDeselectAllButton = true,
         }};
     }
 
@@ -367,8 +421,17 @@ struct SyncDialog::Implementation
                     uploads.push_back(
                         makeItem(SyncItemAction::Upload, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
                 else if (actionDelete_.value() && direction_ == SyncDirection::Download)
-                    deletes.push_back(makeItem(
-                        SyncItemAction::DeleteLocal, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
+                {
+                    // In non-recursive mode we haven't scanned the directory's
+                    // children, so we cannot know whether deleting it would
+                    // remove files the user never saw.  Hide the directory
+                    // instead of risking a recursive delete.
+                    const bool skipDir = !recursive_.value()
+                        && localEntry.type == SharedData::FileType::Directory;
+                    if (!skipDir)
+                        deletes.push_back(makeItem(
+                            SyncItemAction::DeleteLocal, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
+                }
             }
             else
             {
@@ -413,9 +476,34 @@ struct SyncDialog::Implementation
                 downloads.push_back(
                     makeItem(SyncItemAction::Download, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
             else if (actionDelete_.value() && direction_ == SyncDirection::Upload)
-                deletes.push_back(
-                    makeItem(SyncItemAction::DeleteRemote, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
+            {
+                // See matching comment on DeleteLocal: hide directories in
+                // non-recursive mode instead of offering a potentially
+                // destructive recursive delete.
+                const bool skipDir = !recursive_.value()
+                    && remoteEntry.type == SharedData::FileType::Directory;
+                if (!skipDir)
+                    deletes.push_back(makeItem(
+                        SyncItemAction::DeleteRemote, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
+            }
         }
+
+        // Auto-toggle a section's collapsed state on N↔0 transitions so the
+        // user isn't left looking at an empty open section after changing
+        // direction/actions, and isn't surprised by a hidden newly-populated
+        // section either.  Only zero-crossings flip — manual collapses while
+        // a section stays populated are preserved.
+        auto reconcileCollapse = [](Nui::Observed<bool>& collapsed,
+                                    std::size_t prevCount,
+                                    std::size_t newCount) {
+            if (prevCount > 0 && newCount == 0)
+                collapsed = true;
+            else if (prevCount == 0 && newCount > 0)
+                collapsed = false;
+        };
+        reconcileCollapse(uploadCollapsed_, uploadItems_.value().size(), uploads.size());
+        reconcileCollapse(downloadCollapsed_, downloadItems_.value().size(), downloads.size());
+        reconcileCollapse(deleteCollapsed_, deleteItems_.value().size(), deletes.size());
 
         uploadItems_ = std::move(uploads);
         downloadItems_ = std::move(downloads);
@@ -895,7 +983,20 @@ namespace
 ScriptNuiComponents::Tree::RowContentRenderer
 SyncDialog::Implementation::makeTreeRowRenderer(Nui::Observed<std::vector<SyncItem>>& listObs, bool mirrored)
 {
-    return [this, &listObs, mirrored](ScriptNuiComponents::Tree::RowContext const& ctx) -> Nui::ElementRenderer {
+    // Where do content cells live for the current list?  Static for Upload /
+    // Download (driven by the tree's `mirrored` flag), but the Delete list is
+    // one-sided and switches sides with the current direction: DeleteRemote
+    // → right, DeleteLocal → left.  Synthetic directory rows read this at
+    // render time so their labels track the leaves underneath them.
+    auto contentOnRight = [mirrored, &listObs]() -> bool {
+        if (mirrored)
+            return true;
+        auto const& items = listObs.value();
+        if (items.empty())
+            return false;
+        return items.front().action == SyncItemAction::DeleteRemote;
+    };
+    return [this, &listObs, contentOnRight](ScriptNuiComponents::Tree::RowContext const& ctx) -> Nui::ElementRenderer {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
@@ -912,17 +1013,17 @@ SyncDialog::Implementation::makeTreeRowRenderer(Nui::Observed<std::vector<SyncIt
                 view.remove_suffix(1);
             const auto slash = view.rfind('/');
             const auto basename = (slash == std::string_view::npos) ? view : view.substr(slash + 1);
-            // In mirrored trees (Download) the chevron sits on the right, so the
-            // label must live in the right cell to align with the children's
-            // content — otherwise a parent directory ends up floating on the
-            // opposite side of the row from its own children.
+            // Place the folder label on the same side as the leaf content in
+            // this list — otherwise a parent directory ends up floating on
+            // the opposite side of the row from its own children.
+            const bool labelRight = contentOnRight();
             auto labelCell = span{
-                class_ = mirrored
+                class_ = labelRight
                     ? "sync-diff-cell sync-diff-cell-right sync-diff-cell--directory"
                     : "sync-diff-cell sync-diff-cell--directory"
             }(span{class_ = "name"}(std::string{basename}));
             auto emptyCell = span{class_ = "sync-diff-cell sync-diff-cell--directory"}();
-            if (mirrored)
+            if (labelRight)
             {
                 return div{class_ = "sync-diff-row sync-diff-row--directory"}(
                     std::move(emptyCell),
@@ -972,6 +1073,10 @@ SyncDialog::Implementation::makeTreeRowRenderer(Nui::Observed<std::vector<SyncIt
             }(std::move(arrowIcon));
         };
 
+        // Leaves render on the side that carries the data: local→left,
+        // remote→right.  DeleteLocal/DeleteRemote inherit this via their
+        // populated side, so the Delete list naturally switches sides based
+        // on the current direction.
         // Progress overlay is painted by `.sync-diff-row::before` via the
         // `--sync-row-bg` CSS custom property set here.  Keeping it on
         // `.sync-diff-row`'s own `style` (not the outer tree row) avoids
@@ -1420,9 +1525,11 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 observe(impl_->uploadItems_),
                                 [this]() -> Nui::ElementRenderer {
                                     using Nui::Elements::span;
+                                    const auto totals = computeTotals(impl_->uploadItems_.value());
                                     return span{}(fmt::format(
                                         fmt::runtime(language->get("syncDialog", "uploadSectionCount")),
-                                        impl_->uploadItems_.value().size()));
+                                        totals.count,
+                                        Utility::formatBytes(static_cast<long long>(totals.bytes))));
                                 }
                             )
                         ),
@@ -1458,9 +1565,11 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 observe(impl_->downloadItems_),
                                 [this]() -> Nui::ElementRenderer {
                                     using Nui::Elements::span;
+                                    const auto totals = computeTotals(impl_->downloadItems_.value());
                                     return span{}(fmt::format(
                                         fmt::runtime(language->get("syncDialog", "downloadSectionCount")),
-                                        impl_->downloadItems_.value().size()));
+                                        totals.count,
+                                        Utility::formatBytes(static_cast<long long>(totals.bytes))));
                                 }
                             )
                         ),
@@ -1496,14 +1605,30 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 observe(impl_->deleteItems_),
                                 [this]() -> Nui::ElementRenderer {
                                     using Nui::Elements::span;
+                                    const auto totals = computeTotals(impl_->deleteItems_.value());
                                     return span{}(fmt::format(
                                         fmt::runtime(language->get("syncDialog", "deleteSectionCount")),
-                                        impl_->deleteItems_.value().size()));
+                                        totals.count,
+                                        Utility::formatBytes(static_cast<long long>(totals.bytes))));
                                 }
                             )
                         ),
                         div{
-                            class_ = "sync-diff-section-rows",
+                            // The Delete tree is one-sided and switches sides
+                            // with the current direction (DeleteRemote → right,
+                            // DeleteLocal → left).  Tree::Options::mirror is
+                            // static, so we layer the mirror class on this
+                            // wrapper instead — CSS uses descendant selectors
+                            // (`.script-nui-tree--mirrored .script-nui-tree__row`
+                            // etc.) so the same styling kicks in either way.
+                            class_ = observe(impl_->deleteItems_).generate([this]() -> std::string {
+                                auto const& items = impl_->deleteItems_.value();
+                                const bool mirror = !items.empty()
+                                    && items.front().action == SyncItemAction::DeleteRemote;
+                                return mirror
+                                    ? std::string{"sync-diff-section-rows script-nui-tree--mirrored"}
+                                    : std::string{"sync-diff-section-rows"};
+                            }),
                             style = observe(impl_->deleteCollapsed_).generate([this]() {
                                 return impl_->deleteCollapsed_.value() ? "display: none;"s : ""s;
                             })
@@ -1565,6 +1690,25 @@ Nui::ElementRenderer SyncDialog::operator()()
                             div{class_ = "sync-queue-running-dot"}(),
                             span{}(language->getObserved("syncDialog", "queueRunning"))
                         );
+                    }
+                ),
+                div{class_ = "sync-footer-summary"}(
+                    observe(
+                        *impl_->uploadSelected_, *impl_->downloadSelected_, *impl_->deleteSelected_,
+                        impl_->uploadItems_, impl_->downloadItems_, impl_->deleteItems_
+                    ),
+                    [this]() -> Nui::ElementRenderer {
+                        using Nui::Elements::span;
+                        const auto up = computeTotals(impl_->uploadItems_.value(), &impl_->uploadSelected_->value());
+                        const auto down = computeTotals(impl_->downloadItems_.value(), &impl_->downloadSelected_->value());
+                        const auto del = computeTotals(impl_->deleteItems_.value(), &impl_->deleteSelected_->value());
+                        const std::size_t total = up.count + down.count + del.count;
+                        const std::uint64_t bytes = up.bytes + down.bytes + del.bytes;
+                        return span{}(fmt::format(
+                            fmt::runtime(language->get("syncDialog", "footerSummary")),
+                            total,
+                            Utility::formatBytes(static_cast<long long>(bytes))
+                        ));
                     }
                 ),
                 Snc::button({

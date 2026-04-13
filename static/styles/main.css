@@ -193,3 +193,96 @@ body {
     background-color: var(--background-color);
     color: var(--color);
 }
+
+/* ─────────── Scrollbars ──────────────────────────────────────────────────── */
+/* App-wide WebKit scrollbar styling.  Tuned to match the dark theme: the track
+   blends into surrounding surfaces, the thumb sits at a low contrast level by
+   default and brightens on hover/active, and corners (where horizontal +
+   vertical bars meet) stay flush with the track.  Overridable per surface via
+   the listed CSS variables, e.g. set --app-scrollbar-thumb on a side panel
+   that needs more visual weight. */
+
+:root {
+    --app-scrollbar-size: 10px;
+    --app-scrollbar-track: transparent;
+    --app-scrollbar-thumb: color-mix(in srgb, var(--color, #ddd) 18%, transparent);
+    --app-scrollbar-thumb-hover: color-mix(in srgb, var(--color, #ddd) 32%, transparent);
+    --app-scrollbar-thumb-active: color-mix(in srgb, var(--theme-color, #90d26d) 55%, transparent);
+    --app-scrollbar-thumb-radius: 6px;
+    --app-scrollbar-thumb-border: 2px solid transparent;
+}
+
+::-webkit-scrollbar {
+    width: var(--app-scrollbar-size);
+    height: var(--app-scrollbar-size);
+}
+
+::-webkit-scrollbar-track {
+    background: var(--app-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--app-scrollbar-thumb);
+    border-radius: var(--app-scrollbar-thumb-radius);
+    /* Transparent border + background-clip:padding-box gives the thumb a
+       little visual breathing room on each side without using margin (which
+       isn't honoured on scrollbar parts). */
+    border: var(--app-scrollbar-thumb-border);
+    background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--app-scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+    background-color: var(--app-scrollbar-thumb-active);
+}
+
+::-webkit-scrollbar-corner {
+    background: var(--app-scrollbar-track);
+}
+
+/* Suppress the legacy up/down/left/right arrow buttons WebKit can render at
+   the ends of a scrollbar — they look out of place on a flat dark theme. */
+::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+/* Firefox fallback (single-property API; coarse but better than browser default). */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+}
+
+/* WebKitGTK runs an opacity fade-out animation on overlay scrollbars that
+   lingers on top of dialog backdrops.  The animation is browser-native, not
+   CSS-driven, but the thumb's opacity can be pinned and any transition
+   suppressed, which neutralises the fade in engines that honour it. */
+::-webkit-scrollbar,
+::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-track {
+    transition: none !important;
+    animation: none !important;
+    -webkit-animation: none !important;
+}
+
+/* Second line of defence: while a blocking surface is visible, hide
+   scrollbars on the document root so nothing can fade over the dialog.
+   - `dialog[open]` covers every component built on the native <dialog>
+     (Snc::Dialog, ConfirmDialog, etc. — they set the `open` attribute
+     when visible).
+   - `.sync-dialog-blocker` is the sync dialog's custom full-viewport
+     backdrop (div, not a native <dialog>, so needs its own hook).
+   Relies on `:has()` (every WebKit shipped in the last ~2 years).  A
+   no-op on older engines — the first rule above is still in force. */
+html:has(dialog[open]),
+html:has(.sync-dialog-blocker[style*="display: flex"]) {
+    overflow: hidden;
+}
+html:has(dialog[open])::-webkit-scrollbar,
+html:has(.sync-dialog-blocker[style*="display: flex"])::-webkit-scrollbar {
+    display: none;
+}
