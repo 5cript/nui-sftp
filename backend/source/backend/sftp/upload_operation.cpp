@@ -251,6 +251,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
         }
     }
 
+    if (options_.createMissingDirectories)
+    {
+        if (auto res = ensureRemoteDirectoryExists(options_.remotePath.parent_path()); !res.has_value())
+            return std::unexpected(res.error());
+    }
+
     auto fut = sftp_->createSymLink(target, options_.remotePath);
     const auto futureStatus = fut.wait_for(options_.futureTimeout);
     if (futureStatus != std::future_status::ready)
@@ -432,6 +438,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
         }
     }
 
+    if (options_.createMissingDirectories)
+    {
+        if (auto res = ensureRemoteDirectoryExists(std::filesystem::path{tempPath}.parent_path()); !res.has_value())
+            return std::unexpected(res.error());
+    }
+
     // Open temp file part regularly, freshly:
     Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath);
     auto openFut = sftp_->openFile(
@@ -455,6 +467,64 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
 
     fileStream_ = openResult.value();
 
+    return {};
+}
+
+std::expected<void, UploadOperation::Error>
+UploadOperation::ensureRemoteDirectoryExists(std::filesystem::path const& dir)
+{
+    if (dir.empty() || dir == dir.root_path() || dir == std::filesystem::path{"/"})
+        return {};
+
+    auto statFut = sftp_->lstat(dir);
+    if (statFut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: Timeout stating '{}' while ensuring parent dirs.", dir.generic_string());
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    const auto statResult = statFut.get();
+    if (statResult.has_value())
+    {
+        if (statResult->type == SharedData::FileType::Directory)
+            return {};
+        Log::error(
+            "UploadOperation: Cannot create parent '{}': path exists and is not a directory.", dir.generic_string()
+        );
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = SecureShell::SftpError{
+                    .message = "Parent path exists but is not a directory",
+                    .sftpError = SSH_FX_FAILURE,
+                },
+            }
+        );
+    }
+    if (statResult.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = statResult.error()});
+
+    if (auto parent = ensureRemoteDirectoryExists(dir.parent_path()); !parent.has_value())
+        return parent;
+
+    const auto dirPerms = options_.directoryPermissions.value_or(
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+        std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+        std::filesystem::perms::others_exec
+    );
+    auto mkdirFut = sftp_->createDirectoryIfItDoesntExist(dir, dirPerms);
+    if (mkdirFut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: Timeout creating parent dir '{}'.", dir.generic_string());
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    auto mkdirResult = mkdirFut.get();
+    if (!mkdirResult.has_value())
+    {
+        Log::error(
+            "UploadOperation: Failed to create parent dir '{}': {}.", dir.generic_string(), mkdirResult.error().message
+        );
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = mkdirResult.error()});
+    }
     return {};
 }
 

@@ -2,15 +2,52 @@
 #include <log/log.hpp>
 
 #include <ssh/sftp_session.hpp>
+#include <ssh/file_stream.hpp>
+
+#include <string>
 
 ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options)
     : sftp_(&sftp)
     , remotePath_{std::move(options.remotePath)}
     , progressCallback_{std::move(options.progressCallback)}
     , futureTimeout_{options.futureTimeout}
+    , respectIgnoreFiles_{options.respectIgnoreFiles}
 {}
 
 ScanOperation::~ScanOperation() = default;
+
+namespace
+{
+    std::optional<std::string>
+    readRemoteFile(SecureShell::SftpSession& sftp, std::filesystem::path const& path, std::chrono::seconds timeout)
+    {
+        auto openFut = sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        if (openFut.wait_for(timeout) != std::future_status::ready)
+            return std::nullopt;
+        auto openResult = openFut.get();
+        if (!openResult.has_value())
+            return std::nullopt;
+        auto stream = openResult.value().lock();
+        if (!stream)
+            return std::nullopt;
+
+        std::string contents;
+        auto readFut = stream->readAll([&contents](std::string_view chunk) {
+            contents.append(chunk);
+            return true;
+        });
+        if (readFut.wait_for(timeout) != std::future_status::ready)
+        {
+            stream->close();
+            return std::nullopt;
+        }
+        auto readResult = readFut.get();
+        stream->close();
+        if (!readResult.has_value())
+            return std::nullopt;
+        return contents;
+    }
+}
 
 std::expected<std::vector<SharedData::DirectoryEntry>, ScanOperation::Error>
 ScanOperation::scanner(std::filesystem::path const& path)
@@ -26,7 +63,45 @@ ScanOperation::scanner(std::filesystem::path const& path)
             {.type = ErrorType::SftpError, .sftpError = result.error()}
         );
 
-    return {std::move(result).value()};
+    auto entries = std::move(result).value();
+
+    if (!respectIgnoreFiles_)
+        return {std::move(entries)};
+
+    const auto relDir = [&]() -> std::filesystem::path {
+        std::error_code errc{};
+        auto rel = std::filesystem::relative(path, remotePath_, errc);
+        if (errc || rel.empty() || rel == std::filesystem::path{"."})
+            return {};
+        return rel;
+    }();
+
+    for (auto const& entry : entries)
+    {
+        const auto name = entry.path.generic_string();
+        if (name != ".gitignore" && name != ".ignore")
+            continue;
+        if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
+            continue;
+        if (auto content = readRemoteFile(*sftp_, path / entry.path, futureTimeout_))
+            ignoreMatcher_.addFile(relDir, *content);
+    }
+
+    if (ignoreMatcher_.empty())
+        return {std::move(entries)};
+
+    std::vector<SharedData::DirectoryEntry> filtered;
+    filtered.reserve(entries.size());
+    for (auto& entry : entries)
+    {
+        const auto childRel =
+            relDir.empty() ? std::filesystem::path{entry.path} : (relDir / entry.path);
+        const bool isDir = entry.type == SharedData::DirectoryEntry::FileType::Directory;
+        if (ignoreMatcher_.isIgnored(childRel, isDir))
+            continue;
+        filtered.push_back(std::move(entry));
+    }
+    return {std::move(filtered)};
 }
 
 std::uint64_t ScanOperation::totalBytes() const

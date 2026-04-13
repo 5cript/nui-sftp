@@ -61,6 +61,7 @@ class OperationQueue
         bool allowOverwrite,
         bool isBigFile,
         bool insertRefresh,
+        bool createMissingDirectories,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
@@ -72,6 +73,7 @@ class OperationQueue
         bool allowOverwrite,
         bool isBigFile,
         bool insertRefresh,
+        bool createMissingDirectories,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
@@ -106,7 +108,8 @@ class OperationQueue
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
         std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath
+        std::filesystem::path const& localPath,
+        bool respectIgnoreFiles
     );
 
     void registerRpc();

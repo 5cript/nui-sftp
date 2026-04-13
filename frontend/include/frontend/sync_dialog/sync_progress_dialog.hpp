@@ -32,6 +32,7 @@ class SyncProgressDialog
     void open(
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
+        bool respectIgnoreFiles,
         std::function<void(
             std::vector<SharedData::DirectoryEntry> localEntries,
             std::vector<SharedData::DirectoryEntry> remoteEntries

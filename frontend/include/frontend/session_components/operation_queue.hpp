@@ -61,6 +61,7 @@ class OperationQueue
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
+        bool createMissingDirectories = false,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueUpload(
@@ -69,6 +70,7 @@ class OperationQueue
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
+        bool createMissingDirectories = false,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueRename(
@@ -106,6 +108,7 @@ class OperationQueue
     void enqueueSyncScans(
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
+        bool respectIgnoreFiles,
         std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
         std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
         std::function<void(SharedData::SyncScanResult)> onRemoteComplete,

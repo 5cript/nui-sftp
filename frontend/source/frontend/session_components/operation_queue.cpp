@@ -921,6 +921,7 @@ void OperationQueue::unpause()
 void OperationQueue::enqueueSyncScans(
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
+    bool respectIgnoreFiles,
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
     std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
@@ -947,6 +948,7 @@ void OperationQueue::enqueueSyncScans(
         remotePath,
         remoteScanId,
         localScanId,
+        respectIgnoreFiles,
         [remoteScanId, localScanId](bool success, std::string const& info)
         {
             if (!success)
@@ -1151,6 +1153,7 @@ void OperationQueue::enqueueDownload(
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -1164,7 +1167,9 @@ void OperationQueue::enqueueDownload(
     Log::info(
         "Frontend Operation Queue download: {} -> {}", remoteItem.path.generic_string(), localItem.path.generic_string()
     );
-    impl_->fileEngine->addDownload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, mode);
+    impl_->fileEngine->addDownload(
+        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+    );
 }
 void OperationQueue::enqueueUpload(
     NuiFileExplorer::Item const& remoteItem,
@@ -1172,6 +1177,7 @@ void OperationQueue::enqueueUpload(
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -1185,7 +1191,9 @@ void OperationQueue::enqueueUpload(
     Log::info(
         "Frontend Operation Queue upload: {} -> {}", localItem.path.generic_string(), remoteItem.path.generic_string()
     );
-    impl_->fileEngine->addUpload(remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, mode);
+    impl_->fileEngine->addUpload(
+        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+    );
 }
 void OperationQueue::enqueueRename(
     std::filesystem::path const& oldPath,

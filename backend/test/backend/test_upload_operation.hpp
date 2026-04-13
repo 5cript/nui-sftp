@@ -782,6 +782,144 @@ namespace Test
         EXPECT_EQ(it, listResult.value().end()) << ".filepart must not be created for symlink uploads";
     }
 
+    // ---- createMissingDirectories option ----------------------------------
+    //
+    // These exercise the sync-initiated path where the remote subtree may not yet
+    // exist.  Without the flag an upload into /home/test/missing/... fails (see
+    // UploadToNonExistentRemoteDirectoryFails above); with the flag the operation
+    // walks up the chain and mkdirs every missing level.
+
+    TEST_F(UploadOperationTests, UploadCreatesSingleMissingParentDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/newly_created/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+                .createMissingDirectories = true,
+            }};
+
+        auto status = runToCompletion(operation);
+        ASSERT_TRUE(status.has_value()) << "upload should succeed when parent is auto-created";
+        EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
+
+        auto lstatFut = sftp->lstat("/home/test/newly_created/testfile.txt");
+        ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
+        ASSERT_TRUE(lstatFut.get().has_value()) << "uploaded file should exist at the nested path";
+
+        auto dirFut = sftp->lstat("/home/test/newly_created");
+        ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
+        auto dirEntry = dirFut.get();
+        ASSERT_TRUE(dirEntry.has_value());
+        EXPECT_EQ(dirEntry->type, SharedData::FileType::Directory);
+    }
+
+    TEST_F(UploadOperationTests, UploadCreatesDeeplyNestedMissingParentDirectories)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/a/b/c/d/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+                .createMissingDirectories = true,
+            }};
+
+        auto status = runToCompletion(operation);
+        ASSERT_TRUE(status.has_value()) << "deeply nested upload should succeed";
+        EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
+
+        for (auto const* path : {"/home/test/a", "/home/test/a/b", "/home/test/a/b/c", "/home/test/a/b/c/d"})
+        {
+            auto fut = sftp->lstat(path);
+            ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+            auto entry = fut.get();
+            ASSERT_TRUE(entry.has_value()) << "intermediate directory missing: " << path;
+            EXPECT_EQ(entry->type, SharedData::FileType::Directory) << path;
+        }
+
+        auto fileFut = sftp->lstat("/home/test/a/b/c/d/testfile.txt");
+        ASSERT_EQ(fileFut.wait_for(5s), std::future_status::ready);
+        EXPECT_TRUE(fileFut.get().has_value());
+    }
+
+    TEST_F(UploadOperationTests, UploadWithCreateMissingDirectoriesIsIdempotentOnExistingParent)
+    {
+        // When the parent already exists the flag must be a no-op (no mkdir error).
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+                .createMissingDirectories = true,
+            }};
+
+        auto status = runToCompletion(operation);
+        ASSERT_TRUE(status.has_value());
+        EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
+    }
+
+    TEST_F(UploadOperationTests, UploadWithoutCreateMissingDirectoriesStillFailsOnMissingParent)
+    {
+        // Regression guard: default behaviour must not silently start creating dirs.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/still_missing_dir/testfile.txt",
+                .localPath = programDirectory / "temp" / "testfile.txt",
+                .createMissingDirectories = false,
+            }};
+
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::SftpError);
+
+        auto dirFut = sftp->lstat("/home/test/still_missing_dir");
+        ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
+        EXPECT_FALSE(dirFut.get().has_value()) << "parent dir must NOT have been created";
+    }
+
+    TEST_F(UploadOperationTests, UploadSymlinkCreatesMissingParentDirectories)
+    {
+        // Symlink path must honour the flag too: createSymLink fails without the parent.
+        const auto linkPath = makeFreshSymlink(
+            programDirectory / "temp" / "sym_for_missing_dirs",
+            programDirectory / "temp" / "testfile.txt"
+        );
+
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/missing/for/symlink/uploaded_link",
+                .localPath = linkPath,
+                .createMissingDirectories = true,
+            }};
+
+        auto status = runToCompletion(operation);
+        ASSERT_TRUE(status.has_value());
+        EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
+
+        auto lstatFut = sftp->lstat("/home/test/missing/for/symlink/uploaded_link");
+        ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
+        auto entry = lstatFut.get();
+        ASSERT_TRUE(entry.has_value());
+        EXPECT_TRUE(entry->isSymlink());
+    }
+
     TEST_F(UploadOperationTests, PartialFileLargerThanLocalDoesNotContinueButWorksAnyways)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

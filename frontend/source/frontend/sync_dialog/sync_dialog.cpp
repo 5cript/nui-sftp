@@ -131,18 +131,13 @@ namespace
         return result;
     }
 
-    /** @brief Returns true when the two entries are considered different under the given criteria.
+    /** @brief Returns true when the two entries are considered different (by size and mtime).
      *
      * Symlinks are compared by raw link target (readlink value): two links with the same target
      * are in sync, two with different targets are not — size and mtime of the link itself are
      * meaningless for comparison. A type mismatch (symlink vs regular file) always counts as a diff.
      */
-    bool entriesDiffer(
-        SharedData::DirectoryEntry const& loc,
-        SharedData::DirectoryEntry const& rem,
-        bool criteriaSize,
-        bool criteriaMtime
-    )
+    bool entriesDiffer(SharedData::DirectoryEntry const& loc, SharedData::DirectoryEntry const& rem)
     {
         if (loc.type != rem.type)
             return true;
@@ -150,16 +145,15 @@ namespace
         {
             if (loc.linkTarget && rem.linkTarget)
                 return *loc.linkTarget != *rem.linkTarget;
-            // If either side is missing the link target, fall back to considering them equal so
-            // we don't churn re-uploading links we can't compare.
             return false;
         }
-        if (criteriaSize && loc.size != rem.size)
+        if (loc.size != rem.size)
             return true;
-        if (criteriaMtime && loc.mtime != rem.mtime)
+        if (loc.mtime != rem.mtime)
             return true;
         return false;
     }
+
 }
 
 // ---- Implementation ---------------------------------------------------------
@@ -177,10 +171,7 @@ struct SyncDialog::Implementation
     // Settings
     Nui::Observed<std::string> directionStr_{"Both"s};
     SyncDirection direction_{SyncDirection::Both};
-    Nui::Observed<bool> criteriaName_{true};
-    Nui::Observed<bool> criteriaSize_{true};
-    Nui::Observed<bool> criteriaMtime_{true};
-    Nui::Observed<bool> criteriaHash_{false};
+    Nui::Observed<bool> respectIgnore_{true};
     Nui::Observed<bool> recursive_{true};
     Nui::Observed<bool> actionUpload_{true};
     Nui::Observed<bool> actionDownload_{true};
@@ -200,6 +191,7 @@ struct SyncDialog::Implementation
     std::function<void(
         std::filesystem::path,
         std::filesystem::path,
+        bool respectIgnoreFiles,
         std::function<void(
             std::vector<SharedData::DirectoryEntry>,
             std::vector<SharedData::DirectoryEntry>
@@ -225,9 +217,6 @@ struct SyncDialog::Implementation
             deleteItems_ = std::move(deletes);
             return;
         }
-
-        const bool sizeCheck = criteriaSize_.value();
-        const bool mtimeCheck = criteriaMtime_.value();
 
         auto localMap = buildEntryMap(localPath_, localEntries_);
         auto remoteMap = buildEntryMap(remotePath_, remoteEntries_);
@@ -260,7 +249,7 @@ struct SyncDialog::Implementation
                 if (localEntry.type == SharedData::FileType::Directory)
                     continue;
 
-                if (!entriesDiffer(localEntry, remoteEntry, sizeCheck, mtimeCheck))
+                if (!entriesDiffer(localEntry, remoteEntry))
                     continue;
 
                 const bool localNewer = localEntry.mtime >= remoteEntry.mtime;
@@ -302,6 +291,115 @@ struct SyncDialog::Implementation
         uploadItems_ = std::move(uploads);
         downloadItems_ = std::move(downloads);
         deleteItems_ = std::move(deletes);
+    }
+
+    /** @brief Enqueues a single item from one of the three diff lists at priority.
+     *
+     * @param list  The observed list the item belongs to (upload, download or delete).
+     * @param index Index of the item inside @p list.
+     */
+    void enqueueSingle(Nui::Observed<std::vector<SyncItem>>& list, std::size_t index)
+    {
+        auto items = list.value();
+        if (index >= items.size())
+            return;
+
+        auto progress = std::make_shared<Nui::Observed<double>>(0.0);
+        items[index].progress = progress;
+        const auto itemCopy = items[index];
+        list = std::move(items);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+
+        auto onComplete = [this, progress](std::optional<Ids::OperationId> const& opId, std::string const&)
+        {
+            if (!opId)
+            {
+                *progress = -1.0;
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return;
+            }
+            operationQueue_->addTransferProgressCallback(
+                *opId,
+                [progress](double fraction) {
+                    *progress = fraction;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
+            operationQueue_->addCompletionCallback(
+                *opId,
+                [progress](bool) {
+                    *progress = 1.1;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
+        };
+
+        switch (itemCopy.action)
+        {
+            case SyncItemAction::Upload:
+            {
+                if (itemCopy.localItem && itemCopy.remoteItem)
+                {
+                    operationQueue_->enqueueUpload(
+                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, true, /*createMissingDirs=*/true,
+                        SharedData::OperationMode::PriorityQueued
+                    );
+                }
+                else if (itemCopy.localItem)
+                {
+                    SharedData::DirectoryEntry remoteStub = *itemCopy.localItem;
+                    remoteStub.path = itemCopy.localItem->path;
+                    remoteStub.fullPath = remotePath_ / itemCopy.localItem->path;
+                    operationQueue_->enqueueUpload(
+                        NuiFileExplorer::Item{remoteStub}, *itemCopy.localItem, onComplete, true, true,
+                        /*createMissingDirs=*/true, SharedData::OperationMode::PriorityQueued
+                    );
+                }
+                break;
+            }
+            case SyncItemAction::Download:
+            {
+                if (itemCopy.localItem && itemCopy.remoteItem)
+                {
+                    operationQueue_->enqueueDownload(
+                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, true, /*createMissingDirs=*/true,
+                        SharedData::OperationMode::PriorityQueued
+                    );
+                }
+                else if (itemCopy.remoteItem)
+                {
+                    SharedData::DirectoryEntry localStub = *itemCopy.remoteItem;
+                    localStub.path = itemCopy.remoteItem->path;
+                    localStub.fullPath = localPath_ / itemCopy.remoteItem->path;
+                    operationQueue_->enqueueDownload(
+                        *itemCopy.remoteItem, NuiFileExplorer::Item{localStub}, onComplete, true, true,
+                        /*createMissingDirs=*/true, SharedData::OperationMode::PriorityQueued
+                    );
+                }
+                break;
+            }
+            case SyncItemAction::DeleteLocal:
+            case SyncItemAction::DeleteRemote:
+            {
+                std::vector<std::filesystem::path> paths;
+                if (itemCopy.action == SyncItemAction::DeleteRemote && itemCopy.remoteItem)
+                    paths.push_back(itemCopy.remoteItem->fullPath);
+                else if (itemCopy.action == SyncItemAction::DeleteLocal && itemCopy.localItem)
+                    paths.push_back(itemCopy.localItem->fullPath);
+                if (!paths.empty())
+                {
+                    operationQueue_->enqueueDelete(
+                        paths, recursive_.value(),
+                        [progress](auto const& opIds, std::string const&) {
+                            *progress = opIds ? 1.1 : -1.0;
+                            Nui::globalEventContext.executeActiveEventsImmediately();
+                        },
+                        SharedData::OperationMode::PriorityQueued
+                    );
+                }
+                break;
+            }
+        }
     }
 
     void enqueueOperations()
@@ -354,7 +452,8 @@ struct SyncDialog::Implementation
             if (itm.localItem && itm.remoteItem)
             {
                 operationQueue_->enqueueUpload(
-                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true
+                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true,
+                    /*createMissingDirs=*/true
                 );
             }
             else if (itm.localItem)
@@ -363,7 +462,8 @@ struct SyncDialog::Implementation
                 remoteStub.path = itm.localItem->path;
                 remoteStub.fullPath = remotePath_ / itm.localItem->path;
                 operationQueue_->enqueueUpload(
-                    NuiFileExplorer::Item{remoteStub}, *itm.localItem, hookProgress(itm.progress), true, true
+                    NuiFileExplorer::Item{remoteStub}, *itm.localItem, hookProgress(itm.progress), true, true,
+                    /*createMissingDirs=*/true
                 );
             }
         }
@@ -373,7 +473,8 @@ struct SyncDialog::Implementation
             if (itm.localItem && itm.remoteItem)
             {
                 operationQueue_->enqueueDownload(
-                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true
+                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true,
+                    /*createMissingDirs=*/true
                 );
             }
             else if (itm.remoteItem)
@@ -382,7 +483,8 @@ struct SyncDialog::Implementation
                 localStub.path = itm.remoteItem->path;
                 localStub.fullPath = localPath_ / itm.remoteItem->path;
                 operationQueue_->enqueueDownload(
-                    *itm.remoteItem, NuiFileExplorer::Item{localStub}, hookProgress(itm.progress), true, true
+                    *itm.remoteItem, NuiFileExplorer::Item{localStub}, hookProgress(itm.progress), true, true,
+                    /*createMissingDirs=*/true
                 );
             }
         }
@@ -419,6 +521,7 @@ void SyncDialog::setOnRecompare(
     std::function<void(
         std::filesystem::path,
         std::filesystem::path,
+        bool respectIgnoreFiles,
         std::function<void(
             std::vector<SharedData::DirectoryEntry>,
             std::vector<SharedData::DirectoryEntry>
@@ -470,64 +573,83 @@ Nui::ElementRenderer SyncDialog::operator()()
         Nui::globalEventContext.executeActiveEventsImmediately();
     };
 
-    // Renders a single diff row, with a reactive progress/done background if progress is set.
-    auto renderRow = [](long long /*idx*/, SyncItem const& itm) -> Nui::ElementRenderer
+    // Factory producing a row renderer bound to a specific diff list so that the per-row
+    // Play button can enqueue just that item at priority.
+    auto makeRowRenderer = [&](Nui::Observed<std::vector<SyncItem>>& listObs)
     {
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-
-        std::string arrowClass;
-        Nui::ElementRenderer arrowIcon = Nui::nil();
-        switch (itm.action)
+        return [this, &listObs](long long idx, SyncItem const& itm) -> Nui::ElementRenderer
         {
-            case SyncItemAction::Upload:
-                arrowClass = "upload";
-                arrowIcon = Ui5Icons::arrow_right();
-                break;
-            case SyncItemAction::Download:
-                arrowClass = "download";
-                arrowIcon = Ui5Icons::arrow_left();
-                break;
-            case SyncItemAction::DeleteLocal:
-            case SyncItemAction::DeleteRemote:
-                arrowClass = "delete";
-                arrowIcon = Ui5Icons::delete_();
-                break;
-        }
+            using namespace Nui::Elements;
+            using namespace Nui::Attributes;
+            using Nui::Elements::div;
+            namespace Snc = ScriptNuiComponents;
 
-        if (itm.progress)
-        {
-            auto prog = itm.progress;
-            return div{
-                class_ = "sync-diff-row",
-                style = observe(*prog).generate([prog]() -> std::string
-                {
-                    const double val = prog->value();
-                    if (val > 1.0)
-                        return "background: var(--sync-done-color, rgba(76,175,80,0.18));";
-                    if (val < 0.0)
-                        return "background: var(--sync-error-color, rgba(231,76,60,0.18));";
-                    const int pct = static_cast<int>(val * 100.0);
-                    return fmt::format(
-                        "background: linear-gradient(to right,"
-                        " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
-                        " transparent {}%);",
-                        pct, pct
-                    );
-                })
-            }(
+            std::string arrowClass;
+            Nui::ElementRenderer arrowIcon = Nui::nil();
+            switch (itm.action)
+            {
+                case SyncItemAction::Upload:
+                    arrowClass = "upload";
+                    arrowIcon = Ui5Icons::arrow_right();
+                    break;
+                case SyncItemAction::Download:
+                    arrowClass = "download";
+                    arrowIcon = Ui5Icons::arrow_left();
+                    break;
+                case SyncItemAction::DeleteLocal:
+                case SyncItemAction::DeleteRemote:
+                    arrowClass = "delete";
+                    arrowIcon = Ui5Icons::delete_();
+                    break;
+            }
+
+            const auto rowIndex = static_cast<std::size_t>(idx);
+            auto playButton = Snc::button({
+                .icon = Ui5Icons::play(),
+                .attributes = {
+                    onClick = [this, &listObs, rowIndex](Nui::val event) {
+                        event.call<void>("stopPropagation");
+                        impl_->enqueueSingle(listObs, rowIndex);
+                    }
+                },
+                .styleVariant = Snc::StyleVariant::Transparent,
+            });
+
+            if (itm.progress)
+            {
+                auto prog = itm.progress;
+                return div{
+                    class_ = "sync-diff-row",
+                    style = observe(*prog).generate([prog]() -> std::string
+                    {
+                        const double val = prog->value();
+                        if (val > 1.0)
+                            return "background: var(--sync-done-color, rgba(76,175,80,0.18));";
+                        if (val < 0.0)
+                            return "background: var(--sync-error-color, rgba(231,76,60,0.18));";
+                        const int pct = static_cast<int>(val * 100.0);
+                        return fmt::format(
+                            "background: linear-gradient(to right,"
+                            " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
+                            " transparent {}%);",
+                            pct, pct
+                        );
+                    })
+                }(
+                    renderItemCell(itm.localItem, false),
+                    div{class_ = fmt::format("sync-diff-arrow {}", arrowClass)}(std::move(arrowIcon)),
+                    renderItemCell(itm.remoteItem, true),
+                    div{class_ = "sync-diff-row-action"}(std::move(playButton))
+                );
+            }
+
+            return div{class_ = "sync-diff-row"}(
                 renderItemCell(itm.localItem, false),
                 div{class_ = fmt::format("sync-diff-arrow {}", arrowClass)}(std::move(arrowIcon)),
-                renderItemCell(itm.remoteItem, true)
+                renderItemCell(itm.remoteItem, true),
+                div{class_ = "sync-diff-row-action"}(std::move(playButton))
             );
-        }
-
-        return div{class_ = "sync-diff-row"}(
-            renderItemCell(itm.localItem, false),
-            div{class_ = fmt::format("sync-diff-arrow {}", arrowClass)}(std::move(arrowIcon)),
-            renderItemCell(itm.remoteItem, true)
-        );
+        };
     };
 
     // clang-format off
@@ -605,47 +727,6 @@ Nui::ElementRenderer SyncDialog::operator()()
                         })
                     ),
                     div{class_ = "sync-settings-card"}(
-                        label{class_ = "sync-settings-label"}("Match by"),
-                        div{class_ = "sync-settings-switches sync-settings-switches-2col"}(
-                            div{class_ = "sync-settings-switch-row"}(
-                                Snc::switch_({
-                                    .isChecked = impl_->criteriaName_,
-                                    .onChange = [this, onSettingChange](bool val, auto const&) {
-                                        impl_->criteriaName_ = val; onSettingChange();
-                                    }
-                                }),
-                                span{}("Name")
-                            ),
-                            div{class_ = "sync-settings-switch-row"}(
-                                Snc::switch_({
-                                    .isChecked = impl_->criteriaSize_,
-                                    .onChange = [this, onSettingChange](bool val, auto const&) {
-                                        impl_->criteriaSize_ = val; onSettingChange();
-                                    }
-                                }),
-                                span{}("Size")
-                            ),
-                            div{class_ = "sync-settings-switch-row"}(
-                                Snc::switch_({
-                                    .isChecked = impl_->criteriaMtime_,
-                                    .onChange = [this, onSettingChange](bool val, auto const&) {
-                                        impl_->criteriaMtime_ = val; onSettingChange();
-                                    }
-                                }),
-                                span{}("Time")
-                            ),
-                            div{class_ = "sync-settings-switch-row"}(
-                                Snc::switch_({
-                                    .isChecked = impl_->criteriaHash_,
-                                    .onChange = [this, onSettingChange](bool val, auto const&) {
-                                        impl_->criteriaHash_ = val; onSettingChange();
-                                    }
-                                }),
-                                span{}("Hash")
-                            )
-                        )
-                    ),
-                    div{class_ = "sync-settings-card"}(
                         label{class_ = "sync-settings-label"}("Options"),
                         div{class_ = "sync-settings-switches"}(
                             div{class_ = "sync-settings-switch-row"}(
@@ -654,6 +735,15 @@ Nui::ElementRenderer SyncDialog::operator()()
                                     .onChange = [this](bool val, auto const&) { impl_->recursive_ = val; }
                                 }),
                                 span{}("Recursive")
+                            ),
+                            div{class_ = "sync-settings-switch-row"}(
+                                Snc::switch_({
+                                    .isChecked = impl_->respectIgnore_,
+                                    .onChange = [this, onSettingChange](bool val, auto const&) {
+                                        impl_->respectIgnore_ = val; onSettingChange();
+                                    }
+                                }),
+                                span{}("Respect .ignore / .gitignore")
                             )
                         )
                     ),
@@ -695,7 +785,8 @@ Nui::ElementRenderer SyncDialog::operator()()
                 div{class_ = "sync-diff-header"}(
                     span{class_ = "sync-diff-col-label"}("Local"),
                     span{}(),
-                    span{class_ = "sync-diff-col-label sync-diff-col-label-right"}("Remote")
+                    span{class_ = "sync-diff-col-label sync-diff-col-label-right"}("Remote"),
+                    span{}()
                 ),
 
                 // Diff body — three collapsible sections
@@ -733,7 +824,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                             })
                         }(
                             Nui::range(impl_->uploadItems_),
-                            renderRow
+                            makeRowRenderer(impl_->uploadItems_)
                         )
                     ),
 
@@ -770,7 +861,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                             })
                         }(
                             Nui::range(impl_->downloadItems_),
-                            renderRow
+                            makeRowRenderer(impl_->downloadItems_)
                         )
                     ),
 
@@ -807,7 +898,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                             })
                         }(
                             Nui::range(impl_->deleteItems_),
-                            renderRow
+                            makeRowRenderer(impl_->deleteItems_)
                         )
                     )
                 )
@@ -828,6 +919,7 @@ Nui::ElementRenderer SyncDialog::operator()()
                                 impl_->onRecompare_(
                                     impl_->localPath_,
                                     impl_->remotePath_,
+                                    impl_->respectIgnore_.value(),
                                     [this](auto localE, auto remoteE) {
                                         open(
                                             impl_->localPath_,

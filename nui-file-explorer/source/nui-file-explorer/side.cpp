@@ -459,26 +459,35 @@ namespace NuiFileExplorer
 
         auto menuItems = impl_->model->contextMenuItems(clickItems);
 
-        if (impl_->onSynchronize && impl_->otherSide && clickItems.size() == 1 &&
-            clickItems[0].isDirectoryLike())
+        if (impl_->onSynchronize && impl_->otherSide)
         {
+            namespace Snc = ScriptNuiComponents;
+
+            const bool thisSideOk = clickItems.size() == 1 && clickItems[0].isDirectoryLike();
             const auto otherSelected = impl_->otherSide->selectedItems();
-            if (otherSelected.size() == 1 && otherSelected[0].isDirectoryLike())
+            const bool otherSideOk = otherSelected.size() == 1 && otherSelected[0].isDirectoryLike();
+
+            menuItems.push_back(Snc::PopupMenu::separator());
+            if (thisSideOk && otherSideOk)
             {
-                namespace Snc = ScriptNuiComponents;
                 const bool thisIsLocal = impl_->model->isLeft();
-                const auto localPath =
-                    thisIsLocal ? clickItems[0].fullPath : otherSelected[0].fullPath;
-                const auto remotePath =
-                    thisIsLocal ? otherSelected[0].fullPath : clickItems[0].fullPath;
-                menuItems.push_back(Snc::PopupMenu::separator());
+                const auto localPath = thisIsLocal ? clickItems[0].fullPath : otherSelected[0].fullPath;
+                const auto remotePath = thisIsLocal ? otherSelected[0].fullPath : clickItems[0].fullPath;
                 menuItems.push_back(Snc::PopupMenu::item(
                     "Synchronize...",
                     Ui5Icons::synchronize(),
-                    [this, localPath, remotePath]()
-                    {
-                        impl_->onSynchronize(localPath, remotePath);
-                    }
+                    [this, localPath, remotePath]() { impl_->onSynchronize(localPath, remotePath); }
+                ));
+            }
+            else
+            {
+                menuItems.push_back(Snc::PopupMenu::item(
+                    "Synchronize...",
+                    Ui5Icons::synchronize(),
+                    {},
+                    /*disabled=*/true,
+                    /*shortcut=*/{},
+                    "Select exactly one directory on each side to synchronize."
                 ));
             }
         }

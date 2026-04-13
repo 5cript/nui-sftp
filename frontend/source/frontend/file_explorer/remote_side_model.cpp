@@ -11,6 +11,7 @@
 #include <ui5-sap-icons/icons/open-folder.hpp>
 #include <ui5-sap-icons/icons/open-command-field.hpp>
 #include <ui5-sap-icons/icons/synchronize.hpp>
+#include <ui5-sap-icons/icons/show.hpp>
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/edit.hpp>
 #include <ui5-sap-icons/icons/detail-view.hpp>
@@ -217,8 +218,8 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             !singleItem || fileTracking_ == nullptr
         ),
         Snc::PopupMenu::item(
-            language->get("fileExplorer", "contextMenu", "openAndSync"),
-            Ui5Icons::synchronize(),
+            language->get("fileExplorer", "contextMenu", "openAndWatch"),
+            Ui5Icons::show(),
             [this, selectedItems]()
             {
                 onWatchDownloadAndOpen(selectedItems.front(), false);
@@ -226,8 +227,8 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             !singleItem || fileTracking_ == nullptr
         ),
         Snc::PopupMenu::item(
-            language->get("fileExplorer", "contextMenu", "openWithAndSync"),
-            Ui5Icons::synchronize(),
+            language->get("fileExplorer", "contextMenu", "openWithAndWatch"),
+            Ui5Icons::show(),
             [this, selectedItems]()
             {
                 onWatchDownloadAndOpen(selectedItems.front(), true);
@@ -1136,6 +1137,7 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
         },
         false, // allowOverwrite
         false, // insertRefresh
+        false, // createMissingDirectories
         SharedData::OperationMode::PriorityQueued
     );
 }

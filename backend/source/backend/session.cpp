@@ -637,6 +637,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                 bool allowOverwrite,
                 bool bigFile,
                 bool insertRefresh,
+                bool createMissingDirectories,
                 int mode
             )
             {
@@ -653,6 +654,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
+                        createMissingDirectories,
                         mode](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
@@ -667,6 +669,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                             allowOverwrite,
                             bigFile,
                             insertRefresh,
+                            createMissingDirectories,
                             static_cast<SharedData::OperationMode>(mode)
                         );
 
@@ -710,6 +713,7 @@ void Session::registerRpcSftpAddUploadOperation()
                 bool allowOverwrite,
                 bool bigFile,
                 bool insertRefresh,
+                bool createMissingDirectories,
                 int mode
             )
             {
@@ -726,6 +730,7 @@ void Session::registerRpcSftpAddUploadOperation()
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
+                        createMissingDirectories,
                         mode](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
@@ -740,6 +745,7 @@ void Session::registerRpcSftpAddUploadOperation()
                             allowOverwrite,
                             bigFile,
                             insertRefresh,
+                            createMissingDirectories,
                             static_cast<SharedData::OperationMode>(mode)
                         );
 
@@ -867,7 +873,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                 std::string const& remoteScanIdString,
                 std::string const& localScanIdString,
                 std::string const& remotePath,
-                std::string const& localPath
+                std::string const& localPath,
+                bool respectIgnoreFiles
             )
             {
                 auto self = weak.lock();
@@ -880,7 +887,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                         remoteScanIdString,
                         localScanIdString,
                         remotePath,
-                        localPath](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        localPath,
+                        respectIgnoreFiles](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -891,7 +899,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                             Ids::makeOperationId(remoteScanIdString),
                             Ids::makeOperationId(localScanIdString),
                             remotePath,
-                            localPath
+                            localPath,
+                            respectIgnoreFiles
                         );
 
                         self->resetQueueThrottle();

@@ -474,6 +474,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     bool allowOverwrite,
     bool isBigFile,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -506,6 +507,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         opts.localPath = localPath;
         opts.bigFileOptimized = isBigFile;
         opts.entry = result.value();
+        opts.createMissingDirectories = createMissingDirectories;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -612,6 +614,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool allowOverwrite,
     bool isBigFile,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -654,6 +657,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.remotePath = remotePath;
         opts.localPath = localPath;
         opts.bigFileOptimized = isBigFile;
+        opts.createMissingDirectories = createMissingDirectories;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -875,7 +879,8 @@ void OperationQueue::addSyncScanOperation(
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
     std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath
+    std::filesystem::path const& localPath,
+    bool respectIgnoreFiles
 )
 {
     // Register completion callbacks that emit onSyncScanResult to the frontend.
@@ -920,6 +925,7 @@ void OperationQueue::addSyncScanOperation(
             .progressCallback = makeScanProgressCallback("onScanProgress", remoteScanId),
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+            .respectIgnoreFiles = respectIgnoreFiles,
         }
     );
     priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
@@ -938,6 +944,7 @@ void OperationQueue::addSyncScanOperation(
     auto localScan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
         .progressCallback = makeScanProgressCallback("onLocalScanProgress", localScanId),
         .localPath = localPath,
+        .respectIgnoreFiles = respectIgnoreFiles,
     });
     priorityOperations_.emplace_back(localScanId, std::move(localScan));
 

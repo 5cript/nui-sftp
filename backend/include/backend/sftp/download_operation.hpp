@@ -36,6 +36,11 @@ class DownloadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
         Persistence::SymlinkHandling symlinkHandling{Persistence::SymlinkHandling::AsSymlink};
         std::optional<SharedData::DirectoryEntry> entry{std::nullopt};
+        /** @brief Create every missing parent directory of @ref localPath before opening the
+         *         local file.  Off by default — enable for sync flows whose target subtree
+         *         may not yet exist locally.
+         */
+        bool createMissingDirectories{false};
     };
 
     SecureShell::ProcessingStrand* strand() const override

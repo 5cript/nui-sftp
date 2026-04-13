@@ -49,6 +49,7 @@ class SyncDialog
         std::function<void(
             std::filesystem::path,
             std::filesystem::path,
+            bool respectIgnoreFiles,
             std::function<void(
                 std::vector<SharedData::DirectoryEntry>,
                 std::vector<SharedData::DirectoryEntry>

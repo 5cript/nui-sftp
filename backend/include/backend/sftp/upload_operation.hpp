@@ -32,6 +32,12 @@ class UploadOperation : public Operation
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
         std::chrono::seconds futureTimeout{5};
         Persistence::SymlinkHandling symlinkHandling{Persistence::SymlinkHandling::AsSymlink};
+        /** @brief Create every missing parent directory of @ref remotePath before opening the
+         *         file.  Adds one lstat (+ one mkdir per missing level) per upload, so it is
+         *         off by default — enable for sync/priority flows that target freshly-diffed
+         *         subtrees whose remote structure may not exist yet.
+         */
+        bool createMissingDirectories{false};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -97,6 +103,14 @@ class UploadOperation : public Operation
     std::expected<void, Error> handleSymlink();
 
     std::expected<void, Error> openOrAdoptFile();
+
+    /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
+     *         any missing ones.  Idempotent: existing directories are left alone.
+     *
+     *  Walks up the chain via lstat and recurses into the grandparent before mkdir'ing
+     *  the parent, so deeply-nested missing paths are created in one pass.
+     */
+    std::expected<void, Error> ensureRemoteDirectoryExists(std::filesystem::path const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
