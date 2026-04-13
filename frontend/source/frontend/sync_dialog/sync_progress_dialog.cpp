@@ -4,6 +4,8 @@
 #include <frontend/components/progress_bar.hpp>
 #include <frontend/svgs/decline.hpp>
 
+#include <utility/language.hpp>
+
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/sync_phase.hpp>
@@ -95,6 +97,7 @@ void SyncProgressDialog::open(
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
     bool recursive,
+    bool ignoreHidden,
     std::function<void(
         std::vector<SharedData::DirectoryEntry> localEntries,
         std::vector<SharedData::DirectoryEntry> remoteEntries
@@ -126,6 +129,7 @@ void SyncProgressDialog::open(
         impl_->remotePath_,
         respectIgnoreFiles,
         recursive,
+        ignoreHidden,
         // onRemoteProgress
         [this, token](SharedData::ScanProgress const& progress)
         {
@@ -202,7 +206,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     [this]() -> Nui::ElementRenderer {
                         using Nui::Elements::span;
                         return span{}(fmt::format(
-                            "Comparing: {} / {}",
+                            fmt::runtime(language->get("syncProgressDialog", "titleFormat")),
                             impl_->localPath_.filename().string(),
                             impl_->remotePath_.filename().string()
                         ));
@@ -233,15 +237,15 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
                                 div{class_ = "sync-progress-spinner"}(),
-                                span{class_ = "sync-progress-step-label"}("Listing files...")
+                                span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "listingFiles"))
                             ),
                             div{class_ = "sync-progress-counters"}(
                                 div{class_ = "sync-progress-counter"}(
-                                    span{class_ = "sync-progress-counter-label"}("Local"),
+                                    span{class_ = "sync-progress-counter-label"}(language->getObserved("syncProgressDialog", "localLabel")),
                                     span{class_ = "sync-progress-counter-value"}(impl_->localListed_)
                                 ),
                                 div{class_ = "sync-progress-counter"}(
-                                    span{class_ = "sync-progress-counter-label"}("Remote"),
+                                    span{class_ = "sync-progress-counter-label"}(language->getObserved("syncProgressDialog", "remoteLabel")),
                                     span{class_ = "sync-progress-counter-value"}(impl_->remoteListed_)
                                 )
                             )
@@ -254,11 +258,11 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
                                 div{class_ = "sync-progress-spinner"}(),
-                                span{class_ = "sync-progress-step-label"}("Comparing...")
+                                span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "comparing"))
                             ),
                             div{class_ = "sync-progress-counters"}(
                                 div{class_ = "sync-progress-counter"}(
-                                    span{class_ = "sync-progress-counter-label"}("Differences found"),
+                                    span{class_ = "sync-progress-counter-label"}(language->getObserved("syncProgressDialog", "differencesFound")),
                                     span{class_ = "sync-progress-counter-value"}(impl_->compared_)
                                 )
                             )
@@ -270,7 +274,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     {
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
-                                span{class_ = "sync-progress-step-label"}("Hashing...")
+                                span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "hashing"))
                             ),
                             impl_->hashProgressBar_()
                         );
@@ -284,7 +288,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
             div{class_ = "sync-dialog-footer"}(
                 div{class_ = "sync-footer-actions"}(
                     Snc::button({
-                        .text = "Cancel"s,
+                        .text = language->getObserved("syncProgressDialog", "cancel"),
                         .attributes = {
                             onClick = [this]() { cancel(); }
                         },

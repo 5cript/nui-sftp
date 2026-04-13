@@ -27,7 +27,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         , progressBar_({
               .height = std::string{progressHeight},
               .min = 0,
-              .max = 1,
+              .max = 0,
               .showMinMax = true,
               .byteMode = false,
           })

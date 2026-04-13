@@ -51,6 +51,7 @@ class SyncDialog
             std::filesystem::path,
             bool respectIgnoreFiles,
             bool recursive,
+            bool ignoreHidden,
             std::function<void(
                 std::vector<SharedData::DirectoryEntry>,
                 std::vector<SharedData::DirectoryEntry>

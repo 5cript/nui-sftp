@@ -5,6 +5,7 @@
 #include <ssh/file_stream.hpp>
 
 #include <string>
+#include <algorithm>
 
 ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options)
     : sftp_(&sftp)
@@ -13,6 +14,7 @@ ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOption
     , futureTimeout_{options.futureTimeout}
     , respectIgnoreFiles_{options.respectIgnoreFiles}
     , recursive_{options.recursive}
+    , ignoreHidden_{options.ignoreHidden}
 {}
 
 ScanOperation::~ScanOperation() = default;
@@ -69,6 +71,17 @@ ScanOperation::scanner(std::filesystem::path const& path)
         );
 
     auto entries = std::move(result).value();
+
+    if (ignoreHidden_)
+    {
+        entries.erase(
+            std::remove_if(entries.begin(), entries.end(), [](SharedData::DirectoryEntry const& entry) {
+                const auto name = entry.path.filename().string();
+                return !name.empty() && name.front() == '.';
+            }),
+            entries.end()
+        );
+    }
 
     if (!respectIgnoreFiles_)
         return {std::move(entries)};

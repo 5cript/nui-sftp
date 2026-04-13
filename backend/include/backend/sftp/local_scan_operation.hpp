@@ -24,6 +24,8 @@ class LocalScanOperation : public Operation
         bool respectIgnoreFiles{false};
         /// When false, only the root directory is listed; subdirectories are not descended into.
         bool recursive{true};
+        /// When true, entries whose filename starts with '.' are skipped during scan.
+        bool ignoreHidden{false};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -99,6 +101,7 @@ class LocalScanOperation : public Operation
         progressCallback_;
     bool respectIgnoreFiles_;
     bool recursive_;
+    bool ignoreHidden_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
