@@ -880,7 +880,8 @@ void OperationQueue::addSyncScanOperation(
     Ids::OperationId localScanId,
     std::filesystem::path const& remotePath,
     std::filesystem::path const& localPath,
-    bool respectIgnoreFiles
+    bool respectIgnoreFiles,
+    bool recursive
 )
 {
     // Register completion callbacks that emit onSyncScanResult to the frontend.
@@ -926,6 +927,7 @@ void OperationQueue::addSyncScanOperation(
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
             .respectIgnoreFiles = respectIgnoreFiles,
+            .recursive = recursive,
         }
     );
     priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
@@ -945,6 +947,7 @@ void OperationQueue::addSyncScanOperation(
         .progressCallback = makeScanProgressCallback("onLocalScanProgress", localScanId),
         .localPath = localPath,
         .respectIgnoreFiles = respectIgnoreFiles,
+        .recursive = recursive,
     });
     priorityOperations_.emplace_back(localScanId, std::move(localScan));
 

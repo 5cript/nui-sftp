@@ -922,6 +922,7 @@ void OperationQueue::enqueueSyncScans(
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
+    bool recursive,
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
     std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
@@ -949,6 +950,7 @@ void OperationQueue::enqueueSyncScans(
         remoteScanId,
         localScanId,
         respectIgnoreFiles,
+        recursive,
         [remoteScanId, localScanId](bool success, std::string const& info)
         {
             if (!success)

@@ -532,7 +532,9 @@ void LocalSideModel::onTransfer(
                         auto localItem = item;
                         auto remoteItem = item;
                         localItem.path = fullSourcePath();
+                        localItem.fullPath = localItem.path;
                         remoteItem.path = destinationDir / item.path.filename();
+                        remoteItem.fullPath = remoteItem.path;
                         return std::make_pair(remoteItem, localItem);
                     }
                 );

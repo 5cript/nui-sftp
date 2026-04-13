@@ -109,7 +109,8 @@ class OperationQueue
         Ids::OperationId localScanId,
         std::filesystem::path const& remotePath,
         std::filesystem::path const& localPath,
-        bool respectIgnoreFiles
+        bool respectIgnoreFiles,
+        bool recursive
     );
 
     void registerRpc();

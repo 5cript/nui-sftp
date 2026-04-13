@@ -874,7 +874,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                 std::string const& localScanIdString,
                 std::string const& remotePath,
                 std::string const& localPath,
-                bool respectIgnoreFiles
+                bool respectIgnoreFiles,
+                bool recursive
             )
             {
                 auto self = weak.lock();
@@ -888,7 +889,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                         localScanIdString,
                         remotePath,
                         localPath,
-                        respectIgnoreFiles](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        respectIgnoreFiles,
+                        recursive](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -900,7 +902,8 @@ void Session::registerRpcSftpAddSyncScanOperation()
                             Ids::makeOperationId(localScanIdString),
                             remotePath,
                             localPath,
-                            respectIgnoreFiles
+                            respectIgnoreFiles,
+                            recursive
                         );
 
                         self->resetQueueThrottle();

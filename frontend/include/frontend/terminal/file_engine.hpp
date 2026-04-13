@@ -47,6 +47,7 @@ class FileEngine
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
         bool respectIgnoreFiles,
+        bool recursive,
         std::function<void(bool success, std::string const& info)> onComplete
     );
 

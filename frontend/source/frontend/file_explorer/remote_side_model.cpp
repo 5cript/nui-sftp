@@ -908,7 +908,9 @@ void RemoteSideModel::onTransfer(
                         NuiFileExplorer::Item localItem = item;
                         NuiFileExplorer::Item remoteItem = item;
                         localItem.path = destinationDir / item.path.filename();
+                        localItem.fullPath = localItem.path;
                         remoteItem.path = currentPath_.value() / item.path;
+                        remoteItem.fullPath = remoteItem.path;
                         return std::make_pair(remoteItem, localItem);
                     }
                 );

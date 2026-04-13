@@ -29,6 +29,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     : localPath_{std::move(options.localPath)}
     , progressCallback_{std::move(options.progressCallback)}
     , respectIgnoreFiles_{options.respectIgnoreFiles}
+    , recursive_{options.recursive}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
@@ -36,6 +37,13 @@ LocalScanOperation::~LocalScanOperation() = default;
 std::expected<std::vector<SharedData::DirectoryEntry>, LocalScanOperation::Error>
 LocalScanOperation::scanner(std::filesystem::path const& path)
 {
+    // Non-recursive mode: only list the root directory.  The walker still invokes the
+    // scanner for each child directory it discovers, but we short-circuit those calls so
+    // nothing below the root is enumerated.
+    if (!recursive_ && rootScanned_)
+        return std::vector<SharedData::DirectoryEntry>{};
+    rootScanned_ = true;
+
     auto iter = std::filesystem::directory_iterator(path, std::filesystem::directory_options::skip_permission_denied);
     const auto end = std::filesystem::directory_iterator();
 
