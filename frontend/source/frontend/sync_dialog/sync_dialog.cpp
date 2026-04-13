@@ -37,6 +37,8 @@
 
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/sync_phase.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/enqueue_minimizer.hpp>
 #include <utility/format_bytes.hpp>
 
 #include <fmt/format.h>
@@ -54,12 +56,7 @@ using namespace std::string_literals;
 
 namespace
 {
-    enum class SyncDirection
-    {
-        Both,
-        Upload,
-        Download
-    };
+    using SyncDirection = SharedData::Sync::Direction;
 
     std::string formatMtime(std::uint64_t mtime)
     {
@@ -153,59 +150,6 @@ namespace
                 return span{class_ = "meta date"}(mtimeStr);
             }()
         );
-    }
-
-    /** @brief Build a flat map of relative-path string → entry for a scan result.
-     *         The root entry (index 0) is excluded from the map.
-     *
-     * @param root    The absolute root path that was scanned.
-     * @param entries Flat entry list with pre-computed fullPath fields.
-     */
-    std::map<std::string, SharedData::DirectoryEntry>
-    buildEntryMap(std::filesystem::path const& root, std::vector<SharedData::DirectoryEntry> const& entries)
-    {
-        std::map<std::string, SharedData::DirectoryEntry> result;
-        for (std::size_t idx = 1; idx < entries.size(); ++idx)
-        {
-            const auto& entry = entries[idx];
-            std::filesystem::path relPath;
-            if (entry.fullPath.has_relative_path())
-            {
-                relPath = std::filesystem::path{entry.fullPath.generic_string()}.lexically_relative(
-                    std::filesystem::path{root.generic_string()}
-                );
-            }
-            else
-            {
-                relPath = entry.path;
-            }
-            if (!relPath.empty())
-                result.emplace(relPath.generic_string(), entry);
-        }
-        return result;
-    }
-
-    /** @brief Returns true when the two entries are considered different (by size and mtime).
-     *
-     * Symlinks are compared by raw link target (readlink value): two links with the same target
-     * are in sync, two with different targets are not — size and mtime of the link itself are
-     * meaningless for comparison. A type mismatch (symlink vs regular file) always counts as a diff.
-     */
-    bool entriesDiffer(SharedData::DirectoryEntry const& loc, SharedData::DirectoryEntry const& rem)
-    {
-        if (loc.type != rem.type)
-            return true;
-        if (loc.type == SharedData::FileType::Symlink)
-        {
-            if (loc.linkTarget && rem.linkTarget)
-                return *loc.linkTarget != *rem.linkTarget;
-            return false;
-        }
-        if (loc.size != rem.size)
-            return true;
-        if (loc.mtime != rem.mtime)
-            return true;
-        return false;
     }
 
 }
@@ -333,160 +277,58 @@ struct SyncDialog::Implementation
 
     void recomputeDiff()
     {
-        std::vector<SyncItem> uploads;
-        std::vector<SyncItem> downloads;
-        std::vector<SyncItem> deletes;
-
-        if (localEntries_.empty() && remoteEntries_.empty())
-        {
-            uploadItems_ = std::move(uploads);
-            downloadItems_ = std::move(downloads);
-            deleteItems_ = std::move(deletes);
-            refreshTrees();
-            return;
-        }
-
-        auto localMap = buildEntryMap(localPath_, localEntries_);
-        auto remoteMap = buildEntryMap(remotePath_, remoteEntries_);
-
-        if (ignoreHidden_.value())
-        {
-            // Backend already filters when this toggle is on at scan-time; this
-            // post-scan pass exists so toggling the switch ON without a
-            // recompare also hides any hidden entries from a prior scan.  A
-            // hidden segment anywhere in the relKey hides the entry (".git/"
-            // hides the whole tree, not just the top-level dotfile).
-            const auto hasHiddenSegment = [](std::string const& relKey) {
-                std::size_t pos = 0;
-                while (pos < relKey.size())
-                {
-                    if (relKey[pos] == '.')
-                        return true;
-                    pos = relKey.find('/', pos);
-                    if (pos == std::string::npos)
-                        break;
-                    ++pos;
-                }
-                return false;
-            };
-            for (auto mapIt = localMap.begin(); mapIt != localMap.end();)
-                mapIt = hasHiddenSegment(mapIt->first) ? localMap.erase(mapIt) : std::next(mapIt);
-            for (auto mapIt = remoteMap.begin(); mapIt != remoteMap.end();)
-                mapIt = hasHiddenSegment(mapIt->first) ? remoteMap.erase(mapIt) : std::next(mapIt);
-        }
-
-        if (!recursive_.value())
-        {
-            // Non-recursive mode: drop everything below the root directory.  The scans
-            // themselves always recurse (cheaper than a separate top-level-only scan path);
-            // we filter here so toggling the switch is immediate and does not require a
-            // new recompare.
-            const auto isNested = [](std::string const& relKey) {
-                return relKey.find('/') != std::string::npos;
-            };
-            for (auto mapIt = localMap.begin(); mapIt != localMap.end();)
-                mapIt = isNested(mapIt->first) ? localMap.erase(mapIt) : std::next(mapIt);
-            for (auto mapIt = remoteMap.begin(); mapIt != remoteMap.end();)
-                mapIt = isNested(mapIt->first) ? remoteMap.erase(mapIt) : std::next(mapIt);
-        }
-
-        auto makeLocalItem = [](SharedData::DirectoryEntry const& entry, std::string const& relKey) {
-            SharedData::DirectoryEntry item = entry;
-            item.path = std::filesystem::path{relKey};
-            return NuiFileExplorer::Item{item};
+        const SharedData::Sync::DiffOptions diffOptions{
+            .direction = direction_,
+            .actionUpload = actionUpload_.value(),
+            .actionDownload = actionDownload_.value(),
+            .actionDelete = actionDelete_.value(),
+            .recursive = recursive_.value(),
+            .ignoreHidden = ignoreHidden_.value(),
         };
-        auto makeRemoteItem = [](SharedData::DirectoryEntry const& entry, std::string const& relKey) {
-            SharedData::DirectoryEntry item = entry;
-            item.path = std::filesystem::path{relKey};
-            return NuiFileExplorer::Item{item};
+        auto diff = SharedData::Sync::computeSyncDiff(
+            localPath_, remotePath_, localEntries_, remoteEntries_, diffOptions
+        );
+
+        const auto actionToSyncItemAction = [](SharedData::Sync::Action action) {
+            switch (action)
+            {
+                case SharedData::Sync::Action::Upload:
+                    return SyncItemAction::Upload;
+                case SharedData::Sync::Action::Download:
+                    return SyncItemAction::Download;
+                case SharedData::Sync::Action::DeleteLocal:
+                    return SyncItemAction::DeleteLocal;
+                case SharedData::Sync::Action::DeleteRemote:
+                    return SyncItemAction::DeleteRemote;
+            }
+            return SyncItemAction::Upload;
         };
 
-        auto makeItem = [](SyncItemAction action, std::optional<NuiFileExplorer::Item> localI,
-                           std::optional<NuiFileExplorer::Item> remoteI, std::string relKey) {
-            SyncItem item{};
-            item.action = action;
-            item.localItem = std::move(localI);
-            item.remoteItem = std::move(remoteI);
-            item.relKey = std::move(relKey);
-            return item;
+        const auto toFileExplorerItem = [](SharedData::DirectoryEntry entry, std::string const& relKey) {
+            entry.path = std::filesystem::path{relKey};
+            return NuiFileExplorer::Item{std::move(entry)};
         };
 
-        // --- Entries that exist locally ---
-        for (auto const& [relKey, localEntry] : localMap)
-        {
-            auto remIt = remoteMap.find(relKey);
-            if (remIt == remoteMap.end())
+        const auto convert = [&](std::vector<SharedData::Sync::DiffEntry>&& diffEntries) {
+            std::vector<SyncItem> result;
+            result.reserve(diffEntries.size());
+            for (auto& diffEntry : diffEntries)
             {
-                if (actionUpload_.value() && direction_ != SyncDirection::Download)
-                    uploads.push_back(
-                        makeItem(SyncItemAction::Upload, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
-                else if (actionDelete_.value() && direction_ == SyncDirection::Download)
-                {
-                    // In non-recursive mode we haven't scanned the directory's
-                    // children, so we cannot know whether deleting it would
-                    // remove files the user never saw.  Hide the directory
-                    // instead of risking a recursive delete.
-                    const bool skipDir = !recursive_.value()
-                        && localEntry.type == SharedData::FileType::Directory;
-                    if (!skipDir)
-                        deletes.push_back(makeItem(
-                            SyncItemAction::DeleteLocal, makeLocalItem(localEntry, relKey), std::nullopt, relKey));
-                }
+                SyncItem item{};
+                item.action = actionToSyncItemAction(diffEntry.action);
+                if (diffEntry.local)
+                    item.localItem = toFileExplorerItem(std::move(*diffEntry.local), diffEntry.relKey);
+                if (diffEntry.remote)
+                    item.remoteItem = toFileExplorerItem(std::move(*diffEntry.remote), diffEntry.relKey);
+                item.relKey = std::move(diffEntry.relKey);
+                result.push_back(std::move(item));
             }
-            else
-            {
-                const auto& remoteEntry = remIt->second;
-                if (localEntry.type == SharedData::FileType::Directory)
-                    continue;
+            return result;
+        };
 
-                if (!entriesDiffer(localEntry, remoteEntry))
-                    continue;
-
-                const bool localNewer = localEntry.mtime >= remoteEntry.mtime;
-
-                if (direction_ == SyncDirection::Upload ||
-                    (direction_ == SyncDirection::Both && localNewer))
-                {
-                    if (actionUpload_.value())
-                        uploads.push_back(makeItem(
-                            SyncItemAction::Upload,
-                            makeLocalItem(localEntry, relKey),
-                            makeRemoteItem(remoteEntry, relKey),
-                            relKey));
-                }
-                else
-                {
-                    if (actionDownload_.value())
-                        downloads.push_back(makeItem(
-                            SyncItemAction::Download,
-                            makeLocalItem(localEntry, relKey),
-                            makeRemoteItem(remoteEntry, relKey),
-                            relKey));
-                }
-            }
-        }
-
-        // --- Entries that exist only remotely ---
-        for (auto const& [relKey, remoteEntry] : remoteMap)
-        {
-            if (localMap.count(relKey))
-                continue;
-
-            if (actionDownload_.value() && direction_ != SyncDirection::Upload)
-                downloads.push_back(
-                    makeItem(SyncItemAction::Download, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
-            else if (actionDelete_.value() && direction_ == SyncDirection::Upload)
-            {
-                // See matching comment on DeleteLocal: hide directories in
-                // non-recursive mode instead of offering a potentially
-                // destructive recursive delete.
-                const bool skipDir = !recursive_.value()
-                    && remoteEntry.type == SharedData::FileType::Directory;
-                if (!skipDir)
-                    deletes.push_back(makeItem(
-                        SyncItemAction::DeleteRemote, std::nullopt, makeRemoteItem(remoteEntry, relKey), relKey));
-            }
-        }
+        auto uploads = convert(std::move(diff.uploads));
+        auto downloads = convert(std::move(diff.downloads));
+        auto deletes = convert(std::move(diff.deletes));
 
         // Auto-toggle a section's collapsed state on N↔0 transitions so the
         // user isn't left looking at an empty open section after changing
@@ -685,27 +527,6 @@ struct SyncDialog::Implementation
         std::vector<SyncItem> const& items,
         std::unordered_set<std::string> const& selected)
     {
-        const std::size_t count = items.size();
-        if (count == 0)
-            return {};
-
-        std::vector<bool> isTreeLeaf(count, true);
-        for (std::size_t idx = 0; idx < count; ++idx)
-        {
-            const std::string prefix = items[idx].relKey + "/";
-            for (std::size_t other = 0; other < count; ++other)
-            {
-                if (other == idx)
-                    continue;
-                if (items[other].relKey.size() > prefix.size() &&
-                    items[other].relKey.starts_with(prefix))
-                {
-                    isTreeLeaf[idx] = false;
-                    break;
-                }
-            }
-        }
-
         const auto isBulkDir = [](SyncItem const& item) {
             switch (item.action)
             {
@@ -725,89 +546,12 @@ struct SyncDialog::Implementation
             return false;
         };
 
-        // Leaf-keyed selection; for a dir-role item the "anySelected" /
-        // "allSelected" questions reduce to scanning its descendant tree-leaves.
-        const auto subtreeSelectionState = [&](std::size_t idx) {
-            struct State { bool any{false}; bool all{true}; } state;
-            if (isTreeLeaf[idx])
-            {
-                const bool checked = selected.contains(items[idx].relKey);
-                state.any = checked;
-                state.all = checked;
-                return state;
-            }
-            const std::string prefix = items[idx].relKey + "/";
-            bool sawAnyLeaf = false;
-            for (std::size_t other = 0; other < count; ++other)
-            {
-                if (!isTreeLeaf[other])
-                    continue;
-                if (items[other].relKey.size() <= prefix.size() ||
-                    !items[other].relKey.starts_with(prefix))
-                    continue;
-                sawAnyLeaf = true;
-                const bool checked = selected.contains(items[other].relKey);
-                state.any = state.any || checked;
-                if (!checked)
-                    state.all = false;
-            }
-            if (!sawAnyLeaf)
-                state.all = false; // no descendants at all → don't treat as "all selected"
-            return state;
-        };
+        std::vector<SharedData::Sync::MinimizerItemView> views;
+        views.reserve(items.size());
+        for (auto const& item : items)
+            views.push_back({.relKey = item.relKey, .isBulkDir = isBulkDir(item)});
 
-        std::vector<std::size_t> order(count);
-        std::iota(order.begin(), order.end(), std::size_t{0});
-        std::sort(order.begin(), order.end(), [&](std::size_t lhs, std::size_t rhs) {
-            return items[lhs].relKey.size() < items[rhs].relKey.size();
-        });
-
-        std::vector<std::string> coveredPrefixes;
-        std::vector<std::size_t> result;
-        result.reserve(count);
-
-        const auto isCovered = [&](std::string const& relKey) {
-            for (auto const& ancestor : coveredPrefixes)
-            {
-                const std::string prefix = ancestor + "/";
-                if (relKey.size() > prefix.size() && relKey.starts_with(prefix))
-                    return true;
-            }
-            return false;
-        };
-
-        for (std::size_t idx : order)
-        {
-            auto const& item = items[idx];
-            if (isCovered(item.relKey))
-                continue;
-
-            if (isBulkDir(item))
-            {
-                const auto state = subtreeSelectionState(idx);
-                if (!state.any)
-                    continue; // no selected work under this directory
-                if (state.all)
-                {
-                    // Bulk-transfer the whole subtree in one operation.
-                    result.push_back(idx);
-                    coveredPrefixes.push_back(item.relKey);
-                    continue;
-                }
-                // Partial selection: fall through; the dir itself is not
-                // emitted, descendants will be considered individually.
-                continue;
-            }
-
-            if (!isTreeLeaf[idx])
-                continue; // non-directory intermediate node: defer to descendants
-            if (!selected.contains(item.relKey))
-                continue;
-
-            result.push_back(idx);
-        }
-
-        return result;
+        return SharedData::Sync::minimizeEnqueueIndices(views, selected);
     }
 
     void enqueueOperations()
