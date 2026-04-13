@@ -112,7 +112,7 @@
 
 .sync-diff-header {
     display: grid;
-    grid-template-columns: 1fr 44px 1fr;
+    grid-template-columns: 1fr 44px 1fr 32px;
     padding: 4px 16px;
     border-bottom: 1px solid var(--foreground-border-color);
     background-color: var(--background-color);
@@ -180,7 +180,7 @@
 
 .sync-diff-row {
     display: grid;
-    grid-template-columns: 1fr 44px 1fr;
+    grid-template-columns: 1fr 44px 1fr 32px;
     height: 36px;
     align-items: center;
     padding: 0 8px;
@@ -189,6 +189,31 @@
 
 .sync-diff-row:hover {
     filter: brightness(1.06);
+}
+
+/* Per-row action button (priority-sync a single item) */
+.sync-diff-row-action {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.12s ease-in-out;
+}
+
+.sync-diff-row:hover .sync-diff-row-action {
+    opacity: 1;
+}
+
+.sync-diff-row-action button {
+    padding: 2px;
+    min-width: 0;
+    width: 22px;
+    height: 22px;
+}
+
+.sync-diff-row-action svg {
+    width: 14px;
+    height: 14px;
 }
 
 /* Diff cells */

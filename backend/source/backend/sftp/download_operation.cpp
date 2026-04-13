@@ -198,6 +198,19 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
     auto const& linkEntry = readResult.value().targetInfo;
 
     std::error_code ec{};
+    if (options_.createMissingDirectories)
+    {
+        std::filesystem::create_directories(options_.localPath.parent_path(), ec);
+        if (ec)
+        {
+            Log::error(
+                "DownloadOperation: Failed to create parent dirs for symlink '{}': {}.",
+                options_.localPath.generic_string(),
+                ec.message()
+            );
+            return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
+        }
+    }
     if (linkEntry && linkEntry->isDirectory())
         std::filesystem::create_directory_symlink(readResult.value().linkTarget, options_.localPath, ec);
     else
@@ -305,6 +318,19 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
 std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile(SecureShell::IFileStream& stream)
 {
     const auto tempPath = options_.localPath.generic_string() + options_.tempFileSuffix;
+
+    if (options_.createMissingDirectories)
+    {
+        std::error_code mkErr{};
+        std::filesystem::create_directories(std::filesystem::path{tempPath}.parent_path(), mkErr);
+        if (mkErr)
+        {
+            Log::error(
+                "DownloadOperation: Failed to create parent directories for '{}': {}.", tempPath, mkErr.message()
+            );
+            return enterErrorState({.type = ErrorType::CannotCreateDirectory});
+        }
+    }
 
     if (options_.tryContinue && std::filesystem::exists(tempPath))
     {

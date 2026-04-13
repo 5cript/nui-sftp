@@ -3,6 +3,7 @@
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <shared_data/ignore_rules.hpp>
 #include <utility/directory_traversal.hpp>
 
 #include <cstdint>
@@ -20,6 +21,7 @@ class LocalScanOperation : public Operation
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
             progressCallback = [](auto, auto, auto) {};
         std::filesystem::path localPath{};
+        bool respectIgnoreFiles{false};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -93,5 +95,7 @@ class LocalScanOperation : public Operation
     std::filesystem::path localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
+    bool respectIgnoreFiles_;
+    SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
 };

@@ -191,6 +191,7 @@ void FileEngine::addSyncScans(
     std::filesystem::path const& remotePath,
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
+    bool respectIgnoreFiles,
     std::function<void(bool success, std::string const& info)> onComplete
 )
 {
@@ -200,9 +201,8 @@ void FileEngine::addSyncScans(
         remotePath.generic_string()
     );
     lazyOpen(
-        [this, localPath, remotePath, remoteScanId, localScanId, onComplete = std::move(onComplete)](
-            auto const& channelId, std::string const& info
-        )
+        [this, localPath, remotePath, remoteScanId, localScanId, respectIgnoreFiles,
+            onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
@@ -227,7 +227,8 @@ void FileEngine::addSyncScans(
                 remoteScanId.value(),
                 localScanId.value(),
                 remotePath.generic_string(),
-                localPath.generic_string()
+                localPath.generic_string(),
+                respectIgnoreFiles
             );
         }
     );
@@ -239,6 +240,7 @@ void FileEngine::addDownload(
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -252,6 +254,7 @@ void FileEngine::addDownload(
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
             insertRefresh,
+            createMissingDirectories,
             mode](auto const& channelId, std::string const& info)
         {
             if (!channelId)
@@ -291,6 +294,7 @@ void FileEngine::addDownload(
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
                 insertRefresh,
+                createMissingDirectories,
                 static_cast<int>(mode)
             );
         }
@@ -303,6 +307,7 @@ void FileEngine::addUpload(
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh,
+    bool createMissingDirectories,
     SharedData::OperationMode mode
 )
 {
@@ -314,6 +319,7 @@ void FileEngine::addUpload(
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
             insertRefresh,
+            createMissingDirectories,
             mode](auto const& channelId, std::string const& info)
         {
             if (!channelId)
@@ -353,6 +359,7 @@ void FileEngine::addUpload(
                 allowOverwrite,
                 remotePath.size > Constants::bigFileCutOff,
                 insertRefresh,
+                createMissingDirectories,
                 static_cast<int>(mode)
             );
         }

@@ -531,6 +531,121 @@ namespace Test
     // the server's OPEN handler to transparently follow symlinks (ssh2's fake server does
     // not). FollowSymlink isn't part of any sync scenario we hit, so we don't cover it here.
 
+    // ---- createMissingDirectories option ----------------------------------
+    //
+    // Mirror of the upload-side feature: when the flag is on the download pre-creates
+    // any missing parent directories locally, so a sync into a freshly-diffed subtree
+    // that doesn't yet exist on disk doesn't fail at ofstream::open time.
+
+    TEST_F(DownloadOperationTests, DownloadCreatesSingleMissingLocalParentDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "newly_created" / "file1.txt";
+        ASSERT_FALSE(std::filesystem::exists(localPath.parent_path()));
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .createMissingDirectories = true,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_TRUE(std::filesystem::is_directory(localPath.parent_path()));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, DownloadCreatesDeeplyNestedMissingLocalParentDirectories)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "a" / "b" / "c" / "d" / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .createMissingDirectories = true,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+        EXPECT_TRUE(std::filesystem::is_directory(downloadDir_.path() / "a"));
+        EXPECT_TRUE(std::filesystem::is_directory(downloadDir_.path() / "a" / "b"));
+        EXPECT_TRUE(std::filesystem::is_directory(downloadDir_.path() / "a" / "b" / "c"));
+        EXPECT_TRUE(std::filesystem::is_directory(downloadDir_.path() / "a" / "b" / "c" / "d"));
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+    }
+
+    TEST_F(DownloadOperationTests, DownloadWithoutCreateMissingDirectoriesFailsOnMissingParent)
+    {
+        // Default behaviour: the std::ofstream::open fails and the operation enters error state.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "nonexistent" / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .createMissingDirectories = false,
+            }};
+
+        auto first = operation.work();
+        // The error can surface on any iteration before completion.
+        for (int i = 0; first.has_value() && *first != DownloadOperation::WorkStatus::Complete && i < 100; ++i)
+            first = operation.work();
+
+        ASSERT_FALSE(first.has_value()) << "download should fail when local parent is missing";
+        EXPECT_FALSE(std::filesystem::exists(localPath.parent_path()))
+            << "parent dir must NOT have been created";
+    }
+
+    TEST_F(DownloadOperationTests, DownloadWithCreateMissingDirectoriesIsIdempotentOnExistingParent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .createMissingDirectories = true,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, DownloadSymlinkCreatesMissingLocalParentDirectories)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "nested" / "deep" / "link_to_file1.txt";
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/link_to_file1.txt",
+                .localPath = localPath,
+                .createMissingDirectories = true,
+            }};
+
+        EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
+        EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)));
+    }
+
     TEST_F(DownloadOperationTests, DownloadDanglingRemoteSymlinkCreatesLocalSymlink)
     {
         // Even when the remote link points nowhere, downloading it must still result in a

@@ -554,6 +554,7 @@ void FileTrackingPanel::startWatching(
                 },
                 true, // allowOverwrite — re-upload always overwrites
                 false, // insertRefresh
+                false, // createMissingDirectories
                 SharedData::OperationMode::PriorityQueued
             );
         }

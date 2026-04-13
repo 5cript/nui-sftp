@@ -93,6 +93,7 @@ SyncProgressDialog& SyncProgressDialog::operator=(SyncProgressDialog&&) = defaul
 void SyncProgressDialog::open(
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
+    bool respectIgnoreFiles,
     std::function<void(
         std::vector<SharedData::DirectoryEntry> localEntries,
         std::vector<SharedData::DirectoryEntry> remoteEntries
@@ -122,6 +123,7 @@ void SyncProgressDialog::open(
     operationQueue_->enqueueSyncScans(
         impl_->localPath_,
         impl_->remotePath_,
+        respectIgnoreFiles,
         // onRemoteProgress
         [this, token](SharedData::ScanProgress const& progress)
         {

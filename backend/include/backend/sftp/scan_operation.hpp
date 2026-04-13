@@ -3,6 +3,7 @@
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <shared_data/ignore_rules.hpp>
 #include <utility/directory_traversal.hpp>
 
 #include <filesystem>
@@ -19,6 +20,7 @@ class ScanOperation : public Operation
             progressCallback = [](auto, auto, auto) {};
         std::filesystem::path remotePath{};
         std::chrono::seconds futureTimeout{5};
+        bool respectIgnoreFiles{false};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -91,5 +93,7 @@ class ScanOperation : public Operation
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
     std::chrono::seconds futureTimeout_;
+    bool respectIgnoreFiles_;
+    SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
 };

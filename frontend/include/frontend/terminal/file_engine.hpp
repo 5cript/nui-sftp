@@ -46,6 +46,7 @@ class FileEngine
         std::filesystem::path const& remotePath,
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
+        bool respectIgnoreFiles,
         std::function<void(bool success, std::string const& info)> onComplete
     );
 
@@ -55,6 +56,7 @@ class FileEngine
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
+        bool createMissingDirectories = false,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void addUpload(
@@ -63,6 +65,7 @@ class FileEngine
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
+        bool createMissingDirectories = false,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 

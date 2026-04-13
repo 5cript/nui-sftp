@@ -5,14 +5,30 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 #ifndef _WIN32
 #    include <sys/stat.h>
 #endif
 
+namespace
+{
+    std::optional<std::string> readLocalFile(std::filesystem::path const& path)
+    {
+        std::ifstream stream{path, std::ios::binary};
+        if (!stream)
+            return std::nullopt;
+        std::ostringstream buffer;
+        buffer << stream.rdbuf();
+        return buffer.str();
+    }
+}
+
 LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     : localPath_{std::move(options.localPath)}
     , progressCallback_{std::move(options.progressCallback)}
+    , respectIgnoreFiles_{options.respectIgnoreFiles}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
@@ -22,6 +38,27 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
 {
     auto iter = std::filesystem::directory_iterator(path, std::filesystem::directory_options::skip_permission_denied);
     const auto end = std::filesystem::directory_iterator();
+
+    const auto relDir = [&]() -> std::filesystem::path {
+        std::error_code errc{};
+        auto rel = std::filesystem::relative(path, localPath_, errc);
+        if (errc || rel.empty() || rel == std::filesystem::path{"."})
+            return {};
+        return rel;
+    }();
+
+    if (respectIgnoreFiles_)
+    {
+        for (auto const& ignoreName : {".gitignore", ".ignore"})
+        {
+            const auto ignorePath = path / ignoreName;
+            std::error_code errc{};
+            if (!std::filesystem::is_regular_file(ignorePath, errc))
+                continue;
+            if (auto content = readLocalFile(ignorePath))
+                ignoreMatcher_.addFile(relDir, *content);
+        }
+    }
 
     std::vector<SharedData::DirectoryEntry> entries;
 
@@ -85,9 +122,17 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                     linkTarget = std::move(target);
             }
 
+            const auto filename = entry.path().filename();
+            if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
+            {
+                const auto childRel = relDir.empty() ? filename : (relDir / filename);
+                if (ignoreMatcher_.isIgnored(childRel, type == SharedData::DirectoryEntry::FileType::Directory))
+                    continue;
+            }
+
             entries.push_back(
                 SharedData::DirectoryEntry{
-                    .path = entry.path().filename(),
+                    .path = filename,
                     .type = type,
                     .size = entry.is_regular_file() ? entry.file_size() : 0,
                     .mtime = mtimeSecs,
