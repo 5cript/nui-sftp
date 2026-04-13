@@ -187,6 +187,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css"
 )
 
 target_include_directories(
