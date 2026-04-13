@@ -1013,11 +1013,11 @@ void SyncDialog::open(
     impl_->localEntries_ = std::move(localEntries);
     impl_->remoteEntries_ = std::move(remoteEntries);
 
-    impl_->uploadCollapsed_ = false;
-    impl_->downloadCollapsed_ = false;
-    impl_->deleteCollapsed_ = false;
-
     impl_->recomputeDiff();
+
+    impl_->uploadCollapsed_ = impl_->uploadItems_.value().empty();
+    impl_->downloadCollapsed_ = impl_->downloadItems_.value().empty();
+    impl_->deleteCollapsed_ = impl_->deleteItems_.value().empty();
 
     impl_->open_ = true;
     impl_->minimized_ = false;
