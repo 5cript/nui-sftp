@@ -236,12 +236,16 @@
     grid-template-columns: 1fr 44px 1fr;
     grid-template-rows: 100%;
     align-items: center;
-    /* Absolute, edge-to-edge over the ENTIRE tree row.  Content cell is
-       position:relative so `left` / `right` are relative to it.  The negative
-       offsets reach back through the tree's left-side fixtures (indent +
-       chevron + gap) and forward through the tree row's own padding-right,
-       so the 5-column grid's centre sits at the tree row's exact centre
-       regardless of depth. */
+    /* Absolute, edge-to-edge over the ENTIRE tree row.  Uses the SAME
+       negative offsets in both default AND mirrored trees — the mirrored
+       variant used to swap them, which left the 44px arrow column at a
+       different absolute x than in the default tree.  With identical
+       offsets the extended row width (and therefore its centre) is the
+       same in both modes, so arrows line up 1:1 across Upload/Download/
+       Delete.  `left: -fixtures` reaches back through the chevron+indent
+       area (default side); `right: -row-padding-right` reaches through
+       the tiny right pad.  In mirrored mode those areas swap roles but
+       the extended row's overall span stays identical. */
     position: absolute;
     left: calc(-1 * var(--row-left-fixtures, 0px));
     right: calc(-1 * var(--row-padding-right, 4px));
@@ -275,9 +279,14 @@
 
 /* ─────────── Mirrored layout for the Download tree ─────────────────────── */
 
+/* In mirrored mode the chevron + checkbox sit on the right, so the
+   negative offsets swap: `left` reaches back through the small left pad,
+   `right` reaches forward through the now-on-the-right fixtures.  With
+   the tree's `--row-left-fixtures` var now correctly including the
+   checkbox width + gap, this swap produces an extended row of IDENTICAL
+   width in both modes — so the 44px arrow column lands at the same
+   absolute x in Upload, Download, and Delete. */
 .script-nui-tree--mirrored .script-nui-tree__content > .sync-diff-row {
-    /* Flip the edge-to-edge offsets: reach forward through the indent/chevron
-       area (now on the right) and back through the tree's small left padding. */
     left: calc(-1 * var(--row-padding-right, 4px));
     right: calc(-1 * var(--row-left-fixtures, 0px));
 }
