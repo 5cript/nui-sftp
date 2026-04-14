@@ -15,12 +15,15 @@
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";
 @import "./dialog/input_dialog.css";
+
+/* Dont forget to add in frontend CMakeLists.txt OBSERVED_BUNDLE_FILES and copy_styles_to_build_dir.cmake */
 @import "../../../styles/nui-file-explorer/file_grid.css";
 @import "../../../styles/5cript-nui-components/themes/light.css";
 @import "../../../styles/5cript-nui-components/button.css";
 @import "../../../styles/5cript-nui-components/color_picker.css";
 @import "../../../styles/5cript-nui-components/carousel.css";
 @import "../../../styles/5cript-nui-components/dialog.css";
+@import "../../../styles/5cript-nui-components/pagination.css";
 @import "../../../styles/5cript-nui-components/popup_menu.css";
 @import "../../../styles/5cript-nui-components/dropdown_menu.css";
 @import "../../../styles/5cript-nui-components/resizeable_table.css";
@@ -124,8 +127,8 @@
 
     /* Sync dialog progress (dark) */
     --sync-progress-color: rgba(76, 175, 80, 0.40);
-    --sync-done-color:     rgba(76, 175, 80, 0.38);
-    --sync-error-color:    rgba(231, 76, 60, 0.38);
+    --sync-done-color: rgba(76, 175, 80, 0.38);
+    --sync-error-color: rgba(231, 76, 60, 0.38);
 }
 
 :root[data-theme="light"] {
@@ -170,8 +173,8 @@
 
     /* Sync dialog progress (light) */
     --sync-progress-color: rgba(56, 142, 60, 0.35);
-    --sync-done-color:     rgba(56, 142, 60, 0.32);
-    --sync-error-color:    rgba(198, 40, 40, 0.32);
+    --sync-done-color: rgba(56, 142, 60, 0.32);
+    --sync-error-color: rgba(198, 40, 40, 0.32);
 }
 
 .login-form>div {
@@ -282,6 +285,7 @@ html:has(dialog[open]),
 html:has(.sync-dialog-blocker[style*="display: flex"]) {
     overflow: hidden;
 }
+
 html:has(dialog[open])::-webkit-scrollbar,
 html:has(.sync-dialog-blocker[style*="display: flex"])::-webkit-scrollbar {
     display: none;

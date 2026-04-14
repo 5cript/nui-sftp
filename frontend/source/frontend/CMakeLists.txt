@@ -180,6 +180,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dialog.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/pagination.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dropdown_menu.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/resizeable_table.css"

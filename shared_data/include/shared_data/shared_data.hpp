@@ -74,6 +74,20 @@ namespace SharedData
         template <typename ObjT>
         void from_json_impl(ObjT& obj, nlohmann::json const&, nlohmann::json const& j, std::filesystem::perms& value);
 
+        /**
+         * @brief Split-encoding aware overloads for 64-bit integers. They
+         *        accept either the `{_u64_hi, _u64_lo}` object produced by
+         *        the frontend convertToVal / the matching to_json_impl below,
+         *        or a plain JSON number for legacy payloads.  This keeps the
+         *        RPC wire format JSON.stringify-safe — JS has no BigInt
+         *        support in JSON.stringify.
+         */
+        template <typename ObjT>
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::uint64_t& value);
+
+        template <typename ObjT>
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::int64_t& value);
+
         template <typename ObjT, typename T>
         void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, T& value)
         {
@@ -103,6 +117,28 @@ namespace SharedData
         void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::filesystem::perms& value)
         {
             value = static_cast<std::filesystem::perms>(j.get<int>());
+        }
+
+        template <typename ObjT>
+        void from_json_impl(ObjT&, nlohmann::json const&, nlohmann::json const& j, std::uint64_t& value)
+        {
+            constexpr unsigned u32BitCount = 32;
+            if (j.is_object() && j.contains("_u64_hi") && j.contains("_u64_lo"))
+            {
+                const auto hi = static_cast<std::uint64_t>(j.at("_u64_hi").get<std::uint32_t>());
+                const auto lo = static_cast<std::uint64_t>(j.at("_u64_lo").get<std::uint32_t>());
+                value = (hi << u32BitCount) | lo;
+                return;
+            }
+            j.get_to(value);
+        }
+
+        template <typename ObjT>
+        void from_json_impl(ObjT& obj, nlohmann::json const& outerJ, nlohmann::json const& j, std::int64_t& value)
+        {
+            std::uint64_t reinterpreted = 0;
+            from_json_impl(obj, outerJ, j, reinterpreted);
+            value = static_cast<std::int64_t>(reinterpreted);
         }
 
         template <typename ObjT, typename T>
@@ -155,6 +191,10 @@ namespace SharedData
         void to_json_impl(nlohmann::json& j, std::chrono::seconds value);
         void to_json_impl(nlohmann::json& j, std::chrono::milliseconds value);
         void to_json_impl(nlohmann::json& j, std::filesystem::perms value);
+        // Split-encoding for 64-bit ints — see the from_json_impl counterparts
+        // for the motivation (JS JSON.stringify can't handle BigInt).
+        void to_json_impl(nlohmann::json& j, std::uint64_t value);
+        void to_json_impl(nlohmann::json& j, std::int64_t value);
 
         template <typename T>
         requires(!std::is_enum_v<T>)
@@ -179,6 +219,18 @@ namespace SharedData
         inline void to_json_impl(nlohmann::json& j, std::filesystem::perms value)
         {
             j = static_cast<int>(value);
+        }
+        inline void to_json_impl(nlohmann::json& j, std::uint64_t value)
+        {
+            constexpr unsigned u32BitCount = 32;
+            constexpr std::uint64_t u32Mask = 0xFFFFFFFFu;
+            j = nlohmann::json::object();
+            j["_u64_hi"] = static_cast<std::uint32_t>((value >> u32BitCount) & u32Mask);
+            j["_u64_lo"] = static_cast<std::uint32_t>(value & u32Mask);
+        }
+        inline void to_json_impl(nlohmann::json& j, std::int64_t value)
+        {
+            to_json_impl(j, static_cast<std::uint64_t>(value));
         }
         template <typename T>
         void to_json_impl(nlohmann::json& j, std::optional<T> const& obj)

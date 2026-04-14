@@ -75,6 +75,7 @@ RpcFilesystem::RpcFilesystem(
     registerProperties();
     registerGetHome();
     registerDoesExist();
+    registerDoesExistBatch();
     registerWriteFile();
     registerOpen();
 }
@@ -141,8 +142,6 @@ void RpcFilesystem::registerRemoveMultiple()
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
                     return reply.error("File deletion is prevented by configuration.");
                 }
-
-                Log::info("RpcFilesystem::removeSome called with parameters: {}", parameters.dump(4));
 
                 if (!RpcHelper::ParameterVerifyView{reply, "RpcFilesystem::removeSome", parameters}.hasValueDeep(
                         "paths"
@@ -257,8 +256,8 @@ void RpcFilesystem::registerListFiles()
                     const auto entryPathStr = entryPath.c_str();
 
                     SharedData::DirectoryEntry dirEntry{};
-                    const auto u8 = fileNameOnly ? entryPath.filename().generic_u8string()
-                                                 : entryPath.generic_u8string();
+                    const auto u8 =
+                        fileNameOnly ? entryPath.filename().generic_u8string() : entryPath.generic_u8string();
                     dirEntry.path = std::string{u8.begin(), u8.end()};
                     dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
                     dirEntry.permissions = entry.symlink_status().permissions();
@@ -464,6 +463,40 @@ void RpcFilesystem::registerDoesExist()
 
                 Log::info("Successfully retrieved existence for path '{}'", path);
                 return reply({{"success", true}, {"exists", status}});
+            }
+        );
+}
+
+void RpcFilesystem::registerDoesExistBatch()
+{
+    // Batched form of RpcFilesystem::exists.  Lets the frontend ask about a
+    // whole transfer's worth of destination paths in a single round-trip
+    // instead of N — eliminating the per-file network latency that made
+    // multi-file drag/drop downloads feel slow.
+    on("RpcFilesystem::existsBatch")
+        .perform(
+            [](RpcHelper::RpcOnce&& reply, std::vector<std::string> const& paths)
+            {
+                std::vector<bool> results;
+                results.reserve(paths.size());
+                for (auto const& path : paths)
+                {
+                    std::error_code ec;
+                    const auto status = std::filesystem::exists(path, ec);
+                    if (ec)
+                    {
+                        Log::warn(
+                            "RpcFilesystem::existsBatch: stat failed for '{}': {} (treating as not-exists)",
+                            path,
+                            ec.message()
+                        );
+                        results.push_back(false);
+                        continue;
+                    }
+                    results.push_back(status);
+                }
+                Log::info("RpcFilesystem::existsBatch: probed {} paths", paths.size());
+                return reply({{"success", true}, {"exists", results}});
             }
         );
 }

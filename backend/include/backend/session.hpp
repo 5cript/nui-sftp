@@ -172,6 +172,10 @@ class Session
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
     void registerRpcSftpAddRenameOperation();
+    void registerRpcSftpAddBulkDownloadOperation();
+    void registerRpcSftpAddBulkUploadOperation();
+    void registerRpcSftpAddBulkDeleteOperation();
+    void registerRpcSftpExistsBatch();
     void registerRpcSftpAddSyncScanOperation();
     void registerOperationQueuePauseUnpause();
 

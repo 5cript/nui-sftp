@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/file_explorer/side_model.hpp>
+#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
@@ -99,9 +100,11 @@ class LocalSideModel
 
     void uploadItemsConfirmed(
         std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems,
+        std::shared_ptr<std::vector<bool>> existsResults,
         std::size_t index = 0,
         bool overwriteNever = false,
-        bool overwriteAlways = false
+        bool overwriteAlways = false,
+        std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted = nullptr
     );
 
     void enqueueSingleUpload(

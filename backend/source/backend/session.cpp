@@ -3,6 +3,7 @@
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
+#include <shared_data/file_operations/bulk_add_request.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -56,6 +57,10 @@ void Session::start()
             self->registerRpcSftpAddDownloadOperation();
             self->registerRpcSftpAddUploadOperation();
             self->registerRpcSftpAddRenameOperation();
+            self->registerRpcSftpAddBulkDownloadOperation();
+            self->registerRpcSftpAddBulkUploadOperation();
+            self->registerRpcSftpAddBulkDeleteOperation();
+            self->registerRpcSftpExistsBatch();
             self->registerRpcSftpAddSyncScanOperation();
             self->registerOperationQueuePauseUnpause();
             self->registerRpcSftpDeleteFiles();
@@ -700,6 +705,109 @@ void Session::registerRpcSftpAddDownloadOperation()
         );
 }
 
+void Session::registerRpcSftpAddBulkDownloadOperation()
+{
+    // One RPC for a whole batch. The handler performs all queueing inside a
+    // single strand dispatch so the SSH thread-hop cost is paid once per
+    // batch instead of once per file. Files are trusted (no lstat per entry).
+    on(fmt::format("Session::{}::sftp::addBulkDownload", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::string> const& operationIdStrings,
+                SharedData::BulkAddRequest const& request
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                if (operationIdStrings.size() != request.entries.size())
+                    return reply.error(
+                        "addBulkDownload: operationIds and entries length mismatch"
+                    );
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        operationIdStrings,
+                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto enqueued = self->operationQueue_->addBulkDownloadOperation(
+                            *channel,
+                            request,
+                            [&operationIdStrings](std::size_t idx) {
+                                return Ids::makeOperationId(operationIdStrings[idx]);
+                            }
+                        );
+
+                        Log::info(
+                            "addBulkDownload: queued {}/{} entries",
+                            enqueued,
+                            request.entries.size()
+                        );
+
+                        self->resetQueueThrottle();
+                        reply({{"success", true}, {"enqueued", enqueued}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpAddBulkUploadOperation()
+{
+    // See registerRpcSftpAddBulkDownloadOperation — same contract for upload.
+    on(fmt::format("Session::{}::sftp::addBulkUpload", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::string> const& operationIdStrings,
+                SharedData::BulkAddRequest const& request
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                if (operationIdStrings.size() != request.entries.size())
+                    return reply.error("addBulkUpload: operationIds and entries length mismatch");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        operationIdStrings,
+                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto enqueued = self->operationQueue_->addBulkUploadOperation(
+                            *channel,
+                            request,
+                            [&operationIdStrings](std::size_t idx) {
+                                return Ids::makeOperationId(operationIdStrings[idx]);
+                            }
+                        );
+
+                        Log::info("addBulkUpload: queued {}/{} entries", enqueued, request.entries.size());
+                        self->resetQueueThrottle();
+                        reply({{"success", true}, {"enqueued", enqueued}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
 void Session::registerRpcSftpAddUploadOperation()
 {
     on(fmt::format("Session::{}::sftp::addUpload", id_.value()))
@@ -1032,6 +1140,98 @@ void Session::registerRpcSftpRename()
                         if (!result.has_value())
                             return reply.error("Failed to rename file: " + result.error().toString());
                         reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpAddBulkDeleteOperation()
+{
+    // One RPC for the whole bulk delete.  Frontend pre-allocates a single
+    // OperationId for the aggregate file-bulk card; the backend may also
+    // create extra single-Delete cards for any directory entries.
+    on(fmt::format("Session::{}::sftp::addBulkDelete", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::string const& bulkOperationIdString,
+                SharedData::BulkAddRequest const& request
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        bulkOperationIdString,
+                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto enqueued = self->operationQueue_->addBulkDeleteOperation(
+                            *channel,
+                            request,
+                            Ids::makeOperationId(bulkOperationIdString)
+                        );
+
+                        Log::info("addBulkDelete: queued {} entries", enqueued);
+                        self->resetQueueThrottle();
+                        reply({{"success", true}, {"enqueued", enqueued}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpExistsBatch()
+{
+    // Batched existence probe over SFTP.  Lets the frontend ask whether N
+    // remote paths exist in a single round-trip — eliminates the per-file
+    // SFTP stat latency that made multi-file uploads feel slow.  Stat
+    // failures degrade to "not exists" per-entry rather than failing the
+    // whole batch (mirrors RpcFilesystem::existsBatch on the local side).
+    on(fmt::format("Session::{}::sftp::existsBatch", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::string> const& paths
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [paths](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        std::vector<bool> results;
+                        results.reserve(paths.size());
+                        for (auto const& path : paths)
+                        {
+                            auto fut = channel->stat(std::filesystem::path{path});
+                            if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            {
+                                Log::warn(
+                                    "sftp::existsBatch: stat timeout for '{}' (treating as not-exists)", path
+                                );
+                                results.push_back(false);
+                                continue;
+                            }
+                            const auto result = fut.get();
+                            results.push_back(result.has_value());
+                        }
+                        Log::info("sftp::existsBatch: probed {} paths", paths.size());
+                        reply({{"success", true}, {"exists", results}});
                     },
                     std::move(reply)
                 );

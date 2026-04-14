@@ -96,9 +96,11 @@ class RemoteSideModel
 
     void downloadItemsConfirmed(
         std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems,
+        std::shared_ptr<std::vector<bool>> existsResults,
         std::size_t index = 0,
         bool overwriteNever = false,
-        bool overwriteAlways = false
+        bool overwriteAlways = false,
+        std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted = nullptr
     );
 
     void enqueueSingleDownload(

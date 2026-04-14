@@ -24,11 +24,27 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
 
 std::filesystem::path BulkUploadOperation::fullLocalPath(SharedData::DirectoryEntry const& entry) const
 {
+    if (!prescannedPathOverride_.empty())
+    {
+        for (std::size_t idx = 0; idx < entries_.size(); ++idx)
+        {
+            if (&entries_[idx] == &entry)
+                return prescannedPathOverride_[idx].first;
+        }
+    }
     return (options_.localPath / SharedData::fullPathRelative(entries_, entry)).lexically_normal();
 }
 
 std::filesystem::path BulkUploadOperation::fullRemotePath(SharedData::DirectoryEntry const& entry) const
 {
+    if (!prescannedPathOverride_.empty())
+    {
+        for (std::size_t idx = 0; idx < entries_.size(); ++idx)
+        {
+            if (&entries_[idx] == &entry)
+                return prescannedPathOverride_[idx].second;
+        }
+    }
     return (options_.remotePath / SharedData::fullPathRelative(entries_, entry)).lexically_normal();
 }
 
@@ -45,6 +61,18 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 Log::info("BulkUploadOperation: No entries to upload.");
                 enterState(Completed);
                 return WorkStatus::Complete;
+            }
+            if (!prescannedPathOverride_.empty())
+            {
+                // Prescanned flat-file mode — see BulkDownloadOperation for
+                // the rationale.  Each file's UploadOperation creates its
+                // missing remote parents via createMissingDirectories.
+                currentIndex_ = 0;
+                enterState(Running);
+                options_.overallProgressCallback(
+                    options_.remotePath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, 0
+                );
+                return WorkStatus::MoreWork;
             }
             auto const& entry = entries_[0];
             if (entry.isDirectory())
@@ -293,6 +321,27 @@ void BulkUploadOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&
 {
     entries_ = std::move(entries);
     totalBytes_ = totalBytes;
+    prescannedPathOverride_.clear();
+}
+
+void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> files)
+{
+    entries_.clear();
+    entries_.reserve(files.size());
+    prescannedPathOverride_.clear();
+    prescannedPathOverride_.reserve(files.size());
+    totalBytes_ = 0;
+    for (auto& file : files)
+    {
+        SharedData::DirectoryEntry entry{};
+        entry.path = file.localSrc;
+        entry.fullPath = file.localSrc;
+        entry.type = SharedData::FileType::Regular;
+        entry.size = file.sizeBytes;
+        totalBytes_ += file.sizeBytes;
+        entries_.push_back(std::move(entry));
+        prescannedPathOverride_.emplace_back(file.localSrc, file.remoteDst);
+    }
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::cancel(bool adoptCancelState)

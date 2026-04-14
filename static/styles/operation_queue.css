@@ -3,7 +3,78 @@
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    /* Named areas so each row keeps its identity even when an optional child
+       (e.g. the pagination host) is `display: none` — otherwise auto-placement
+       slides the footer into the 1fr list row and makes it fill the space. */
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+        "header"
+        "tabs"
+        "pagination"
+        "list"
+        "footer";
+}
+
+header.opq-controls { grid-area: header; }
+.opq-tabs { grid-area: tabs; }
+.opq-pagination-host { grid-area: pagination; }
+.opq-list { grid-area: list; }
+.opq-footer { grid-area: footer; }
+
+.opq-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 8px;
+    background: var(--darker-background);
+    border-bottom: 1px solid var(--opq-border-faint);
+    user-select: none;
+}
+
+.opq-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--opq-muted);
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    font-size: 13px;
+    transition: color 100ms ease, background-color 100ms ease;
+
+    &:hover {
+        color: var(--color);
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    &.selected {
+        color: var(--color);
+        background: var(--background-color);
+        box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-color) 80%, transparent);
+    }
+}
+
+.opq-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: rgba(168, 0, 0, 0.35);
+    color: #ffdddd;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.opq-pagination-host {
+    display: block;
+
+    &.hidden {
+        display: none;
+    }
 }
 
 header.opq-controls {
@@ -59,9 +130,13 @@ header.opq-controls {
     grid-auto-rows: 36px;
 }
 
-/* Transparent pass-through wrappers so cards remain direct grid children */
+/* Transparent pass-through wrappers so cards remain direct grid children.
+   .opq-live-wrapper is emitted by the page-switch observe/renderer when the
+   user is on the live page; it hosts both priority and regular lists and must
+   also pass through so its grandchildren land as direct .opq-list grid cells. */
 .opq-priority-list,
-.opq-regular-list {
+.opq-regular-list,
+.opq-live-wrapper {
     display: contents;
 
     &>:nth-child(even) {
