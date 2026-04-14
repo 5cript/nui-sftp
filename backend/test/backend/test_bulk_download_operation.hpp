@@ -423,6 +423,92 @@ namespace Test
         EXPECT_EQ(secondResult.error().type, BulkDownloadOperation::ErrorType::CannotWorkFailedOperation);
     }
 
+    TEST_F(BulkDownloadOperationTests, SetPrescannedFileListDownloadsAllFilesInSingleOperation)
+    {
+        // The bulk optimization: a single BulkDownloadOperation primed via
+        // setPrescannedFileList should transfer N pre-known files end-to-end
+        // without spawning per-file scan passes.  Run to completion and verify
+        // every file lands locally with its original content.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localRoot = downloadDir_.path() / "prescanned";
+        std::filesystem::create_directories(localRoot);
+
+        std::vector<BulkDownloadOperation::PrescannedFile> files;
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc1.txt",
+            .localDst = localRoot / "doc1.txt",
+            .sizeBytes = std::string{"Document 1 content"}.size(),
+        });
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc2.txt",
+            .localDst = localRoot / "doc2.txt",
+            .sizeBytes = std::string{"Document 2 content"}.size(),
+        });
+
+        BulkDownloadOperation operation{*sftp, {.localPath = localRoot}};
+        operation.setPrescannedFileList(std::move(files));
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localRoot / "doc1.txt"));
+        ASSERT_TRUE(std::filesystem::exists(localRoot / "doc2.txt"));
+        EXPECT_EQ(readLocalFile(localRoot / "doc1.txt"), "Document 1 content");
+        EXPECT_EQ(readLocalFile(localRoot / "doc2.txt"), "Document 2 content");
+        EXPECT_TRUE(operation.getFailed().empty());
+    }
+
+    TEST_F(BulkDownloadOperationTests, SetPrescannedFileListPreservesMtimeOnDownloadedFiles)
+    {
+        // Regression: BulkAddEntry → PrescannedFile → DirectoryEntry must
+        // carry mtime through so each downloaded local file ends up with the
+        // remote's mtime (otherwise a follow-up sync would see all downloaded
+        // files as "modified" and re-enqueue them forever).
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localRoot = downloadDir_.path() / "prescanned_mtime";
+        std::filesystem::create_directories(localRoot);
+
+        constexpr std::uint64_t mtimeDoc1 = 1234567890ull; // 2009-02-13
+        constexpr std::uint64_t mtimeDoc2 = 1600000000ull; // 2020-09-13
+
+        std::vector<BulkDownloadOperation::PrescannedFile> files;
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc1.txt",
+            .localDst = localRoot / "doc1.txt",
+            .sizeBytes = std::string{"Document 1 content"}.size(),
+            .mtime = mtimeDoc1,
+            .mtimeNsec = 0,
+        });
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc2.txt",
+            .localDst = localRoot / "doc2.txt",
+            .sizeBytes = std::string{"Document 2 content"}.size(),
+            .mtime = mtimeDoc2,
+            .mtimeNsec = 0,
+        });
+
+        BulkDownloadOperation operation{*sftp, {.localPath = localRoot}};
+        operation.setPrescannedFileList(std::move(files));
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        const auto mtimeSeconds = [](std::filesystem::path const& path) {
+            const auto fileTime = std::filesystem::last_write_time(path);
+            const auto sysTime = std::chrono::file_clock::to_sys(fileTime);
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(sysTime.time_since_epoch()).count()
+            );
+        };
+
+        ASSERT_TRUE(std::filesystem::exists(localRoot / "doc1.txt"));
+        ASSERT_TRUE(std::filesystem::exists(localRoot / "doc2.txt"));
+        EXPECT_EQ(mtimeSeconds(localRoot / "doc1.txt"), mtimeDoc1);
+        EXPECT_EQ(mtimeSeconds(localRoot / "doc2.txt"), mtimeDoc2);
+    }
+
     TEST_F(BulkDownloadOperationTests, CancelledOperationCannotBeWorkedFurther)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

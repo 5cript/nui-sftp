@@ -98,6 +98,58 @@ namespace Test
         EXPECT_EQ(readLocalFile(localPath), "Fake file content");
     }
 
+    TEST_F(DownloadOperationTests, PreservesProvidedEntryMtimeOnDownload)
+    {
+        // finalize() must set the local file's last_write_time from the
+        // remote entry's mtime/mtimeNsec so a subsequent sync comparison
+        // doesn't see the downloaded file as modified.  Regression test for
+        // the bulk-download path where entry is supplied up-front (no lstat).
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file_with_mtime.txt";
+
+        // Arbitrary epoch seconds well in the past; 2009-02-13 23:31:30 UTC.
+        constexpr std::uint64_t expectedMtime = 1234567890ull;
+        constexpr std::uint32_t expectedMtimeNsec = 500000000u; // 0.5s
+
+        SharedData::DirectoryEntry entry{};
+        entry.path = "/home/test/file1.txt";
+        entry.fullPath = "/home/test/file1.txt";
+        entry.type = SharedData::FileType::Regular;
+        entry.size = std::string{"Fake file content"}.size();
+        entry.mtime = expectedMtime;
+        entry.mtimeNsec = expectedMtimeNsec;
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = "/home/test/file1.txt",
+                .localPath = localPath,
+                .entry = entry,
+            }};
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        const auto fileTime = std::filesystem::last_write_time(localPath);
+        const auto sysTime = std::chrono::file_clock::to_sys(fileTime);
+        const auto actualSecs = std::chrono::duration_cast<std::chrono::seconds>(
+            sysTime.time_since_epoch()
+        ).count();
+        // Tolerate sub-second rounding; filesystems may truncate nanoseconds.
+        EXPECT_EQ(static_cast<std::uint64_t>(actualSecs), expectedMtime);
+    }
+
     TEST_F(DownloadOperationTests, FilepartAbsentAfterSuccessfulDownload)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
