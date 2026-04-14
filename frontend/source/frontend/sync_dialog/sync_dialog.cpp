@@ -5,6 +5,7 @@
 #include <frontend/components/icon_panel.hpp>
 
 #include <utility/language.hpp>
+#include <log/log.hpp>
 
 #include <nui/event_system/event_context.hpp>
 #include <nui/event_system/observed_value.hpp>
@@ -36,6 +37,7 @@
 #include <frontend/svgs/decline.hpp>
 
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/sync_phase.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/enqueue_minimizer.hpp>
@@ -560,10 +562,9 @@ struct SyncDialog::Implementation
         const auto downloadIndices = minimizeEnqueueIndices(downloadItems_.value(), downloadSelected_->value());
         const auto deleteIndices = minimizeEnqueueIndices(deleteItems_.value(), deleteSelected_->value());
 
-        // Assign progress observers to selected items (and propagate to every
-        // descendant SyncItem so tree rows reflect the bulk op's progress).
-        // Progress observers must be in place before any RPC callback fires, so
-        // we mutate BEFORE enqueueing and refresh the trees immediately.
+        // Each selected row gets its own progress observer (propagated to every
+        // descendant SyncItem so subtree rows reflect the ancestor's progress).
+        // Observers must be in place before any RPC callback fires.
         auto assignProgress = [](std::vector<SyncItem>& items, std::vector<std::size_t> const& emitted) {
             for (auto idx : emitted)
             {
@@ -594,41 +595,11 @@ struct SyncDialog::Implementation
             deleteItems_ = std::move(deletes);
         }
 
+        const bool nonRecursive = !recursive_.value();
+
         refreshTrees();
         Nui::globalEventContext.executeActiveEventsImmediately();
 
-        auto hookProgress = [this](std::shared_ptr<Nui::Observed<double>> prog)
-        {
-            return [this, prog](std::optional<Ids::OperationId> const& opId, std::string const&)
-            {
-                if (!opId)
-                {
-                    *prog = -1.0;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                    return;
-                }
-                operationQueue_->addTransferProgressCallback(
-                    *opId,
-                    [prog](double fraction)
-                    {
-                        *prog = fraction;
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    }
-                );
-                operationQueue_->addCompletionCallback(
-                    *opId,
-                    [prog](bool /*success*/)
-                    {
-                        *prog = 1.1;
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    }
-                );
-            };
-        };
-
-        // See enqueueSingle: in non-recursive mode missing directories must be
-        // created via createDirectory (not bulk-transferred).
-        const bool nonRecursive = !recursive_.value();
         auto onDirCreatedFor = [](std::shared_ptr<Nui::Observed<double>> prog) {
             return [prog](bool success, std::string const&) {
                 *prog = success ? 1.1 : -1.0;
@@ -636,6 +607,112 @@ struct SyncDialog::Implementation
             };
         };
 
+        // Live per-row progress for bulk transfers is reconstructed from
+        // BulkProgress events (aggregated per-batch, carrying currentFile +
+        // currentFileBytes/currentFileTotalBytes) plus per-entry completion
+        // callbacks.  We index progress observers by the canonical src path
+        // so BulkProgress.currentFile can be resolved in O(1).
+        using ProgressPtr = std::shared_ptr<Nui::Observed<double>>;
+        auto hookBulkTransfer = [this](
+            std::vector<SharedData::BulkAddEntry> entries,
+            std::vector<ProgressPtr> observers,
+            bool isUpload,
+            std::string const& kind
+        ) {
+            // Map entry src path (canonical generic form) → row observer.
+            auto pathToProgress = std::make_shared<std::unordered_map<std::string, ProgressPtr>>();
+            pathToProgress->reserve(entries.size());
+            for (std::size_t idx = 0; idx < entries.size(); ++idx)
+                pathToProgress->emplace(entries[idx].src.generic_string(), observers[idx]);
+
+            auto onBulkProgress = [pathToProgress](SharedData::BulkProgress const& prog) {
+                const auto cbIt = pathToProgress->find(std::filesystem::path{prog.currentFile}.generic_string());
+                if (cbIt == pathToProgress->end() || !cbIt->second)
+                    return;
+                if (prog.currentFileTotalBytes == 0)
+                    return;
+                *cbIt->second =
+                    static_cast<double>(prog.currentFileBytes) / static_cast<double>(prog.currentFileTotalBytes);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            };
+
+            // Backend emits ONE aggregate OperationCompleted keyed to opIds[0]
+            // for the file-bulk — no per-entry file completion events — and a
+            // separate OperationCompleted per directory entry (each assigned
+            // its own opId).  So we flip all observers whose entry is a file
+            // on the aggregate completion, and flip per-directory observers
+            // on their individual completions.
+            auto entryIsDir = std::make_shared<std::vector<bool>>();
+            entryIsDir->reserve(entries.size());
+            for (auto const& entry : entries)
+                entryIsDir->push_back(entry.isDirectory);
+            auto observersShared = std::make_shared<std::vector<ProgressPtr>>(std::move(observers));
+
+            auto onEnqueued = [this,
+                               onBulkProgress = std::move(onBulkProgress),
+                               observersShared,
+                               entryIsDir](std::vector<Ids::OperationId> const& opIds) {
+                if (opIds.empty())
+                    return;
+                // Backend emits BulkProgress keyed to opIds[0].
+                operationQueue_->addBulkProgressCallback(opIds.front(), onBulkProgress);
+
+                operationQueue_->addCompletionCallback(
+                    opIds.front(),
+                    [observersShared, entryIsDir](bool success) {
+                        for (std::size_t idx = 0; idx < observersShared->size(); ++idx)
+                        {
+                            if (idx < entryIsDir->size() && (*entryIsDir)[idx])
+                                continue; // dir entries flip via their own opId callback below
+                            auto& obs = (*observersShared)[idx];
+                            if (obs)
+                                *obs = success ? 1.1 : -1.0;
+                        }
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                );
+                for (std::size_t idx = 0; idx < opIds.size() && idx < entryIsDir->size(); ++idx)
+                {
+                    if (!(*entryIsDir)[idx])
+                        continue;
+                    auto observer = (idx < observersShared->size()) ? (*observersShared)[idx] : nullptr;
+                    if (!observer)
+                        continue;
+                    operationQueue_->addCompletionCallback(
+                        opIds[idx],
+                        [observer](bool success) {
+                            *observer = success ? 1.1 : -1.0;
+                            Nui::globalEventContext.executeActiveEventsImmediately();
+                        }
+                    );
+                }
+            };
+
+            auto onBulkAck = [kind](bool success, std::string const& info) {
+                if (!success)
+                    Log::error("Sync bulk {} failed: {}", kind, info);
+            };
+
+            if (isUpload)
+            {
+                operationQueue_->enqueueBulkUpload(
+                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ true,
+                    SharedData::OperationMode::Queued,
+                    /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
+                );
+            }
+            else
+            {
+                operationQueue_->enqueueBulkDownload(
+                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ true,
+                    SharedData::OperationMode::Queued,
+                    /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
+                );
+            }
+        };
+
+        std::vector<SharedData::BulkAddEntry> uploadEntries;
+        std::vector<ProgressPtr> uploadObservers;
         auto const& uploadsSnap = uploadItems_.value();
         for (auto idx : uploadIndices)
         {
@@ -645,26 +722,34 @@ struct SyncDialog::Implementation
                 operationQueue_->createRemoteDirectory(
                     remotePath_ / itm.relKey, onDirCreatedFor(itm.progress)
                 );
+                continue;
             }
-            else if (itm.localItem && itm.remoteItem)
+            if (itm.localItem && itm.remoteItem)
             {
-                operationQueue_->enqueueUpload(
-                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true,
-                    /*createMissingDirs=*/true
-                );
+                uploadEntries.push_back(SharedData::BulkAddEntry{
+                    .src = !itm.localItem->fullPath.empty() ? itm.localItem->fullPath : itm.localItem->path,
+                    .dst = !itm.remoteItem->fullPath.empty() ? itm.remoteItem->fullPath : itm.remoteItem->path,
+                    .sizeBytes = itm.localItem->size,
+                    .isDirectory = itm.localItem->isDirectory(),
+                });
+                uploadObservers.push_back(itm.progress);
             }
             else if (itm.localItem)
             {
-                SharedData::DirectoryEntry remoteStub = *itm.localItem;
-                remoteStub.path = itm.localItem->path;
-                remoteStub.fullPath = remotePath_ / itm.localItem->path;
-                operationQueue_->enqueueUpload(
-                    NuiFileExplorer::Item{remoteStub}, *itm.localItem, hookProgress(itm.progress), true, true,
-                    /*createMissingDirs=*/true
-                );
+                uploadEntries.push_back(SharedData::BulkAddEntry{
+                    .src = !itm.localItem->fullPath.empty() ? itm.localItem->fullPath : itm.localItem->path,
+                    .dst = remotePath_ / itm.localItem->path,
+                    .sizeBytes = itm.localItem->size,
+                    .isDirectory = itm.localItem->isDirectory(),
+                });
+                uploadObservers.push_back(itm.progress);
             }
         }
+        if (!uploadEntries.empty())
+            hookBulkTransfer(std::move(uploadEntries), std::move(uploadObservers), /*isUpload=*/true, "upload");
 
+        std::vector<SharedData::BulkAddEntry> downloadEntries;
+        std::vector<ProgressPtr> downloadObservers;
         auto const& downloadsSnap = downloadItems_.value();
         for (auto idx : downloadIndices)
         {
@@ -674,39 +759,86 @@ struct SyncDialog::Implementation
                 operationQueue_->createLocalDirectory(
                     localPath_ / itm.relKey, onDirCreatedFor(itm.progress)
                 );
+                continue;
             }
-            else if (itm.localItem && itm.remoteItem)
+            if (itm.localItem && itm.remoteItem)
             {
-                operationQueue_->enqueueDownload(
-                    *itm.remoteItem, *itm.localItem, hookProgress(itm.progress), true, true,
-                    /*createMissingDirs=*/true
-                );
+                downloadEntries.push_back(SharedData::BulkAddEntry{
+                    .src = !itm.remoteItem->fullPath.empty() ? itm.remoteItem->fullPath : itm.remoteItem->path,
+                    .dst = !itm.localItem->fullPath.empty() ? itm.localItem->fullPath : itm.localItem->path,
+                    .sizeBytes = itm.remoteItem->size,
+                    .isDirectory = itm.remoteItem->isDirectory(),
+                    .mtime = itm.remoteItem->mtime,
+                    .mtimeNsec = itm.remoteItem->mtimeNsec,
+                });
+                downloadObservers.push_back(itm.progress);
             }
             else if (itm.remoteItem)
             {
-                SharedData::DirectoryEntry localStub = *itm.remoteItem;
-                localStub.path = itm.remoteItem->path;
-                localStub.fullPath = localPath_ / itm.remoteItem->path;
-                operationQueue_->enqueueDownload(
-                    *itm.remoteItem, NuiFileExplorer::Item{localStub}, hookProgress(itm.progress), true, true,
-                    /*createMissingDirs=*/true
-                );
+                downloadEntries.push_back(SharedData::BulkAddEntry{
+                    .src = !itm.remoteItem->fullPath.empty() ? itm.remoteItem->fullPath : itm.remoteItem->path,
+                    .dst = localPath_ / itm.remoteItem->path,
+                    .sizeBytes = itm.remoteItem->size,
+                    .isDirectory = itm.remoteItem->isDirectory(),
+                    .mtime = itm.remoteItem->mtime,
+                    .mtimeNsec = itm.remoteItem->mtimeNsec,
+                });
+                downloadObservers.push_back(itm.progress);
             }
         }
+        if (!downloadEntries.empty())
+            hookBulkTransfer(std::move(downloadEntries), std::move(downloadObservers), /*isUpload=*/false, "download");
 
         auto const& deletesSnap = deleteItems_.value();
-        std::vector<std::filesystem::path> delPaths;
-        delPaths.reserve(deleteIndices.size());
+        std::vector<SharedData::BulkAddEntry> deleteEntries;
+        std::vector<ProgressPtr> deleteObservers;
+        deleteEntries.reserve(deleteIndices.size());
+        deleteObservers.reserve(deleteIndices.size());
         for (auto idx : deleteIndices)
         {
             auto const& itm = deletesSnap[idx];
             if (itm.action == SyncItemAction::DeleteRemote && itm.remoteItem)
-                delPaths.push_back(itm.remoteItem->fullPath);
+            {
+                deleteEntries.push_back(SharedData::BulkAddEntry{
+                    .src = itm.remoteItem->fullPath,
+                    .dst = {},
+                    .sizeBytes = 0,
+                    .isDirectory = itm.remoteItem->isDirectory(),
+                });
+                deleteObservers.push_back(itm.progress);
+            }
             else if (itm.action == SyncItemAction::DeleteLocal && itm.localItem)
-                delPaths.push_back(itm.localItem->fullPath);
+            {
+                deleteEntries.push_back(SharedData::BulkAddEntry{
+                    .src = itm.localItem->fullPath,
+                    .dst = {},
+                    .sizeBytes = 0,
+                    .isDirectory = itm.localItem->isDirectory(),
+                });
+                deleteObservers.push_back(itm.progress);
+            }
         }
-        if (!delPaths.empty())
-            operationQueue_->enqueueDelete(delPaths, recursive_.value(), [](auto const&, auto const&) {});
+        if (!deleteEntries.empty())
+        {
+            // Bulk delete emits BulkDeleteProgress (not BulkProgress) and only
+            // signals completion once for the whole batch — flip all delete
+            // rows together when onBulkComplete fires.
+            auto observersShared = std::make_shared<std::vector<ProgressPtr>>(std::move(deleteObservers));
+            operationQueue_->enqueueBulkDelete(
+                std::move(deleteEntries),
+                /*insertRefresh*/ true,
+                SharedData::OperationMode::Queued,
+                [observersShared](bool success) {
+                    for (auto& obs : *observersShared)
+                        if (obs) *obs = success ? 1.1 : -1.0;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                },
+                [](bool success, std::string const& info) {
+                    if (!success)
+                        Log::error("Sync bulk delete failed: {}", info);
+                }
+            );
+        }
     }
 };
 

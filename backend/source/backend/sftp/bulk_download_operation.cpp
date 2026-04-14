@@ -352,6 +352,8 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         entry.fullPath = file.remoteSrc;
         entry.type = SharedData::FileType::Regular;
         entry.size = file.sizeBytes;
+        entry.mtime = file.mtime;
+        entry.mtimeNsec = file.mtimeNsec;
         totalBytes_ += file.sizeBytes;
         entries_.push_back(std::move(entry));
         prescannedPathOverride_.emplace_back(file.remoteSrc, file.localDst);

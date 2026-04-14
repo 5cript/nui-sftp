@@ -69,6 +69,8 @@ class BulkDownloadOperation : public Operation
         std::filesystem::path remoteSrc;
         std::filesystem::path localDst;
         std::uint64_t sizeBytes;
+        std::uint64_t mtime{0};
+        std::uint32_t mtimeNsec{0};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 

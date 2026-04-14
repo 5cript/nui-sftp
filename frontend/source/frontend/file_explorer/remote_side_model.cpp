@@ -682,6 +682,8 @@ void RemoteSideModel::downloadItemsConfirmed(
             .dst = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
             .sizeBytes = remoteItem.size,
             .isDirectory = remoteItem.isDirectory(),
+            .mtime = remoteItem.mtime,
+            .mtimeNsec = remoteItem.mtimeNsec,
         });
     };
 

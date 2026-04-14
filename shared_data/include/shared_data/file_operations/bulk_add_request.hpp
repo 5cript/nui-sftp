@@ -24,8 +24,14 @@ namespace SharedData
         std::filesystem::path dst{};       ///< Unused for delete.
         std::uint64_t sizeBytes{0};        ///< Meaningful only when !isDirectory.
         bool isDirectory{false};
+        /// Source file's mtime in seconds + nanoseconds.  Only consumed by
+        /// bulk download (to restore the local file's mtime after transfer
+        /// so subsequent syncs don't see a spurious diff).  Unused for bulk
+        /// upload (backend reads the local file's mtime directly) and delete.
+        std::uint64_t mtime{0};
+        std::uint32_t mtimeNsec{0};
     };
-    BOOST_DESCRIBE_STRUCT(BulkAddEntry, (), (src, dst, sizeBytes, isDirectory))
+    BOOST_DESCRIBE_STRUCT(BulkAddEntry, (), (src, dst, sizeBytes, isDirectory, mtime, mtimeNsec))
 
     /**
      * @brief Single-RPC payload for adding many file operations at once.

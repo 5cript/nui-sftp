@@ -621,5 +621,27 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
         }
     }
     /* else keep default */
+
+    // Preserve the remote file's mtime on the downloaded local file so
+    // subsequent syncs don't see the file as modified (best-effort; a failure
+    // is only a warning).  Mirrors UploadOperation's post-transfer setstat.
+    if (options_.entry)
+    {
+        using namespace std::chrono;
+        const auto sysTime = system_clock::time_point{
+            seconds{options_.entry->mtime} + nanoseconds{options_.entry->mtimeNsec}
+        };
+        const auto fileTime = std::chrono::file_clock::from_sys(sysTime);
+        std::error_code mtimeError{};
+        std::filesystem::last_write_time(options_.localPath, fileTime, mtimeError);
+        if (mtimeError)
+        {
+            Log::warn(
+                "DownloadOperation: Failed to set mtime on '{}': {}.",
+                options_.localPath.generic_string(),
+                mtimeError.message()
+            );
+        }
+    }
     return {};
 }

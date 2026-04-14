@@ -103,6 +103,10 @@ class OperationQueue
      *                        acknowledgement.
      * @param onBulkAck       Called once when the backend acknowledges the
      *                        batch (before per-entry completions fire).
+     * @param onEnqueued      Invoked synchronously with the pre-generated
+     *                        per-entry OperationIds (same order as @p entries)
+     *                        before the RPC dispatches.  Lets callers register
+     *                        transfer-progress callbacks per entry.
      */
     void enqueueBulkDownload(
         std::vector<SharedData::BulkAddEntry> entries,
@@ -110,7 +114,8 @@ class OperationQueue
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
-        std::function<void(bool success, std::string const& info)> onBulkAck
+        std::function<void(bool success, std::string const& info)> onBulkAck,
+        std::function<void(std::vector<Ids::OperationId> const& opIds)> onEnqueued = {}
     );
 
     /** @brief Upload analogue of enqueueBulkDownload — see its docs. */
@@ -120,17 +125,21 @@ class OperationQueue
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
-        std::function<void(bool success, std::string const& info)> onBulkAck
+        std::function<void(bool success, std::string const& info)> onBulkAck,
+        std::function<void(std::vector<Ids::OperationId> const& opIds)> onEnqueued = {}
     );
 
     /** @brief Bulk delete: one bulk-delete card for all file entries plus
-     *         standard Scan+Delete pairs for any directory entries. */
+     *         standard Scan+Delete pairs for any directory entries.
+     *  @param onEnqueued  Invoked synchronously with the aggregate file-bulk
+     *                     OperationId before the RPC dispatches. */
     void enqueueBulkDelete(
         std::vector<SharedData::BulkAddEntry> entries,
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(bool success)> onBulkComplete,
-        std::function<void(bool success, std::string const& info)> onBulkAck
+        std::function<void(bool success, std::string const& info)> onBulkAck,
+        std::function<void(Ids::OperationId const& bulkOpId)> onEnqueued = {}
     );
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
@@ -138,6 +147,16 @@ class OperationQueue
      *         Automatically removed when the operation completes.
      */
     void addTransferProgressCallback(Ids::OperationId const& opId, std::function<void(double fraction)> callback);
+    /** @brief Register a callback that receives BulkProgress events for a bulk
+     *         up/download or delete.  Keyed by the aggregate operation id: for
+     *         bulk up/download this is entries[0]'s id (as surfaced via
+     *         onEnqueued), for bulk delete it is the single aggregate id.
+     *         Auto-erased when the bulk operation completes.
+     */
+    void addBulkProgressCallback(
+        Ids::OperationId const& aggregateOpId,
+        std::function<void(SharedData::BulkProgress const&)> callback
+    );
     void unpause();
     /** @brief Observable pause state — observe() it to react to pause/unpause changes. */
     Nui::Observed<bool>& pausedState();

@@ -84,6 +84,10 @@ struct OperationQueue::Implementation
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
+    // Keyed by the aggregate bulk operation id (first pre-generated opId for
+    // bulk up/download, or the aggregate id for bulk delete).  Auto-erased on
+    // completion, same as transferProgressCallbacks.
+    std::unordered_map<std::string, std::function<void(SharedData::BulkProgress const&)>> bulkProgressCallbacks;
     // Keyed by operationId.value(); used for sync scan progress + completion routing.
     std::unordered_map<std::string, std::function<void(SharedData::ScanProgress const&)>> syncScanProgressCallbacks;
     std::unordered_map<std::string, std::function<void(SharedData::SyncScanResult)>> syncScanCompletionCallbacks;
@@ -932,6 +936,11 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
         return;
     }
     card->setProgress(progress);
+    {
+        const auto cbIt = impl_->bulkProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->bulkProgressCallbacks.end())
+            cbIt->second(progress);
+    }
 }
 
 void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progress)
@@ -993,6 +1002,11 @@ void OperationQueue::onBulkUploadProgress(SharedData::BulkProgress const& progre
         return;
     }
     renderer->setProgress(progress);
+    {
+        const auto cbIt = impl_->bulkProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->bulkProgressCallbacks.end())
+            cbIt->second(progress);
+    }
 }
 
 void OperationQueue::onOperationCompleted(Nui::val val)
@@ -1065,6 +1079,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
             );
     }
     impl_->transferProgressCallbacks.erase(completed.operationId.value());
+    impl_->bulkProgressCallbacks.erase(completed.operationId.value());
     auto cbIt = impl_->completionCallbacks.find(completed.operationId.value());
     if (cbIt != impl_->completionCallbacks.end())
     {
@@ -1087,6 +1102,14 @@ void OperationQueue::addTransferProgressCallback(
 )
 {
     impl_->transferProgressCallbacks[opId.value()] = std::move(callback);
+}
+
+void OperationQueue::addBulkProgressCallback(
+    Ids::OperationId const& aggregateOpId,
+    std::function<void(SharedData::BulkProgress const&)> callback
+)
+{
+    impl_->bulkProgressCallbacks[aggregateOpId.value()] = std::move(callback);
 }
 
 Nui::Observed<bool>& OperationQueue::pausedState()
@@ -1627,7 +1650,8 @@ void OperationQueue::enqueueBulkDownload(
     bool insertRefresh,
     SharedData::OperationMode mode,
     std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
-    std::function<void(bool success, std::string const& info)> onBulkAck
+    std::function<void(bool success, std::string const& info)> onBulkAck,
+    std::function<void(std::vector<Ids::OperationId> const&)> onEnqueued
 )
 {
     if (!impl_->fileEngine)
@@ -1657,6 +1681,9 @@ void OperationQueue::enqueueBulkDownload(
         }
     }
 
+    if (onEnqueued)
+        onEnqueued(operationIds);
+
     Log::info(
         "Frontend Operation Queue bulk download: {} entries, one RPC",
         entries.size()
@@ -1677,7 +1704,8 @@ void OperationQueue::enqueueBulkUpload(
     bool insertRefresh,
     SharedData::OperationMode mode,
     std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
-    std::function<void(bool success, std::string const& info)> onBulkAck
+    std::function<void(bool success, std::string const& info)> onBulkAck,
+    std::function<void(std::vector<Ids::OperationId> const&)> onEnqueued
 )
 {
     if (!impl_->fileEngine)
@@ -1704,6 +1732,9 @@ void OperationQueue::enqueueBulkUpload(
         }
     }
 
+    if (onEnqueued)
+        onEnqueued(operationIds);
+
     Log::info("Frontend Operation Queue bulk upload: {} entries, one RPC", entries.size());
     impl_->fileEngine->addBulkUpload(
         std::move(entries),
@@ -1720,7 +1751,8 @@ void OperationQueue::enqueueBulkDelete(
     bool insertRefresh,
     SharedData::OperationMode mode,
     std::function<void(bool success)> onBulkComplete,
-    std::function<void(bool success, std::string const& info)> onBulkAck
+    std::function<void(bool success, std::string const& info)> onBulkAck,
+    std::function<void(Ids::OperationId const&)> onEnqueued
 )
 {
     if (!impl_->fileEngine)
@@ -1744,6 +1776,9 @@ void OperationQueue::enqueueBulkDelete(
             [onBulkComplete](bool success) { onBulkComplete(success); }
         );
     }
+
+    if (onEnqueued)
+        onEnqueued(bulkOperationId);
 
     Log::info("Frontend Operation Queue bulk delete: {} entries, one RPC", entries.size());
     impl_->fileEngine->addBulkDelete(
