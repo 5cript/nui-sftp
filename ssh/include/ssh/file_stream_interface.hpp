@@ -36,11 +36,21 @@ namespace SecureShell
         virtual std::future<std::expected<void, SftpError>> seek(std::size_t pos) = 0;
 
         /**
+         * @brief In-strand variant of seek. Must be called from within the processing thread.
+         */
+        virtual std::expected<void, SftpError> seekInStrand(std::size_t pos) = 0;
+
+        /**
          * @brief Tells the current position in the file.
          *
          * @return std::future<std::expected<std::size_t, SftpError>> The current position or an error.
          */
         virtual std::future<std::expected<std::size_t, SftpError>> tell() = 0;
+
+        /**
+         * @brief In-strand variant of tell. Must be called from within the processing thread.
+         */
+        virtual std::expected<std::size_t, SftpError> tellInStrand() = 0;
 
         /**
          * @brief Retrieves information about the file.
@@ -50,9 +60,19 @@ namespace SecureShell
         virtual std::future<std::expected<FileInformation, SftpError>> stat() = 0;
 
         /**
+         * @brief In-strand variant of stat. Must be called from within the processing thread.
+         */
+        virtual std::expected<FileInformation, SftpError> statInStrand() = 0;
+
+        /**
          * @brief Rewind the file to the beginning.
          */
         virtual std::future<std::expected<void, SftpError>> rewind() = 0;
+
+        /**
+         * @brief In-strand variant of rewind. Must be called from within the processing thread.
+         */
+        virtual std::expected<void, SftpError> rewindInStrand() = 0;
 
         /**
          * @brief Reads some bytes from the file. Not necessarily fills the buffer. bufferSize MUST be less than or
@@ -63,6 +83,11 @@ namespace SecureShell
          * @return std::future<std::expected<std::size_t, SftpError>> The number of bytes read or an error.
          */
         virtual std::future<std::expected<std::size_t, SftpError>> readSome(char* buffer, std::size_t bufferSize) = 0;
+
+        /**
+         * @brief In-strand variant of readSome. Must be called from within the processing thread.
+         */
+        virtual std::expected<std::size_t, SftpError> readSomeInStrand(char* buffer, std::size_t bufferSize) = 0;
 
         /**
          * @brief Reads all bytes from the file.
@@ -141,6 +166,11 @@ namespace SecureShell
          * @brief Closes the file and removes itself from the sftp session.
          */
         virtual void close(bool isBackElement = false) = 0;
+
+        /**
+         * @brief In-strand variant of close. Must be called from within the processing thread.
+         */
+        virtual void closeInStrand(bool isBackElement = false) = 0;
 
         /**
          * @brief Returns the processing strand of the file stream.

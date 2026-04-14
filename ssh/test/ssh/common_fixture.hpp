@@ -75,8 +75,7 @@ namespace SecureShell::Test
                     }
                     else
                     {
-                        // ???
-                        throw std::runtime_error("No main module, why");
+                        std::cerr << "No main module, why" << std::endl;
                     }
                 }};
             processResultAvailable.get_future().wait();

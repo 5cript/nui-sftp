@@ -36,11 +36,21 @@ namespace SecureShell
         std::future<std::expected<void, SftpError>> seek(std::size_t pos) override;
 
         /**
+         * @brief In-strand variant of seek. Must be called from within the processing thread.
+         */
+        std::expected<void, SftpError> seekInStrand(std::size_t pos) override;
+
+        /**
          * @brief Tells the current position in the file.
          *
          * @return std::future<std::expected<std::size_t, SftpError>> The current position or an error.
          */
         std::future<std::expected<std::size_t, SftpError>> tell() override;
+
+        /**
+         * @brief In-strand variant of tell. Must be called from within the processing thread.
+         */
+        std::expected<std::size_t, SftpError> tellInStrand() override;
 
         /**
          * @brief Retrieves information about the file.
@@ -50,9 +60,19 @@ namespace SecureShell
         std::future<std::expected<FileInformation, SftpError>> stat() override;
 
         /**
+         * @brief In-strand variant of stat. Must be called from within the processing thread.
+         */
+        std::expected<FileInformation, SftpError> statInStrand() override;
+
+        /**
          * @brief Rewind the file to the beginning.
          */
         std::future<std::expected<void, SftpError>> rewind() override;
+
+        /**
+         * @brief In-strand variant of rewind. Must be called from within the processing thread.
+         */
+        std::expected<void, SftpError> rewindInStrand() override;
 
         /**
          * @brief Reads some bytes from the file. Not necessarily fills the buffer. bufferSize MUST be less than or
@@ -63,6 +83,11 @@ namespace SecureShell
          * @return std::future<std::expected<std::size_t, SftpError>>
          */
         std::future<std::expected<std::size_t, SftpError>> readSome(char* buffer, std::size_t bufferSize) override;
+
+        /**
+         * @brief In-strand variant of readSome. Must be called from within the processing thread.
+         */
+        std::expected<std::size_t, SftpError> readSomeInStrand(char* buffer, std::size_t bufferSize) override;
 
         /**
          * @brief Reads all bytes from the file.
@@ -133,6 +158,11 @@ namespace SecureShell
          * @brief Closes the file and removes itself from the sftp session.
          */
         void close(bool isBackElement = false) override;
+
+        /**
+         * @brief In-strand variant of close. Must be called from within the processing thread.
+         */
+        void closeInStrand(bool isBackElement = false) override;
 
         ProcessingStrand* strand() const override;
 
