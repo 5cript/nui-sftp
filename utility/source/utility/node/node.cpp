@@ -50,9 +50,20 @@ namespace SecureShell::Test
 
     int NodeProcessResult::wait()
     {
-        if (mainModule)
-            return process(*this)->wait();
-        return std::numeric_limits<int>::min();
+        if (!mainModule)
+            return std::numeric_limits<int>::min();
+
+        // boost::process v2 may install an internal async SIGCHLD reaper via the
+        // executor. If that reaper wins the race against this synchronous wait(),
+        // waitid returns ECHILD and the throwing overload aborts the process.
+        // Use the error_code overload and treat ECHILD as "already reaped".
+        boost::system::error_code errc{};
+        const int exitCode = process(*this)->wait(errc);
+        if (errc && errc != boost::system::errc::no_child_process)
+        {
+            std::cerr << "node process wait failed: " << errc.message() << std::endl;
+        }
+        return exitCode;
     }
 
     void NodeProcessResult::terminate()

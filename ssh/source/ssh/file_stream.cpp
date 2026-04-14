@@ -1,6 +1,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 
+#include <cassert>
 #include <utility>
 #include <chrono>
 
@@ -56,18 +57,25 @@ namespace SecureShell
                 sftp->performPromise(
                         [this, isBackElement, sftp]() -> bool
                         {
-                            file_.reset();
-                            sftp->fileStreamRemoveItself(this, isBackElement);
+                            closeInStrand(isBackElement);
                             return true;
                         }
                 ).get();
             }
             else
             {
-                file_.reset();
-                sftp->fileStreamRemoveItself(this, isBackElement);
+                closeInStrand(isBackElement);
             }
         }
+    }
+    void FileStream::closeInStrand(bool isBackElement)
+    {
+        auto sftp = sftp_.lock();
+        if (!sftp)
+            return;
+        assert(sftp->strand_->withinProcessingThread());
+        file_.reset();
+        sftp->fileStreamRemoveItself(this, isBackElement);
     }
     std::function<void(sftp_file)> FileStream::makeFileDeleter()
     {
@@ -96,52 +104,56 @@ namespace SecureShell
         }
         return *this;
     }
+    std::expected<void, SftpError> FileStream::seekInStrand(std::size_t pos)
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        sftp_seek64(file_.get(), pos);
+        return {};
+    }
     std::future<std::expected<void, SftpError>> FileStream::seek(std::size_t pos)
     {
-        return performPromise(
-            [this, pos]() -> std::expected<void, SftpError>
-            {
-                VERIFY_FILE_STREAM();
-                sftp_seek64(file_.get(), pos);
-                return {};
-            }
-        );
+        return performPromise([this, pos]() { return seekInStrand(pos); });
+    }
+    std::expected<FileInformation, SftpError> FileStream::statInStrand()
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
+            sftp_fstat(file_.get()), sftp_attributes_free
+        };
+        if (attributes == nullptr)
+            return std::unexpected(lastError());
+        return fromSftpAttributes(attributes.get());
     }
     std::future<std::expected<FileInformation, SftpError>> FileStream::stat()
     {
-        return performPromise(
-            [this]() -> std::expected<FileInformation, SftpError>
-            {
-                VERIFY_FILE_STREAM();
-                std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                    sftp_fstat(file_.get()), sftp_attributes_free
-                };
-                if (attributes == nullptr)
-                    return std::unexpected(lastError());
-                return fromSftpAttributes(attributes.get());
-            }
-        );
+        return performPromise([this]() { return statInStrand(); });
+    }
+    std::expected<std::size_t, SftpError> FileStream::tellInStrand()
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        return static_cast<std::size_t>(sftp_tell64(file_.get()));
     }
     std::future<std::expected<std::size_t, SftpError>> FileStream::tell()
     {
-        return performPromise(
-            [this]() -> std::expected<std::size_t, SftpError>
-            {
-                VERIFY_FILE_STREAM();
-                return static_cast<std::size_t>(sftp_tell64(file_.get()));
-            }
-        );
+        return performPromise([this]() { return tellInStrand(); });
+    }
+    std::expected<void, SftpError> FileStream::rewindInStrand()
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        sftp_rewind(file_.get());
+        return {};
     }
     std::future<std::expected<void, SftpError>> FileStream::rewind()
     {
-        return performPromise(
-            [this]() -> std::expected<void, SftpError>
-            {
-                VERIFY_FILE_STREAM();
-                sftp_rewind(file_.get());
-                return {};
-            }
-        );
+        return performPromise([this]() { return rewindInStrand(); });
     }
     SftpError FileStream::lastError() const
     {
@@ -157,18 +169,19 @@ namespace SecureShell
             };
         }
     }
+    std::expected<std::size_t, SftpError> FileStream::readSomeInStrand(char* buffer, std::size_t bufferSize)
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        const auto result = sftp_read(file_.get(), buffer, bufferSize);
+        if (result < 0)
+            return std::unexpected(lastError());
+        return static_cast<std::size_t>(result);
+    }
     std::future<std::expected<std::size_t, SftpError>> FileStream::readSome(char* buffer, std::size_t bufferSize)
     {
-        return performPromise(
-            [this, buffer, bufferSize]() -> std::expected<std::size_t, SftpError>
-            {
-                VERIFY_FILE_STREAM();
-                const auto result = sftp_read(file_.get(), buffer, bufferSize);
-                if (result < 0)
-                    return std::unexpected(lastError());
-                return static_cast<std::size_t>(result);
-            }
-        );
+        return performPromise([this, buffer, bufferSize]() { return readSomeInStrand(buffer, bufferSize); });
     }
 
     std::future<std::expected<std::size_t, SftpError>>

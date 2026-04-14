@@ -17,12 +17,22 @@ namespace SecureShell::Test
     {
       public:
         MOCK_METHOD((std::future<std::expected<void, SftpError>>), seek, (std::size_t), (override));
+        MOCK_METHOD((std::expected<void, SftpError>), seekInStrand, (std::size_t), (override));
         MOCK_METHOD((std::future<std::expected<std::size_t, SftpError>>), tell, (), (override));
+        MOCK_METHOD((std::expected<std::size_t, SftpError>), tellInStrand, (), (override));
         MOCK_METHOD((std::future<std::expected<FileInformation, SftpError>>), stat, (), (override));
+        MOCK_METHOD((std::expected<FileInformation, SftpError>), statInStrand, (), (override));
         MOCK_METHOD((std::future<std::expected<void, SftpError>>), rewind, (), (override));
+        MOCK_METHOD((std::expected<void, SftpError>), rewindInStrand, (), (override));
         MOCK_METHOD(
             (std::future<std::expected<std::size_t, SftpError>>),
             readSome,
+            (char* buffer, std::size_t bufferSize),
+            (override)
+        );
+        MOCK_METHOD(
+            (std::expected<std::size_t, SftpError>),
+            readSomeInStrand,
             (char* buffer, std::size_t bufferSize),
             (override)
         );
@@ -58,6 +68,7 @@ namespace SecureShell::Test
         MOCK_METHOD(std::size_t, readLengthLimit, (), (const, override));
         MOCK_METHOD(sftp_file, release, (), (override));
         MOCK_METHOD(void, close, (bool isBackElement), (override));
+        MOCK_METHOD(void, closeInStrand, (bool isBackElement), (override));
         MOCK_METHOD(ProcessingStrand*, strand, (), (const, override));
     };
 }
