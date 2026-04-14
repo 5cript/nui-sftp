@@ -660,6 +660,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             .remoteSrc = entry.src,
             .localDst = entry.dst,
             .sizeBytes = entry.sizeBytes,
+            .mtime = entry.mtime,
+            .mtimeNsec = entry.mtimeNsec,
         });
     }
 
