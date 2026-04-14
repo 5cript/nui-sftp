@@ -118,6 +118,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 // No More to read?
                 else
                 {
+                    options_.progressCallback(0ull, 0ull, 0ull, 0ull);
                     state_ = Finalizing;
                     [[fallthrough]];
                 }
@@ -243,6 +244,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 
     if (options_.entry->size == 0)
     {
+        // File is empty nothing todo.
         return false;
     }
 
