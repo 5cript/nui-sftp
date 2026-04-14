@@ -32,6 +32,8 @@ operationQueue:
   autoCleanCompleted: "Auto Remove Completed operations"
   totalOperations: "{} total operations"
   cancelAll: "Cancel All"
+  tabQueue: "Queue"
+  tabFailed: "Failed"
   resumeMinimizedSync: "Resume Sync"
   restoreMinimizedSyncTitle: "Restore minimized sync dialog"
 syncDialog:
@@ -416,6 +418,8 @@ settings:
     autoRemoveCompletedOperationsHelpText: "When enabled, completed SFTP operations are automatically removed from the queue."
     startInPausedState: "Start In Paused State"
     startInPausedStateHelpText: "When enabled, the SFTP queue starts in a paused state."
+    liveQueuePageSize: "Live Queue Page Size"
+    liveQueuePageSizeHelpText: "Maximum number of operations visible on the live page. When exceeded, the oldest entries move into a paginated history. Hard limit: 1000."
   terminalOptions:
     fontFamily: "Font Family"
     fontFamilyHelpText: "Choose the font family used to render text in the terminal."

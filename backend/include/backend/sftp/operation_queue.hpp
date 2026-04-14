@@ -8,6 +8,7 @@
 #include <backend/rpc_helper.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
+#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/directory_entry.hpp>
 
 #include <deque>
@@ -84,6 +85,56 @@ class OperationQueue
         bool recursive,
         bool insertRefresh,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
+    /**
+     * @brief Bulk-add download operations from a pre-known entry list.
+     *        Files are taken at face value (no lstat — sizes come from the
+     *        caller) and turned into individual DownloadOperation cards.
+     *        Directory entries fall back to the existing Scan+BulkDownload
+     *        flow. Everything happens inside a single strand dispatch so
+     *        only one SSH-thread context switch is paid for the batch.
+     *
+     * @param sftp           SFTP session to use.
+     * @param request        Full bulk request (file + directory entries).
+     * @param operationIdFor Callback producing a fresh OperationId per entry
+     *                       index (frontend reserves them so it can register
+     *                       completion callbacks before the RPC returns).
+     * @return Number of entries successfully enqueued.
+     */
+    std::size_t addBulkDownloadOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkAddRequest const& request,
+        std::function<Ids::OperationId(std::size_t)> operationIdFor
+    );
+
+    /** @brief Upload analogue of addBulkDownloadOperation.  File entries skip
+     *         the per-file local lstat + RPC round-trip; directories fall
+     *         back to the existing LocalScan+BulkUpload flow. */
+    std::size_t addBulkUploadOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkAddRequest const& request,
+        std::function<Ids::OperationId(std::size_t)> operationIdFor
+    );
+
+    /**
+     * @brief Bulk-delete: collapse N file entries (and any directory entries)
+     *        into a single delete operation card on the frontend.  File
+     *        entries are pre-known so no SFTP stat is needed.  Directory
+     *        entries get the existing Scan+Delete pair so descendants are
+     *        recursively removed.
+     *
+     * @param sftp           SFTP session to use.
+     * @param request        Bulk request — `dst` is unused for delete, only
+     *                       `src` (target path) and `isDirectory` matter.
+     * @param bulkOperationId  Single OperationId for the aggregate file-bulk
+     *                         card.  Per-directory ids are generated locally.
+     * @return Number of entries successfully enqueued.
+     */
+    std::size_t addBulkDeleteOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkAddRequest const& request,
+        Ids::OperationId bulkOperationId
     );
 
     std::expected<void, Operation::Error> addRenameOperation(

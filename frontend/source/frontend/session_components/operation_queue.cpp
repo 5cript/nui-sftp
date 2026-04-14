@@ -26,13 +26,18 @@
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/switch.hpp>
+#include <script-nui-components/pagination.hpp>
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <deque>
 #include <functional>
+#include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -53,6 +58,29 @@ struct OperationQueue::Implementation
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
+
+    // History tier: live-queue elements evicted after the live page overflows.
+    // Shared ownership lets the same card also appear in `failed` without
+    // risking dangling raw pointers when one container drops it.
+    std::deque<std::shared_ptr<DisplayedOperation>> history;
+    std::unordered_map<std::string, std::shared_ptr<DisplayedOperation>> historyIndex;
+
+    // Failed copy-list: tracks failed operations so the user can review them
+    // via a dedicated tab even after auto-clean removed them from the queue.
+    // Shared ownership with live/history means no copy-of-card is required.
+    Nui::Observed<std::deque<std::shared_ptr<DisplayedOperation>>> failed;
+    std::unordered_map<std::string, std::shared_ptr<DisplayedOperation>> failedIndex;
+
+    // Pagination / navigation state.
+    Nui::Observed<int> pageCount{1};
+    Nui::Observed<int> currentPage{0}; // pageCount-1 is the live page.
+    Nui::Observed<int> activeTab{0}; // 0 = Queue (live + history), 1 = Failed
+    // True until the user explicitly clicks a non-live history page. While
+    // true, the live page follows overflow growth so the user is not yanked
+    // into a stale history page when a new eviction bumps pageCount.
+    bool followLive{true};
+    int liveQueuePageSize{200};
+
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
@@ -71,18 +99,127 @@ struct OperationQueue::Implementation
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
     {
-        auto* op = priorityOperations.at(id);
-        if (op)
+        if (auto* op = priorityOperations.at(id))
             return op;
-        return operations.at(id);
+        if (auto* op = operations.at(id))
+            return op;
+        if (auto it = historyIndex.find(id.value()); it != historyIndex.end())
+            return it->second.get();
+        if (auto it = failedIndex.find(id.value()); it != failedIndex.end())
+            return it->second.get();
+        return nullptr;
     }
 
+    /**
+     * @brief Remove the operation from every container that currently holds it.
+     *        Cascades by id so the Failed copy-list stays consistent with the
+     *        live/history tiers without any cross-container pointer references.
+     */
     void eraseOperation(Ids::OperationId const& id)
     {
         if (priorityOperations.at(id))
             priorityOperations.erase(id);
-        else
+        if (operations.at(id))
             operations.erase(id);
+
+        bool historyChanged = false;
+        if (auto it = historyIndex.find(id.value()); it != historyIndex.end())
+        {
+            historyIndex.erase(it);
+            std::erase_if(
+                history,
+                [&](auto const& entry)
+                {
+                    return entry->key() == id;
+                }
+            );
+            historyChanged = true;
+        }
+        if (auto it = failedIndex.find(id.value()); it != failedIndex.end())
+        {
+            failedIndex.erase(it);
+            auto& deque = failed.value();
+            std::erase_if(
+                deque,
+                [&](auto const& entry)
+                {
+                    return entry->key() == id;
+                }
+            );
+            failed.modify();
+        }
+        if (historyChanged)
+            recomputePageCount();
+    }
+
+    /**
+     * @brief Snapshot an operation into the Failed tab. Uses shared ownership
+     *        so the same card continues to render correctly in the Queue tab
+     *        (live or history) without requiring a deep copy of the card.
+     */
+    void recordFailed(Ids::OperationId const& id)
+    {
+        if (failedIndex.contains(id.value()))
+            return;
+
+        std::shared_ptr<DisplayedOperation> entry;
+        if (auto raam = priorityOperations.shared(id))
+            entry = raam;
+        else if (auto raam = operations.shared(id))
+            entry = raam;
+        else if (auto it = historyIndex.find(id.value()); it != historyIndex.end())
+            entry = it->second;
+        if (!entry)
+            return;
+
+        failedIndex.emplace(id.value(), entry);
+        failed.push_back(std::move(entry));
+    }
+
+    /**
+     * @brief Recompute page count from history size and clamp currentPage.
+     *        Live page is always the last page (index pageCount - 1).
+     */
+    void recomputePageCount()
+    {
+        const int pageSize = std::max(1, liveQueuePageSize);
+        const int historySize = static_cast<int>(history.size());
+        const int newPageCount = 1 + (historySize + pageSize - 1) / pageSize;
+
+        // Dedupe Observed assignments: Nui's operator= does NOT compare old and
+        // new values, so every identical assignment fires observers. On the
+        // eviction-per-insert overflow path this causes the entire .opq-list
+        // subtree to re-render on every new op — unacceptable perf.
+        if (pageCount.value() != newPageCount)
+            pageCount = newPageCount;
+
+        const int desiredPage = followLive
+            ? newPageCount - 1
+            : std::clamp(currentPage.value(), 0, newPageCount - 1);
+        if (currentPage.value() != desiredPage)
+            currentPage = desiredPage;
+    }
+
+    /**
+     * @brief Enforce the configured live-queue page size by moving the oldest
+     *        overflow from `operations` to `history` via a single block erase
+     *        (Nui emits one range-erase diff rather than N individual diffs).
+     */
+    void enforceLivePageSize()
+    {
+        auto& deque = operations.observedValues().value();
+        const int overflow = static_cast<int>(deque.size()) - std::max(1, liveQueuePageSize);
+        if (overflow <= 0)
+            return;
+
+        auto evicted = operations.extract_front_n(static_cast<std::size_t>(overflow));
+        for (auto& entry : evicted)
+        {
+            const auto key = entry->key().value();
+            historyIndex.emplace(key, entry);
+            history.push_back(std::move(entry));
+        }
+        recomputePageCount();
     }
 
     Implementation(
@@ -159,6 +296,8 @@ OperationQueue::OperationQueue(
             auto [engineKey, engine] = *iter;
             impl_->paused = engine.queueOptions->startInPausedState.value_or(true);
             *impl_->autoClean = engine.queueOptions->autoRemoveCompletedOperations.value_or(false);
+            impl_->liveQueuePageSize = std::clamp(engine.queueOptions->liveQueuePageSize.value_or(200), 1, 1000);
+            impl_->enforceLivePageSize();
             Nui::globalEventContext.executeActiveEventsImmediately();
         },
         "Cannot set up operation queue."
@@ -194,6 +333,28 @@ OperationQueue::OperationQueue(
                 cleanFront(impl_->priorityOperations);
                 cleanFront(impl_->operations);
 
+                // History can contain completed ops (either completed before
+                // being evicted or force-popped while still running and later
+                // finished). Sweep any whose completion window has elapsed.
+                const auto sizeBefore = impl_->history.size();
+                std::erase_if(
+                    impl_->history,
+                    [&](auto const& entry)
+                    {
+                        if (!entry->isCompletedState())
+                            return false;
+                        if (now - entry->completionTime() < autoRemoveTime)
+                            return false;
+                        impl_->historyIndex.erase(entry->key().value());
+                        return true;
+                    }
+                );
+                if (impl_->history.size() != sizeBefore)
+                {
+                    impl_->recomputePageCount();
+                    anyRemoved = true;
+                }
+
                 if (anyRemoved)
                     Nui::globalEventContext.executeActiveEventsImmediately();
             }
@@ -210,6 +371,11 @@ void OperationQueue::cancelAll()
 {
     impl_->operations.clear();
     impl_->priorityOperations.clear();
+    impl_->history.clear();
+    impl_->historyIndex.clear();
+    // Failed list survives "Cancel All": it's a retrospective review tool,
+    // not a live-state container. Users can still clear it explicitly.
+    impl_->recomputePageCount();
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
@@ -510,11 +676,22 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean
             );
         }
-        else if (added.type == SharedData::OperationType::Delete)
+        else if (
+            added.type == SharedData::OperationType::Delete ||
+            added.type == SharedData::OperationType::BulkDelete
+        )
         {
             using namespace std::string_literals;
+            // BulkDelete reuses the DisplayedDeleteOperation card — its body
+            // already renders BulkDeleteProgress (current file + filesDeleted
+            // / totalFiles), which is exactly what the backend's bulk path
+            // emits.  No new card class needed.  When remotePath is absent
+            // (the bulk-files aggregate has no single root) we fall back to
+            // an empty placeholder; the running progress text takes over
+            // before the user sees anything else.
             Log::info(
-                "Creating delete operation card for operation id: {}. path: {}",
+                "Creating {} operation card for operation id: {}. path: {}",
+                added.type == SharedData::OperationType::BulkDelete ? "bulk delete" : "delete",
                 added.operationId.value(),
                 added.remotePath ? added.remotePath->generic_string() : "???"s
             );
@@ -632,9 +809,12 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
             );
         else
+        {
             impl_->operations.insert(
                 added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
             );
+            impl_->enforceLivePageSize();
+        }
     }
     catch (std::exception const& e)
     {
@@ -851,7 +1031,10 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         case (SharedData::OperationCompletionReason::Completed):
         {
             if (partial)
+            {
                 operation->state(SharedData::OperationState::PartialSuccess);
+                impl_->recordFailed(completed.operationId);
+            }
             else
                 operation->state(SharedData::OperationState::Completed);
             break;
@@ -871,6 +1054,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                     .extraInfo = "Unknown Error"
                 }
             ));
+            impl_->recordFailed(completed.operationId);
             break;
         }
         default:
@@ -1090,6 +1274,24 @@ void OperationQueue::askBackendToCancelAll()
 void OperationQueue::changeAutoClean(bool doClean)
 {
     *impl_->autoClean = doClean;
+    if (doClean)
+    {
+        // History may still hold not-yet-completed operations that were
+        // force-popped because the live page overflowed; only completed cards
+        // are eligible for the auto-clean sweep.  The periodic autoCleanTimer
+        // below will keep whittling away any further completions.
+        std::erase_if(
+            impl_->history,
+            [&](auto const& entry)
+            {
+                if (!entry->isCompletedState())
+                    return false;
+                impl_->historyIndex.erase(entry->key().value());
+                return true;
+            }
+        );
+        impl_->recomputePageCount();
+    }
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
@@ -1100,6 +1302,7 @@ void OperationQueue::changeAutoClean(bool doClean)
 
             auto iter = impl_->stateHolder->stateCache().sessions.find(name);
             iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
+            iter->second.queueOptions->liveQueuePageSize = impl_->liveQueuePageSize;
             impl_->stateHolder->save(
                 [this](std::optional<std::string> const& error)
                 {
@@ -1132,7 +1335,8 @@ Nui::ElementRenderer OperationQueue::operator()()
             fmt::runtime(language->get("operationQueue", "totalOperations")),
             static_cast<int>(
                 impl_->operations.observedValues().value().size() +
-                impl_->priorityOperations.observedValues().value().size()
+                impl_->priorityOperations.observedValues().value().size() +
+                impl_->history.size()
             )
         );
     };
@@ -1209,25 +1413,113 @@ Nui::ElementRenderer OperationQueue::operator()()
                     .generate(makeSummaryText)
             )
         ),
-        // Main content
+        // Tab bar — Queue (live + history via pagination) vs Failed.
+        div{class_ = "opq-tabs"}(
+            div{
+                class_ = observe(impl_->activeTab).generate([this]() {
+                    return std::string{"opq-tab"} + (impl_->activeTab.value() == 0 ? " selected" : "");
+                }),
+                onClick = [this](Nui::val) { impl_->activeTab = 0; },
+            }(span{}(language->getObserved("operationQueue", "tabQueue"))),
+            div{
+                class_ = observe(impl_->activeTab).generate([this]() {
+                    return std::string{"opq-tab"} + (impl_->activeTab.value() == 1 ? " selected" : "");
+                }),
+                onClick = [this](Nui::val) { impl_->activeTab = 1; },
+            }(
+                span{}(language->getObserved("operationQueue", "tabFailed")),
+                span{class_ = "opq-tab-count"}(
+                    observe(impl_->failed).generate([this]() {
+                        return fmt::format("{}", impl_->failed.value().size());
+                    })
+                )
+            )
+        ),
+        // Pagination bar — hidden when pageCount == 1 or when Failed tab is active.
+        div{
+            class_ = observe(impl_->activeTab, impl_->pageCount).generate([this]() {
+                const bool hidden = impl_->activeTab.value() != 0 || impl_->pageCount.value() <= 1;
+                return std::string{"opq-pagination-host"} + (hidden ? " hidden" : "");
+            }),
+        }(
+            Snc::pagination({
+                .pageCount = &impl_->pageCount,
+                .currentPage = &impl_->currentPage,
+                .onPageChange = [this](int newPage) {
+                    // Auto-follow live only while the user is viewing the live
+                    // page; clicking any history page opts them out until they
+                    // return to the live page.
+                    impl_->followLive = (newPage == impl_->pageCount.value() - 1);
+                    impl_->currentPage = newPage;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                },
+            })
+        ),
+        // Main content — switches between live page (reactive, preserves
+        // single-insert perf), a static history-page slice, or the Failed tab.
         div{
             class_ = "opq-list"
         }(
-            div{class_ = "opq-priority-list"}(
-                // TODO: Make after element depend on list length > 0
-                Nui::range(impl_->priorityOperations.observedValues())
-                    .after(div{class_ = "opq-priority-separator"}()),
-                [](auto, auto const& element) -> Nui::ElementRenderer
+            // Only subscribe to tab + paging state here.  `failed` mutations
+            // must NOT tear down the live reactive ranges below, or every new
+            // failure would wipe the live list and re-create all card nodes.
+            Nui::observe(impl_->activeTab, impl_->currentPage, impl_->pageCount),
+            [this]() -> Nui::ElementRenderer
+            {
+                if (impl_->activeTab.value() == 1)
                 {
-                    return (*element)();
+                    // Failed tab: render the current snapshot.  We pass the
+                    // Observed deque into Nui::range so Failed-list updates
+                    // diff incrementally while the user is viewing this tab.
+                    return div{class_ = "opq-regular-list"}(
+                        Nui::range(impl_->failed),
+                        [](long long, auto const& entry) -> Nui::ElementRenderer {
+                            return (*entry)();
+                        }
+                    );
                 }
-            ),
-            div{class_ = "opq-regular-list"}(
-                impl_->operations.observedValues().map([](auto, auto const& element)
+
+                const int page = impl_->currentPage.value();
+                const int pageMax = impl_->pageCount.value() - 1;
+
+                if (page >= pageMax)
                 {
-                    return (*element)();
-                })
-            )
+                    // Live page: original reactive markup wrapped in one host
+                    // div with display:contents (see operation_queue.css) so
+                    // priority/regular cards remain direct .opq-list grid
+                    // children.  Re-entering re-establishes the Observed
+                    // subscription so subsequent enqueue/dequeue stays single-diff.
+                    return div{class_ = "opq-live-wrapper"}(
+                        div{class_ = "opq-priority-list"}(
+                            // TODO: Make after element depend on list length > 0
+                            Nui::range(impl_->priorityOperations.observedValues())
+                                .after(div{class_ = "opq-priority-separator"}()),
+                            [](auto, auto const& element) -> Nui::ElementRenderer
+                            {
+                                return (*element)();
+                            }
+                        ),
+                        div{class_ = "opq-regular-list"}(
+                            impl_->operations.observedValues().map(
+                                [](auto, auto const& element) { return (*element)(); }
+                            )
+                        )
+                    );
+                }
+
+                // History page: static slice of evicted cards.
+                const int pageSize = std::max(1, impl_->liveQueuePageSize);
+                const int begin = page * pageSize;
+                const int end = std::min(begin + pageSize, static_cast<int>(impl_->history.size()));
+                std::vector<Nui::ElementRenderer> cards;
+                cards.reserve(static_cast<std::size_t>(std::max(0, end - begin)));
+                for (int idx = begin; idx < end; ++idx)
+                    cards.push_back((*impl_->history[idx])());
+                return div{class_ = "opq-regular-list"}(
+                    Nui::range(std::move(cards)),
+                    [](long long, auto const& card) -> Nui::ElementRenderer { return card; }
+                );
+            }
         ),
         // Footer
         div{
@@ -1327,4 +1619,138 @@ void OperationQueue::enqueueDelete(
         return;
     }
     impl_->fileEngine->removeOnQueueUnchecked(paths, recursive, std::move(onComplete), mode);
+}
+
+void OperationQueue::enqueueBulkDownload(
+    std::vector<SharedData::BulkAddEntry> entries,
+    bool allowOverwrite,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
+    std::function<void(bool success, std::string const& info)> onBulkAck
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue bulk download");
+        if (onBulkAck)
+            onBulkAck(false, "No file engine set");
+        return;
+    }
+
+    // Pre-allocate the OperationIds so per-entry completion callbacks can be
+    // registered BEFORE the RPC returns.  Otherwise progress events for the
+    // first entries might arrive and be dropped before their callbacks exist.
+    std::vector<Ids::OperationId> operationIds;
+    operationIds.reserve(entries.size());
+    for (std::size_t idx = 0; idx < entries.size(); ++idx)
+        operationIds.push_back(Ids::generateOperationId());
+
+    if (onEachComplete)
+    {
+        for (auto const& opId : operationIds)
+        {
+            impl_->completionCallbacks.emplace(
+                opId.value(),
+                [onEachComplete, opId](bool success) { onEachComplete(opId, success); }
+            );
+        }
+    }
+
+    Log::info(
+        "Frontend Operation Queue bulk download: {} entries, one RPC",
+        entries.size()
+    );
+    impl_->fileEngine->addBulkDownload(
+        std::move(entries),
+        std::move(operationIds),
+        allowOverwrite,
+        insertRefresh,
+        mode,
+        std::move(onBulkAck)
+    );
+}
+
+void OperationQueue::enqueueBulkUpload(
+    std::vector<SharedData::BulkAddEntry> entries,
+    bool allowOverwrite,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
+    std::function<void(bool success, std::string const& info)> onBulkAck
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue bulk upload");
+        if (onBulkAck)
+            onBulkAck(false, "No file engine set");
+        return;
+    }
+
+    std::vector<Ids::OperationId> operationIds;
+    operationIds.reserve(entries.size());
+    for (std::size_t idx = 0; idx < entries.size(); ++idx)
+        operationIds.push_back(Ids::generateOperationId());
+
+    if (onEachComplete)
+    {
+        for (auto const& opId : operationIds)
+        {
+            impl_->completionCallbacks.emplace(
+                opId.value(),
+                [onEachComplete, opId](bool success) { onEachComplete(opId, success); }
+            );
+        }
+    }
+
+    Log::info("Frontend Operation Queue bulk upload: {} entries, one RPC", entries.size());
+    impl_->fileEngine->addBulkUpload(
+        std::move(entries),
+        std::move(operationIds),
+        allowOverwrite,
+        insertRefresh,
+        mode,
+        std::move(onBulkAck)
+    );
+}
+
+void OperationQueue::enqueueBulkDelete(
+    std::vector<SharedData::BulkAddEntry> entries,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(bool success)> onBulkComplete,
+    std::function<void(bool success, std::string const& info)> onBulkAck
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue bulk delete");
+        if (onBulkAck)
+            onBulkAck(false, "No file engine set");
+        return;
+    }
+
+    // Single OperationId for the aggregate file-bulk card so the per-bulk
+    // completion callback can be registered before the RPC returns.  Per-
+    // directory cards (created backend-side for directory entries) use
+    // their own ids and aren't tracked here — those are normal Delete
+    // operations the user can monitor in the queue.
+    const auto bulkOperationId = Ids::generateOperationId();
+    if (onBulkComplete)
+    {
+        impl_->completionCallbacks.emplace(
+            bulkOperationId.value(),
+            [onBulkComplete](bool success) { onBulkComplete(success); }
+        );
+    }
+
+    Log::info("Frontend Operation Queue bulk delete: {} entries, one RPC", entries.size());
+    impl_->fileEngine->addBulkDelete(
+        std::move(entries),
+        bulkOperationId,
+        insertRefresh,
+        mode,
+        std::move(onBulkAck)
+    );
 }

@@ -17,24 +17,36 @@ QueueOptions::QueueOptions(std::function<void()> const& onChange)
           onChange,
           valueReset(startInPausedState, onChange, true),
       }
+    , liveQueuePageSize{
+          language->getObserved("settings", "queueOptions", "liveQueuePageSizeHelpText"),
+          onChange,
+          valueReset(liveQueuePageSize, onChange, 200),
+          NumberSetting<int, true>::ConstructionArgs{
+              .minValue = 1,
+              .maxValue = 1000,
+          },
+      }
 {}
 
 void QueueOptions::applyToState(Persistence::QueueOptions& state) const
 {
     assignIfValid(state.autoRemoveCompletedOperations, autoRemoveCompletedOperations);
     assignIfValid(state.startInPausedState, startInPausedState);
+    assignIfValid(state.liveQueuePageSize, liveQueuePageSize);
 }
 
 void QueueOptions::loadFromState(Persistence::QueueOptions const& state)
 {
     autoRemoveCompletedOperations.value(state.autoRemoveCompletedOperations);
     startInPausedState.value(state.startInPausedState);
+    liveQueuePageSize.value(state.liveQueuePageSize);
 }
 
 void QueueOptions::assumeDefaultsFrom(Persistence::QueueOptions const& state)
 {
     autoRemoveCompletedOperations.inherit(state.autoRemoveCompletedOperations);
     startInPausedState.inherit(state.startInPausedState);
+    liveQueuePageSize.inherit(state.liveQueuePageSize);
 }
 
 Nui::ElementRenderer QueueOptions::render()
@@ -45,6 +57,7 @@ Nui::ElementRenderer QueueOptions::render()
         autoRemoveCompletedOperations(
             language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperations")
         ),
-        startInPausedState(language->getObserved("settings", "queueOptions", "startInPausedState"))
+        startInPausedState(language->getObserved("settings", "queueOptions", "startInPausedState")),
+        liveQueuePageSize(language->getObserved("settings", "queueOptions", "liveQueuePageSize"))
     );
 }

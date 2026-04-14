@@ -49,6 +49,15 @@ class BulkUploadOperation : public Operation
 
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t totalBytes);
 
+    /** @brief See BulkDownloadOperation::setPrescannedFileList. */
+    struct PrescannedFile
+    {
+        std::filesystem::path localSrc;
+        std::filesystem::path remoteDst;
+        std::uint64_t sizeBytes;
+    };
+    void setPrescannedFileList(std::vector<PrescannedFile> files);
+
     bool isBarrier() const noexcept override
     {
         return false;
@@ -84,4 +93,7 @@ class BulkUploadOperation : public Operation
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};
     std::chrono::seconds futureTimeout_{5};
+    // Pairs are (localAbsSrc, remoteAbsDst) per entry.  See the download
+    // equivalent for why this exists.
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> prescannedPathOverride_{};
 };

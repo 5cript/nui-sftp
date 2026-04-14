@@ -16,6 +16,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 
@@ -84,6 +85,52 @@ class OperationQueue
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
+    /**
+     * @brief Bulk-add downloads from a pre-known entry list.  One RPC for the
+     *        whole batch; backend skips the per-file lstat and amortizes the
+     *        SSH thread-switch across all entries in a single strand dispatch.
+     *
+     * @param entries         Mixed file + directory entries (set isDirectory
+     *                        + sizeBytes accordingly).
+     * @param allowOverwrite  Applied to every entry.
+     * @param insertRefresh   Applied to every entry.
+     * @param mode            Queue vs. priority-queue for the batch.
+     * @param onEachComplete  Called once per entry upon its completion; the
+     *                        OperationId allows per-entry completion tracking.
+     *                        May be empty if the caller only needs the bulk
+     *                        acknowledgement.
+     * @param onBulkAck       Called once when the backend acknowledges the
+     *                        batch (before per-entry completions fire).
+     */
+    void enqueueBulkDownload(
+        std::vector<SharedData::BulkAddEntry> entries,
+        bool allowOverwrite,
+        bool insertRefresh,
+        SharedData::OperationMode mode,
+        std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
+        std::function<void(bool success, std::string const& info)> onBulkAck
+    );
+
+    /** @brief Upload analogue of enqueueBulkDownload — see its docs. */
+    void enqueueBulkUpload(
+        std::vector<SharedData::BulkAddEntry> entries,
+        bool allowOverwrite,
+        bool insertRefresh,
+        SharedData::OperationMode mode,
+        std::function<void(Ids::OperationId const& opId, bool success)> onEachComplete,
+        std::function<void(bool success, std::string const& info)> onBulkAck
+    );
+
+    /** @brief Bulk delete: one bulk-delete card for all file entries plus
+     *         standard Scan+Delete pairs for any directory entries. */
+    void enqueueBulkDelete(
+        std::vector<SharedData::BulkAddEntry> entries,
+        bool insertRefresh,
+        SharedData::OperationMode mode,
+        std::function<void(bool success)> onBulkComplete,
+        std::function<void(bool success, std::string const& info)> onBulkAck
     );
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);

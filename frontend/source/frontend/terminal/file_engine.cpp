@@ -305,6 +305,193 @@ void FileEngine::addDownload(
     );
 }
 
+void FileEngine::addBulkDownload(
+    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<Ids::OperationId> operationIds,
+    bool allowOverwrite,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(bool success, std::string const& info)> onBulkCreated
+)
+{
+    Log::info("Requesting bulk download for {} entries", entries.size());
+
+    if (entries.size() != operationIds.size())
+    {
+        Log::error("addBulkDownload: entries and operationIds size mismatch");
+        onBulkCreated(false, "entries and operationIds size mismatch");
+        return;
+    }
+
+    lazyOpen(
+        [this,
+            entries = std::move(entries),
+            operationIds = std::move(operationIds),
+            allowOverwrite,
+            insertRefresh,
+            mode,
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot bulk-add download, no channel");
+                onBulkCreated(false, info);
+                return;
+            }
+
+            std::vector<std::string> operationIdStrings;
+            operationIdStrings.reserve(operationIds.size());
+            for (auto const& id : operationIds)
+                operationIdStrings.push_back(id.value());
+
+            SharedData::BulkAddRequest request{
+                .entries = entries,
+                .allowOverwrite = allowOverwrite,
+                .insertRefresh = insertRefresh,
+                .mode = mode,
+            };
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addBulkDownload", impl_->engine->sshSessionId().value()),
+                [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed bulk download: {}", val["error"].as<std::string>());
+                        onBulkCreated(false, val["error"].as<std::string>());
+                        return;
+                    }
+                    onBulkCreated(true, "Success");
+                },
+                channelId.value().value(),
+                operationIdStrings,
+                request
+            );
+        }
+    );
+}
+
+void FileEngine::addBulkUpload(
+    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<Ids::OperationId> operationIds,
+    bool allowOverwrite,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(bool success, std::string const& info)> onBulkCreated
+)
+{
+    Log::info("Requesting bulk upload for {} entries", entries.size());
+
+    if (entries.size() != operationIds.size())
+    {
+        Log::error("addBulkUpload: entries and operationIds size mismatch");
+        onBulkCreated(false, "entries and operationIds size mismatch");
+        return;
+    }
+
+    lazyOpen(
+        [this,
+            entries = std::move(entries),
+            operationIds = std::move(operationIds),
+            allowOverwrite,
+            insertRefresh,
+            mode,
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot bulk-add upload, no channel");
+                onBulkCreated(false, info);
+                return;
+            }
+
+            std::vector<std::string> operationIdStrings;
+            operationIdStrings.reserve(operationIds.size());
+            for (auto const& id : operationIds)
+                operationIdStrings.push_back(id.value());
+
+            SharedData::BulkAddRequest request{
+                .entries = entries,
+                .allowOverwrite = allowOverwrite,
+                .insertRefresh = insertRefresh,
+                .mode = mode,
+            };
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addBulkUpload", impl_->engine->sshSessionId().value()),
+                [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed bulk upload: {}", val["error"].as<std::string>());
+                        onBulkCreated(false, val["error"].as<std::string>());
+                        return;
+                    }
+                    onBulkCreated(true, "Success");
+                },
+                channelId.value().value(),
+                operationIdStrings,
+                request
+            );
+        }
+    );
+}
+
+void FileEngine::addBulkDelete(
+    std::vector<SharedData::BulkAddEntry> entries,
+    Ids::OperationId bulkOperationId,
+    bool insertRefresh,
+    SharedData::OperationMode mode,
+    std::function<void(bool success, std::string const& info)> onBulkCreated
+)
+{
+    Log::info("Requesting bulk delete for {} entries", entries.size());
+
+    lazyOpen(
+        [this,
+            entries = std::move(entries),
+            bulkOperationId,
+            insertRefresh,
+            mode,
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot bulk-delete, no channel");
+                onBulkCreated(false, info);
+                return;
+            }
+
+            SharedData::BulkAddRequest request{
+                .entries = entries,
+                .allowOverwrite = false,
+                .insertRefresh = insertRefresh,
+                .mode = mode,
+            };
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::addBulkDelete", impl_->engine->sshSessionId().value()),
+                [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) Failed bulk delete: {}", val["error"].as<std::string>());
+                        onBulkCreated(false, val["error"].as<std::string>());
+                        return;
+                    }
+                    onBulkCreated(true, "Success");
+                },
+                channelId.value().value(),
+                bulkOperationId.value(),
+                request
+            );
+        }
+    );
+}
+
 void FileEngine::addUpload(
     NuiFileExplorer::Item const& remotePath,
     NuiFileExplorer::Item const& localPath,
@@ -668,6 +855,61 @@ void FileEngine::removeOnQueueUnchecked(
                 recursive,
                 true,
                 static_cast<int>(mode)
+            );
+        }
+    );
+}
+
+void FileEngine::existsBatchRemote(
+    std::vector<std::filesystem::path> const& paths,
+    std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
+)
+{
+    Log::info("Requesting existsBatch for {} remote paths", paths.size());
+
+    std::vector<std::string> pathStrings;
+    pathStrings.reserve(paths.size());
+    for (auto const& path : paths)
+        pathStrings.push_back(path.generic_string());
+
+    lazyOpen(
+        [this,
+            pathStrings = std::move(pathStrings),
+            onComplete = std::move(onComplete)](auto const& channelId, std::string const& info) mutable
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot run existsBatchRemote, no channel");
+                onComplete({}, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::existsBatch", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error("(Frontend) sftp::existsBatch failed: {}", val["error"].as<std::string>());
+                        onComplete({}, val["error"].as<std::string>());
+                        return;
+                    }
+                    if (!val.hasOwnProperty("success") || !val["success"].as<bool>() ||
+                        !val.hasOwnProperty("exists"))
+                    {
+                        onComplete({}, "Malformed sftp::existsBatch response");
+                        return;
+                    }
+                    auto arr = val["exists"];
+                    const auto length = arr["length"].as<long long>();
+                    std::vector<bool> results;
+                    results.reserve(static_cast<std::size_t>(length));
+                    for (long long idx = 0; idx < length; ++idx)
+                        results.push_back(arr[static_cast<int>(idx)].as<bool>());
+                    onComplete(std::move(results), "Success");
+                },
+                channelId.value().value(),
+                pathStrings
             );
         }
     );

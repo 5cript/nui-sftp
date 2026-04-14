@@ -88,6 +88,8 @@ operationQueue:
   autoCleanCompleted: "Abgeschlossene Operationen automatisch enterfernen"
   totalOperations: "{} gesamte Operationen"
   cancelAll: "Alle abbrechen"
+  tabQueue: "Warteschlange"
+  tabFailed: "Fehlgeschlagen"
   resumeMinimizedSync: "Sync fortsetzen"
   restoreMinimizedSyncTitle: "Minimierten Sync-Dialog wiederherstellen"
 syncDialog:
@@ -414,6 +416,8 @@ settings:
     autoRemoveCompletedOperationsHelpText: "Wenn aktiviert, werden abgeschlossene SFTP Operationen automatisch aus der Warteschlange entfernt."
     startInPausedState: "Im pausierten Zustand starten"
     startInPausedStateHelpText: "Wenn aktiviert, startet die SFTP Warteschlange im pausierten Zustand."
+    liveQueuePageSize: "Seitengröße der Live-Warteschlange"
+    liveQueuePageSizeHelpText: "Maximale Anzahl von Operationen auf der Live-Seite. Bei Überschreitung wandern ältere Einträge in eine paginierte Historie. Harte Grenze: 1000."
   terminalOptions:
     fontFamily: "Schriftart"
     fontFamilyHelpText: "Wählen Sie die Schriftart, mit der Text im Terminal dargestellt wird."

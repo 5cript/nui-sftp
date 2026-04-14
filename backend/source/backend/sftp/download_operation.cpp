@@ -243,7 +243,6 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 
     if (options_.entry->size == 0)
     {
-        Log::info("DownloadOperation: Remote file is empty, nothing to do.");
         return false;
     }
 
@@ -276,7 +275,6 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 
     if (readAmount == 0)
     {
-        Log::info("DownloadOperation: Remote file read complete or error.");
         return false;
     }
 

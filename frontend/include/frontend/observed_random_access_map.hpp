@@ -18,7 +18,7 @@ class ObservedRandomAccessMap
         if (keyToPointerMap_.find(key) != keyToPointerMap_.end())
             throw std::invalid_argument("Key already exists in ObservedRandomAccessMap");
 
-        observedValues_.push_back(std::make_unique<ValueT>(std::move(value)));
+        observedValues_.push_back(std::make_shared<ValueT>(std::move(value)));
         Log::info("Inserting key '{}' at index '{}'", key.value(), observedValues_.value().size() - 1);
         keyToPointerMap_[key] = observedValues_.value().back().get();
     }
@@ -41,6 +41,30 @@ class ObservedRandomAccessMap
         observedValues_.pop_front();
     }
 
+    /**
+     * @brief Extract the first @p count elements, returning ownership to the caller.
+     *        Performs a single contiguous range-erase on the underlying Observed
+     *        so Nui emits one block diff rather than @p count individual diffs.
+     */
+    std::vector<std::shared_ptr<ValueT>> extract_front_n(std::size_t count)
+    {
+        auto& deque = observedValues_.value();
+        if (count > deque.size())
+            count = deque.size();
+        if (count == 0)
+            return {};
+
+        std::vector<std::shared_ptr<ValueT>> extracted;
+        extracted.reserve(count);
+        for (std::size_t idx = 0; idx < count; ++idx)
+        {
+            keyToPointerMap_.erase(deque[idx]->key());
+            extracted.push_back(std::move(deque[idx]));
+        }
+        observedValues_.erase(observedValues_.begin(), observedValues_.begin() + count);
+        return extracted;
+    }
+
     ValueT* front()
     {
         if (observedValues_.value().empty())
@@ -61,7 +85,7 @@ class ObservedRandomAccessMap
         auto dequeIt = std::find_if(
             deque.begin(),
             deque.end(),
-            [ptr](std::unique_ptr<ValueT> const& uptr)
+            [ptr](std::shared_ptr<ValueT> const& uptr)
             {
                 return uptr.get() == ptr;
             }
@@ -72,7 +96,7 @@ class ObservedRandomAccessMap
         observedValues_.erase(dequeIt);
     }
 
-    Nui::Observed<std::deque<std::unique_ptr<ValueT>>>& observedValues()
+    Nui::Observed<std::deque<std::shared_ptr<ValueT>>>& observedValues()
     {
         return observedValues_;
     }
@@ -85,6 +109,25 @@ class ObservedRandomAccessMap
         return it->second;
     }
 
+    /**
+     * @brief Return a shared_ptr to the element for @p key, or nullptr if absent.
+     *        Lets callers share ownership with other containers without copying.
+     */
+    std::shared_ptr<ValueT> shared(KeyT const& key)
+    {
+        auto mapIt = keyToPointerMap_.find(key);
+        if (mapIt == keyToPointerMap_.end())
+            return nullptr;
+
+        ValueT* ptr = mapIt->second;
+        for (auto const& entry : observedValues_.value())
+        {
+            if (entry.get() == ptr)
+                return entry;
+        }
+        return nullptr;
+    }
+
     auto find(KeyT const& key)
     {
         auto mapIt = keyToPointerMap_.find(key);
@@ -95,7 +138,7 @@ class ObservedRandomAccessMap
         return std::find_if(
             observedValues_.value().begin(),
             observedValues_.value().end(),
-            [ptr](std::unique_ptr<ValueT> const& uptr)
+            [ptr](std::shared_ptr<ValueT> const& uptr)
             {
                 return uptr.get() == ptr;
             }
@@ -129,6 +172,6 @@ class ObservedRandomAccessMap
     }
 
   private:
-    Nui::Observed<std::deque<std::unique_ptr<ValueT>>> observedValues_;
+    Nui::Observed<std::deque<std::shared_ptr<ValueT>>> observedValues_;
     MapT<KeyT, ValueT*> keyToPointerMap_;
 };

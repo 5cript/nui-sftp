@@ -25,6 +25,7 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     void registerProperties();
     void registerGetHome();
     void registerDoesExist();
+    void registerDoesExistBatch();
     void registerWriteFile();
     void registerOpen();
 

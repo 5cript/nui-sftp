@@ -10,7 +10,8 @@ namespace Persistence
     {
         std::optional<bool> autoRemoveCompletedOperations{std::nullopt};
         std::optional<bool> startInPausedState{std::nullopt};
+        std::optional<int> liveQueuePageSize{std::nullopt};
     };
 
-    BOOST_DESCRIBE_STRUCT(QueueOptions, (), (autoRemoveCompletedOperations, startInPausedState))
+    BOOST_DESCRIBE_STRUCT(QueueOptions, (), (autoRemoveCompletedOperations, startInPausedState, liveQueuePageSize))
 }

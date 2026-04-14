@@ -50,6 +50,28 @@ class BulkDownloadOperation : public Operation
 
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t totalBytes);
 
+    /**
+     * @brief Prescanned-flat-list constructor path: the frontend already has
+     *        per-file absolute source and destination paths plus known
+     *        sizes, so the backend can skip scanning and build the entry
+     *        list directly.
+     *
+     *        When this is used instead of setScanResult, workNormal's file
+     *        branch consults the per-entry absolute-path override instead
+     *        of computing paths from a shared root + tree structure.
+     *        Directory creation (intermediate folders) is handled by
+     *        DownloadOperation's createMissingDirectories path.
+     *
+     * @param files  Tuple (remoteAbsSrc, localAbsDst, sizeBytes) per file.
+     */
+    struct PrescannedFile
+    {
+        std::filesystem::path remoteSrc;
+        std::filesystem::path localDst;
+        std::uint64_t sizeBytes;
+    };
+    void setPrescannedFileList(std::vector<PrescannedFile> files);
+
     bool isBarrier() const noexcept override
     {
         return false;
@@ -84,4 +106,9 @@ class BulkDownloadOperation : public Operation
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};
     std::chrono::seconds futureTimeout_{5};
+    // Prescanned-flat-list override: when non-empty, indexed by the same
+    // currentIndex_ as entries_, and carries the absolute remote/local
+    // paths verbatim so workNormal doesn't re-derive them from a shared
+    // root.  Left empty when scanned via setScanResult.
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> prescannedPathOverride_{};
 };

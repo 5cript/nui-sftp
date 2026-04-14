@@ -27,6 +27,19 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
 
 std::filesystem::path BulkDownloadOperation::fullLocalPath(SharedData::DirectoryEntry const& entry) const
 {
+    // Prescanned flat-list mode: the local destination is looked up directly
+    // from the override vector rather than derived from a shared local root.
+    // Index equivalence: since setPrescannedFileList pushes each entry +
+    // override in lock-step, the entry's index in entries_ lines up with
+    // its override slot.
+    if (!prescannedPathOverride_.empty())
+    {
+        for (std::size_t idx = 0; idx < entries_.size(); ++idx)
+        {
+            if (&entries_[idx] == &entry)
+                return prescannedPathOverride_[idx].second;
+        }
+    }
     return (options_.localPath / SharedData::fullPathRelative(entries_, entry)).lexically_normal();
 }
 
@@ -43,6 +56,20 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 Log::info("BulkDownloadOperation: No entries to download.");
                 enterState(Completed);
                 return WorkStatus::Complete;
+            }
+            if (!prescannedPathOverride_.empty())
+            {
+                // Prescanned flat-file mode: no tree root, just a list of
+                // absolute (src, dst) pairs.  Skip the "first entry is a
+                // directory" contract of the scan-based mode and let each
+                // file's DownloadOperation create its missing parent dirs
+                // via createMissingDirectories.
+                currentIndex_ = 0;
+                enterState(Running);
+                options_.overallProgressCallback(
+                    options_.localPath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, 0
+                );
+                return WorkStatus::MoreWork;
             }
             auto const& entry = entries_[0];
             if (entry.isDirectory())
@@ -303,6 +330,32 @@ void BulkDownloadOperation::setScanResult(std::vector<SharedData::DirectoryEntry
 {
     entries_ = std::move(entries);
     totalBytes_ = totalBytes;
+    prescannedPathOverride_.clear();
+}
+
+void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> files)
+{
+    entries_.clear();
+    entries_.reserve(files.size());
+    prescannedPathOverride_.clear();
+    prescannedPathOverride_.reserve(files.size());
+    totalBytes_ = 0;
+    for (auto& file : files)
+    {
+        SharedData::DirectoryEntry entry{};
+        // entry.path carries the absolute remote source path so
+        // SharedData::fullPath(entries_, entry) returns it verbatim (flat
+        // entry, no parent), which is what workNormal uses for the remote
+        // fetch URL.  The local destination is injected via the override
+        // member below.
+        entry.path = file.remoteSrc;
+        entry.fullPath = file.remoteSrc;
+        entry.type = SharedData::FileType::Regular;
+        entry.size = file.sizeBytes;
+        totalBytes_ += file.sizeBytes;
+        entries_.push_back(std::move(entry));
+        prescannedPathOverride_.emplace_back(file.remoteSrc, file.localDst);
+    }
 }
 
 std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::cancel(bool adoptCancelState)
