@@ -20,7 +20,10 @@ int main(int argc, char** argv)
 {
     Log::setLevel(Log::Level::Off);
 
-    programDirectory = std::filesystem::path{argv[0]}.parent_path();
+    // Absolute path required: TemporaryDirectoryInstance::addWatch joins
+    // instanceDir with the passed path when it isn't absolute, so a relative
+    // instanceDir (from a relative programDirectory) doubles the path.
+    programDirectory = std::filesystem::weakly_canonical(std::filesystem::path{argv[0]}.parent_path());
 
     ::testing::InitGoogleTest(&argc, argv);
     ::testing::AddGlobalTestEnvironment(new Test::NuiEnvGuard{});
