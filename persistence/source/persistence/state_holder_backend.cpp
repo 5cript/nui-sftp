@@ -98,14 +98,22 @@ namespace Persistence
                 }
             }();
 
+            auto appendWarning = [this](std::optional<std::string> const& warning)
+            {
+                if (!warning)
+                    return;
+                cachedWarning_ = cachedWarning_ ? *cachedWarning_ + "\n" + *warning : *warning;
+            };
+
             if (before.is_null())
             {
                 // Save something valid
-                dataFixer(nlohmann::json::object());
-                onLoad(std::nullopt, *this, std::nullopt);
+                appendWarning(dataFixer(nlohmann::json::object()));
+                onLoad(std::nullopt, *this, cachedWarning_);
                 return;
             }
 
+            stateCache_ = State{};
             before.get_to(stateCache_);
             auto warning = dataFixer(before);
             auto missing = stateCache_.collectMissingMembers(stateCache_);
@@ -124,7 +132,8 @@ namespace Persistence
                     *warning += fmt::format("- {}\n", member);
                 }
             }
-            onLoad(error, *this, warning);
+            appendWarning(warning);
+            onLoad(error, *this, cachedWarning_);
         }
         catch (std::exception const& e)
         {
@@ -326,6 +335,12 @@ namespace Persistence
         return warning;
     }
 
+    void StateHolder::clearWarnings(std::function<void()> const& onComplete)
+    {
+        cachedWarning_ = std::nullopt;
+        onComplete();
+    }
+
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
     {
         setupPersistence();
@@ -412,6 +427,15 @@ namespace Persistence
                         }
                     );
                 }
+            }
+        );
+
+        hub.registerFunction(
+            "StateHolder::clearWarnings",
+            [&hub, this](std::string responseId)
+            {
+                cachedWarning_ = std::nullopt;
+                hub.callRemote(responseId, nlohmann::json{{"success", true}});
             }
         );
 

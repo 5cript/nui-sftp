@@ -51,6 +51,12 @@ namespace Persistence
 
         State& stateCache();
 
+        /**
+         * @brief Clears any cached warning from prior loads. To be called once the warning has been
+         * presented to the user, so it is not shown again on subsequent loads.
+         */
+        void clearWarnings(std::function<void()> const& onComplete = [] {});
+
 #ifdef NUI_BACKEND
         /**
          * @brief Loads a single language (expected format eg "en_US.yaml")
@@ -77,5 +83,6 @@ namespace Persistence
       private:
         State stateCache_{};
         std::filesystem::path programDirectory_;
+        std::optional<std::string> cachedWarning_{std::nullopt};
     };
 } // namespace Persistence
