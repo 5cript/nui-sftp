@@ -255,31 +255,20 @@ namespace NuiFileExplorer
                     setupResizeObserver();
                 }
             },
-            style = observe(columnPixelWidths_, impl().items).generate([this]()
+            style = observe(columnPixelWidths_).generate([this]()
             {
                 const auto& widths = columnPixelWidths_.value();
-                const bool hasPixelWidths = widths.front().has_value();
-                const std::size_t rowCount = impl().items.value().size();
-                const std::string rowDef = fmt::format(
-                    "grid-template-rows: minmax(40px, min-content) repeat({}, 25px)",
-                    rowCount
-                );
-
-                if (!hasPixelWidths)
-                {
-                    return fmt::format(
-                        "grid-template-columns: 1fr max-content max-content max-content; {}",
-                        rowDef
-                    );
-                }
+                if (!widths.front().has_value())
+                    return std::string{"grid-template-columns: 1fr max-content max-content max-content;"};
 
                 std::string cols;
-                for (int i = 0; i < columnCount; ++i)
+                for (int colIdx = 0; colIdx < columnCount; ++colIdx)
                 {
-                    if (i > 0) cols += ' ';
-                    cols += widths[i].has_value() ? fmt::format("{}px", *widths[i]) : "1fr";
+                    if (colIdx > 0)
+                        cols += ' ';
+                    cols += widths[colIdx].has_value() ? fmt::format("{}px", *widths[colIdx]) : "1fr";
                 }
-                return fmt::format("grid-template-columns: {}; {}", cols, rowDef);
+                return fmt::format("grid-template-columns: {};", cols);
             }),
             "dragstart"_event = [this](Nui::WebApi::DragEvent event) {
                 onDelegatedDragStart(std::move(event));
@@ -301,7 +290,43 @@ namespace NuiFileExplorer
                 makeHeaderCell(SortCriterion::Mtime, "Last Modified", 3, true)
             ),
             div{class_ = "nui-file-grid-table-rows"}(
-                impl().items.map([this, contextMenu](auto index, auto& item){
+                Nui::range(impl().items).before(
+                    // Loading placeholder — first table row, glassy styling. Visibility flipped
+                    // by the side's debounced loading hint so fast nav doesn't flash this in.
+                    div{
+                        class_ = observe(impl().showLoadingHint).generate([this]() {
+                            return impl().showLoadingHint.value()
+                                ? "nui-file-grid-table-row nui-file-grid-loading-placeholder visible"
+                                : "nui-file-grid-table-row nui-file-grid-loading-placeholder";
+                        }),
+                    }(
+                        div{class_ = "nui-file-grid-table-cell"}(
+                            div{class_ = "nui-file-grid-loading-placeholder-spinner"}(),
+                            span{}("...")
+                        ),
+                        div{class_ = "nui-file-grid-table-cell"}(),
+                        div{class_ = "nui-file-grid-table-cell"}(),
+                        div{class_ = "nui-file-grid-table-cell"}()
+                    )
+                ),
+                [this, contextMenu](long long index, auto& item) -> Nui::ElementRenderer {
+                    const auto pageSizeValue = std::max(1, impl().pageSize.value());
+                    const long long pageStart =
+                        static_cast<long long>(impl().currentPage.value()) * pageSizeValue;
+                    const long long pageEnd = pageStart + pageSizeValue;
+
+                    if (!impl().filterQuery.value().empty())
+                    {
+                        const auto found = impl().filterMatchPosition.find(index);
+                        if (found == impl().filterMatchPosition.end())
+                            return Nui::nil();
+                        if (found->second < pageStart || found->second >= pageEnd)
+                            return Nui::nil();
+                    }
+                    else if (index < pageStart || index >= pageEnd)
+                    {
+                        return Nui::nil();
+                    }
                     return div{
                         class_ = item.observeClassRelevant([&item](){
                             const auto searchHighlight = item.searchHighlight();
@@ -341,19 +366,19 @@ namespace NuiFileExplorer
                                     ? "filter: hue-rotate(120deg)"
                                     : "filter: invert(100%) brightness(2)",
                             }(),
-                            span{}(item.item.path.filename().string())
+                            span{}(item.displayFilename)
                         ),
                         div{class_ = "nui-file-grid-table-cell", contextMenu(item)}(
-                            span{}(Utility::formatBytes(item.item.size))
+                            span{}(item.displaySize)
                         ),
                         div{class_ = "nui-file-grid-table-cell", contextMenu(item)}(
-                            span{}(item.item.lsStyleTypePermsUserGroup())
+                            span{}(item.displayPerms)
                         ),
                         div{class_ = "nui-file-grid-table-cell", contextMenu(item)}(
-                            span{}(item.item.readableMTime())
+                            span{}(item.displayMtime)
                         )
                     );
-                })
+                }
             )
         );
         // clang-format on

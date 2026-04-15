@@ -84,6 +84,12 @@ namespace NuiFileExplorer
         void setGrid(std::size_t columns, std::size_t rows);
         void setFlavor(Flavor flavor);
 
+        /**
+         *  @brief Configure how many items one PageUp/PageDown press advances through.
+         *  @param size 0 resets the manager to its default (visible rows * columns).
+         */
+        void setPageJumpSize(std::size_t size);
+
         // ------------------------------------------------------------------ scroll
         /// Register a callback that scrolls the item at the given flat index into
         /// view.  Called automatically after every user-driven selection change
@@ -260,6 +266,9 @@ namespace NuiFileExplorer
         Flavor currentFlavor_;
         std::size_t gridColumns_{1};
         std::size_t gridRows_{1};
+
+        // Step size used by PageUp / PageDown. 0 means "fall back to visible rows * columns".
+        std::size_t pageJumpSize_{0};
 
         // Scroll-into-view
         std::function<void(std::size_t)> scrollIntoView_{};

@@ -15,9 +15,67 @@
 #    include <fcntl.h>
 #endif
 
+#include <unordered_map>
+
 namespace
 {
 #ifndef _WIN32
+    /**
+     *  @brief Per-call uid/gid → name cache, so a directory full of files owned by the same user
+     *         only triggers one getpwuid_r / getgrgid_r call instead of one per entry.
+     */
+    struct UserGroupCache
+    {
+        std::unordered_map<std::uint32_t, std::string> users;
+        std::unordered_map<std::uint32_t, std::string> groups;
+
+        std::string const& user(std::uint32_t uid)
+        {
+            const auto found = users.find(uid);
+            if (found != users.end())
+                return found->second;
+            char buffer[1024];
+            struct passwd pwd{};
+            struct passwd* result = nullptr;
+            std::string name;
+            if (::getpwuid_r(uid, &pwd, buffer, sizeof(buffer), &result) == 0 && result)
+                name = result->pw_name;
+            return users.emplace(uid, std::move(name)).first->second;
+        }
+
+        std::string const& group(std::uint32_t gid)
+        {
+            const auto found = groups.find(gid);
+            if (found != groups.end())
+                return found->second;
+            char buffer[1024];
+            struct group grp{};
+            struct group* result = nullptr;
+            std::string name;
+            if (::getgrgid_r(gid, &grp, buffer, sizeof(buffer), &result) == 0 && result)
+                name = result->gr_name;
+            return groups.emplace(gid, std::move(name)).first->second;
+        }
+    };
+
+    /**
+     *  @brief Lean stat fill for directory listing — drops atime (only used by the Properties dialog,
+     *         which now fetches its own full entry on demand).
+     */
+    void fillFromPosixStatLean(SharedData::DirectoryEntry& entry, struct stat const& st, UserGroupCache& cache)
+    {
+        entry.uid = static_cast<std::uint32_t>(st.st_uid);
+        entry.gid = static_cast<std::uint32_t>(st.st_gid);
+        entry.size = static_cast<std::uint64_t>(st.st_size);
+        entry.mtime = static_cast<std::uint64_t>(st.st_mtim.tv_sec);
+        entry.mtimeNsec = static_cast<std::uint32_t>(st.st_mtim.tv_nsec);
+        entry.owner = cache.user(entry.uid);
+        entry.group = cache.group(entry.gid);
+    }
+
+    /**
+     *  @brief Full stat fill for the Properties dialog — also captures atime.
+     */
     void fillFromPosixStat(SharedData::DirectoryEntry& entry, struct stat const& st)
     {
         entry.uid = static_cast<std::uint32_t>(st.st_uid);
@@ -250,6 +308,10 @@ void RpcFilesystem::registerListFiles()
                     );
                     return reply.error(ec.message());
                 }
+
+#ifndef _WIN32
+                UserGroupCache cache;
+#endif
                 for (const auto& entry : iter)
                 {
                     const auto entryPath = entry.path();
@@ -265,38 +327,34 @@ void RpcFilesystem::registerListFiles()
 #ifndef _WIN32
                     struct stat lstSt{};
                     if (::lstat(entryPathStr, &lstSt) == 0)
-                        fillFromPosixStat(dirEntry, lstSt);
-#    ifdef __linux__
-                    fillBirthTime(dirEntry, entryPathStr, AT_SYMLINK_NOFOLLOW);
-#    endif
+                        fillFromPosixStatLean(dirEntry, lstSt, cache);
 #endif
 
-                    auto resolved = std::make_shared<SharedData::DirectoryEntry>();
+                    if (dirEntry.type == SharedData::FileType::Symlink)
                     {
+                        std::error_code linkEc;
+                        auto linkTarget = std::filesystem::read_symlink(entryPath, linkEc);
+                        if (!linkEc)
+                            dirEntry.linkTarget = std::move(linkTarget);
+
+                        auto resolved = std::make_shared<SharedData::DirectoryEntry>();
                         std::error_code pathEc;
                         auto canonical = std::filesystem::canonical(entryPath, pathEc);
                         if (!pathEc)
                             resolved->path = std::move(canonical);
-                        else
-                        {
-                            auto target = std::filesystem::read_symlink(entryPath, pathEc);
-                            if (!pathEc)
-                                resolved->path = std::move(target);
-                        }
-                    }
-                    resolved->type = SharedData::fileTypeFromStdFilesystemType(entry.status().type());
-                    resolved->permissions = entry.status().permissions();
+                        else if (dirEntry.linkTarget.has_value())
+                            resolved->path = *dirEntry.linkTarget;
 
+                        resolved->type = SharedData::fileTypeFromStdFilesystemType(entry.status().type());
+                        resolved->permissions = entry.status().permissions();
 #ifndef _WIN32
-                    struct stat stSt{};
-                    if (::stat(entryPathStr, &stSt) == 0)
-                        fillFromPosixStat(*resolved, stSt);
-#    ifdef __linux__
-                    fillBirthTime(*resolved, entryPathStr, 0 /*follow symlinks*/);
-#    endif
+                        struct stat stSt{};
+                        if (::stat(entryPathStr, &stSt) == 0)
+                            fillFromPosixStatLean(*resolved, stSt, cache);
 #endif
+                        dirEntry.resolvedTarget = std::move(resolved);
+                    }
 
-                    dirEntry.resolvedTarget = std::move(resolved);
                     fileList.push_back(nlohmann::json(dirEntry));
                 }
 
@@ -383,6 +441,9 @@ void RpcFilesystem::registerCreateDirectory()
 }
 void RpcFilesystem::registerProperties()
 {
+    // Returns a fully-populated DirectoryEntry for a single path. listFiles intentionally
+    // omits expensive fields (atime, birthtime, acl, second stat) so the dialog fetches
+    // them on demand here.
     on("RpcFilesystem::properties")
         .perform(
             [](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
@@ -397,22 +458,70 @@ void RpcFilesystem::registerProperties()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                const auto path = parameters["path"].get<std::string>();
-                std::error_code ec;
-                const auto status = std::filesystem::status(path, ec);
-                if (ec)
+                const auto path = std::filesystem::path{parameters["path"].get<std::string>()};
+                const auto pathStr = path.c_str();
+
+                SharedData::DirectoryEntry entry{};
                 {
-                    Log::error("Failed to get properties for path '{}': {}", path, ec.message());
-                    return reply.error(ec.message());
+                    const auto u8 = path.generic_u8string();
+                    entry.path = std::string{u8.begin(), u8.end()};
                 }
 
-                nlohmann::json properties = {
-                    {"type", static_cast<int>(status.type())},
-                    {"size", std::filesystem::is_regular_file(status) ? std::filesystem::file_size(path, ec) : 0},
-                };
+                std::error_code symEc;
+                const auto symStatus = std::filesystem::symlink_status(path, symEc);
+                if (symEc)
+                {
+                    Log::error("Failed to get properties for path '{}': {}", path.generic_string(), symEc.message());
+                    return reply.error(symEc.message());
+                }
+                entry.type = SharedData::fileTypeFromStdFilesystemType(symStatus.type());
+                entry.permissions = symStatus.permissions();
 
-                Log::info("Successfully retrieved properties for path '{}'", path);
-                return reply({{"success", true}, {"properties", properties}});
+#ifndef _WIN32
+                struct stat lstSt{};
+                if (::lstat(pathStr, &lstSt) == 0)
+                    fillFromPosixStat(entry, lstSt);
+#    ifdef __linux__
+                fillBirthTime(entry, pathStr, AT_SYMLINK_NOFOLLOW);
+#    endif
+#endif
+
+                if (entry.type == SharedData::FileType::Symlink)
+                {
+                    std::error_code linkEc;
+                    auto linkTarget = std::filesystem::read_symlink(path, linkEc);
+                    if (!linkEc)
+                        entry.linkTarget = std::move(linkTarget);
+
+                    auto resolved = std::make_shared<SharedData::DirectoryEntry>();
+                    std::error_code pathEc;
+                    auto canonical = std::filesystem::canonical(path, pathEc);
+                    if (!pathEc)
+                        resolved->path = std::move(canonical);
+                    else if (entry.linkTarget.has_value())
+                        resolved->path = *entry.linkTarget;
+
+                    std::error_code statusEc;
+                    const auto resolvedStatus = std::filesystem::status(path, statusEc);
+                    if (!statusEc)
+                    {
+                        resolved->type = SharedData::fileTypeFromStdFilesystemType(resolvedStatus.type());
+                        resolved->permissions = resolvedStatus.permissions();
+                    }
+
+#ifndef _WIN32
+                    struct stat stSt{};
+                    if (::stat(pathStr, &stSt) == 0)
+                        fillFromPosixStat(*resolved, stSt);
+#    ifdef __linux__
+                    fillBirthTime(*resolved, pathStr, 0 /*follow symlinks*/);
+#    endif
+#endif
+                    entry.resolvedTarget = std::move(resolved);
+                }
+
+                Log::info("Successfully retrieved properties for path '{}'", path.generic_string());
+                return reply({{"success", true}, {"entry", nlohmann::json(entry)}});
             }
         );
 }

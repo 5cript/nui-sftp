@@ -59,6 +59,11 @@ namespace NuiFileExplorer
         currentFlavor_ = flavor;
     }
 
+    void SelectionManager::setPageJumpSize(std::size_t size)
+    {
+        pageJumpSize_ = size;
+    }
+
     // =========================================================================
     // Internal helpers
     // =========================================================================
@@ -425,9 +430,11 @@ namespace NuiFileExplorer
         const bool isArrow = (key == "ArrowRight" || key == "ArrowLeft" || key == "ArrowDown" || key == "ArrowUp");
         const bool isHome = (key == "Home");
         const bool isEnd = (key == "End");
+        const bool isPageDown = (key == "PageDown");
+        const bool isPageUp = (key == "PageUp");
         const bool isSelectAll = (key == "a" || key == "A") && event.ctrlKey();
 
-        if (!isArrow && !isHome && !isEnd && !isSelectAll)
+        if (!isArrow && !isHome && !isEnd && !isPageDown && !isPageUp && !isSelectAll)
             return false;
 
         if (isSelectAll)
@@ -438,6 +445,39 @@ namespace NuiFileExplorer
 
         const bool shift = event.shiftKey();
         const auto n = items_->value().size();
+
+        if (isPageDown || isPageUp)
+        {
+            if (n == 0)
+                return true;
+
+            const std::size_t step = pageJumpSize_ > 0 ? pageJumpSize_ : std::max(std::size_t{1}, gridColumns_ * gridRows_);
+            const std::size_t lastIdx = n - 1;
+            const auto jump = [&](std::size_t from) -> std::size_t {
+                if (isPageDown)
+                    return from + step >= n ? lastIdx : from + step;
+                return from > step ? from - step : 0;
+            };
+
+            if (shift)
+            {
+                if (!flag_.has_value())
+                    flag_ = anchor_.value_or(0);
+                flag_ = jump(*flag_);
+                rebuildSelection();
+                maybeScrollActiveIntoView();
+            }
+            else
+            {
+                ctrlAdd_.clear();
+                ctrlRemove_.clear();
+                flag_.reset();
+                anchor_ = jump(anchor_.value_or(0));
+                rebuildSelection();
+                maybeScrollActiveIntoView();
+            }
+            return true;
+        }
 
         if (isHome || isEnd)
         {

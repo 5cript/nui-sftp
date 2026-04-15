@@ -16,6 +16,7 @@
 
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/svg.hpp>
 #include <nui/frontend/api/json.hpp>
@@ -1367,6 +1368,26 @@ Nui::ElementRenderer OperationQueue::operator()()
     // clang-format off
     return div{
         class_ = "operation-queue",
+        tabIndex = 0,
+        "keydown"_event = [this](Nui::WebApi::KeyboardEvent event) {
+            const auto key = event.key();
+            if (key != "PageUp" && key != "PageDown")
+                return;
+            const auto total = impl_->pageCount.value();
+            if (total <= 1)
+                return;
+            event.stopPropagation();
+            event.preventDefault();
+            const int current = impl_->currentPage.value();
+            const int next = key == "PageDown"
+                ? std::min(total - 1, current + 1)
+                : std::max(0, current - 1);
+            if (next == current)
+                return;
+            impl_->followLive = (next == total - 1);
+            impl_->currentPage = next;
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        },
     }(
         header{
             class_ = "opq-controls"

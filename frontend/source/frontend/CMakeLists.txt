@@ -127,6 +127,7 @@ nui_prepare_emscripten_target(
         23
     OBSERVED_BUNDLE_FILES
         "${CMAKE_SOURCE_DIR}/static/index.html"
+        "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"

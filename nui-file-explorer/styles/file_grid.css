@@ -79,8 +79,16 @@
 }
 
 .nui-file-grid-side-content {
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     flex: 1;
+}
+
+.nui-file-grid-side-content-inner {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .nui-file-grid-side-middle {
@@ -220,6 +228,8 @@
         position: relative;
         cursor: pointer;
         pointer-events: none;
+        width: var(--nui-file-grid-icon-size, 64px);
+        height: var(--nui-file-grid-icon-size, 64px);
     }
 
     & div {
@@ -232,8 +242,10 @@
     }
 }
 
-/* ── Liquid glass layer: blurred backdrop + turbulence displacement ── */
-.nui-file-grid-item-icons::after {
+/* ── Liquid glass layer: blurred backdrop + turbulence displacement ──
+   `:not(.nui-file-grid-loading-placeholder)` keeps the glass effect off the
+   loading placeholder, which uses a flat grayscale plate instead. */
+.nui-file-grid-item-icons:not(.nui-file-grid-loading-placeholder)::after {
     content: '';
     position: absolute;
     z-index: -1;
@@ -254,7 +266,7 @@
 }
 
 /* ── Specular highlight border ── */
-.nui-file-grid-item-icons::before {
+.nui-file-grid-item-icons:not(.nui-file-grid-loading-placeholder)::before {
     content: '';
     position: absolute;
     inset: 0;
@@ -420,7 +432,10 @@
 .nui-file-grid-table {
     background-color: var(--nui-file-grid-table-cell-background, #303030);
     /* grid-template-columns is set from within the code */
-    /* grid-template-rows is set from within the code */
+    /* Header row sized via the leading grid-template-rows value; data rows use grid-auto-rows
+       so adding/removing items doesn't force re-emitting an O(N) row template string. */
+    grid-template-rows: minmax(40px, min-content);
+    grid-auto-rows: 25px;
     display: grid;
     height: 100%;
     overflow: auto;
@@ -724,4 +739,63 @@
     &:focus {
         background-color: var(--nui-file-grid-item-highlight, #3d2cd6);
     }
+}
+
+/* Loading placeholder — hidden (display:none) unless `visible`, so it collapses out of
+   the grid flow and doesn't reserve a slot while idle. */
+.nui-file-grid-loading-placeholder {
+    display: none;
+    pointer-events: none;
+
+    &.visible {
+        display: flex;
+        opacity: 1;
+    }
+}
+
+/* Footer slot — hosts pagination controls when paginated; collapses cleanly when empty. */
+.nui-file-grid-side-footer {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    &:empty {
+        display: none;
+    }
+}
+
+.nui-file-grid-loading-placeholder-spinner {
+    width: 24px;
+    height: 24px;
+    margin: auto;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: rgba(255, 255, 255, 0.9);
+    animation: nui-file-grid-loading-spin 0.9s linear infinite;
+}
+
+@keyframes nui-file-grid-loading-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Flat grayscale plate — override the glass-styling pseudos inherited from
+   .nui-file-grid-item-icons. Colors come from theme-aware variables defined in main.css. */
+.nui-file-grid-item-icons.nui-file-grid-loading-placeholder {
+    box-shadow: none;
+}
+
+.nui-file-grid-item-icons.nui-file-grid-loading-placeholder::after {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--nui-file-grid-loading-placeholder-background);
+}
+
+.nui-file-grid-item-icons.nui-file-grid-loading-placeholder::before {
+    border: 1px solid var(--nui-file-grid-loading-placeholder-border);
+    box-shadow: none;
+}
+
+.nui-file-grid-table-row.nui-file-grid-loading-placeholder .nui-file-grid-table-cell {
+    background-color: var(--nui-file-grid-loading-placeholder-background);
 }

@@ -124,6 +124,19 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 onChange();
             },
         },
+        .fileGridPageSize = NumberSetting<int, true>{
+            language->getObserved("settings", "general", "userInterface", "fileGridPageSizeHelpText"),
+            onChange,
+            [this, onChange]()
+            {
+                userInterface.fileGridPageSize.value(Persistence::UiOptions{}.fileGridPageSize);
+                onChange();
+            },
+            NumberSetting<int, true>::ConstructionArgs{
+                .minValue = 50,
+                .maxValue = 10000,
+            },
+        },
         .fileGridExtensionIcons = MapSetting<>{
             language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsHelpText"),
             multiInputDialog,
@@ -314,6 +327,10 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.uiOptions.showHiddenFilesLocally = userInterface.showHiddenFilesLocally.value();
     state.uiOptions.showHiddenFilesRemotely = userInterface.showHiddenFilesRemotely.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
+    if (userInterface.fileGridPageSize.valueIsValid())
+        state.uiOptions.fileGridPageSize = userInterface.fileGridPageSize.value().value_or(
+            Persistence::UiOptions{}.fileGridPageSize
+        );
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
     state.uiOptions.neverShowAgainDialogs = userInterface.neverShowAgainDialogs.value();
     state.uiOptions.localFavorites = userInterface.localFavorites.value();
@@ -347,6 +364,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     userInterface.showHiddenFilesLocally.value(state.uiOptions.showHiddenFilesLocally);
     userInterface.showHiddenFilesRemotely.value(state.uiOptions.showHiddenFilesRemotely);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
+    userInterface.fileGridPageSize.value(state.uiOptions.fileGridPageSize);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
     userInterface.neverShowAgainDialogs.value(state.uiOptions.neverShowAgainDialogs);
     userInterface.localFavorites.value(state.uiOptions.localFavorites);
@@ -411,6 +429,9 @@ Nui::ElementRenderer GeneralSettings::render(
             userInterface.showHiddenFilesRemotely(language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotely")),
             userInterface.fileGridPathBarOnTop(
                 language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
+            ),
+            userInterface.fileGridPageSize(
+                language->getObserved("settings", "general", "userInterface", "fileGridPageSize")
             ),
             userInterface.fileGridExtensionIcons(
                 language->getObserved("settings", "general", "userInterface", "fileGridExtensionIcons")

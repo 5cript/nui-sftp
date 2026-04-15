@@ -17,6 +17,7 @@
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/text_input.hpp>
+#include <script-nui-components/pagination.hpp>
 #include <nui/frontend/utility/functions.hpp>
 #include <ui5-sap-icons/icons/show.hpp>
 #include <ui5-sap-icons/icons/hide.hpp>
@@ -67,6 +68,18 @@ namespace NuiFileExplorer
         iconFlavor_ = std::make_unique<IconFlavor>(*this, otherSide);
         tableFlavor_ = std::make_unique<TableFlavor>(*this, otherSide);
         impl_->otherSide = otherSide;
+
+        // Any path change is a navigation start. updateItems() clears the loading state when the
+        // listing arrives, so the listener only has to mark the start.
+        impl_->currentPathListener = Nui::smartListen(
+            impl_->model->currentPath(),
+            [this](auto const&) {
+                beginNavigationLoading();
+            }
+        );
+
+        // PgUp/PgDn should align with the pagination step so keyboard paging matches the footer.
+        impl_->selectionManager.setPageJumpSize(static_cast<std::size_t>(std::max(1, impl_->pageSize.value())));
 
         if (impl_->model->placesProvider() || impl_->model->favoritesProvider() || impl_->model->drivesProvider())
         {
@@ -235,7 +248,7 @@ namespace NuiFileExplorer
                     }
                 }(
                     div{
-                        style = "width: 100%; height: 100%",
+                        class_ = "nui-file-grid-side-content-inner",
                         "contextmenu"_event = [this](Nui::val event) {
                             onContextMenu(nullptr, event);
                         }
@@ -247,6 +260,47 @@ namespace NuiFileExplorer
                             if (impl_->flavor.value() == Flavor::Table)
                                 return (*tableFlavor_)();
                             return div{}();
+                        }
+                    ),
+                    // Pagination footer lives inside the content column so it only spans the item
+                    // area — the places panel sits to the left and is unaffected.
+                    div{
+                        class_ = "nui-file-grid-side-footer",
+                        // Swallow bubbled clicks / mousedown so the FileGrid's outer
+                        // onClick → onUneventfulClick → deselectAll doesn't fire, AND so the
+                        // browser never shifts focus to a pagination button on mousedown —
+                        // keeping focus on the side so PgUp/PgDn continue to flow through the
+                        // side's keydown handler.
+                        onClick = [](Nui::val event) {
+                            event.call<void>("stopPropagation");
+                        },
+                        onMouseDown = [](Nui::val event) {
+                            event.call<void>("preventDefault");
+                        },
+                    }(
+                        observe(impl_->pageCount),
+                        [this]() -> Nui::ElementRenderer {
+                            if (impl_->pageCount.value() <= 1)
+                                return Nui::nil();
+                            return ScriptNuiComponents::pagination(ScriptNuiComponents::PaginationOptions{
+                                .pageCount = &impl_->pageCount,
+                                .currentPage = &impl_->currentPage,
+                                .onPageChange = [this](int newPage) {
+                                    impl_->currentPage = newPage;
+                                    // The items.map render block re-evaluates per-item only when
+                                    // the items vector itself signals a change, so trigger a
+                                    // re-render so the new page's slice takes effect.
+                                    impl_->items.modifyNow();
+                                    Nui::globalEventContext.executeActiveEventsImmediately();
+
+                                    // Pull focus back to the side so subsequent PgUp/PgDn land
+                                    // on the Side's keydown handler instead of the pagination
+                                    // button we just clicked.
+                                    if (auto sideEl = impl_->sideElement.lock(); sideEl)
+                                        sideEl->val().call<void>("focus");
+                                },
+                                .liveLabel = std::nullopt,
+                            });
                         }
                     )
                 )
@@ -297,6 +351,23 @@ namespace NuiFileExplorer
         if (sorted)
             impl_->sortItems();
 
+        // New directory listing invalidates any active filter — clear it so items aren't
+        // silently hidden after navigation.
+        if (!impl_->filterQuery.value().empty())
+            impl_->filterQuery = "";
+
+        // Recompute paging derived state from the new items count. Reset to page 0 on every
+        // navigation so users always start from the top of a freshly-loaded directory.
+        const auto pageSizeValue = std::max(1, impl_->pageSize.value());
+        const auto itemCount = impl_->items.value().size();
+        const int newPageCount =
+            std::max(1, static_cast<int>((itemCount + static_cast<std::size_t>(pageSizeValue) - 1) /
+                                         static_cast<std::size_t>(pageSizeValue)));
+        if (impl_->pageCount.value() != newPageCount)
+            impl_->pageCount = newPageCount;
+        if (impl_->currentPage.value() != 0)
+            impl_->currentPage = 0;
+
         impl_->items.modifyNow();
 
         // TODO: expensive, also do I want this?
@@ -323,7 +394,58 @@ namespace NuiFileExplorer
                 search(query);
         }
 
+        clearNavigationLoading();
+
+        // Reset scroll on the actual scrolling flavor container so a fresh listing always
+        // starts from the top, regardless of where the previous directory was scrolled to.
+        if (auto contentEl = impl_->scrollContainer.lock(); contentEl)
+        {
+            const auto scrollers = contentEl->val().call<Nui::val>(
+                "querySelectorAll", std::string{".nui-file-grid-icons, .nui-file-grid-table"}
+            );
+            const auto count = scrollers["length"].as<int>();
+            for (int idx = 0; idx < count; ++idx)
+                scrollers[idx].set("scrollTop", 0);
+        }
+
         Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
+    void Side::beginNavigationLoading()
+    {
+        impl_->isLoading = true;
+
+        // Cancel any previously scheduled hint flip — we want a fresh debounce window.
+        if (!impl_->loadingHintTimerHandle.isUndefined() && !impl_->loadingHintTimerHandle.isNull())
+        {
+            Nui::val::global("clearTimeout")(impl_->loadingHintTimerHandle);
+            impl_->loadingHintTimerHandle = Nui::val::undefined();
+        }
+
+        impl_->loadingHintTimerHandle = Nui::val::global("setTimeout")(
+            Nui::bind(
+                [this]() {
+                    impl_->loadingHintTimerHandle = Nui::val::undefined();
+                    if (impl_->isLoading.value())
+                    {
+                        impl_->showLoadingHint = true;
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                }
+            ),
+            150
+        );
+    }
+
+    void Side::clearNavigationLoading()
+    {
+        if (!impl_->loadingHintTimerHandle.isUndefined() && !impl_->loadingHintTimerHandle.isNull())
+        {
+            Nui::val::global("clearTimeout")(impl_->loadingHintTimerHandle);
+            impl_->loadingHintTimerHandle = Nui::val::undefined();
+        }
+        impl_->showLoadingHint = false;
+        impl_->isLoading = false;
     }
 
     void Side::flavor(Flavor value)
@@ -843,9 +965,19 @@ namespace NuiFileExplorer
                         event.call<void>("stopPropagation");
                         search(event["target"]["value"].as<std::string>());
                     },
-                    "keydown"_event = [](Nui::val event){
+                    "keydown"_event = [this](Nui::val event){
                         event.call<void>("stopPropagation");
-                    }
+                        // In paginated mode typing doesn't do anything visually (search()
+                        // skips the per-item scan). Enter commits the query as a filter so the
+                        // grid re-renders to only matching items.
+                        if (event["key"].as<std::string>() == "Enter")
+                            applyFilter(event["target"]["value"].as<std::string>());
+                    },
+                    "blur"_event = [this](Nui::val event){
+                        // Same commit path as Enter — when focus leaves the box, treat the
+                        // current contents as the filter.
+                        applyFilter(event["target"]["value"].as<std::string>());
+                    },
                 },
                 .dontUpdateValue = true,
             })
@@ -853,41 +985,57 @@ namespace NuiFileExplorer
         // clang-format on
     }
 
+    namespace
+    {
+        constexpr double kSearchHitScore = 90.;
+        constexpr double kSearchMinimumScore = 60.;
+
+        /**
+         *  @brief Score how strongly @p itemTokens match any query token. Returns the max
+         *         partial_ratio across pairs. Used by both search (highlight) and applyFilter
+         *         (hide non-matches) so the two modes agree on what counts as a match.
+         */
+        double scoreItemAgainstQuery(
+            std::vector<std::string> const& itemTokens,
+            std::vector<std::string> const& queryTokens
+        )
+        {
+            double max = 0.;
+            for (auto const& queryToken : queryTokens)
+            {
+                for (auto const& token : itemTokens)
+                {
+                    const auto fuzzScore = rapidfuzz::fuzz::partial_ratio(queryToken, token);
+                    if (fuzzScore >= kSearchHitScore)
+                        return fuzzScore;
+                    max = std::max(max, fuzzScore);
+                }
+            }
+            return max;
+        }
+    }
+
     void Side::search(std::string query)
     {
+        // Paginated directories: skip the per-item highlight scan on every keystroke. The
+        // commit path (Enter / blur) calls applyFilter() instead, which re-renders the visible
+        // slice to only matching items.
+        if (impl_->pageCount.value() > 1 || !impl_->filterQuery.value().empty())
+        {
+            if (query.empty() && !impl_->filterQuery.value().empty())
+                applyFilter("");
+            return;
+        }
+
         if (query.empty())
         {
-            // Clear all highlights
             for (auto& item : impl_->items.value())
                 item.searchHighlight(ItemWithInternals::SearchHighlight::Off);
             return;
         }
 
-        constexpr static double hitScore = 90.;
-        constexpr static double minimumScore = 60.;
-
         Utility::Algorithm::toLowerCaseInplace(query);
         const auto queryTokens = tokenize(query);
-
-        auto const score = [&queryTokens](auto const& tokens)
-        {
-            double max = 0.;
-            std::vector<std::string>::const_iterator maxToken;
-            for (auto const& query : queryTokens)
-            {
-                for (auto i = std::cbegin(tokens), end = std::cend(tokens); i != end; ++i)
-                {
-                    auto const fuzzScore = rapidfuzz::fuzz::partial_ratio(query, *i);
-                    if (fuzzScore >= hitScore)
-                        return std::make_pair(fuzzScore, i);
-                    auto previousMax = max;
-                    max = std::max(max, fuzzScore);
-                    if (max > previousMax)
-                        maxToken = i;
-                }
-            }
-            return std::make_pair(max, maxToken);
-        };
 
         for (auto& item : impl_->items.value())
         {
@@ -897,11 +1045,61 @@ namespace NuiFileExplorer
                 item.searchHighlight(ItemWithInternals::SearchHighlight::Highlight);
                 continue;
             }
-            const auto reachedScore = score(tokenize(generic));
+            const auto reachedScore = scoreItemAgainstQuery(tokenize(generic), queryTokens);
             item.searchHighlight(
-                reachedScore.first >= minimumScore ? ItemWithInternals::SearchHighlight::Highlight
+                reachedScore >= kSearchMinimumScore ? ItemWithInternals::SearchHighlight::Highlight
                                                    : ItemWithInternals::SearchHighlight::Muted
             );
         }
+    }
+
+    void Side::applyFilter(std::string query)
+    {
+        if (impl_->filterQuery.value() == query)
+            return;
+
+        impl_->filterMatchIndices.clear();
+        impl_->filterMatchPosition.clear();
+
+        if (!query.empty())
+        {
+            Utility::Algorithm::toLowerCaseInplace(query);
+            const auto queryTokens = tokenize(query);
+            auto const& items = impl_->items.value();
+            for (std::size_t itemIdx = 0; itemIdx < items.size(); ++itemIdx)
+            {
+                const auto generic = items[itemIdx].item.path.generic_string();
+                if (generic.find(query) != std::string::npos ||
+                    scoreItemAgainstQuery(tokenize(generic), queryTokens) >= kSearchMinimumScore)
+                {
+                    const auto absoluteIndex = static_cast<long long>(itemIdx);
+                    impl_->filterMatchPosition.emplace(
+                        absoluteIndex, static_cast<long long>(impl_->filterMatchIndices.size())
+                    );
+                    impl_->filterMatchIndices.push_back(absoluteIndex);
+                }
+            }
+        }
+
+        // Pagination must apply to the filtered set, not the underlying vector. When the filter
+        // is empty the regular pagination (computed off items.size()) takes over again.
+        const auto pageSizeValue = std::max(1, impl_->pageSize.value());
+        const std::size_t paginationCount = query.empty() ? impl_->items.value().size()
+                                                          : impl_->filterMatchIndices.size();
+        const int newPageCount = std::max(
+            1,
+            static_cast<int>(
+                (paginationCount + static_cast<std::size_t>(pageSizeValue) - 1) /
+                static_cast<std::size_t>(pageSizeValue)
+            )
+        );
+        if (impl_->pageCount.value() != newPageCount)
+            impl_->pageCount = newPageCount;
+        if (impl_->currentPage.value() != 0)
+            impl_->currentPage = 0;
+
+        impl_->filterQuery = std::move(query);
+        impl_->items.modifyNow();
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 }

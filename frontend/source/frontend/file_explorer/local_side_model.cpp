@@ -662,7 +662,99 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 }
 void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
-    filePropertyDialog_->open(static_cast<SharedData::DirectoryEntry const&>(item));
+    // listFiles only carries the lean field set; fetch the full entry (atime, birthtime, acl, ...)
+    // on demand so the dialog can display everything without inflating every directory listing.
+    Nui::val args = Nui::val::object();
+    args.set("path", item.path.generic_string());
+
+    auto fallback = static_cast<SharedData::DirectoryEntry>(item);
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::properties",
+        [this, fallback = std::move(fallback)](Nui::val val) mutable
+        {
+            const auto useFallback = [this, &fallback]() {
+                filePropertyDialog_->open(fallback);
+            };
+
+            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+            {
+                Log::warn("RpcFilesystem::properties failed; opening dialog with cached entry");
+                useFallback();
+                return;
+            }
+            if (!val.hasOwnProperty("entry") || val["entry"].isNull() || val["entry"].isUndefined())
+            {
+                useFallback();
+                return;
+            }
+
+            const auto extractFull = [](Nui::val const& source) -> SharedData::DirectoryEntry {
+                const auto pickU64 = [&source](char const* key) -> std::uint64_t {
+                    if (!source.hasOwnProperty(key))
+                        return 0;
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return 0;
+                    return field.template as<std::uint64_t>();
+                };
+                const auto pickU32 = [&source](char const* key) -> std::uint32_t {
+                    if (!source.hasOwnProperty(key))
+                        return 0;
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return 0;
+                    return field.template as<std::uint32_t>();
+                };
+                const auto pickString = [&source](char const* key) -> std::string {
+                    if (!source.hasOwnProperty(key))
+                        return {};
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return {};
+                    return field.template as<std::string>();
+                };
+
+                SharedData::DirectoryEntry out{
+                    .path = source["path"].template as<std::string>(),
+                    .type = SharedData::fileTypeFromStdFilesystemType(
+                        static_cast<std::filesystem::file_type>(source["type"].template as<int>())
+                    ),
+                    .size = pickU64("size"),
+                    .uid = pickU32("uid"),
+                    .gid = pickU32("gid"),
+                    .owner = pickString("owner"),
+                    .group = pickString("group"),
+                    .permissions = static_cast<std::filesystem::perms>(pickU32("permissions")),
+                    .atime = pickU64("atime"),
+                    .atimeNsec = pickU32("atimeNsec"),
+                    .createTime = pickU64("createTime"),
+                    .createTimeNsec = pickU32("createTimeNsec"),
+                    .mtime = pickU64("mtime"),
+                    .mtimeNsec = pickU32("mtimeNsec"),
+                    .acl = pickString("acl"),
+                };
+                if (source.hasOwnProperty("linkTarget"))
+                {
+                    const auto link = source["linkTarget"];
+                    if (!link.isNull() && !link.isUndefined())
+                        out.linkTarget = std::filesystem::path{link.template as<std::string>()};
+                }
+                return out;
+            };
+
+            const auto entryVal = val["entry"];
+            auto full = extractFull(entryVal);
+            if (full.type == SharedData::FileType::Symlink && entryVal.hasOwnProperty("resolvedTarget"))
+            {
+                const auto target = entryVal["resolvedTarget"];
+                if (!target.isNull() && !target.isUndefined())
+                    full.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(extractFull(target));
+            }
+
+            filePropertyDialog_->open(full);
+        },
+        args
+    );
 }
 void LocalSideModel::onError(std::string const& error)
 {
@@ -714,11 +806,16 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                     currentPath_ = preNavigatePath_;
                     currentPath_.modifyNow();
                 }
+                // Re-render the existing items so the side's loading hint clears even though
+                // no new directory data arrived. updateItems preserves selection across the
+                // refresh, so the user lands back on what they had before the failed nav.
+                if (refreshCallback_)
+                    refreshCallback_(false, true);
             };
 
             if (!val.hasOwnProperty("success"))
             {
-                Log::error("Invalid response from RpcFilesystem::properties");
+                Log::error("Invalid response from RpcFilesystem::listFiles");
                 confirmDialog_->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("localSideModel", "failedToListFiles"),
@@ -744,58 +841,77 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 return;
             }
 
+            const auto extractEntry = [](Nui::val const& source) -> SharedData::DirectoryEntry {
+                const auto pickU64 = [&source](char const* key) -> std::uint64_t {
+                    if (!source.hasOwnProperty(key))
+                        return 0;
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return 0;
+                    return field.template as<std::uint64_t>();
+                };
+                const auto pickU32 = [&source](char const* key) -> std::uint32_t {
+                    if (!source.hasOwnProperty(key))
+                        return 0;
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return 0;
+                    return field.template as<std::uint32_t>();
+                };
+                const auto pickString = [&source](char const* key) -> std::string {
+                    if (!source.hasOwnProperty(key))
+                        return {};
+                    const auto field = source[key];
+                    if (field.isNull() || field.isUndefined())
+                        return {};
+                    return field.template as<std::string>();
+                };
+
+                SharedData::DirectoryEntry entry{
+                    .path = source["path"].template as<std::string>(),
+                    .type = SharedData::fileTypeFromStdFilesystemType(
+                        static_cast<std::filesystem::file_type>(source["type"].template as<int>())
+                    ),
+                    .size = pickU64("size"),
+                    .uid = pickU32("uid"),
+                    .gid = pickU32("gid"),
+                    .owner = pickString("owner"),
+                    .group = pickString("group"),
+                    .permissions = static_cast<std::filesystem::perms>(pickU32("permissions")),
+                    .atime = pickU64("atime"),
+                    .atimeNsec = pickU32("atimeNsec"),
+                    .createTime = pickU64("createTime"),
+                    .createTimeNsec = pickU32("createTimeNsec"),
+                    .mtime = pickU64("mtime"),
+                    .mtimeNsec = pickU32("mtimeNsec"),
+                };
+                if (source.hasOwnProperty("linkTarget"))
+                {
+                    const auto link = source["linkTarget"];
+                    if (!link.isNull() && !link.isUndefined())
+                        entry.linkTarget = std::filesystem::path{link.template as<std::string>()};
+                }
+                return entry;
+            };
+
             std::vector<SharedData::DirectoryEntry> directoryEntries;
             const auto files = val["files"];
-            for (const auto& file : files)
+            const auto fileCount = files["length"].as<int>();
+            directoryEntries.reserve(static_cast<std::size_t>(fileCount));
+            for (int idx = 0; idx < fileCount; ++idx)
             {
-                const auto fileType = SharedData::fileTypeFromStdFilesystemType(
-                    static_cast<std::filesystem::file_type>(file["type"].as<int>())
-                );
-                directoryEntries.push_back(
-                    SharedData::DirectoryEntry{
-                        .path = file["path"].as<std::string>(),
-                        .type = fileType,
-                        .size = file["size"].as<std::uint64_t>(),
-                        .uid = file["uid"].as<std::uint32_t>(),
-                        .gid = file["gid"].as<std::uint32_t>(),
-                        .owner = file["owner"].as<std::string>(),
-                        .group = file["group"].as<std::string>(),
-                        .permissions = static_cast<std::filesystem::perms>(file["permissions"].as<int>()),
-                        .atime = file["atime"].as<std::uint64_t>(),
-                        .atimeNsec = file["atimeNsec"].as<std::uint32_t>(),
-                        .createTime = file["createTime"].as<std::uint64_t>(),
-                        .createTimeNsec = file["createTimeNsec"].as<std::uint32_t>(),
-                        .mtime = file["mtime"].as<std::uint64_t>(),
-                        .mtimeNsec = file["mtimeNsec"].as<std::uint32_t>(),
-                        .resolvedTarget = [&]() -> std::shared_ptr<SharedData::DirectoryEntry>
-                        {
-                            if (fileType != SharedData::FileType::Symlink)
-                                return nullptr;
-                            if (!file.hasOwnProperty("resolvedTarget") || file["resolvedTarget"].isNull() ||
-                                file["resolvedTarget"].isUndefined())
-                                return nullptr;
-                            const auto target = file["resolvedTarget"];
-                            return std::make_shared<SharedData::DirectoryEntry>(SharedData::DirectoryEntry{
-                                .path = target["path"].as<std::string>(),
-                                .type = SharedData::fileTypeFromStdFilesystemType(
-                                    static_cast<std::filesystem::file_type>(target["type"].as<int>())
-                                ),
-                                .size = target["size"].as<std::uint64_t>(),
-                                .uid = target["uid"].as<std::uint32_t>(),
-                                .gid = target["gid"].as<std::uint32_t>(),
-                                .owner = target["owner"].as<std::string>(),
-                                .group = target["group"].as<std::string>(),
-                                .permissions = static_cast<std::filesystem::perms>(target["permissions"].as<int>()),
-                                .atime = target["atime"].as<std::uint64_t>(),
-                                .atimeNsec = target["atimeNsec"].as<std::uint32_t>(),
-                                .createTime = target["createTime"].as<std::uint64_t>(),
-                                .createTimeNsec = target["createTimeNsec"].as<std::uint32_t>(),
-                                .mtime = target["mtime"].as<std::uint64_t>(),
-                                .mtimeNsec = target["mtimeNsec"].as<std::uint32_t>(),
-                            });
-                        }(),
+                const auto file = files[idx];
+                auto entry = extractEntry(file);
+                if (entry.type == SharedData::FileType::Symlink && file.hasOwnProperty("resolvedTarget"))
+                {
+                    const auto target = file["resolvedTarget"];
+                    if (!target.isNull() && !target.isUndefined())
+                    {
+                        entry.resolvedTarget =
+                            std::make_shared<SharedData::DirectoryEntry>(extractEntry(target));
                     }
-                );
+                }
+                directoryEntries.push_back(std::move(entry));
             }
 
             onDirectoryListing(directoryEntries);
