@@ -707,6 +707,15 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
         [this](Nui::val val)
         {
             Log::debug("Received directory listing response");
+            auto revertNavigation = [this]()
+            {
+                if (currentPath_.value() != preNavigatePath_)
+                {
+                    currentPath_ = preNavigatePath_;
+                    currentPath_.modifyNow();
+                }
+            };
+
             if (!val.hasOwnProperty("success"))
             {
                 Log::error("Invalid response from RpcFilesystem::properties");
@@ -716,6 +725,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                     .text = language->get("localSideModel", "invalidResponseFromBackend"),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
+                revertNavigation();
                 return;
             }
 
@@ -730,6 +740,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                     .text = error,
                     .buttons = ConfirmDialog::Button::Ok,
                 });
+                revertNavigation();
                 return;
             }
 
