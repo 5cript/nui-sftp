@@ -306,6 +306,29 @@ namespace SecureShell
         auto sftp = sftp_.lock();
         return sftp ? sftp->strand_.get() : nullptr;
     }
+    std::expected<void, SftpError> FileStream::writeInStrand(std::string_view data)
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        while (!data.empty())
+        {
+            const auto chunk = std::min(data.size(), writeLengthLimit());
+            const auto written = sftp_write(file_.get(), data.data(), chunk);
+            if (written < 0)
+                return std::unexpected(lastError());
+            if (written == 0)
+                return std::unexpected(
+                    SftpError{
+                        .message = "Failed to write any data",
+                        .wrapperError = WrapperErrors::ShortWrite,
+                    }
+                );
+            data.remove_prefix(static_cast<std::size_t>(written));
+        }
+        return {};
+    }
+
     std::future<std::expected<void, SftpError>> FileStream::write(std::string_view data)
     {
         // Short easy path:
@@ -340,6 +363,77 @@ namespace SecureShell
         limits_ = {};
         return file_.release();
     }
+    std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<bool(SignedSizeType)> onRead
+    )
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        auto context = std::make_shared<AsyncTransferContext>();
+        const auto [success, id] = strand()->pushPermanentTask(
+            [weakStream = weak_from_this(),
+                buffer,
+                bufferSize,
+                onRead = std::move(onRead),
+                context,
+                totalFileSize]()
+            {
+                if (context->hasEnded())
+                    return false;
+                if (context->paused())
+                    return true;
+
+                auto stream = weakStream.lock();
+                if (!stream)
+                {
+                    context->cancel();
+                    return false;
+                }
+
+                auto remainingRead = totalFileSize - context->bytesTransferred_.load();
+                const auto readCycles =
+                    std::min(SignedSizeType{10}, (remainingRead / bufferSize) + SignedSizeType{1});
+
+                for (SignedSizeType i = 0; i != readCycles; ++i)
+                {
+                    const auto result = sftp_read(stream->file_.get(), buffer, std::min(remainingRead, bufferSize));
+                    if (result < 0)
+                    {
+                        context->cancel();
+                        return false;
+                    }
+                    remainingRead -= result;
+                    if (!onRead(result))
+                    {
+                        context->cancel();
+                        return false;
+                    }
+                    context->bytesTransferred_ += result;
+                }
+
+                context->calculateBytesPerSecond();
+                if (remainingRead == 0)
+                {
+                    context->ended_ = true;
+                    return false;
+                }
+                return true;
+            }
+        );
+        if (!success)
+            return std::unexpected(
+                SftpError{
+                    .message = "Failed to push permanent task",
+                    .wrapperError = WrapperErrors::TaskPushFailed,
+                }
+            );
+        context->permanentTaskId_ = id;
+        return context;
+    }
+
     std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::readAsync(
         SignedSizeType totalFileSize,
         char* buffer,
@@ -347,76 +441,86 @@ namespace SecureShell
         std::function<bool(SignedSizeType)> onRead
     )
     {
-        auto fut = performPromise(
-            [this, totalFileSize, buffer, bufferSize, onRead = std::move(onRead)]() mutable
-                -> std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>
-            {
-                auto context = std::make_shared<AsyncTransferContext>();
-                const auto [success, id] = strand()->pushPermanentTask(
-                    [weakStream = weak_from_this(),
-                        buffer,
-                        bufferSize,
-                        onRead = std::move(onRead),
-                        context,
-                        totalFileSize]()
-                    {
-                        if (context->hasEnded())
-                            return false;
-                        if (context->paused())
-                            return true;
-
-                        auto stream = weakStream.lock();
-                        if (!stream)
-                        {
-                            context->cancel();
-                            return false;
-                        }
-
-                        auto remainingRead = totalFileSize - context->bytesTransferred_.load();
-                        const auto readCycles =
-                            std::min(SignedSizeType{10}, (remainingRead / bufferSize) + SignedSizeType{1});
-
-                        for (SignedSizeType i = 0; i != readCycles; ++i)
-                        {
-                            const auto result =
-                                sftp_read(stream->file_.get(), buffer, std::min(remainingRead, bufferSize));
-                            if (result < 0)
-                            {
-                                context->cancel();
-                                return false;
-                            }
-                            remainingRead -= result;
-                            if (!onRead(result))
-                            {
-                                context->cancel();
-                                return false;
-                            }
-                            context->bytesTransferred_ += result;
-                        }
-
-                        context->calculateBytesPerSecond();
-                        if (remainingRead == 0)
-                        {
-                            context->ended_ = true;
-                            return false;
-                        }
-                        return true;
-                    }
-                );
-                if (!success)
-                    return std::unexpected(
-                        SftpError{
-                            .message = "Failed to push permanent task",
-                            .wrapperError = WrapperErrors::TaskPushFailed,
-                        }
-                    );
-                context->permanentTaskId_ = id;
-                return context;
+        return performPromise(
+            [this, totalFileSize, buffer, bufferSize, onRead = std::move(onRead)]() mutable {
+                return readAsyncInStrand(totalFileSize, buffer, bufferSize, std::move(onRead));
             }
         );
-
-        return fut;
     }
+
+    std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> FileStream::writeAsyncInStrand(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<SignedSizeType(SignedSizeType)> doRead
+    )
+    {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        auto context = std::make_shared<AsyncTransferContext>();
+        const auto [success, id] = strand()->pushPermanentTask(
+            [weakStream = weak_from_this(),
+                buffer,
+                bufferSize,
+                doRead = std::move(doRead),
+                context,
+                totalFileSize]()
+            {
+                if (context->hasEnded())
+                    return false;
+                if (context->paused())
+                    return true;
+
+                auto stream = weakStream.lock();
+                if (!stream)
+                {
+                    context->cancel();
+                    return false;
+                }
+
+                auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
+                const auto writeCycles =
+                    std::min(SignedSizeType{10}, (remainingWrite / bufferSize) + SignedSizeType{1});
+
+                for (SignedSizeType i = 0; i != writeCycles; ++i)
+                {
+                    const auto amountRead = doRead(remainingWrite);
+                    if (amountRead <= 0)
+                    {
+                        context->cancel();
+                        return false;
+                    }
+                    const auto result =
+                        sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
+                    if (result < 0)
+                    {
+                        context->cancel();
+                        return false;
+                    }
+                    remainingWrite -= result;
+                    context->bytesTransferred_ += result;
+                }
+
+                context->calculateBytesPerSecond();
+                if (remainingWrite == 0)
+                {
+                    context->ended_ = true;
+                    return false;
+                }
+                return true;
+            }
+        );
+        if (!success)
+            return std::unexpected(
+                SftpError{
+                    .message = "Failed to push permanent task",
+                    .wrapperError = WrapperErrors::TaskPushFailed,
+                }
+            );
+        context->permanentTaskId_ = id;
+        return context;
+    }
+
     std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::writeAsync(
         SignedSizeType totalFileSize,
         char* buffer,
@@ -424,75 +528,10 @@ namespace SecureShell
         std::function<SignedSizeType(SignedSizeType)> doRead
     )
     {
-        auto fut = performPromise(
-            [this, totalFileSize, buffer, bufferSize, doRead = std::move(doRead)]() mutable
-                -> std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>
-            {
-                auto context = std::make_shared<AsyncTransferContext>();
-                const auto [success, id] = strand()->pushPermanentTask(
-                    [weakStream = weak_from_this(),
-                        buffer,
-                        bufferSize,
-                        doRead = std::move(doRead),
-                        context,
-                        totalFileSize]()
-                    {
-                        if (context->hasEnded())
-                            return false;
-                        if (context->paused())
-                            return true;
-
-                        auto stream = weakStream.lock();
-                        if (!stream)
-                        {
-                            context->cancel();
-                            return false;
-                        }
-
-                        auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
-                        const auto writeCycles =
-                            std::min(SignedSizeType{10}, (remainingWrite / bufferSize) + SignedSizeType{1});
-
-                        for (SignedSizeType i = 0; i != writeCycles; ++i)
-                        {
-                            const auto amountRead = doRead(remainingWrite);
-                            if (amountRead <= 0)
-                            {
-                                context->cancel();
-                                return false;
-                            }
-                            const auto result =
-                                sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
-                            if (result < 0)
-                            {
-                                context->cancel();
-                                return false;
-                            }
-                            remainingWrite -= result;
-                            context->bytesTransferred_ += result;
-                        }
-
-                        context->calculateBytesPerSecond();
-                        if (remainingWrite == 0)
-                        {
-                            context->ended_ = true;
-                            return false;
-                        }
-                        return true;
-                    }
-                );
-                if (!success)
-                    return std::unexpected(
-                        SftpError{
-                            .message = "Failed to push permanent task",
-                            .wrapperError = WrapperErrors::TaskPushFailed,
-                        }
-                    );
-                context->permanentTaskId_ = id;
-                return context;
+        return performPromise(
+            [this, totalFileSize, buffer, bufferSize, doRead = std::move(doRead)]() mutable {
+                return writeAsyncInStrand(totalFileSize, buffer, bufferSize, std::move(doRead));
             }
         );
-
-        return fut;
     }
 }

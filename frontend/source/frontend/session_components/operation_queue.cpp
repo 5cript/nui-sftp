@@ -1665,15 +1665,22 @@ void OperationQueue::enqueueBulkDownload(
     // Pre-allocate the OperationIds so per-entry completion callbacks can be
     // registered BEFORE the RPC returns.  Otherwise progress events for the
     // first entries might arrive and be dropped before their callbacks exist.
+    // We reserve one extra id at the back for the aggregate bulk-download card
+    // so it cannot collide with any per-entry id.
     std::vector<Ids::OperationId> operationIds;
-    operationIds.reserve(entries.size());
+    operationIds.reserve(entries.size() + 1);
     for (std::size_t idx = 0; idx < entries.size(); ++idx)
         operationIds.push_back(Ids::generateOperationId());
+    operationIds.push_back(Ids::generateOperationId()); // aggregate bulk-card id
 
     if (onEachComplete)
     {
-        for (auto const& opId : operationIds)
+        // Register completion callbacks only for the per-entry ids — the
+        // aggregate card's completion surfaces through the operation-queue
+        // observer, not this per-entry callback.
+        for (std::size_t idx = 0; idx < entries.size(); ++idx)
         {
+            auto const& opId = operationIds[idx];
             impl_->completionCallbacks.emplace(
                 opId.value(),
                 [onEachComplete, opId](bool success) { onEachComplete(opId, success); }
@@ -1716,15 +1723,19 @@ void OperationQueue::enqueueBulkUpload(
         return;
     }
 
+    // Reserve one extra id at the back for the aggregate bulk-upload card —
+    // see enqueueBulkDownload for rationale.
     std::vector<Ids::OperationId> operationIds;
-    operationIds.reserve(entries.size());
+    operationIds.reserve(entries.size() + 1);
     for (std::size_t idx = 0; idx < entries.size(); ++idx)
         operationIds.push_back(Ids::generateOperationId());
+    operationIds.push_back(Ids::generateOperationId()); // aggregate bulk-card id
 
     if (onEachComplete)
     {
-        for (auto const& opId : operationIds)
+        for (std::size_t idx = 0; idx < entries.size(); ++idx)
         {
+            auto const& opId = operationIds[idx];
             impl_->completionCallbacks.emplace(
                 opId.value(),
                 [onEachComplete, opId](bool success) { onEachComplete(opId, success); }

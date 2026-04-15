@@ -30,6 +30,20 @@ DownloadOperation::~DownloadOperation()
 
 std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadOperation::work()
 {
+    // Drive one work() step from outside the strand. OperationQueue normally calls
+    // workInStrand directly inside its batched umbrella, so this wrapper is only used by
+    // callers that aren't already on the strand (standalone ops, tests).
+    auto fut = sftp_->performPromise([this]() { return workInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("DownloadOperation: work umbrella timed out.");
+        return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadOperation::workInStrand()
+{
     using enum OperationState;
 
     switch (state_)
@@ -41,7 +55,22 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         }
         case (Preparing):
         {
-            const auto prepareResult = prepare();
+            // Local-only preconditions replicated from prepare(); the remote work runs in
+            // prepareInStrand() without an inner umbrella.
+            if (options_.localPath.empty())
+            {
+                Log::error("DownloadOperation: Invalid local path.");
+                return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
+            }
+            if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
+            {
+                Log::error(
+                    "DownloadOperation: File '{}' already exists and may not be overwritten.",
+                    options_.localPath.generic_string()
+                );
+                return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
+            }
+            const auto prepareResult = prepareInStrand();
             if (!prepareResult.has_value())
             {
                 Log::error("DownloadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
@@ -55,7 +84,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             state_ = Running;
             if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
             {
-                const auto result = handleSymlink();
+                const auto result = handleSymlinkInStrand();
                 if (!result.has_value())
                 {
                     Log::error("DownloadOperation: Failed to handle symlink: {}", result.error().toString());
@@ -74,7 +103,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     Log::error("DownloadOperation: File stream expired.");
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
-                auto contextFut = stream->readAsync(
+                const auto contextResult = stream->readAsyncInStrand(
                     options_.entry->size,
                     buffer_.data(),
                     buffer_.size(),
@@ -83,13 +112,6 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                         return commitBufferToFile(bytesRead);
                     }
                 );
-                const auto futureStatus = contextFut.wait_for(options_.futureTimeout);
-                if (futureStatus != std::future_status::ready)
-                {
-                    Log::error("DownloadOperation: Future timed out while starting async read.");
-                    return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
-                }
-                const auto contextResult = contextFut.get();
                 if (!contextResult.has_value())
                 {
                     Log::error("DownloadOperation: Failed to start async read: {}", contextResult.error().toString());
@@ -105,7 +127,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         {
             if (!options_.bigFileOptimized)
             {
-                const auto result = readOnce();
+                const auto result = readOnceInStrand();
                 if (!result.has_value())
                 {
                     Log::error("DownloadOperation: Failed to read file: {}", result.error().toString());
@@ -147,7 +169,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         }
         case (Finalizing):
         {
-            const auto finalizeResult = finalize();
+            const auto finalizeResult = finalizeInStrand();
             if (!finalizeResult.has_value())
             {
                 Log::error("DownloadOperation: Failed to finalize operation: {}", finalizeResult.error().toString());
@@ -187,13 +209,24 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 {
+    auto fut = sftp_->performPromise([this]() { return handleSymlinkInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("DownloadOperation: handleSymlink umbrella timed out.");
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkInStrand()
+{
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
         Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.string());
         return {};
     }
 
-    const auto readResult = readSymlink(options_.remotePath);
+    const auto readResult = readSymlinkInStrand(options_.remotePath);
     if (!readResult.has_value())
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
@@ -230,6 +263,17 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 
 std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 {
+    auto fut = sftp_->performPromise([this]() { return readOnceInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("DownloadOperation: readOnce umbrella timed out.");
+        return enterErrorState<bool>({.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStrand()
+{
     if (state_ < OperationState::Prepared)
     {
         Log::error("DownloadOperation: Operation not prepared.");
@@ -255,17 +299,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
         return enterErrorState<bool>({.type = ErrorType::FileStreamExpired});
     }
 
-    auto future = stream->readSome(buffer_.data(), buffer_.size());
-
-    const auto futureStatus = future.wait_for(options_.futureTimeout);
-
-    if (futureStatus != std::future_status::ready)
-    {
-        Log::error("DownloadOperation: Future timed out while reading.");
-        return enterErrorState<bool>({.type = ErrorType::FutureTimeout});
-    }
-
-    const auto result = future.get();
+    const auto result = stream->readSomeInStrand(buffer_.data(), buffer_.size());
 
     if (!result.has_value())
     {
@@ -315,7 +349,8 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
     return true;
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile(SecureShell::IFileStream& stream)
+std::expected<void, DownloadOperation::Error>
+DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
     const auto tempPath = options_.localPath.generic_string() + options_.tempFileSuffix;
 
@@ -328,7 +363,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile
             Log::error(
                 "DownloadOperation: Failed to create parent directories for '{}': {}.", tempPath, mkErr.message()
             );
-            return enterErrorState({.type = ErrorType::CannotCreateDirectory});
+            return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
 
@@ -338,31 +373,27 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile
         if (!localFile_.is_open())
         {
             Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath);
-            return enterErrorState({.type = ErrorType::OpenFailure});
+            return std::unexpected(Error{.type = ErrorType::OpenFailure});
         }
 
-        // File complete but not renamed? just rename it in the finalize() step
         if (static_cast<std::uint64_t>(localFile_.tellp()) == options_.entry->size)
         {
             Log::info("DownloadOperation: File '{}' already complete, will be renamed in finalize() step.", tempPath);
             localFile_.close();
             return {};
         }
-        // File is larger than expected? discard it and start over.
         else if (static_cast<std::uint64_t>(localFile_.tellp()) > options_.entry->size)
         {
             Log::info("DownloadOperation: File '{}' is larger than expected, discarding and starting over.", tempPath);
             localFile_.close();
-            // Reset the file
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else
         {
             Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath);
-            // Seek stream to position:
-            auto seekResult = stream.seek(localFile_.tellp()).get();
+            auto seekResult = stream.seekInStrand(localFile_.tellp());
             if (!seekResult.has_value())
-                return enterErrorState({.type = ErrorType::FileStatFailed});
+                return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
     }
     else
@@ -373,31 +404,16 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openOrAdoptFile
     if (!localFile_.is_open())
     {
         Log::error("DownloadOperation: Failed to open file: {}", tempPath);
-        return enterErrorState({.type = ErrorType::OpenFailure});
+        return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
 
     return {};
 }
 
 std::expected<SecureShell::SftpSession::DeepLinkResult, DownloadOperation::Error>
-DownloadOperation::readSymlink(std::filesystem::path const& remoteFullPath)
+DownloadOperation::readSymlinkInStrand(std::filesystem::path const& remoteFullPath)
 {
-    auto targetResult = sftp_->readLinkDeep(remoteFullPath);
-    const auto status = targetResult.wait_for(options_.futureTimeout);
-    if (status != std::future_status::ready)
-    {
-        Log::error(
-            "DownloadOperation: Failed to read symlink target: timeout for entry: {}.", remoteFullPath.generic_string()
-        );
-        return std::unexpected(
-            Error{
-                .type = ErrorType::FutureTimeout,
-                .extraInfo =
-                    fmt::format("Timeout reading symlink target for entry: {}", remoteFullPath.generic_string())
-            }
-        );
-    }
-    const auto deepLinkResult = targetResult.get();
+    auto deepLinkResult = sftp_->readLinkDeepInStrand(remoteFullPath);
     if (!deepLinkResult.has_value())
     {
         Log::error(
@@ -424,7 +440,7 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         return enterErrorState({.type = ErrorType::InvalidPath});
     }
 
-    // Initial check. Check again later before rename
+    // Initial check. Check again later before rename.
     if (std::filesystem::exists(options_.localPath))
     {
         if (!options_.mayOverwrite)
@@ -437,46 +453,43 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         }
     }
 
+    auto fut = sftp_->performPromise([this]() { return prepareInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("DownloadOperation: prepare umbrella timed out.");
+        return enterErrorState(
+            {.type = ErrorType::FutureTimeout, .extraInfo = "Timeout preparing download"}
+        );
+    }
+    auto result = fut.get();
+    if (!result.has_value())
+        return enterErrorState(std::move(result).error());
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand()
+{
     if (!options_.entry)
     {
-        auto fut = sftp_->lstat(options_.remotePath);
-        const auto status = fut.wait_for(options_.futureTimeout);
-        if (status != std::future_status::ready)
-        {
-            Log::error("DownloadOperation: Failed to stat file: timeout.");
-            return enterErrorState({.type = ErrorType::FutureTimeout, .extraInfo = "Timeout stating file"});
-        }
-        const auto fileInfo = fut.get();
+        const auto fileInfo = sftp_->lstatInStrand(options_.remotePath);
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
-            return enterErrorState({.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
+            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
         }
-        options_.entry = std::move(fileInfo).value();
+        options_.entry = fileInfo.value();
     }
 
     // Dont try to open symlink as file, unless option says to download said file as a file:
     if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
         return {};
 
-    auto fileFut =
-        sftp_->openFile(options_.remotePath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown);
-
-    if (fileFut.wait_for(options_.futureTimeout) != std::future_status::ready)
-    {
-        Log::error("BulkDownloadOperation: Failed to open remote sftp file: timeout.");
-        return std::unexpected(
-            Error{
-                .type = ErrorType::FutureTimeout,
-                .extraInfo = fmt::format("Timeout opening remote file: {}", options_.remotePath.string())
-            }
-        );
-    }
-
-    const auto streamOpenResult = fileFut.get();
+    const auto streamOpenResult = sftp_->openFileInStrand(
+        options_.remotePath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
+    );
     if (!streamOpenResult.has_value())
     {
-        Log::error("BulkDownloadOperation: Failed to open remote sftp file: {}.", streamOpenResult.error().message);
+        Log::error("DownloadOperation: Failed to open remote sftp file: {}.", streamOpenResult.error().message);
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
@@ -486,19 +499,19 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         );
     }
 
-    fileStream_ = std::move(streamOpenResult).value();
+    fileStream_ = streamOpenResult.value();
     auto stream = fileStream_.lock();
     if (!stream)
     {
         Log::error("DownloadOperation: File stream expired after opening.");
-        return enterErrorState({.type = ErrorType::FileStreamExpired});
+        return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
-    auto openResult = openOrAdoptFile(*stream);
+    auto openResult = openOrAdoptFileInStrand(*stream);
     if (!openResult.has_value())
     {
         Log::error("DownloadOperation: Failed to open file.");
-        return enterErrorState(std::move(openResult).error());
+        return std::unexpected(openResult.error());
     }
 
     if (options_.entry->isSymlink())
@@ -506,14 +519,13 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
 
     if (options_.reserveSpace && options_.entry->size != 0)
     {
-        // Reserve space
         const auto pos = localFile_.tellp();
         localFile_.seekp(options_.entry->size - 1);
         localFile_.put('\0');
         if (localFile_.fail())
         {
-            Log::error("DownloadOperation: Failed to open file.");
-            return enterErrorState({.type = ErrorType::OpenFailure});
+            Log::error("DownloadOperation: Failed to reserve space on local file.");
+            return std::unexpected(Error{.type = ErrorType::OpenFailure});
         }
         localFile_.seekp(pos);
     }
@@ -561,6 +573,17 @@ void DownloadOperation::pause(bool doPause)
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
 {
+    auto fut = sftp_->performPromise([this]() { return finalizeInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("DownloadOperation: finalize umbrella timed out.");
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStrand()
+{
     if (state_ == OperationState::Running)
     {
         Log::error("DownloadOperation: Cannot finalize while reading.");
@@ -595,7 +618,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
             return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
         }
 
-        const auto fileInfo = stream->stat().get();
+        const auto fileInfo = stream->statInStrand();
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");

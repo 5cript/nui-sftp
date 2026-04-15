@@ -105,16 +105,23 @@ class OperationQueue
     std::size_t addBulkDownloadOperation(
         SecureShell::SftpSession& sftp,
         SharedData::BulkAddRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor
+        std::function<Ids::OperationId(std::size_t)> operationIdFor,
+        Ids::OperationId bulkCardId
     );
 
     /** @brief Upload analogue of addBulkDownloadOperation.  File entries skip
      *         the per-file local lstat + RPC round-trip; directories fall
-     *         back to the existing LocalScan+BulkUpload flow. */
+     *         back to the existing LocalScan+BulkUpload flow.
+     *
+     *  @param bulkCardId  Separate id reserved by the frontend for the aggregate
+     *                     BulkUpload card that covers all file entries. Must not
+     *                     collide with any of the per-entry ids produced by
+     *                     @p operationIdFor. */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
         SharedData::BulkAddRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor
+        std::function<Ids::OperationId(std::size_t)> operationIdFor,
+        Ids::OperationId bulkCardId
     );
 
     /**

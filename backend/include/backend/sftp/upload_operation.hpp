@@ -50,6 +50,7 @@ class UploadOperation : public Operation
     UploadOperation& operator=(UploadOperation&&) = delete;
 
     std::expected<WorkStatus, Error> work() override;
+    std::expected<WorkStatus, Error> workInStrand() override;
 
     bool isBarrier() const noexcept override
     {
@@ -97,20 +98,29 @@ class UploadOperation : public Operation
   private:
     /// Returns true if there is more data to write, false if the operation is complete.
     std::expected<bool, Error> writeOnce();
+    std::expected<bool, Error> writeOnceInStrand();
 
     SecureShell::IFileStream::SignedSizeType commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes);
 
     std::expected<void, Error> handleSymlink();
+    std::expected<void, Error> handleSymlinkInStrand();
 
-    std::expected<void, Error> openOrAdoptFile();
+    std::expected<void, Error> openOrAdoptFileInStrand();
+
+    /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
+    std::expected<void, Error> prepareInStrand();
+
+    /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
+    std::expected<void, Error> finalizeInStrand();
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
      *
      *  Walks up the chain via lstat and recurses into the grandparent before mkdir'ing
      *  the parent, so deeply-nested missing paths are created in one pass.
+     *  Must be called from within the processing thread.
      */
-    std::expected<void, Error> ensureRemoteDirectoryExists(std::filesystem::path const& dir);
+    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(std::filesystem::path const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 

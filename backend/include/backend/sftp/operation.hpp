@@ -91,9 +91,40 @@ class Operation
     /**
      * @brief Performs work for the operation depending on the operation type.
      *
+     * Call site is free to run this from any thread — implementations that need the SFTP
+     * processing strand must push into it themselves. Prefer calling @ref workInStrand from
+     * @ref OperationQueue so that several operations share a single strand umbrella.
+     *
      * @return std::expected<bool, Error>, true if it wants to be retriggered without delay.
      */
     virtual std::expected<WorkStatus, Error> work() = 0;
+
+    /**
+     * @brief In-strand variant of @ref work. Runs one step of the state machine assuming the
+     * caller has already hopped into the SFTP processing strand.
+     *
+     * Default implementation forwards to @ref work so legacy operations keep working — only
+     * operations that have been converted to SFTP *InStrand primitives should override this.
+     *
+     * @return std::expected<WorkStatus, Error>
+     */
+    virtual std::expected<WorkStatus, Error> workInStrand()
+    {
+        return work();
+    }
+
+    /**
+     * @brief Whether this operation needs the SFTP processing strand to make progress.
+     *
+     * Ops that return false (e.g. pure local filesystem scans) are driven directly on the
+     * queue's caller thread and skipped when the queue builds its batched strand umbrella.
+     *
+     * @return true if @ref workInStrand must run on the SFTP processing strand.
+     */
+    virtual bool usesStrand() const noexcept
+    {
+        return true;
+    }
 
     /**
      * @brief Cancels the operation.

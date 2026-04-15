@@ -114,6 +114,16 @@ namespace SecureShell
         ) = 0;
 
         /**
+         * @brief In-strand variant of readAsync. Must be called from within the processing thread.
+         */
+        virtual std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> readAsyncInStrand(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<bool(SignedSizeType)> onRead
+        ) = 0;
+
+        /**
          * @brief Returns an AsyncTransferContext that can be used to monitor the asynchronou transfer.
          *
          * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
@@ -122,6 +132,16 @@ namespace SecureShell
          * @return std::shared_ptr<AsyncTransferContext>
          */
         virtual std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<SignedSizeType(SignedSizeType)> doRead
+        ) = 0;
+
+        /**
+         * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
+         */
+        virtual std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -138,6 +158,12 @@ namespace SecureShell
          * @return std::future<std::expected<void, SftpError>>
          */
         virtual std::future<std::expected<void, SftpError>> write(std::string_view data) = 0;
+
+        /**
+         * @brief In-strand variant of write. Must be called from within the processing thread.
+         * Chunking for data larger than writeLengthLimit is handled inline.
+         */
+        virtual std::expected<void, SftpError> writeInStrand(std::string_view data) = 0;
 
         /**
          * @brief Returns the maximum number of bytes that can be written in a single pure write operation.

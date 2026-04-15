@@ -29,6 +29,14 @@ class ScanOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override;
 
+    // work() here still waits on futures pushed to the SFTP strand; running it inside
+    // the queue's batched strand umbrella would self-deadlock. Opt out of batching until
+    // this op is converted to the *InStrand style.
+    bool usesStrand() const noexcept override
+    {
+        return false;
+    }
+
     ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options);
     ~ScanOperation() override;
     ScanOperation(ScanOperation const&) = delete;

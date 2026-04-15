@@ -40,6 +40,11 @@ class LocalScanOperation : public Operation
         return nullptr;
     }
 
+    bool usesStrand() const noexcept override
+    {
+        return false;
+    }
+
     std::expected<WorkStatus, Error> work() override;
 
     SharedData::OperationType type() const override

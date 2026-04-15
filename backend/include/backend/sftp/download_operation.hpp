@@ -47,7 +47,7 @@ class DownloadOperation : public Operation
     {
         if (auto stream = fileStream_.lock(); stream)
             return stream->strand();
-        return nullptr;
+        return sftp_ ? sftp_->strand() : nullptr;
     }
 
     DownloadOperation(SecureShell::SftpSession& sftp, DownloadOperationOptions options);
@@ -58,6 +58,7 @@ class DownloadOperation : public Operation
     DownloadOperation& operator=(DownloadOperation&&) = delete;
 
     std::expected<WorkStatus, Error> work() override;
+    std::expected<WorkStatus, Error> workInStrand() override;
 
     bool isBarrier() const noexcept override
     {
@@ -103,19 +104,25 @@ class DownloadOperation : public Operation
 
     std::expected<void, Error> prepare();
     std::expected<void, Error> finalize();
+    std::expected<void, Error> finalizeInStrand();
 
   private:
     /// Returns true if there is more data to read, false if the operation is complete.
     std::expected<bool, Error> readOnce();
+    std::expected<bool, Error> readOnceInStrand();
 
     std::expected<void, Error> handleSymlink();
+    std::expected<void, Error> handleSymlinkInStrand();
 
     bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 
-    std::expected<void, Error> openOrAdoptFile(SecureShell::IFileStream& stream);
+    /// Runs the remote-heavy portion of prepare() under a single strand umbrella.
+    std::expected<void, Error> prepareInStrand();
+
+    std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlink(std::filesystem::path const& remoteFullPath);
+    readSymlinkInStrand(std::filesystem::path const& remoteFullPath);
 
     void cleanup();
 
