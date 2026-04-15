@@ -19,6 +19,9 @@
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
 
+#include <unordered_map>
+#include <vector>
+
 using namespace std::string_literals;
 
 namespace NuiFileExplorer
@@ -54,6 +57,31 @@ namespace NuiFileExplorer
         Nui::Observed<bool> isPlacesWide{false};
         Nui::Observed<std::optional<bool>> isPlacesOpen{std::nullopt};
         Nui::val resizeObserver{Nui::val::undefined()};
+
+        // Loading-state plumbing for the side. `isLoading` flips immediately when navigation
+        // starts; `showLoadingHint` only flips after a debounce so fast navigations don't flash
+        // a placeholder element. `loadingHintTimerHandle` carries the setTimeout id to cancel.
+        Nui::Observed<bool> isLoading{false};
+        Nui::Observed<bool> showLoadingHint{false};
+        Nui::val loadingHintTimerHandle{Nui::val::undefined()};
+        Nui::ListenRemover<Nui::Observed<std::filesystem::path>> currentPathListener{};
+
+        // Pagination — render-only slicing. SelectionManager remains index-absolute against
+        // the full items vector. Default pageSize is intentionally large (the user prefers
+        // unpaginated UX); the footer hides itself when pageCount <= 1.
+        Nui::Observed<int> currentPage{0};
+        Nui::Observed<int> pageSize{500};
+        Nui::Observed<int> pageCount{1};
+
+        // Active search filter (paginated directories). Empty means "no filter". The live
+        // highlight mode used for small directories sets per-item `searchHighlight` instead.
+        // `filterMatchIndices` is the absolute item indices that pass the filter, in order.
+        // `filterMatchPosition` maps an absolute index to its position within the filtered
+        // sequence, so the flavor render lambda can decide if the match falls on the current
+        // pagination page in O(1).
+        Nui::Observed<std::string> filterQuery{""};
+        std::vector<long long> filterMatchIndices{};
+        std::unordered_map<long long, long long> filterMatchPosition{};
 
         Nui::Observed<std::vector<std::filesystem::path>> pathBoxSuggestions{};
         std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
@@ -198,6 +226,7 @@ namespace NuiFileExplorer
             : settings{std::move(settings)}
             , model{std::move(model)}
             , showHiddenFiles{this->settings.showHiddenFiles}
+            , pageSize{std::max(1, this->settings.pageSize)}
         {
             namespace Snc = ScriptNuiComponents;
 
@@ -354,6 +383,19 @@ namespace NuiFileExplorer
             selectionManager.setScrollIntoViewCallback(
                 [this](std::size_t idx)
                 {
+                    // Keyboard navigation can land us on an item that's outside the current
+                    // pagination slice — in that case we first jump to the page that contains
+                    // the active index, force the render flush so the element materializes,
+                    // and only then scroll it into view.
+                    const auto pageSizeValue = std::max(1, pageSize.value());
+                    const int targetPage = static_cast<int>(idx / static_cast<std::size_t>(pageSizeValue));
+                    if (targetPage != currentPage.value())
+                    {
+                        currentPage = targetPage;
+                        items.modifyNow();
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+
                     auto elem = items.value()[idx].element.lock();
                     if (elem)
                     {

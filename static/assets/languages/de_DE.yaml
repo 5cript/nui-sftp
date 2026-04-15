@@ -603,6 +603,8 @@ settings:
       darkLightMode: "Dunkel/Hell Modus"
       fileGridPathBarOnTopHelpText: "Wenn aktiviert, wird die Pfadleiste in der Dateiansicht oben anstelle von unten angezeigt."
       fileGridPathBarOnTop: "Dateiansicht Pfadleiste oben"
+      fileGridPageSize: "Dateiansicht Einträge pro Seite"
+      fileGridPageSizeHelpText: "Maximale Anzahl an Einträgen pro Seite in der Dateiansicht. Die Paginierungsleiste blendet sich aus, wenn das Verzeichnis (oder die gefilterte Treffermenge) auf eine Seite passt. Höhere Werte reduzieren das Blättern, können das Rendern sehr großer Verzeichnisse aber verlangsamen."
       fileGridExtensionIconsKeyName: "Dateierweiterung"
       fileGridExtensionIconsValueName: "Symbolpfad"
       fileGridExtensionIcons: "Dateiansicht Symbole"

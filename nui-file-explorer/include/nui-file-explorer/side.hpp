@@ -155,6 +155,24 @@ namespace NuiFileExplorer
         void search(std::string query);
         void onPathBoxSuggestionHit(std::filesystem::path const& path);
 
+        /**
+         *  @brief Mark the side as currently loading a directory listing. Schedules a debounced
+         *         visibility hint so fast navigations don't flash a placeholder.
+         */
+        void beginNavigationLoading();
+
+        /**
+         *  @brief Cancel any pending loading-hint timer and clear the loading state.
+         */
+        void clearNavigationLoading();
+
+        /**
+         *  @brief Commit the search box value as a filter that hides non-matching items.
+         *         Used only in paginated mode; for small directories the live highlight path
+         *         in @ref search is used instead.
+         */
+        void applyFilter(std::string query);
+
       private:
         Nui::ElementRenderer placesPanel();
 

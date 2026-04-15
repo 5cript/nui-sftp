@@ -17,6 +17,10 @@ namespace Persistence
         bool showHiddenFilesLocally{false};
         bool showHiddenFilesRemotely{false};
         bool fileGridPathBarOnTop{false};
+        // Items per page in the file grid pagination footer. The user prefers unpaginated UX,
+        // so the default is intentionally large; the footer hides itself when the directory
+        // (or filtered match set) fits within one page.
+        int fileGridPageSize{500};
         std::set<std::string> neverShowAgainDialogs{};
         std::vector<std::string> localFavorites{};
         std::vector<std::string> remoteFavorites{};
@@ -51,6 +55,7 @@ namespace Persistence
             showHiddenFilesLocally,
             showHiddenFilesRemotely,
             fileGridPathBarOnTop,
+            fileGridPageSize,
             neverShowAgainDialogs,
             localFavorites,
             remoteFavorites,

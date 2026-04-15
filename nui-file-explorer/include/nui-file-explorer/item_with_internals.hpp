@@ -2,6 +2,8 @@
 
 #include <nui-file-explorer/item.hpp>
 
+#include <utility/format_bytes.hpp>
+
 #include <nui/event_system/observed_value.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
@@ -35,9 +37,13 @@ namespace NuiFileExplorer
                 *selected_ = value;
         }
 
-        explicit ItemWithInternals(Item const& item)
-            : item{item}
+        explicit ItemWithInternals(Item const& sourceItem)
+            : item{sourceItem}
             , element{}
+            , displayFilename{sourceItem.path.filename().string()}
+            , displaySize{Utility::formatBytes(static_cast<long long>(sourceItem.size))}
+            , displayPerms{sourceItem.lsStyleTypePermsUserGroup()}
+            , displayMtime{sourceItem.readableMTime()}
             , searchHighlighted_{std::make_shared<Nui::Observed<SearchHighlight>>(SearchHighlight::Off)}
             , isDropHovered_{std::make_shared<Nui::Observed<bool>>(false)}
             , selected_{std::make_shared<Nui::Observed<bool>>(false)}
@@ -94,6 +100,13 @@ namespace NuiFileExplorer
       public:
         Item item;
         std::weak_ptr<Nui::Dom::BasicElement> element;
+
+        // Display strings precomputed at construction so per-render passes don't have to
+        // re-format N items every time the reactive graph fires.
+        std::string displayFilename;
+        std::string displaySize;
+        std::string displayPerms;
+        std::string displayMtime;
 
       private:
         std::shared_ptr<Nui::Observed<SearchHighlight>> searchHighlighted_;

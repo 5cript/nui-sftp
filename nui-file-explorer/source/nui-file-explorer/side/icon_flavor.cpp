@@ -237,7 +237,11 @@ namespace NuiFileExplorer
             div{
                 class_ = "nui-file-grid-icons-grid",
                 style = observe(impl().iconSize, impl().iconSpacing).generate([this]() {
-                    return fmt::format("grid-template-columns: repeat(auto-fit, {}px);", impl().iconSize.value() + impl().iconSpacing.value());
+                    return fmt::format(
+                        "--nui-file-grid-icon-size: {}px; grid-template-columns: repeat(auto-fit, {}px);",
+                        impl().iconSize.value(),
+                        impl().iconSize.value() + impl().iconSpacing.value()
+                    );
                 }),
                 !(reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref) {
                     gridRef_ = ref;
@@ -267,7 +271,42 @@ namespace NuiFileExplorer
                     gridLayoutObserver_->observe(gridRef_.lock()->val());
                 })
             }(
-                impl().items.map([this](auto index, auto& item){
+                Nui::range(impl().items).before(
+                    // Loading placeholder — visually mimics a `..` icon item until the listing
+                    // arrives. The `visible` class is gated by the side's debounced loading hint
+                    // so fast navigations don't flash this in.
+                    div{
+                        class_ = observe(impl().showLoadingHint).generate([this]() {
+                            return impl().showLoadingHint.value()
+                                ? "nui-file-grid-item-icons nui-file-grid-loading-placeholder visible"
+                                : "nui-file-grid-item-icons nui-file-grid-loading-placeholder";
+                        }),
+                    }(
+                        div{class_ = "nui-file-grid-loading-placeholder-spinner"}(),
+                        div{}("...")
+                    )
+                ),
+                [this](long long index, auto& item) -> Nui::ElementRenderer {
+                    // Filter mode (paginated search, committed via Enter/blur): hide
+                    // non-matching items, then slice the matches by current page so
+                    // pagination keeps working on the filtered view.
+                    const auto pageSizeValue = std::max(1, impl().pageSize.value());
+                    const long long pageStart =
+                        static_cast<long long>(impl().currentPage.value()) * pageSizeValue;
+                    const long long pageEnd = pageStart + pageSizeValue;
+
+                    if (!impl().filterQuery.value().empty())
+                    {
+                        const auto found = impl().filterMatchPosition.find(index);
+                        if (found == impl().filterMatchPosition.end())
+                            return Nui::nil();
+                        if (found->second < pageStart || found->second >= pageEnd)
+                            return Nui::nil();
+                    }
+                    else if (index < pageStart || index >= pageEnd)
+                    {
+                        return Nui::nil();
+                    }
                     return div{
                         class_ = item.observeClassRelevant([&item](){
                             auto searchHighlight = item.searchHighlight();
@@ -303,18 +342,12 @@ namespace NuiFileExplorer
                             src = item.item.icon,
                             draggable = "false",
                             alt = "???",
-                            width = observe(impl().iconSize).generate([this](){
-                                return std::to_string(impl().iconSize.value());
-                            }),
-                            height = observe(impl().iconSize).generate([this](){
-                                return std::to_string(impl().iconSize.value());
-                            }),
                             style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
                         }(),
                         div{
-                        }(item.item.path.filename().string())
+                        }(item.displayFilename)
                     );
-                })
+                }
             )
         );
         // clang-format on

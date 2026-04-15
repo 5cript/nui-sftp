@@ -144,6 +144,7 @@ struct Session::Implementation
                             state.uiOptions.showHiddenFilesLocally = value;
                         });
                     },
+                    .pageSize = uiOptions.fileGridPageSize,
                 }, {
                         .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
                         .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
@@ -152,6 +153,7 @@ struct Session::Implementation
                                 state.uiOptions.showHiddenFilesRemotely = value;
                             });
                         },
+                        .pageSize = uiOptions.fileGridPageSize,
                 },
                     std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
                     std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
@@ -166,6 +168,7 @@ struct Session::Implementation
                             state.uiOptions.showHiddenFilesLocally = value;
                         });
                     },
+                    .pageSize = uiOptions.fileGridPageSize,
                 },
                     std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog)
                 };
