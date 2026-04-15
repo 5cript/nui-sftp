@@ -104,6 +104,19 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
         {
             if (currentIndex_ == entries_.size())
             {
+                // In prescanned mode, emit a terminal progress event so the
+                // frontend sees "N/N" (and the per-row index-based mark-green
+                // pass in sync_dialog sweeps the final file).  Tree-scan mode
+                // already lands at "(N-1)/(N-1)" on the last file's progress
+                // tick because entries_[0] is the synthetic root — emitting
+                // another event here would regress it to "N/(N-1)".
+                if (!prescannedPathOverride_.empty())
+                {
+                    options_.overallProgressCallback(
+                        options_.remotePath, currentIndex_, entries_.size(),
+                        0, 0, currentBytes_, totalBytes_, 0
+                    );
+                }
                 Log::info("BulkUploadOperation: Bulk upload completed.");
                 enterState(Completed);
                 return WorkStatus::Complete;
@@ -126,8 +139,12 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     return enterErrorState<BulkUploadOperation::WorkStatus>(result.error());
 
                 ++currentIndex_;
+                // Tree-scan mode treats entries_[0] as the synthetic root dir
+                // (not counted toward the user-visible total); prescanned mode
+                // has no synthetic root, so every entry counts.
+                const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                 options_.overallProgressCallback(
-                    fullRemotePath(entry), currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0
+                    fullRemotePath(entry), currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, 0
                 );
             }
             else if (entry.isRegularFile() || entry.isSymlink())
@@ -140,10 +157,11 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     individualOpts.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
                     individualOpts.progressCallback = [this](auto, auto max, auto current, auto bytesPerSecond)
                     {
+                        const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                         options_.overallProgressCallback(
                             fullRemotePath(entries_[currentIndex_]),
                             currentIndex_,
-                            entries_.size() - 1,
+                            fileCount,
                             current,
                             max,
                             currentBytes_ + current,

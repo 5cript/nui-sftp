@@ -441,7 +441,7 @@ struct SyncDialog::Implementation
                 else if (itemCopy.localItem && itemCopy.remoteItem)
                 {
                     operationQueue_->enqueueUpload(
-                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, true, /*createMissingDirs=*/true,
+                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, false, /*createMissingDirs=*/true,
                         SharedData::OperationMode::PriorityQueued
                     );
                 }
@@ -451,7 +451,7 @@ struct SyncDialog::Implementation
                     remoteStub.path = itemCopy.localItem->path;
                     remoteStub.fullPath = remotePath_ / itemCopy.localItem->path;
                     operationQueue_->enqueueUpload(
-                        NuiFileExplorer::Item{remoteStub}, *itemCopy.localItem, onComplete, true, true,
+                        NuiFileExplorer::Item{remoteStub}, *itemCopy.localItem, onComplete, true, false,
                         /*createMissingDirs=*/true, SharedData::OperationMode::PriorityQueued
                     );
                 }
@@ -468,7 +468,7 @@ struct SyncDialog::Implementation
                 else if (itemCopy.localItem && itemCopy.remoteItem)
                 {
                     operationQueue_->enqueueDownload(
-                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, true, /*createMissingDirs=*/true,
+                        *itemCopy.remoteItem, *itemCopy.localItem, onComplete, true, false, /*createMissingDirs=*/true,
                         SharedData::OperationMode::PriorityQueued
                     );
                 }
@@ -478,7 +478,7 @@ struct SyncDialog::Implementation
                     localStub.path = itemCopy.remoteItem->path;
                     localStub.fullPath = localPath_ / itemCopy.remoteItem->path;
                     operationQueue_->enqueueDownload(
-                        *itemCopy.remoteItem, NuiFileExplorer::Item{localStub}, onComplete, true, true,
+                        *itemCopy.remoteItem, NuiFileExplorer::Item{localStub}, onComplete, true, false,
                         /*createMissingDirs=*/true, SharedData::OperationMode::PriorityQueued
                     );
                 }
@@ -619,34 +619,61 @@ struct SyncDialog::Implementation
             bool isUpload,
             std::string const& kind
         ) {
-            // Map entry src path (canonical generic form) → row observer.
-            auto pathToProgress = std::make_shared<std::unordered_map<std::string, ProgressPtr>>();
-            pathToProgress->reserve(entries.size());
+            // The backend collapses file entries into a single prescanned
+            // BulkUpload/BulkDownload (directories are split out into their
+            // own per-opId operations).  BulkProgress.fileCurrentIndex thus
+            // indexes the file-only list in the same order as our non-dir
+            // frontend entries — build a lookup from that file-index back
+            // to the frontend entry index so we can drive per-row progress
+            // and per-file green-highlighting without path matching (which
+            // failed for uploads because currentFile carries the remote
+            // dst, not the src we were keyed by).
+            auto fileEntryIndices = std::make_shared<std::vector<std::size_t>>();
+            fileEntryIndices->reserve(entries.size());
             for (std::size_t idx = 0; idx < entries.size(); ++idx)
-                pathToProgress->emplace(entries[idx].src.generic_string(), observers[idx]);
+                if (!entries[idx].isDirectory)
+                    fileEntryIndices->push_back(idx);
 
-            auto onBulkProgress = [pathToProgress](SharedData::BulkProgress const& prog) {
-                const auto cbIt = pathToProgress->find(std::filesystem::path{prog.currentFile}.generic_string());
-                if (cbIt == pathToProgress->end() || !cbIt->second)
-                    return;
-                if (prog.currentFileTotalBytes == 0)
-                    return;
-                *cbIt->second =
-                    static_cast<double>(prog.currentFileBytes) / static_cast<double>(prog.currentFileTotalBytes);
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            };
-
-            // Backend emits ONE aggregate OperationCompleted keyed to opIds[0]
-            // for the file-bulk — no per-entry file completion events — and a
-            // separate OperationCompleted per directory entry (each assigned
-            // its own opId).  So we flip all observers whose entry is a file
-            // on the aggregate completion, and flip per-directory observers
-            // on their individual completions.
             auto entryIsDir = std::make_shared<std::vector<bool>>();
             entryIsDir->reserve(entries.size());
             for (auto const& entry : entries)
                 entryIsDir->push_back(entry.isDirectory);
             auto observersShared = std::make_shared<std::vector<ProgressPtr>>(std::move(observers));
+
+            // Flip observers for all file entries strictly before backend
+            // file-index `upTo` to the completed (green) state, unless they
+            // are already in a terminal state.
+            auto markFilesCompletedBefore =
+                [observersShared, fileEntryIndices](std::uint64_t upTo) {
+                    const auto limit = std::min<std::uint64_t>(upTo, fileEntryIndices->size());
+                    for (std::uint64_t pos = 0; pos < limit; ++pos)
+                    {
+                        auto& obs = (*observersShared)[(*fileEntryIndices)[pos]];
+                        if (!obs)
+                            continue;
+                        const double value = obs->value();
+                        if (value >= 1.0 || value < 0.0)
+                            continue;
+                        *obs = 1.1;
+                    }
+                };
+
+            auto onBulkProgress =
+                [observersShared, fileEntryIndices, markFilesCompletedBefore](SharedData::BulkProgress const& prog) {
+                    markFilesCompletedBefore(prog.fileCurrentIndex);
+                    if (prog.fileCurrentIndex >= fileEntryIndices->size())
+                    {
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                        return;
+                    }
+                    auto& obs = (*observersShared)[(*fileEntryIndices)[prog.fileCurrentIndex]];
+                    if (obs && prog.currentFileTotalBytes > 0)
+                    {
+                        *obs = static_cast<double>(prog.currentFileBytes)
+                            / static_cast<double>(prog.currentFileTotalBytes);
+                    }
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                };
 
             auto onEnqueued = [this,
                                onBulkProgress = std::move(onBulkProgress),
@@ -654,11 +681,14 @@ struct SyncDialog::Implementation
                                entryIsDir](std::vector<Ids::OperationId> const& opIds) {
                 if (opIds.empty())
                     return;
-                // Backend emits BulkProgress keyed to opIds[0].
-                operationQueue_->addBulkProgressCallback(opIds.front(), onBulkProgress);
+                // The frontend reserves entries.size() + 1 opIds — the trailing
+                // one is the aggregate bulk-card id that the backend keys both
+                // BulkProgress and the aggregate OperationCompleted to.  The
+                // per-entry opIds[0..N-1] only drive directory sub-operations.
+                operationQueue_->addBulkProgressCallback(opIds.back(), onBulkProgress);
 
                 operationQueue_->addCompletionCallback(
-                    opIds.front(),
+                    opIds.back(),
                     [observersShared, entryIsDir](bool success) {
                         for (std::size_t idx = 0; idx < observersShared->size(); ++idx)
                         {
@@ -696,7 +726,7 @@ struct SyncDialog::Implementation
             if (isUpload)
             {
                 operationQueue_->enqueueBulkUpload(
-                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ true,
+                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ false,
                     SharedData::OperationMode::Queued,
                     /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
                 );
@@ -704,7 +734,7 @@ struct SyncDialog::Implementation
             else
             {
                 operationQueue_->enqueueBulkDownload(
-                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ true,
+                    std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ false,
                     SharedData::OperationMode::Queued,
                     /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
                 );
@@ -826,7 +856,7 @@ struct SyncDialog::Implementation
             auto observersShared = std::make_shared<std::vector<ProgressPtr>>(std::move(deleteObservers));
             operationQueue_->enqueueBulkDelete(
                 std::move(deleteEntries),
-                /*insertRefresh*/ true,
+                /*insertRefresh*/ false,
                 SharedData::OperationMode::Queued,
                 [observersShared](bool success) {
                     for (auto& obs : *observersShared)

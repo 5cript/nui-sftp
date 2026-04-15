@@ -114,6 +114,16 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
         {
             if (currentIndex_ == entries_.size())
             {
+                // See BulkUploadOperation for rationale — prescanned mode
+                // needs the terminal "N/N" tick that tree-scan mode gets
+                // implicitly via its synthetic-root offset.
+                if (!prescannedPathOverride_.empty())
+                {
+                    options_.overallProgressCallback(
+                        options_.localPath, currentIndex_, entries_.size(),
+                        0, 0, currentBytes_, totalBytes_, 0
+                    );
+                }
                 Log::info("BulkDownloadOperation: Bulk download completed.");
                 enterState(Completed);
                 return WorkStatus::Complete;
@@ -148,8 +158,12 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 if (!result.has_value())
                     return enterErrorState<BulkDownloadOperation::WorkStatus>(result.error());
                 ++currentIndex_;
+                // Tree-scan mode treats entries_[0] as the synthetic root dir
+                // (not counted toward the user-visible total); prescanned mode
+                // has no synthetic root, so every entry counts.
+                const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                 options_.overallProgressCallback(
-                    path, currentIndex_, entries_.size() - 1, 0, 0, currentBytes_, totalBytes_, 0 /*TODO: proper bps*/
+                    path, currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, 0 /*TODO: proper bps*/
                 );
             }
             else if (entry.isRegularFile() || entry.isSymlink())
@@ -167,11 +181,11 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                                                            auto, auto max, auto current, auto bytesPerSecond
                                                        )
                     {
-                        // Call overall progress callback
+                        const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                         options_.overallProgressCallback(
                             remoteFullPath,
                             currentIndex_,
-                            entries_.size() - 1,
+                            fileCount,
                             current,
                             max,
                             currentBytes_ + current,
