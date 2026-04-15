@@ -22,11 +22,27 @@ namespace NuiFileExplorer
       protected:
         SideImplementation& impl() const;
         SideImplementation* otherImpl() const;
+
+        /**
+         *  @brief Resolve the item index from an event target by walking up to the nearest `[data-index]` ancestor.
+         *  @param target The event target (typically `event.val()["target"]`).
+         *  @return Item index, or -1 if no item ancestor was found.
+         */
+        int resolveItemIndex(Nui::val target);
+
+        /**
+         *  @brief Update which item currently shows the drop-hover highlight, clearing the previous one.
+         *  @param index Item index to highlight, or -1 to clear. Negative / out-of-range / non-directory items clear.
+         */
+        void setHoverItem(int index);
+
+        void onDelegatedDragStart(Nui::WebApi::DragEvent event);
+        void onDelegatedDragOver(Nui::WebApi::DragEvent event);
+        void onDelegatedDragLeave(Nui::WebApi::DragEvent event);
+        void onDelegatedDrop(Nui::WebApi::DragEvent event);
+
         Side* side_;
         Side* otherSide_;
-        Nui::Attribute allowDrop = Nui::Attributes::EventFactory{"dragover"} = [](Nui::WebApi::DragEvent event)
-        {
-            event.val().call<void>("preventDefault");
-        };
+        int currentHoverIndex_{-1};
     };
 }
