@@ -723,7 +723,8 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                if (operationIdStrings.size() != request.entries.size())
+                // Expect N per-entry ids + 1 dedicated aggregate-bulk-card id at the end.
+                if (operationIdStrings.size() != request.entries.size() + 1)
                     return reply.error(
                         "addBulkDownload: operationIds and entries length mismatch"
                     );
@@ -738,12 +739,14 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
                         if (!self)
                             return reply({{"error", "Session no longer exists"}});
 
+                        const auto bulkCardId = Ids::makeOperationId(operationIdStrings.back());
                         const auto enqueued = self->operationQueue_->addBulkDownloadOperation(
                             *channel,
                             request,
                             [&operationIdStrings](std::size_t idx) {
                                 return Ids::makeOperationId(operationIdStrings[idx]);
-                            }
+                            },
+                            bulkCardId
                         );
 
                         Log::info(
@@ -777,7 +780,7 @@ void Session::registerRpcSftpAddBulkUploadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                if (operationIdStrings.size() != request.entries.size())
+                if (operationIdStrings.size() != request.entries.size() + 1)
                     return reply.error("addBulkUpload: operationIds and entries length mismatch");
 
                 self->withSftpChannelDo(
@@ -790,12 +793,14 @@ void Session::registerRpcSftpAddBulkUploadOperation()
                         if (!self)
                             return reply({{"error", "Session no longer exists"}});
 
+                        const auto bulkCardId = Ids::makeOperationId(operationIdStrings.back());
                         const auto enqueued = self->operationQueue_->addBulkUploadOperation(
                             *channel,
                             request,
                             [&operationIdStrings](std::size_t idx) {
                                 return Ids::makeOperationId(operationIdStrings[idx]);
-                            }
+                            },
+                            bulkCardId
                         );
 
                         Log::info("addBulkUpload: queued {}/{} entries", enqueued, request.entries.size());

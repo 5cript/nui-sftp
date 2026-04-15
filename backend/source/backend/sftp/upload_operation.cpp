@@ -42,6 +42,17 @@ void UploadOperation::pause(bool doPause)
 
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::work()
 {
+    auto fut = sftp_->performPromise([this]() { return workInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: work umbrella timed out.");
+        return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::workInStrand()
+{
     using enum OperationState;
 
     switch (state_)
@@ -53,11 +64,69 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         }
         case (Preparing):
         {
-            const auto prepareResult = prepare();
-            if (!prepareResult.has_value())
+            // Local-only preconditions replicated from prepare(); remote work lives in
+            // prepareInStrand() and runs without an inner umbrella.
+            if (options_.localPath.empty())
             {
-                Log::error("UploadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
-                return enterErrorState<WorkStatus>(prepareResult.error());
+                Log::error("UploadOperation: Invalid local path.");
+                return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
+            }
+            const auto localStatus = std::filesystem::symlink_status(options_.localPath);
+            if (!std::filesystem::is_regular_file(localStatus) && !std::filesystem::is_symlink(localStatus))
+            {
+                Log::error(
+                    "UploadOperation: Local path '{}' is not a regular file or symlink.",
+                    options_.localPath.generic_string()
+                );
+                return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
+            }
+            if (std::filesystem::is_symlink(localStatus) &&
+                options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
+            {
+                isSymlink_ = true;
+            }
+            else
+            {
+                if (!std::filesystem::is_regular_file(std::filesystem::status(options_.localPath)))
+                {
+                    Log::error(
+                        "UploadOperation: Local path '{}' is a directory, but a file was expected.",
+                        options_.localPath.generic_string()
+                    );
+                    return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
+                }
+                if (!std::filesystem::exists(options_.localPath))
+                {
+                    Log::error(
+                        "UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string()
+                    );
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FileNotFound});
+                }
+                localFile_.open(options_.localPath, std::ios::binary);
+                if (!localFile_.is_open())
+                {
+                    Log::error(
+                        "UploadOperation: Failed to open local file: {}", options_.localPath.generic_string()
+                    );
+                    return enterErrorState<WorkStatus>({.type = ErrorType::OpenFailure});
+                }
+                localFile_.seekg(0, std::ios::end);
+                leftToUpload_ = static_cast<std::size_t>(localFile_.tellg());
+                totalSize_ = leftToUpload_;
+                localFile_.seekg(0, std::ios::beg);
+                if (!localFile_.good())
+                {
+                    Log::error(
+                        "UploadOperation: Failed to seek in local file: {}", options_.localPath.generic_string()
+                    );
+                    return enterErrorState<WorkStatus>({.type = ErrorType::FileSeekFailure});
+                }
+                const auto prepareResult = prepareInStrand();
+                if (!prepareResult.has_value())
+                {
+                    Log::error("UploadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
+                    return enterErrorState<WorkStatus>(prepareResult.error());
+                }
             }
             state_ = Prepared;
             [[fallthrough]];
@@ -67,7 +136,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             state_ = Running;
             if (isSymlink_ && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
             {
-                const auto result = handleSymlink();
+                const auto result = handleSymlinkInStrand();
                 if (!result.has_value())
                 {
                     Log::error("UploadOperation: Failed to handle symlink: {}", result.error().toString());
@@ -87,7 +156,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     Log::error("UploadOperation: File stream expired.");
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
-                auto contextFut = stream->writeAsync(
+                const auto contextResult = stream->writeAsyncInStrand(
                     totalSize_,
                     buffer_.data(),
                     buffer_.size(),
@@ -96,13 +165,6 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                         return commitFileToBuffer(bytesRead);
                     }
                 );
-                const auto futureStatus = contextFut.wait_for(options_.futureTimeout);
-                if (futureStatus != std::future_status::ready)
-                {
-                    Log::error("UploadOperation: Future timed out while starting async read.");
-                    return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
-                }
-                const auto contextResult = contextFut.get();
                 if (!contextResult.has_value())
                 {
                     Log::error("UploadOperation: Failed to start async read: {}", contextResult.error().toString());
@@ -118,7 +180,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         {
             if (!options_.bigFileOptimized)
             {
-                const auto result = writeOnce();
+                const auto result = writeOnceInStrand();
                 if (!result.has_value())
                 {
                     Log::error("UploadOperation: Failed to write file: {}", result.error().toString());
@@ -157,7 +219,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         }
         case (Finalizing):
         {
-            const auto finalizeResult = finalize();
+            localFile_.close();
+            const auto finalizeResult = finalizeInStrand();
             if (!finalizeResult.has_value())
             {
                 Log::error("UploadOperation: Failed to finalize operation: {}", finalizeResult.error().toString());
@@ -215,6 +278,17 @@ UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType byt
 
 std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
 {
+    auto fut = sftp_->performPromise([this]() { return handleSymlinkInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: handleSymlink umbrella timed out.");
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStrand()
+{
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
         Log::info("UploadOperation: Skipping symlink as per options: {}.", options_.localPath.string());
@@ -228,43 +302,28 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
     // that almost certainly isn't what the user wants).
     if (options_.mayOverwrite)
     {
-        auto statFut = sftp_->lstat(options_.remotePath);
-        if (statFut.wait_for(options_.futureTimeout) == std::future_status::ready)
+        const auto statResult = sftp_->lstatInStrand(options_.remotePath);
+        if (statResult.has_value() && statResult->type != SharedData::FileType::Directory)
         {
-            const auto statResult = statFut.get();
-            if (statResult.has_value() && statResult->type != SharedData::FileType::Directory)
+            const auto rmResult = sftp_->removeFileInStrand(options_.remotePath);
+            if (!rmResult.has_value())
             {
-                auto rmFut = sftp_->removeFile(options_.remotePath);
-                if (rmFut.wait_for(options_.futureTimeout) == std::future_status::ready)
-                {
-                    const auto rmResult = rmFut.get();
-                    if (!rmResult.has_value())
-                    {
-                        Log::warn(
-                            "UploadOperation: Could not remove existing '{}' before symlink: {}.",
-                            options_.remotePath.generic_string(),
-                            rmResult.error().message
-                        );
-                    }
-                }
+                Log::warn(
+                    "UploadOperation: Could not remove existing '{}' before symlink: {}.",
+                    options_.remotePath.generic_string(),
+                    rmResult.error().message
+                );
             }
         }
     }
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExists(options_.remotePath.parent_path()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(options_.remotePath.parent_path()); !res.has_value())
             return std::unexpected(res.error());
     }
 
-    auto fut = sftp_->createSymLink(target, options_.remotePath);
-    const auto futureStatus = fut.wait_for(options_.futureTimeout);
-    if (futureStatus != std::future_status::ready)
-    {
-        Log::error("UploadOperation: Future timed out while creating symlink.");
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-    const auto result = fut.get();
+    const auto result = sftp_->createSymLinkInStrand(target, options_.remotePath);
     if (!result.has_value())
     {
         Log::error(
@@ -278,6 +337,17 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
 }
 
 std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
+{
+    auto fut = sftp_->performPromise([this]() { return writeOnceInStrand(); });
+    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: writeOnce umbrella timed out.");
+        return enterErrorState<bool>({.type = ErrorType::FutureTimeout});
+    }
+    return fut.get();
+}
+
+std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
 {
     if (state_ < OperationState::Prepared)
     {
@@ -307,21 +377,10 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
     }
     leftToUpload_ -= readCount;
 
-    auto future = stream->write(std::string_view{buffer_.data(), readCount});
-
-    const auto futureStatus = future.wait_for(options_.futureTimeout);
-
-    if (futureStatus != std::future_status::ready)
-    {
-        Log::error("UploadOperation: Future timed out while reading.");
-        return enterErrorState<bool>({.type = ErrorType::FutureTimeout});
-    }
-
-    const auto result = future.get();
-
+    const auto result = stream->writeInStrand(std::string_view{buffer_.data(), readCount});
     if (!result.has_value())
     {
-        Log::error("UploadOperation: Failed to read from remote file: {}", result.error().message);
+        Log::error("UploadOperation: Failed to write to remote file: {}", result.error().message);
         return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
@@ -330,18 +389,9 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
     return leftToUpload_ > 0;
 }
 
-std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
+std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInStrand()
 {
-    auto fut = sftp_->lstat(options_.remotePath);
-
-    const auto futureStatus = fut.wait_for(options_.futureTimeout);
-    if (futureStatus != std::future_status::ready)
-    {
-        Log::error("Failed to stat remote sftp file for continue: timeout");
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-
-    const auto result = fut.get();
+    const auto result = sftp_->lstatInStrand(options_.remotePath);
     if (!result.has_value())
     {
         const auto err = result.error();
@@ -350,7 +400,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
             Log::error("Failed to stat remote sftp file for continue: {}", err.message);
             return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = err});
         }
-        // else ok!
+        // else ok — target does not yet exist.
     }
     else
     {
@@ -365,21 +415,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
     }
 
     const auto tempPath = options_.remotePath.generic_string() + options_.tempFileSuffix;
-    auto tempFuture = sftp_->lstat(tempPath);
-
-    const auto futureStatus2 = tempFuture.wait_for(options_.futureTimeout);
-    if (futureStatus2 != std::future_status::ready)
-    {
-        Log::error("Failed to stat remote sftp file for continue: timeout");
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
+    const auto tempResult = sftp_->lstatInStrand(tempPath);
 
     // local file perms
     const auto status = std::filesystem::symlink_status(options_.localPath);
     const auto perms = determinePerms(status.permissions());
 
     // Adoption mechanic for temp file parts:
-    const auto tempResult = tempFuture.get();
     if (tempResult.has_value())
     {
         if (tempResult->size > static_cast<std::uint64_t>(leftToUpload_))
@@ -391,16 +433,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
         {
             Log::debug("UploadOperation: Continuing upload to existing temp file.");
 
-            auto openFut = sftp_->openFile(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
-
-            const auto openStatus = openFut.wait_for(options_.futureTimeout);
-            if (openStatus != std::future_status::ready)
-            {
-                Log::error("Failed to open remote sftp file for continue: timeout");
-                return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-            }
-
-            const auto openResult = openFut.get();
+            const auto openResult =
+                sftp_->openFileInStrand(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
             if (!openResult.has_value())
             {
                 Log::error("Failed to open remote sftp file for continue: {}", openResult.error().message);
@@ -415,16 +449,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
                 return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
             }
 
-            // Seek to end of file
-            auto seekFut = stream->seek(tempResult->size);
-            const auto seekStatus = seekFut.wait_for(options_.futureTimeout);
-            if (seekStatus != std::future_status::ready)
-            {
-                Log::error("Failed to seek remote sftp file for continue: timeout");
-                return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-            }
-
-            const auto seekResult = seekFut.get();
+            const auto seekResult = stream->seekInStrand(tempResult->size);
             if (!seekResult.has_value())
             {
                 Log::error("Failed to seek remote sftp file for continue: {}", seekResult.error().message);
@@ -440,25 +465,19 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExists(std::filesystem::path{tempPath}.parent_path()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(std::filesystem::path{tempPath}.parent_path());
+            !res.has_value())
             return std::unexpected(res.error());
     }
 
     // Open temp file part regularly, freshly:
     Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath);
-    auto openFut = sftp_->openFile(
+    const auto openResult = sftp_->openFileInStrand(
         tempPath,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
             SecureShell::SftpSession::OpenType::Truncate,
         perms
     );
-    const auto openStatus = openFut.wait_for(options_.futureTimeout);
-    if (openStatus != std::future_status::ready)
-    {
-        Log::error("Failed to open remote sftp file for upload: timeout");
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-    const auto openResult = openFut.get();
     if (!openResult.has_value())
     {
         Log::error("Failed to open remote sftp file for upload: {}", openResult.error().message);
@@ -471,18 +490,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFile()
 }
 
 std::expected<void, UploadOperation::Error>
-UploadOperation::ensureRemoteDirectoryExists(std::filesystem::path const& dir)
+UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const& dir)
 {
     if (dir.empty() || dir == dir.root_path() || dir == std::filesystem::path{"/"})
         return {};
 
-    auto statFut = sftp_->lstat(dir);
-    if (statFut.wait_for(options_.futureTimeout) != std::future_status::ready)
-    {
-        Log::error("UploadOperation: Timeout stating '{}' while ensuring parent dirs.", dir.generic_string());
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-    const auto statResult = statFut.get();
+    const auto statResult = sftp_->lstatInStrand(dir);
     if (statResult.has_value())
     {
         if (statResult->type == SharedData::FileType::Directory)
@@ -503,7 +516,7 @@ UploadOperation::ensureRemoteDirectoryExists(std::filesystem::path const& dir)
     if (statResult.error().sftpError != SSH_FX_NO_SUCH_FILE)
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = statResult.error()});
 
-    if (auto parent = ensureRemoteDirectoryExists(dir.parent_path()); !parent.has_value())
+    if (auto parent = ensureRemoteDirectoryExistsInStrand(dir.parent_path()); !parent.has_value())
         return parent;
 
     const auto dirPerms = options_.directoryPermissions.value_or(
@@ -511,13 +524,7 @@ UploadOperation::ensureRemoteDirectoryExists(std::filesystem::path const& dir)
         std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
         std::filesystem::perms::others_exec
     );
-    auto mkdirFut = sftp_->createDirectoryIfItDoesntExist(dir, dirPerms);
-    if (mkdirFut.wait_for(options_.futureTimeout) != std::future_status::ready)
-    {
-        Log::error("UploadOperation: Timeout creating parent dir '{}'.", dir.generic_string());
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-    auto mkdirResult = mkdirFut.get();
+    const auto mkdirResult = sftp_->createDirectoryIfItDoesntExistInStrand(dir, dirPerms);
     if (!mkdirResult.has_value())
     {
         Log::error(
@@ -585,7 +592,13 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return enterErrorState({.type = ErrorType::FileSeekFailure});
     }
 
-    auto openResult = openOrAdoptFile();
+    auto umbrellaFut = sftp_->performPromise([this]() { return prepareInStrand(); });
+    if (umbrellaFut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: prepare umbrella timed out.");
+        return enterErrorState({.type = ErrorType::FutureTimeout, .extraInfo = "Timeout preparing upload"});
+    }
+    auto openResult = umbrellaFut.get();
     if (!openResult.has_value())
     {
         Log::error("UploadOperation: Failed to open file.");
@@ -599,6 +612,11 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     );
 
     return {};
+}
+
+std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
+{
+    return openOrAdoptFileInStrand();
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCancelState)
@@ -635,6 +653,28 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
 
     localFile_.close();
 
+    auto fut = sftp_->performPromise([this]() { return finalizeInStrand(); });
+    // finalize has more work than a single call (stat + maybe removeFile + rename + setstat),
+    // so allow a bit more slack than the per-call timeout.
+    if (fut.wait_for(options_.futureTimeout * 4) != std::future_status::ready)
+    {
+        Log::error("UploadOperation: finalize umbrella timed out.");
+        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
+    }
+    auto result = fut.get();
+    if (!result.has_value())
+        return result;
+
+    Log::debug(
+        "UploadOperation: Finalized upload of '{}' to '{}'.",
+        options_.remotePath.generic_string(),
+        options_.localPath.generic_string()
+    );
+    return {};
+}
+
+std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
+{
     auto stream = fileStream_.lock();
     if (!stream)
     {
@@ -642,22 +682,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
-    stream->close();
+    stream->closeInStrand();
 
-    // Recheck if it exists or not:
+    // Recheck if the destination already exists.
     {
-        auto fut = sftp_->stat(options_.remotePath);
-
-        if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
-        {
-            Log::error("Failed to stat remote sftp file for continue: timeout");
-            return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-        }
-
-        const auto result = fut.get();
+        const auto result = sftp_->statInStrand(options_.remotePath);
         if (!result.has_value())
         {
-            // interpret error as ok. it either does not exist or something else is wrong, but
+            // Interpret error as ok — either does not exist or something else is wrong;
             // try to rename anyway.
         }
         else
@@ -672,23 +704,17 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
             }
             else
             {
-                sftp_->removeFile(options_.remotePath);
+                std::ignore = sftp_->removeFileInStrand(options_.remotePath);
             }
         }
     }
 
-    auto fut = sftp_->rename(options_.remotePath.generic_string() + options_.tempFileSuffix, options_.remotePath);
-
-    if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
+    const auto renameResult =
+        sftp_->renameInStrand(options_.remotePath.generic_string() + options_.tempFileSuffix, options_.remotePath);
+    if (!renameResult.has_value())
     {
-        Log::error("Failed to rename remote sftp file: timeout");
-        return std::unexpected(Error{.type = ErrorType::FutureTimeout});
-    }
-    const auto result = fut.get();
-    if (!result.has_value())
-    {
-        Log::error("Failed to rename remote sftp file: {}", result.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
+        Log::error("Failed to rename remote sftp file: {}", renameResult.error().message);
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
     }
 
     // Preserve the local file's mtime on the remote file so subsequent syncs
@@ -706,15 +732,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
             attrs.flags = SSH_FILEXFER_ATTR_ACMODTIME;
             attrs.atime = mtimeSecs;
             attrs.mtime = mtimeSecs;
-            auto mtimeFut = sftp_->stat(options_.remotePath, &attrs);
-            if (mtimeFut.wait_for(options_.futureTimeout) != std::future_status::ready)
-            {
-                Log::warn(
-                    "UploadOperation: Timed out setting mtime on '{}'.",
-                    options_.remotePath.generic_string()
-                );
-            }
-            else if (const auto mtimeResult = mtimeFut.get(); !mtimeResult.has_value())
+            const auto mtimeResult = sftp_->statInStrand(options_.remotePath, &attrs);
+            if (!mtimeResult.has_value())
             {
                 Log::warn(
                     "UploadOperation: Failed to set mtime on '{}': {}.",
@@ -732,12 +751,6 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
             );
         }
     }
-
-    Log::debug(
-        "UploadOperation: Finalized upload of '{}' to '{}'.",
-        options_.remotePath.generic_string(),
-        options_.localPath.generic_string()
-    );
     return {};
 }
 

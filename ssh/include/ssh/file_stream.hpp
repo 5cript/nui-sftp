@@ -110,6 +110,11 @@ namespace SecureShell
         std::future<std::expected<void, SftpError>> write(std::string_view data) override;
 
         /**
+         * @brief In-strand variant of write. Must be called from within the processing thread.
+         */
+        std::expected<void, SftpError> writeInStrand(std::string_view data) override;
+
+        /**
          * @brief Returns the maximum number of bytes that can be written in a single pure write operation.
          * This limit is not necessary to uphold for the write function of this class.
          *
@@ -139,7 +144,27 @@ namespace SecureShell
             std::function<bool(SignedSizeType)> onRead
         ) override;
 
+        /**
+         * @brief In-strand variant of readAsync. Must be called from within the processing thread.
+         */
+        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> readAsyncInStrand(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<bool(SignedSizeType)> onRead
+        ) override;
+
         std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+            SignedSizeType totalFileSize,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<SignedSizeType(SignedSizeType)> doRead
+        ) override;
+
+        /**
+         * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
+         */
+        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,

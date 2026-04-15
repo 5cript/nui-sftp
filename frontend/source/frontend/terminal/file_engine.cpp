@@ -316,7 +316,9 @@ void FileEngine::addBulkDownload(
 {
     Log::info("Requesting bulk download for {} entries", entries.size());
 
-    if (entries.size() != operationIds.size())
+    // operationIds carries one id per entry plus one dedicated aggregate-bulk-card id
+    // at the back — see OperationQueue::addBulkDownloadOperation for rationale.
+    if (entries.size() + 1 != operationIds.size())
     {
         Log::error("addBulkDownload: entries and operationIds size mismatch");
         onBulkCreated(false, "entries and operationIds size mismatch");
@@ -383,7 +385,9 @@ void FileEngine::addBulkUpload(
 {
     Log::info("Requesting bulk upload for {} entries", entries.size());
 
-    if (entries.size() != operationIds.size())
+    // operationIds carries one id per entry plus one dedicated aggregate-bulk-card id
+    // at the back — see OperationQueue::addBulkUploadOperation for rationale.
+    if (entries.size() + 1 != operationIds.size())
     {
         Log::error("addBulkUpload: entries and operationIds size mismatch");
         onBulkCreated(false, "entries and operationIds size mismatch");

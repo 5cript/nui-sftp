@@ -184,13 +184,23 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
         auto self = weak.lock();
         if (!self)
             return;
-        self->hub_->callRemote(
-            name,
-            SharedData::ScanProgress{
-                .operationId = operationId,
-                .totalBytes = totalBytes,
-                .currentIndex = currentIndex,
-                .totalScanned = totalScanned,
+        // May be invoked from the SFTP processing strand (batched umbrella) — marshal the
+        // RPC call back onto the asio strand that owns the hub.
+        self->within_strand_do(
+            [weak, name, operationId, totalBytes, currentIndex, totalScanned]()
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::ScanProgress{
+                        .operationId = operationId,
+                        .totalBytes = totalBytes,
+                        .currentIndex = currentIndex,
+                        .totalScanned = totalScanned,
+                    }
+                );
             }
         );
     };
@@ -222,18 +232,36 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
         auto self = weak.lock();
         if (!self)
             return;
-        self->hub_->callRemote(
-            name,
-            SharedData::BulkProgress{
-                .operationId = operationId,
-                .currentFile = currentFile.string(),
-                .fileCurrentIndex = fileCurrentIndex,
-                .fileCount = fileCount,
-                .currentFileBytes = currentFileBytes,
-                .currentFileTotalBytes = currentFileTotalBytes,
-                .bytesCurrent = bytesCurrent,
-                .bytesTotal = bytesTotal,
-                .bytesPerSecond = bytesPerSecond,
+        self->within_strand_do(
+            [weak,
+             name,
+             operationId,
+             currentFile,
+             fileCurrentIndex,
+             fileCount,
+             currentFileBytes,
+             currentFileTotalBytes,
+             bytesCurrent,
+             bytesTotal,
+             bytesPerSecond]()
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::BulkProgress{
+                        .operationId = operationId,
+                        .currentFile = currentFile.string(),
+                        .fileCurrentIndex = fileCurrentIndex,
+                        .fileCount = fileCount,
+                        .currentFileBytes = currentFileBytes,
+                        .currentFileTotalBytes = currentFileTotalBytes,
+                        .bytesCurrent = bytesCurrent,
+                        .bytesTotal = bytesTotal,
+                        .bytesPerSecond = bytesPerSecond,
+                    }
+                );
             }
         );
     };
@@ -325,37 +353,99 @@ void OperationQueue::deepPause(bool pause)
 
 bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue)
 {
-    // Assumed in strand
+    // Assumed in (asio) strand.
 
     const auto updateCount = std::min(queue.size(), static_cast<std::size_t>(parallelism_));
 
     if (updateCount == 0)
         return false;
 
-    bool moreWork = false;
-    bool previousWasBarrier = false;
-    for (std::size_t i = 0; i < updateCount; ++i)
+    // Collect the indices we are allowed to advance this cycle — barrier ops stop the run
+    // before the next iteration.
+    std::vector<std::size_t> eligible;
+    eligible.reserve(updateCount);
     {
-        if (previousWasBarrier)
-            break;
-
-        auto& [id, operation] = queue[i];
-        previousWasBarrier = operation->isBarrier();
-
-        const auto workResult = operation->work();
-        if (!workResult.has_value())
+        bool previousWasBarrier = false;
+        for (std::size_t idx = 0; idx < updateCount; ++idx)
         {
-            completeOperation(
-                makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, workResult.error())
-            );
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(i));
+            if (previousWasBarrier)
+                break;
+            eligible.push_back(idx);
+            previousWasBarrier = queue[idx].second->isBarrier();
+        }
+    }
+    if (eligible.empty())
+        return false;
+
+    // Any strand-using op lets us share a single SFTP processing-thread umbrella across
+    // every eligible op's workInStrand() call.  Pure-local ops run directly on the caller.
+    SecureShell::ProcessingStrand* strand = nullptr;
+    for (const auto idx : eligible)
+    {
+        auto* operation = queue[idx].second.get();
+        if (operation->usesStrand())
+        {
+            strand = operation->strand();
+            if (strand)
+                break;
+        }
+    }
+
+    struct ItemResult
+    {
+        std::size_t queueIndex;
+        std::expected<Operation::WorkStatus, Operation::Error> result;
+    };
+
+    auto runBatch = [&queue, &eligible]()
+    {
+        std::vector<ItemResult> out;
+        out.reserve(eligible.size());
+        for (const auto idx : eligible)
+        {
+            auto* operation = queue[idx].second.get();
+            auto res = operation->usesStrand() ? operation->workInStrand() : operation->work();
+            const bool terminal = !res.has_value() || res.value() == Operation::WorkStatus::Complete;
+            out.push_back({idx, std::move(res)});
+            // Match the single-completion-per-workQueue-cycle semantics of the original
+            // sequential driver: stop as soon as anybody completes or fails so subsequent
+            // ops see the resulting queue mutation on the next cycle.
+            if (terminal)
+                break;
+        }
+        return out;
+    };
+
+    std::vector<ItemResult> results;
+    if (strand)
+    {
+        auto fut = strand->pushPromiseTask(runBatch);
+        results = fut.get();
+    }
+    else
+    {
+        results = runBatch();
+    }
+
+    bool moreWork = false;
+    for (auto& item : results)
+    {
+        auto& [id, operation] = queue[item.queueIndex];
+
+        if (!item.result.has_value())
+        {
+            completeOperation(makeCompletedOperation(
+                OperationQueue::CompletionReason::Failed, id, *operation, item.result.error()
+            ));
+            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
 
-        const auto workStatus = workResult.value();
+        const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            auto* next = (i + 1 < queue.size()) ? queue[i + 1].second.get() : nullptr;
+            auto* next =
+                (item.queueIndex + 1 < queue.size()) ? queue[item.queueIndex + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {
                 if (next && next->type() == SharedData::OperationType::BulkDownload)
@@ -414,7 +504,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             }
 
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
-            queue.pop_front();
+            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
         else if (workStatus == Operation::WorkStatus::MoreWork)
@@ -515,14 +605,23 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            self->hub_->callRemote(
-                name,
-                SharedData::TransferProgress{
-                    .operationId = operationId,
-                    .min = min,
-                    .max = max,
-                    .current = current,
-                    .bytesPerSecond = bytesPerSecond,
+            // Invoked from the SFTP processing strand via workInStrand — marshal back.
+            self->within_strand_do(
+                [weak, name, operationId, min, max, current, bytesPerSecond]()
+                {
+                    auto self = weak.lock();
+                    if (!self)
+                        return;
+                    self->hub_->callRemote(
+                        name,
+                        SharedData::TransferProgress{
+                            .operationId = operationId,
+                            .min = min,
+                            .max = max,
+                            .current = current,
+                            .bytesPerSecond = bytesPerSecond,
+                        }
+                    );
                 }
             );
         };
@@ -609,7 +708,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
 std::size_t OperationQueue::addBulkDownloadOperation(
     SecureShell::SftpSession& sftp,
     SharedData::BulkAddRequest const& request,
-    std::function<Ids::OperationId(std::size_t)> operationIdFor
+    std::function<Ids::OperationId(std::size_t)> operationIdFor,
+    Ids::OperationId bulkCardId
 )
 {
     // Assumed in strand.  The file portion is collapsed into a SINGLE
@@ -667,11 +767,12 @@ std::size_t OperationQueue::addBulkDownloadOperation(
 
     if (!files.empty())
     {
-        // One operationId for the aggregate bulk-download card.  The first
-        // file entry drives the UI's "localPath"/"remotePath" labels for
-        // the card — arbitrary pick; the per-file paths are visible in
-        // progress events as each file uploads.
-        const auto bulkOpId = operationIdFor(0);
+        // Dedicated operationId for the aggregate bulk-download card, reserved
+        // by the frontend separately from the per-entry ids to avoid collisions
+        // (entry-0's id would clash when entry 0 is a directory). The first
+        // file entry drives the UI's "localPath"/"remotePath" labels for the
+        // card — arbitrary pick; per-file paths show up in progress events.
+        const auto bulkOpId = bulkCardId;
         const auto firstSrc = files.front().remoteSrc;
         const auto firstDst = files.front().localDst;
 
@@ -770,14 +871,22 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            self->hub_->callRemote(
-                name,
-                SharedData::TransferProgress{
-                    .operationId = operationId,
-                    .min = min,
-                    .max = max,
-                    .current = current,
-                    .bytesPerSecond = bytesPerSecond,
+            self->within_strand_do(
+                [weak, name, operationId, min, max, current, bytesPerSecond]()
+                {
+                    auto self = weak.lock();
+                    if (!self)
+                        return;
+                    self->hub_->callRemote(
+                        name,
+                        SharedData::TransferProgress{
+                            .operationId = operationId,
+                            .min = min,
+                            .max = max,
+                            .current = current,
+                            .bytesPerSecond = bytesPerSecond,
+                        }
+                    );
                 }
             );
         };
@@ -855,7 +964,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 std::size_t OperationQueue::addBulkUploadOperation(
     SecureShell::SftpSession& sftp,
     SharedData::BulkAddRequest const& request,
-    std::function<Ids::OperationId(std::size_t)> operationIdFor
+    std::function<Ids::OperationId(std::size_t)> operationIdFor,
+    Ids::OperationId bulkCardId
 )
 {
     // Mirrors addBulkDownloadOperation — file portion collapses into one
@@ -908,7 +1018,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
 
     if (!files.empty())
     {
-        const auto bulkOpId = operationIdFor(0);
+        // Separate reserved id — see addBulkDownloadOperation for rationale.
+        const auto bulkOpId = bulkCardId;
         const auto firstSrc = files.front().localSrc;
         const auto firstDst = files.front().remoteDst;
 

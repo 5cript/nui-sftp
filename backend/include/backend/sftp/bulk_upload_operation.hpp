@@ -71,6 +71,13 @@ class BulkUploadOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override;
 
+    // See ScanOperation for rationale — opt out of the queue's batched strand umbrella
+    // until this op is converted to the *InStrand style.
+    bool usesStrand() const noexcept override
+    {
+        return false;
+    }
+
     std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
 
   private:

@@ -52,6 +52,15 @@ namespace SecureShell::Test
                 OnReadFuncT onRead),
             (override)
         );
+        MOCK_METHOD(
+            (std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>),
+            readAsyncInStrand,
+            (SecureShell::IFileStream::SignedSizeType totalFileSize,
+                char* buffer,
+                SecureShell::IFileStream::SignedSizeType bufferSize,
+                OnReadFuncT onRead),
+            (override)
+        );
         using DoReadFuncT =
             std::function<SecureShell::IFileStream::SignedSizeType(SecureShell::IFileStream::SignedSizeType)>;
         MOCK_METHOD(
@@ -63,7 +72,17 @@ namespace SecureShell::Test
                 DoReadFuncT doRead),
             (override)
         );
+        MOCK_METHOD(
+            (std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>),
+            writeAsyncInStrand,
+            (SecureShell::IFileStream::SignedSizeType totalFileSize,
+                char* buffer,
+                SecureShell::IFileStream::SignedSizeType bufferSize,
+                DoReadFuncT doRead),
+            (override)
+        );
         MOCK_METHOD((std::future<std::expected<void, SftpError>>), write, (std::string_view data), (override));
+        MOCK_METHOD((std::expected<void, SftpError>), writeInStrand, (std::string_view data), (override));
         MOCK_METHOD(std::size_t, writeLengthLimit, (), (const, override));
         MOCK_METHOD(std::size_t, readLengthLimit, (), (const, override));
         MOCK_METHOD(sftp_file, release, (), (override));
