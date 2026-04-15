@@ -42,7 +42,8 @@
 #include <frontend/svgs/action-settings.hpp>
 
 #include <nui/frontend/api/throttle.hpp>
-#include <nui/frontend/api/timer.hpp>
+#include <nui/frontend/val.hpp>
+#include <nui/frontend/utility/functions.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
@@ -81,6 +82,7 @@ struct Settings::Implementation
     Nui::Observed<Settings::Section> activeSection{Settings::Section::GeneralSettings};
     Nui::Observed<std::optional<std::string>> activeSession{};
     Nui::Observed<bool> saveInProgress{false};
+    bool applyingToUi{false};
 
     Nui::Observed<std::vector<Settings::SectionSelectorOptions>> sessionSelectors{};
 
@@ -95,7 +97,6 @@ struct Settings::Implementation
     // impractical.
     SessionOptions currentSessionOptions;
 
-    Nui::TimerHandle initialLoadDelay;
     Nui::Observed<bool> wasInitiallyLoaded{false};
     Nui::Observed<bool> initialLoadDone{false};
 
@@ -163,6 +164,8 @@ Settings::Settings(
           multiInputDialog,
           [this]()
           {
+              if (impl_->applyingToUi)
+                  return;
               if (impl_->throttledSave.valid())
                   impl_->throttledSave();
           },
@@ -208,18 +211,27 @@ Settings::Settings(
                 applySettingsToUi();
                 if (!*impl_->wasInitiallyLoaded)
                 {
-                    Nui::setTimeout(
-                        100,
-                        [this]()
-                        {
-                            impl_->wasInitiallyLoaded = true;
-                            Nui::globalEventContext.executeActiveEventsImmediately();
-                        },
-                        [this](Nui::TimerHandle handle)
-                        {
-                            impl_->initialLoadDelay = std::move(handle);
+                    // Three-pass reveal:
+                    //  Frame 1: loader-only tree paints.
+                    //  Frame 2: mount heavy sections() subtree (still covered by loader).
+                    //  Frame 3: hide loader — content is already laid out underneath.
+                    auto raf = Nui::val::global("requestAnimationFrame");
+                    raf(Nui::bind(
+                        [raf, this]() {
+                            raf(Nui::bind(
+                                [raf, this]() {
+                                    impl_->wasInitiallyLoaded = true;
+                                    Nui::globalEventContext.executeActiveEventsImmediately();
+                                    raf(Nui::bind(
+                                        [this]() {
+                                            impl_->initialLoadDone = true;
+                                            Nui::globalEventContext.executeActiveEventsImmediately();
+                                        }
+                                    ));
+                                }
+                            ));
                         }
-                    );
+                    ));
                 }
             }
         }
@@ -303,6 +315,9 @@ void Settings::applySettingsToUi()
         {
             if (!success)
                 return;
+
+            impl_->applyingToUi = true;
+            Nui::ScopeExit clearApplyingFlag{[this]() noexcept { impl_->applyingToUi = false; }};
 
             impl_->sessionSelectors.value().clear();
             for (auto const& [sessionId, session] : impl_->stateHolder->stateCache().sessions)
@@ -565,7 +580,7 @@ Nui::ElementRenderer Settings::operator()()
 
     Log::info("Settings::operator()()");
     Nui::ScopeExit onLeaveOperator(
-        []() noexcept
+        [this]() noexcept
         {
             Log::info("Settings::operator()() complete");
         }
@@ -662,23 +677,7 @@ Nui::ElementRenderer Settings::sections()
                 {
                     return *impl_->activeSection == Section::Session ? "" : "display: none;";
                 }
-            )}(currentSession()),
-            // This is the last thing to be inserted, so use it as a signal that initial load is done.
-            [this](){
-                Nui::setTimeout(
-                    100,
-                    [this]()
-                    {
-                        impl_->initialLoadDone = true;
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    },
-                    [this](Nui::TimerHandle handle)
-                    {
-                        impl_->initialLoadDelay = std::move(handle);
-                    }
-                );
-                return Nui::nil();
-            }()
+            )}(currentSession())
         );
         // clang-format on
     }
@@ -1135,7 +1134,8 @@ void Settings::renameActiveSession()
 
     const auto oldSessionId = **impl_->activeSession;
     impl_->newSessionDialog.open({
-        .onConfirm = [this, oldSessionId](NewSessionDialog::ConfirmResult const& result)
+        .onConfirm =
+            [this, oldSessionId](NewSessionDialog::ConfirmResult const& result)
         {
             if (result.sessionName.empty() || result.sessionName == oldSessionId)
                 return;
@@ -1205,7 +1205,8 @@ void Settings::copyActiveSession()
         ? impl_->stateHolder->stateCache().sessions.at(sourceSessionId).icon
         : std::string{"laptop"};
     impl_->newSessionDialog.open({
-        .onConfirm = [this, sourceSessionId](NewSessionDialog::ConfirmResult const& result)
+        .onConfirm =
+            [this, sourceSessionId](NewSessionDialog::ConfirmResult const& result)
         {
             if (result.sessionName.empty() || result.sessionName == sourceSessionId)
                 return;

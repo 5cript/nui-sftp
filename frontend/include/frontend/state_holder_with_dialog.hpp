@@ -46,6 +46,7 @@ inline void loadState(
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "persistenceLoadWarning",
                 });
+                holder.clearWarnings();
             }
             return onLoad(true, holder.stateCache().fullyResolve());
         }

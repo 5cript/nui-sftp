@@ -51,6 +51,12 @@ namespace Persistence
             onSaveComplete(std::nullopt);
         })(nlohmann::json(stateCache_).dump());
     }
+    void StateHolder::clearWarnings(std::function<void()> const& onComplete)
+    {
+        Nui::RpcClient::getRemoteCallableWithBackChannel("StateHolder::clearWarnings", [onComplete](Nui::val const&) {
+            onComplete();
+        })();
+    }
     void StateHolder::loadModifySave(
         std::function<void(State&)> modifier,
         std::function<void(std::optional<std::string> const&)> onComplete
