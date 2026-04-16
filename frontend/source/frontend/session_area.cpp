@@ -321,6 +321,122 @@ void SessionArea::addSession(std::string const& name)
     );
 }
 
+void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& sshOptions)
+{
+    using namespace std::string_literals;
+
+    loadState(
+        *impl_->stateHolder,
+        impl_->confirmDialog,
+        [this, sshOptions](bool success, Persistence::State const& state)
+        {
+            if (!success)
+            {
+                Log::error("Failed to load state while adding direct connect session");
+                return;
+            }
+
+            Persistence::SessionOptions engine =
+                Persistence::SessionOptions::create(std::nullopt, Persistence::TerminalEngineType::ssh);
+            auto& engineSsh = std::get<Persistence::SshSessionOptions>(engine.engine);
+            engineSsh.host = sshOptions.host;
+            engineSsh.port = sshOptions.port;
+            engineSsh.user = sshOptions.user;
+            engineSsh.sshKeyPrivate = sshOptions.sshKeyPrivate;
+            engineSsh.sshKeyPublic = sshOptions.sshKeyPublic;
+            engineSsh.openSftpByDefault = sshOptions.openSftpByDefault;
+            engineSsh.remoteFavorites = sshOptions.remoteFavorites;
+
+            auto fillDefaults = [](auto& target, auto const& source)
+            {
+                if (!target.hasReference())
+                    return;
+                auto iter = source.find(target.ref());
+                if (iter != source.end())
+                    Persistence::useDefaultsFrom(target, iter->second);
+            };
+            fillDefaults(engine.terminalOptions, state.terminalOptions);
+            fillDefaults(engine.termios, state.termios);
+            fillDefaults(engine.queueOptions, state.queueOptions);
+            fillDefaults(engineSsh.sshOptions, state.sshOptions);
+            fillDefaults(engineSsh.sftpOptions, state.sftpOptions);
+
+            std::string displayName = engineSsh.host;
+            if (engineSsh.user)
+                displayName = *engineSsh.user + "@" + displayName;
+            if (engineSsh.port)
+                displayName += ":" + std::to_string(*engineSsh.port);
+
+            const auto tabId = impl_->tabs.add(displayName, true);
+            Log::info(
+                "Adding direct connect session: {} with layout {}. Tab ID: {}",
+                displayName,
+                impl_->toolbar->selectedLayout(),
+                tabId
+            );
+
+            impl_->sessions.emplace_back(
+                std::make_unique<Session>(
+                    impl_->stateHolder,
+                    impl_->events,
+                    engine,
+                    state.uiOptions,
+                    displayName,
+                    impl_->toolbar->selectedLayout(),
+                    impl_->newItemAskDialog,
+                    impl_->confirmDialog,
+                    impl_->filePropertyDialog,
+                    [this](Session const* ptr)
+                    {
+                        removeSession(ptr->tabId());
+                    },
+                    [this](Session const* ptr, std::string const& desiredTitle) -> std::string
+                    {
+                        std::string disambiguatedTitle = desiredTitle;
+                        int suffix = 1;
+                        bool titleExists = false;
+
+                        do
+                        {
+                            titleExists = false;
+                            for (auto const& session : impl_->sessions.value())
+                            {
+                                if (auto tabTitle = session->tabTitle().lock();
+                                    tabTitle && tabTitle->value() == disambiguatedTitle)
+                                {
+                                    titleExists = true;
+                                    disambiguatedTitle = desiredTitle + " ("s + std::to_string(suffix) + ")"s;
+                                    ++suffix;
+                                    break;
+                                }
+                            }
+                        } while (titleExists);
+
+                        impl_->tabs.modifyTabById(
+                            ptr->tabId(),
+                            [&disambiguatedTitle](ScriptNuiComponents::Tabs::Tab* tab)
+                            {
+                                if (!tab)
+                                {
+                                    Log::error("Tab not found for modifying title.");
+                                    return;
+                                }
+                                tab->title = disambiguatedTitle;
+                            }
+                        );
+                        return disambiguatedTitle;
+                    },
+                    impl_->sessions.size() == 0,
+                    tabId
+                )
+            );
+
+            setSelected(tabId);
+        },
+        "Cannot add direct connect session."
+    );
+}
+
 std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
 {
     Session* activeSession = getActiveSession();

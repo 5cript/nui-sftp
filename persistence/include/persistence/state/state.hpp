@@ -31,6 +31,7 @@ namespace Persistence
         UiOptions uiOptions{};
         LogOptions logOptions{};
         LocalizationOptions localizationOptions{};
+        std::optional<SshSessionOptions> lastDirectConnect{};
 
         State fullyResolve() const;
     };
@@ -48,6 +49,7 @@ namespace Persistence
             localizationOptions,
             queueOptions,
             fileTrackingOptions,
-            localFilesystemOptions)
+            localFilesystemOptions,
+            lastDirectConnect)
     )
 }
