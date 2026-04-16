@@ -31,6 +31,7 @@
 
 #ifdef __linux__
 #    include <signal.h>
+#    include <unistd.h>
 #endif
 
 #ifndef NDEBUG
@@ -322,10 +323,18 @@ void Main::registerInitialWarningGetter()
         {
             Log::debug("Received request for initial persistence load warning.");
 
+            const bool runningAsRoot =
+#ifdef __linux__
+                ::geteuid() == 0;
+#else
+                false;
+#endif
+
             hub_.callRemote(
                 responseId,
                 nlohmann::json{
                     {"warning", initialPersistenceLoadWarning_},
+                    {"isRoot", runningAsRoot},
                 }
             );
         }
