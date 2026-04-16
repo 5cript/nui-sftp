@@ -116,12 +116,12 @@ void SessionManager::addSession(
 
             std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "Key phrase"};
             std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "Password"};
-            auto maybeSshSession = makeSession(
+            auto maybeSshSession = SecureShell::makeSession(
                 sessionOptions,
                 askPassDefault,
                 &askPassUserDataKeyPhrase,
                 &askPassUserDataPassword,
-                &pwCache_,
+                nullptr,
                 // Self destruct callback
                 [weak = weak_from_this(), sessionId]()
                 {
