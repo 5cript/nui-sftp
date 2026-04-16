@@ -71,20 +71,35 @@ void MainPage::onSetupComplete()
         "Main::getInitialPersistenceLoadWarning",
         [this](Nui::val response)
         {
-            if (response.hasOwnProperty("warning"))
+            auto showPersistenceWarning = [this, response]()
             {
+                if (!response.hasOwnProperty("warning"))
+                    return;
                 const auto warning = response["warning"].as<std::string>();
-                if (!warning.empty())
-                {
-                    impl_->confirmDialog.open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                        .headerText = language->get("persistence", "warningLoadingState"),
-                        .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
-                        .buttons = ConfirmDialog::Button::Ok,
-                        .neverShowAgainId = "persistenceLoadWarning",
-                    });
-                }
+                if (warning.empty())
+                    return;
+                impl_->confirmDialog.open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                    .headerText = language->get("persistence", "warningLoadingState"),
+                    .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
+                    .buttons = ConfirmDialog::Button::Ok,
+                    .neverShowAgainId = "persistenceLoadWarning",
+                });
+            };
+
+            if (response.hasOwnProperty("isRoot") && response["isRoot"].as<bool>())
+            {
+                impl_->confirmDialog.open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("rootWarning", "header"),
+                    .text = language->get("rootWarning", "text"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                    .onClose = [showPersistenceWarning](auto) { showPersistenceWarning(); },
+                });
+                return;
             }
+
+            showPersistenceWarning();
         }
     );
 }
