@@ -158,7 +158,7 @@ struct Session::Implementation
                     std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
                     std::make_unique<RemoteSideModel>(
                         this->uiOptions,
-                        std::get<Persistence::SshSessionOptions>(engineOptions.engine).remoteFavorites,
+                        std::get<Persistence::SshSessionOptions>(this->engineOptions.engine).remoteFavorites,
                         confirmDialog,
                         inputDialog,
                         filePropertyDialog
