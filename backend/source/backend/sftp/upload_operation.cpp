@@ -414,7 +414,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
-    const auto tempPath = options_.remotePath.generic_string() + options_.tempFileSuffix;
+    auto tempPath = options_.remotePath;
+    tempPath += options_.tempFileSuffix;
     const auto tempResult = sftp_->lstatInStrand(tempPath);
 
     // local file perms
@@ -465,13 +466,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(std::filesystem::path{tempPath}.parent_path());
+        if (auto res = ensureRemoteDirectoryExistsInStrand(tempPath.parent_path());
             !res.has_value())
             return std::unexpected(res.error());
     }
 
     // Open temp file part regularly, freshly:
-    Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath);
+    Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath.generic_string());
     const auto openResult = sftp_->openFileInStrand(
         tempPath,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
@@ -709,8 +710,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
         }
     }
 
-    const auto renameResult =
-        sftp_->renameInStrand(options_.remotePath.generic_string() + options_.tempFileSuffix, options_.remotePath);
+    auto tempPath = options_.remotePath;
+    tempPath += options_.tempFileSuffix;
+    const auto renameResult = sftp_->renameInStrand(tempPath, options_.remotePath);
     if (!renameResult.has_value())
     {
         Log::error("Failed to rename remote sftp file: {}", renameResult.error().message);

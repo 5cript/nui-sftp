@@ -1,6 +1,7 @@
 #include <backend/rpc_filesystem.hpp>
 #include <log/log.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <utility/path_utf.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
@@ -159,18 +160,19 @@ void RpcFilesystem::registerRemove()
                 }
 
                 const bool recursive = parameters.value("recursive", false);
-                const auto path = parameters["path"].get<std::string>();
+                const auto pathUtf8 = parameters["path"].get<std::string>();
+                const auto path = Utility::pathFromUtf8(pathUtf8);
 
                 if (!recursive)
                 {
                     std::error_code ec;
                     if (std::filesystem::remove(path, ec))
                     {
-                        Log::info("Successfully removed file: {}", path);
+                        Log::info("Successfully removed file: {}", pathUtf8);
                         return reply({{"success", true}});
                     }
 
-                    Log::error("Failed to remove file: {}: {}", path, ec.message());
+                    Log::error("Failed to remove file: {}: {}", pathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
 
@@ -178,11 +180,13 @@ void RpcFilesystem::registerRemove()
                 const auto filesRemoved = std::filesystem::remove_all(path, ec);
                 if (ec)
                 {
-                    Log::error("Failed to recursively remove path: {}: {}", path, ec.message());
+                    Log::error("Failed to recursively remove path: {}: {}", pathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
                 Log::info(
-                    "Successfully recursively removed path: {} ({} files/directories removed)", path, filesRemoved
+                    "Successfully recursively removed path: {} ({} files/directories removed)",
+                    pathUtf8,
+                    filesRemoved
                 );
                 return reply({{"success", true}, {"removedCount", filesRemoved}});
             }
@@ -210,10 +214,11 @@ void RpcFilesystem::registerRemoveMultiple()
                 }
 
                 const bool recursive = parameters.value("recursive", false);
-                const auto paths = parameters["paths"].get<std::vector<std::string>>();
+                const auto pathsUtf8 = parameters["paths"].get<std::vector<std::string>>();
                 size_t removedCount = 0;
-                for (const auto& path : paths)
+                for (const auto& pathUtf8 : pathsUtf8)
                 {
+                    const auto path = Utility::pathFromUtf8(pathUtf8);
                     std::error_code ec;
                     if (recursive)
                     {
@@ -227,8 +232,8 @@ void RpcFilesystem::registerRemoveMultiple()
 
                     if (ec)
                     {
-                        Log::error("Failed to remove path '{}': {}", path, ec.message());
-                        return reply.error(fmt::format("Failed to remove path '{}': {}", path, ec.message()));
+                        Log::error("Failed to remove path '{}': {}", pathUtf8, ec.message());
+                        return reply.error(fmt::format("Failed to remove path '{}': {}", pathUtf8, ec.message()));
                     }
                 }
                 Log::info("Successfully removed all specified paths.");
@@ -258,18 +263,20 @@ void RpcFilesystem::registerRename()
                     return reply.error("Missing required parameters 'oldPath' and/or 'newPath'.");
                 }
 
-                const auto oldPath = parameters["oldPath"].get<std::string>();
-                const auto newPath = parameters["newPath"].get<std::string>();
+                const auto oldPathUtf8 = parameters["oldPath"].get<std::string>();
+                const auto newPathUtf8 = parameters["newPath"].get<std::string>();
+                const auto oldPath = Utility::pathFromUtf8(oldPathUtf8);
+                const auto newPath = Utility::pathFromUtf8(newPathUtf8);
 
                 std::error_code ec;
                 std::filesystem::rename(oldPath, newPath, ec);
                 if (ec)
                 {
-                    Log::error("Failed to rename from '{}' to '{}': {}", oldPath, newPath, ec.message());
+                    Log::error("Failed to rename from '{}' to '{}': {}", oldPathUtf8, newPathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
 
-                Log::info("Successfully renamed from '{}' to '{}'", oldPath, newPath);
+                Log::info("Successfully renamed from '{}' to '{}'", oldPathUtf8, newPathUtf8);
                 return reply({{"success", true}});
             }
         );
@@ -289,22 +296,22 @@ void RpcFilesystem::registerListFiles()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                auto directoryPath = std::filesystem::path{parameters["path"].get<std::string>()};
+                auto directoryPath = Utility::pathFromUtf8(parameters["path"].get<std::string>());
                 const auto fileNameOnly = parameters.value("fileNameOnly", false);
                 nlohmann::json fileList = nlohmann::json::array();
 
 #ifdef _WIN32
                 if (directoryPath == directoryPath.root_path())
-                    directoryPath = std::filesystem::path(directoryPath.string() + "/");
+                    directoryPath += "/";
 #endif
-                Log::info("Listing files in directory: {}", directoryPath.generic_string());
+                Log::info("Listing files in directory: {}", Utility::pathToUtf8Generic(directoryPath));
 
                 std::error_code ec;
                 auto iter = std::filesystem::directory_iterator(directoryPath, ec);
                 if (ec)
                 {
                     Log::error(
-                        "Failed to list files in directory '{}': {}", directoryPath.generic_string(), ec.message()
+                        "Failed to list files in directory '{}': {}", Utility::pathToUtf8Generic(directoryPath), ec.message()
                     );
                     return reply.error(ec.message());
                 }
@@ -315,18 +322,16 @@ void RpcFilesystem::registerListFiles()
                 for (const auto& entry : iter)
                 {
                     const auto entryPath = entry.path();
-                    const auto entryPathStr = entryPath.c_str();
 
                     SharedData::DirectoryEntry dirEntry{};
-                    const auto u8 =
-                        fileNameOnly ? entryPath.filename().generic_u8string() : entryPath.generic_u8string();
-                    dirEntry.path = std::string{u8.begin(), u8.end()};
+                    dirEntry.path =
+                        Utility::pathToUtf8Generic(fileNameOnly ? entryPath.filename() : entryPath);
                     dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
                     dirEntry.permissions = entry.symlink_status().permissions();
 
 #ifndef _WIN32
                     struct stat lstSt{};
-                    if (::lstat(entryPathStr, &lstSt) == 0)
+                    if (::lstat(entryPath.c_str(), &lstSt) == 0)
                         fillFromPosixStatLean(dirEntry, lstSt, cache);
 #endif
 
@@ -349,7 +354,7 @@ void RpcFilesystem::registerListFiles()
                         resolved->permissions = entry.status().permissions();
 #ifndef _WIN32
                         struct stat stSt{};
-                        if (::stat(entryPathStr, &stSt) == 0)
+                        if (::stat(entryPath.c_str(), &stSt) == 0)
                             fillFromPosixStatLean(*resolved, stSt, cache);
 #endif
                         dirEntry.resolvedTarget = std::move(resolved);
@@ -358,7 +363,7 @@ void RpcFilesystem::registerListFiles()
                     fileList.push_back(nlohmann::json(dirEntry));
                 }
 
-                Log::info("Successfully listed files in directory '{}'", directoryPath.generic_string());
+                Log::info("Successfully listed files in directory '{}'", Utility::pathToUtf8Generic(directoryPath));
                 return reply({{"success", true}, {"files", fileList}});
             }
         );
@@ -385,17 +390,18 @@ void RpcFilesystem::registerCreateFile()
                     return reply.error("Missing required parameter 'filePath'.");
                 }
 
-                const auto filePath = parameters["filePath"].get<std::string>();
+                const auto filePathUtf8 = parameters["filePath"].get<std::string>();
+                const auto filePath = Utility::pathFromUtf8(filePathUtf8);
 
                 std::error_code ec;
                 std::ofstream fileStream(filePath, std::ios_base::noreplace | std::ios_base::binary);
                 if (!fileStream)
                 {
-                    Log::error("Failed to create file '{}': {}", filePath, ec.message());
+                    Log::error("Failed to create file '{}': {}", filePathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
 
-                Log::info("Successfully created file '{}'", filePath);
+                Log::info("Successfully created file '{}'", filePathUtf8);
                 return reply({{"success", true}});
             }
         );
@@ -424,17 +430,18 @@ void RpcFilesystem::registerCreateDirectory()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                const auto directoryPath = parameters["path"].get<std::string>();
+                const auto directoryPathUtf8 = parameters["path"].get<std::string>();
+                const auto directoryPath = Utility::pathFromUtf8(directoryPathUtf8);
 
                 std::error_code ec;
                 std::filesystem::create_directory(directoryPath, ec);
                 if (ec)
                 {
-                    Log::error("Failed to create directory '{}': {}", directoryPath, ec.message());
+                    Log::error("Failed to create directory '{}': {}", directoryPathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
 
-                Log::info("Successfully created directory '{}'", directoryPath);
+                Log::info("Successfully created directory '{}'", directoryPathUtf8);
                 return reply({{"success", true}});
             }
         );
@@ -458,20 +465,16 @@ void RpcFilesystem::registerProperties()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                const auto path = std::filesystem::path{parameters["path"].get<std::string>()};
-                const auto pathStr = path.c_str();
+                const auto path = Utility::pathFromUtf8(parameters["path"].get<std::string>());
 
                 SharedData::DirectoryEntry entry{};
-                {
-                    const auto u8 = path.generic_u8string();
-                    entry.path = std::string{u8.begin(), u8.end()};
-                }
+                entry.path = Utility::pathToUtf8Generic(path);
 
                 std::error_code symEc;
                 const auto symStatus = std::filesystem::symlink_status(path, symEc);
                 if (symEc)
                 {
-                    Log::error("Failed to get properties for path '{}': {}", path.generic_string(), symEc.message());
+                    Log::error("Failed to get properties for path '{}': {}", Utility::pathToUtf8Generic(path), symEc.message());
                     return reply.error(symEc.message());
                 }
                 entry.type = SharedData::fileTypeFromStdFilesystemType(symStatus.type());
@@ -479,10 +482,10 @@ void RpcFilesystem::registerProperties()
 
 #ifndef _WIN32
                 struct stat lstSt{};
-                if (::lstat(pathStr, &lstSt) == 0)
+                if (::lstat(path.c_str(), &lstSt) == 0)
                     fillFromPosixStat(entry, lstSt);
 #    ifdef __linux__
-                fillBirthTime(entry, pathStr, AT_SYMLINK_NOFOLLOW);
+                fillBirthTime(entry, path.c_str(), AT_SYMLINK_NOFOLLOW);
 #    endif
 #endif
 
@@ -511,16 +514,16 @@ void RpcFilesystem::registerProperties()
 
 #ifndef _WIN32
                     struct stat stSt{};
-                    if (::stat(pathStr, &stSt) == 0)
+                    if (::stat(path.c_str(), &stSt) == 0)
                         fillFromPosixStat(*resolved, stSt);
 #    ifdef __linux__
-                    fillBirthTime(*resolved, pathStr, 0 /*follow symlinks*/);
+                    fillBirthTime(*resolved, path.c_str(), 0 /*follow symlinks*/);
 #    endif
 #endif
                     entry.resolvedTarget = std::move(resolved);
                 }
 
-                Log::info("Successfully retrieved properties for path '{}'", path.generic_string());
+                Log::info("Successfully retrieved properties for path '{}'", Utility::pathToUtf8Generic(path));
                 return reply({{"success", true}, {"entry", nlohmann::json(entry)}});
             }
         );
@@ -537,14 +540,16 @@ void RpcFilesystem::registerGetHome()
                 if (options.homeOverride.has_value())
                 {
                     std::filesystem::path homePath = *options.homeOverride;
-                    Log::info("Returning overridden home directory path: {}", homePath.generic_string());
-                    return reply({{"success", true}, {"path", homePath.generic_string()}});
+                    const auto homePathUtf8 = Utility::pathToUtf8Generic(homePath);
+                    Log::info("Returning overridden home directory path: {}", homePathUtf8);
+                    return reply({{"success", true}, {"path", homePathUtf8}});
                 }
 
                 auto home = Nui::resolvePath("%userprofile%");
 
-                Log::info("Returning initial directory path: {}", home.generic_string());
-                return reply({{"success", true}, {"path", home.generic_string()}});
+                const auto homeUtf8 = Utility::pathToUtf8Generic(home);
+                Log::info("Returning initial directory path: {}", homeUtf8);
+                return reply({{"success", true}, {"path", homeUtf8}});
             }
         );
 }
@@ -561,16 +566,17 @@ void RpcFilesystem::registerDoesExist()
                     return reply.error("Missing required parameter 'path'.");
                 }
 
-                const auto path = parameters["path"].get<std::string>();
+                const auto pathUtf8 = parameters["path"].get<std::string>();
+                const auto path = Utility::pathFromUtf8(pathUtf8);
                 std::error_code ec;
                 const auto status = std::filesystem::exists(path, ec);
                 if (ec)
                 {
-                    Log::error("Failed to get properties for path '{}': {}", path, ec.message());
+                    Log::error("Failed to get properties for path '{}': {}", pathUtf8, ec.message());
                     return reply.error(ec.message());
                 }
 
-                Log::info("Successfully retrieved existence for path '{}'", path);
+                Log::info("Successfully retrieved existence for path '{}'", pathUtf8);
                 return reply({{"success", true}, {"exists", status}});
             }
         );
@@ -588,15 +594,15 @@ void RpcFilesystem::registerDoesExistBatch()
             {
                 std::vector<bool> results;
                 results.reserve(paths.size());
-                for (auto const& path : paths)
+                for (auto const& pathUtf8 : paths)
                 {
                     std::error_code ec;
-                    const auto status = std::filesystem::exists(path, ec);
+                    const auto status = std::filesystem::exists(Utility::pathFromUtf8(pathUtf8), ec);
                     if (ec)
                     {
                         Log::warn(
                             "RpcFilesystem::existsBatch: stat failed for '{}': {} (treating as not-exists)",
-                            path,
+                            pathUtf8,
                             ec.message()
                         );
                         results.push_back(false);
@@ -646,7 +652,7 @@ void RpcFilesystem::registerOpen()
             [this](RpcHelper::RpcOnce&& reply, std::string const& filePath, bool openWith)
             {
                 Log::info("RpcFilesystem::open called for file: {}", filePath);
-                auto result = opener_->openFile(std::filesystem::path{filePath}, openWith);
+                auto result = opener_->openFile(Utility::pathFromUtf8(filePath), openWith);
                 if (!result)
                 {
                     Log::error("Failed to open file '{}': {}", filePath, result.error());
