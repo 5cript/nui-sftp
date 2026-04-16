@@ -1341,7 +1341,8 @@ Nui::ElementRenderer Settings::currentSession()
                         impl_->currentSessionOptions.sshSessionOptions.user(language->getObserved("settings", "sessionOptions", "user")),
                         impl_->currentSessionOptions.sshSessionOptions.sshKeyPrivate(language->getObserved("settings", "sessionOptions", "sshKeyPrivate")),
                         impl_->currentSessionOptions.sshSessionOptions.sshKeyPublic(language->getObserved("settings", "sessionOptions", "sshKeyPublic")),
-                        impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(language->getObserved("settings", "sessionOptions", "openSftpByDefault"))
+                        impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(language->getObserved("settings", "sessionOptions", "openSftpByDefault")),
+                        impl_->currentSessionOptions.sshSessionOptions.remoteFavorites(language->getObserved("settings", "sessionOptions", "remoteFavorites"))
                     )
                 )
             ),

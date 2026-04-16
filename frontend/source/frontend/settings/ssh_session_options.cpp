@@ -42,6 +42,12 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, Inpu
           onChange,
           valueReset(openSftpByDefault, onChange, Persistence::SshSessionOptions{}.openSftpByDefault)
       }
+    , remoteFavorites{
+          language->getObserved("settings", "sessionSettings", "remoteFavoritesHelpText"),
+          inputDialog,
+          onChange,
+          valueReset(remoteFavorites, onChange, Persistence::SshSessionOptions{}.remoteFavorites)
+      }
     , sshOptions{onChange, inputDialog, multiInputDialog}
     , sftpOptions{onChange}
 {}
@@ -54,6 +60,7 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
     assignIfValid(state.sshKeyPublic, sshKeyPublic);
     assignIfValid(state.sshKeyPrivate, sshKeyPrivate);
     assignIfValid(state.openSftpByDefault, openSftpByDefault);
+    state.remoteFavorites = remoteFavorites.value();
     sshOptions.applyToState(state.sshOptions.value());
     sftpOptions.applyToState(state.sftpOptions.value());
 
@@ -69,6 +76,7 @@ void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& stat
     sshKeyPublic.value(state.sshKeyPublic);
     sshKeyPrivate.value(state.sshKeyPrivate);
     openSftpByDefault.value(state.openSftpByDefault);
+    remoteFavorites.value(state.remoteFavorites);
     sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
     sftpOptions.loadFromState(state.sftpOptions.value(), loadRefs);
 

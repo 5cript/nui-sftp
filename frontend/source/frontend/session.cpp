@@ -156,7 +156,13 @@ struct Session::Implementation
                         .pageSize = uiOptions.fileGridPageSize,
                 },
                     std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
-                    std::make_unique<RemoteSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
+                    std::make_unique<RemoteSideModel>(
+                        this->uiOptions,
+                        std::get<Persistence::SshSessionOptions>(engineOptions.engine).remoteFavorites,
+                        confirmDialog,
+                        inputDialog,
+                        filePropertyDialog
+                    ),
                 };
             } else {
                 // Local only
@@ -228,12 +234,16 @@ struct Session::Implementation
         if (auto* remote = static_cast<RemoteSideModel*>(fileGrid.rightModel()); remote)
         {
             remote->setOnFavoritesChanged(
-                [stateHolder](std::vector<std::string> favs)
+                [stateHolder, sessionName = this->initialName](std::vector<std::string> favs)
                 {
                     stateHolder->loadModifySave(
-                        [favs = std::move(favs)](Persistence::State& state)
+                        [favs = std::move(favs), sessionName](Persistence::State& state)
                         {
-                            state.uiOptions.remoteFavorites = favs;
+                            const auto iter = state.sessions.find(sessionName);
+                            if (iter == state.sessions.end())
+                                return;
+                            if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&iter->second.engine))
+                                ssh->remoteFavorites = favs;
                         }
                     );
                 }

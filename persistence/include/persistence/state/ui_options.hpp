@@ -23,7 +23,6 @@ namespace Persistence
         int fileGridPageSize{500};
         std::set<std::string> neverShowAgainDialogs{};
         std::vector<std::string> localFavorites{};
-        std::vector<std::string> remoteFavorites{};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/Development/noun-c-4921443.png"},
             {".hpp", "icons/Development/noun-c-4921443.png"},
@@ -58,7 +57,6 @@ namespace Persistence
             fileGridPageSize,
             neverShowAgainDialogs,
             localFavorites,
-            remoteFavorites,
             fileGridExtensionIcons)
     )
 }
