@@ -11,6 +11,20 @@ namespace SecureShell
 {
     namespace
     {
+        /**
+         * @brief Overwrite the contents of a string buffer in place so sensitive
+         *        data does not linger in process memory after use.
+         * @param target String whose storage will be overwritten with zero bytes
+         *               through a volatile pointer to prevent optimizer elision.
+         */
+        void secureWipe(std::string& target)
+        {
+            volatile char* volatilePtr = target.data();
+            for (std::size_t index = 0; index < target.size(); ++index)
+                volatilePtr[index] = '\0';
+            target.clear();
+        }
+
         void removeFromContainer(auto& container, auto* ptr, bool isBackElement)
         {
             if (isBackElement && container.back().get() == ptr)
@@ -666,6 +680,8 @@ namespace SecureShell
                         if (pwFromCache.has_value())
                         {
                             buf = pwFromCache.value();
+                            secureWipe(*pwFromCache);
+                            pwFromCache.reset();
                             const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
                             if (result == SSH_AUTH_SUCCESS)
                                 return (int)SSH_AUTH_SUCCESS;
@@ -688,6 +704,7 @@ namespace SecureShell
                     return (int)SSH_AUTH_DENIED;
                 }
             );
+            secureWipe(buf);
         }
 
         if (result.result != SSH_AUTH_SUCCESS)
