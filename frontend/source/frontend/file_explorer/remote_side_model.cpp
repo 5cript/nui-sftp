@@ -54,6 +54,7 @@ namespace
 
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
+    std::vector<std::string> initialFavorites,
     ConfirmDialog* confirmDialog,
     InputDialog* inputDialog,
     FilePropertyDialog* filePropertyDialog
@@ -101,11 +102,11 @@ RemoteSideModel::RemoteSideModel(
           0.,
       }
     , favorites_{std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>(
-          [this]()
+          [&initialFavorites]()
           {
               std::vector<std::filesystem::path> paths;
-              paths.reserve(uiOptions_.remoteFavorites.size());
-              for (auto const& str : uiOptions_.remoteFavorites)
+              paths.reserve(initialFavorites.size());
+              for (auto const& str : initialFavorites)
                   paths.emplace_back(str);
               return paths;
           }()

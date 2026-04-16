@@ -10,6 +10,7 @@
 #include <frontend/settings/atomic_setting/number_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
 #include <frontend/settings/atomic_setting/path_setting.hpp>
+#include <frontend/settings/atomic_setting/list_setting.hpp>
 
 #include <persistence/state/session_options.hpp>
 
@@ -21,6 +22,7 @@ struct SshSessionOptions
     PathSetting<true> sshKeyPublic;
     PathSetting<true> sshKeyPrivate;
     BoolSetting<> openSftpByDefault;
+    ListSetting<> remoteFavorites;
 
     SshOptions sshOptions;
     SftpOptions sftpOptions;

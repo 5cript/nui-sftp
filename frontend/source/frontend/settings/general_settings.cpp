@@ -171,16 +171,6 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 onChange();
             }
         },
-        .remoteFavorites = ListSetting<>{
-            language->getObserved("settings", "general", "userInterface", "remoteFavoritesHelpText"),
-            inputDialog,
-            onChange,
-            [this, onChange]()
-            {
-                userInterface.remoteFavorites.value(Persistence::UiOptions{}.remoteFavorites);
-                onChange();
-            }
-        },
     }
     , localFilesystemOptions {
         .preventDeletion =
@@ -334,7 +324,6 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.uiOptions.fileGridExtensionIcons = userInterface.fileGridExtensionIcons.value();
     state.uiOptions.neverShowAgainDialogs = userInterface.neverShowAgainDialogs.value();
     state.uiOptions.localFavorites = userInterface.localFavorites.value();
-    state.uiOptions.remoteFavorites = userInterface.remoteFavorites.value();
 
     // File Tracking
     state.fileTrackingOptions.autoReupload = fileTrackingOptions.autoReupload.value();
@@ -368,7 +357,6 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
     userInterface.neverShowAgainDialogs.value(state.uiOptions.neverShowAgainDialogs);
     userInterface.localFavorites.value(state.uiOptions.localFavorites);
-    userInterface.remoteFavorites.value(state.uiOptions.remoteFavorites);
 
     // File Tracking
     fileTrackingOptions.autoReupload.value(state.fileTrackingOptions.autoReupload);
@@ -441,9 +429,6 @@ Nui::ElementRenderer GeneralSettings::render(
             ),
             userInterface.localFavorites(
                 language->getObserved("settings", "general", "userInterface", "localFavorites")
-            ),
-            userInterface.remoteFavorites(
-                language->getObserved("settings", "general", "userInterface", "remoteFavorites")
             )
         );
 

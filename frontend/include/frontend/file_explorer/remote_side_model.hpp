@@ -30,6 +30,7 @@ class RemoteSideModel
   public:
     RemoteSideModel(
         Persistence::UiOptions uiOptions,
+        std::vector<std::string> initialFavorites,
         ConfirmDialog* confirmDialog,
         InputDialog* inputDialog,
         FilePropertyDialog* filePropertyDialog

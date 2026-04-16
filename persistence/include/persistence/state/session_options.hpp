@@ -48,6 +48,7 @@ namespace Persistence
         std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
         std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
         bool openSftpByDefault{true};
+        std::vector<std::string> remoteFavorites{};
 
         // Referenceables:
         Referenceable<SshOptions> sshOptions{};
@@ -56,7 +57,15 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         SshSessionOptions,
         (),
-        (sshOptions, sftpOptions, host, port, user, sshKeyPrivate, sshKeyPublic, openSftpByDefault)
+        (sshOptions,
+            sftpOptions,
+            host,
+            port,
+            user,
+            sshKeyPrivate,
+            sshKeyPublic,
+            openSftpByDefault,
+            remoteFavorites)
     )
 
     struct SessionOptions : public DefaultMissingMember
