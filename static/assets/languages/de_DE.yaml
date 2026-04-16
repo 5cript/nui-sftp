@@ -69,6 +69,7 @@ localSideModel:
   renameFailed: "Umbenennen fehlgeschlagen"
   externalDropWebkitWarningTitle: "Externer Drop ist fehlerhaft"
   externalDropWebkitWarningText: "Aufgrund technischer Einschränkungen der WebKitGTK-Engine funktioniert das Ablegen externer Elemente auf der Remote-Seite nur für einzelne Elemente."
+  uploadFailed: "Hochladen fehlgeschlagen"
   uploadSingleConfirmText: "Sind Sie sicher, dass Sie dieses Element '{}' nach {} hochladen möchten?"
   uploadConfirmTitle: "Elemente hochladen?"
   deleteFilesFailedTitle: "Dateien löschen fehlgeschlagen"
@@ -148,6 +149,9 @@ sessionFrontend:
   channelCreationFailedText: "Der Kanal konnte nicht erstellt werden:\n{}"
   externalDropWebkitWarningTitle: "Externer Drop ist fehlerhaft"
   externalDropWebkitWarningText: "Aufgrund technischer Einschränkungen der WebKitGTK-Engine funktioniert das Ablegen externer Elemente auf der Remote-Seite nur für einzelne Elemente."
+fileTrackingPanel:
+  instanceCreationFailed: "Datei-Tracking Instanzerstellung fehlgeschlagen"
+  instanceCreationFailedDesc: "Eine Datei-Tracking Instanz konnte im Backend nicht erstellt werden. Details finden Sie in den Logs."
 fileTracking:
   columnName: "Name"
   columnRemotePath: "Remote-Pfad"
@@ -293,6 +297,8 @@ settings:
     sshKeyPrivateHelpText: "Der Pfad zum SSH Privatschlüssel für die Authentifizierung."
     sshKeyPublicHelpText: "Der Pfad zum öffentlichen SSH Schlüssel für die Authentifizierung. Dieser wird verwendet, um einen Server zuerst höflich zu fragen 'Haben Sie diesen öffentlichen Schlüssel?' bevor eine Authentifizierung mit dem privaten Schlüssel versucht wird. Ist die Einstellung nicht angegeben, wird Authentifizierung mittels des privaten Schlüssels ohne Nachfrage durchgeführt."
     openSftpByDefaultHelpText: "Wenn aktiviert, wird der SFTP Kanal direkt nach dem Verbindungsaufbau geöffnet."
+    remoteFavorites: "Remote Favoriten"
+    remoteFavoritesHelpText: "Favorisierte Verzeichnisse auf dem Remote Server, die als Verknüpfungen in der Orte-Leiste des Remote Datei Explorers angezeigt werden. An diese SSH Sitzung gebunden, da absolute Pfade nur relativ zu einem Server sinnvoll sind."
   sessionSettings:
     host: "Host / IP"
     port: "Port"
@@ -300,6 +306,7 @@ settings:
     sshKeyPrivate: "SSH Privater Schlüssel"
     sshKeyPublic: "SSH öffentlicher Schlüssel (Optional, siehe Hilfe)"
     openSftpByDefault: "SFTP Channel direkt öffnen"
+    remoteFavoritesHelpText: "Favorisierte Verzeichnisse auf dem Remote Server, die als Verknüpfungen in der Orte-Leiste des Remote Datei Explorers angezeigt werden. An diese SSH Sitzung gebunden, da absolute Pfade nur relativ zu einem Server sinnvoll sind."
   listSetting:
     itemValue: "Elementwert"
     addItemText: "Element hinzufügen"
@@ -611,6 +618,8 @@ settings:
       fileGridExtensionIconsHelpText: "Zuordnung von Dateierweiterungen zu Symbolpfaden, die in der Dateiansicht verwendet werden. Geben Sie die Dateierweiterung (z.B. '.txt') als Schlüssel und den entsprechenden Symbolpfad als Wert an."
       neverShowAgainDialogs: "Nicht mehr anzeigen - Dialoge"
       neverShowAgainDialogsHelpText: "Liste der Dialog-IDs, die nicht mehr angezeigt werden. Eintrag entfernen, um den Dialog wieder anzuzeigen."
+      localFavorites: "Lokale Favoriten"
+      localFavoritesHelpText: "Favorisierte Verzeichnisse auf dem lokalen Dateisystem, die als Verknüpfungen in der Orte-Leiste des lokalen Datei Explorers angezeigt werden. Wird über alle Sitzungen geteilt."
     localFilesystemOptions:
       preventDeletionHelpText: "Wenn aktiviert, wird das Löschen von Dateien und Verzeichnissen im lokalen Dateisystem verhindert."
       preventDeletion: "Löschen verhindern"

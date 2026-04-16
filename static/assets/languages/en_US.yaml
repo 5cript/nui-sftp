@@ -116,6 +116,7 @@ localSideModel:
   renameFailed: "Rename Failed"
   externalDropWebkitWarningTitle: "External Drop Is Faulty"
   externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
+  uploadFailed: "Upload Failed"
   uploadSingleConfirmText: "Are you sure you want to upload this item '{}' to {}?"
   createItemFailedTitle: "Create Item Failed"
   uploadConfirmTitle: "Upload Items?"
@@ -147,6 +148,9 @@ sessionFrontend:
   externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
   channelCreationFailedHeader: "(SSH) Channel Creation Failed"
   channelCreationFailedText: "Failed to create channel:\n{}"
+fileTrackingPanel:
+  instanceCreationFailed: "File Tracking Instance Creation Failed"
+  instanceCreationFailedDesc: "Failed to create a file tracking instance on the backend. Check the logs for details."
 fileTracking:
   columnName: "Name"
   columnRemotePath: "Remote Path"
@@ -291,6 +295,8 @@ settings:
     sshKeyPrivateHelpText: "The path to the SSH private key used for authentication."
     sshKeyPublicHelpText: "The path to the SSH public key used for authentication. This is used to politely ask a server 'Do you have this public key?' before attempting authentication with the private key. If not specified, the private key will be used without asking."
     openSftpByDefaultHelpText: "If enabled, the SFTP channel will be opened immediately after establishing the connection."
+    remoteFavorites: "Remote Favorites"
+    remoteFavoritesHelpText: "Favorite directories on the remote server, shown as shortcuts in the remote file explorer's places pane. Scoped to this SSH session because absolute paths only make sense relative to one server."
   sessionSettings:
     host: "Host / IP"
     port: "Port"
@@ -298,6 +304,7 @@ settings:
     sshKeyPrivate: "SSH Private Key"
     sshKeyPublic: "SSH Public Key (Optional, see Help)"
     openSftpByDefault: "Open SFTP Channel by Default"
+    remoteFavoritesHelpText: "Favorite directories on the remote server, shown as shortcuts in the remote file explorer's places pane. Scoped to this SSH session because absolute paths only make sense relative to one server."
   setting:
     resetToDefaultValue: "Reset to default value"
     settingInherits: "Setting inherits"
@@ -608,6 +615,8 @@ settings:
       fileGridExtensionIconsHelpText: "Mapping of file extensions to icon paths used in the file grid view. Specify the file extension (e.g., '.txt') as the key and the corresponding icon path as the value."
       neverShowAgainDialogs: "Never Show Again Dialogs"
       neverShowAgainDialogsHelpText: "List of dialog IDs that will never be shown again. Remove an entry to allow that dialog to appear again."
+      localFavorites: "Local Favorites"
+      localFavoritesHelpText: "Favorite directories on the local filesystem, shown as shortcuts in the local file explorer's places pane. Shared across all sessions."
     localFilesystemOptions:
       preventDeletionHelpText: "If enabled, prevents deletion of files and directories in the local filesystem."
       preventDeletion: "Prevent Deletion"
