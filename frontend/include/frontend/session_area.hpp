@@ -26,6 +26,7 @@ class SessionArea
     Nui::ElementRenderer operator()();
 
     void addSession(std::string const& name);
+    void addDirectConnectSession(Persistence::SshSessionOptions const& sshOptions);
     void registerRpc();
     void removeSession(int tabId);
     void setSelected(int tabId);

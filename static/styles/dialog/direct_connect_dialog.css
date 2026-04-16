@@ -1,0 +1,37 @@
+.direct-connect-section {
+    margin: 1rem 2rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 20px;
+    row-gap: 12px;
+    min-width: 540px;
+}
+
+.direct-connect-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+
+    & > span {
+        font-size: 0.85rem;
+        font-weight: 600;
+        opacity: 0.8;
+        padding-bottom: 2px;
+    }
+
+    & .script-nui-text-input {
+        width: 100%;
+    }
+}
+
+.direct-connect-path-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+
+    & .script-nui-text-input {
+        flex: 1 1 auto;
+    }
+}

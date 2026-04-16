@@ -2,6 +2,7 @@
 
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/dialog/direct_connect_dialog.hpp>
 #include <frontend/theme_controller.hpp>
 #include <persistence/state_holder.hpp>
 
@@ -17,6 +18,7 @@ class Toolbar
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
+        DirectConnectDialog* directConnectDialog,
         ThemeController& themeController
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Toolbar);

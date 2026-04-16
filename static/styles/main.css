@@ -11,6 +11,7 @@
 @import "./file_tracking_panel.css";
 @import "./sync_dialog.css";
 @import "./dialog/new_session_dialog.css";
+@import "./dialog/direct_connect_dialog.css";
 @import "./dialog/file_property_dialog.css";
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";

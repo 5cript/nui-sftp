@@ -9,6 +9,7 @@
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <frontend/dialog/direct_connect_dialog.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -22,6 +23,7 @@ struct MainPage::Implementation
     ConfirmDialog confirmDialog;
     InputDialog newItemAskDialog;
     FilePropertyDialog filePropertyDialog;
+    DirectConnectDialog directConnectDialog;
     PasswordPrompter prompter;
     MultiInputDialog multiInputDialog;
     Sidebar sidebar;
@@ -37,10 +39,11 @@ struct MainPage::Implementation
         , confirmDialog{"ConfirmDialog", *stateHolder}
         , newItemAskDialog{"AskDialog"}
         , filePropertyDialog{"FilePropertyDialog"}
+        , directConnectDialog{"DirectConnectDialog", stateHolder}
         , prompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
-        , toolbar{stateHolder, events, &confirmDialog, themeController}
+        , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
@@ -129,6 +132,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->prompter.dialog(),
         impl_->confirmDialog(),
         impl_->filePropertyDialog(),
+        impl_->directConnectDialog(),
         impl_->multiInputDialog(),
         impl_->settings(),
         div{

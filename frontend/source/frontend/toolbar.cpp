@@ -4,6 +4,7 @@
 #include <frontend/state_holder_with_dialog.hpp>
 #include <frontend/components/icon_panel.hpp>
 #include <frontend/events/frontend_events.hpp>
+#include <frontend/dialog/direct_connect_dialog.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
@@ -17,6 +18,7 @@
 #include <frontend/svgs/settings.hpp>
 #include <ui5-sap-icons/icons/light-mode.hpp>
 #include <ui5-sap-icons/icons/dark-mode.hpp>
+#include <ui5-sap-icons/icons/connected.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -28,6 +30,7 @@ struct Toolbar::Implementation
     FrontendEvents* events;
     SessionArea* sessionArea;
     ConfirmDialog* confirmDialog;
+    DirectConnectDialog* directConnectDialog;
     ThemeController* themeController;
     Nui::Observed<std::string> activeTerminalEngine{};
     Nui::Observed<std::string> selectedLayout{};
@@ -41,11 +44,13 @@ struct Toolbar::Implementation
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
+        DirectConnectDialog* directConnectDialog,
         ThemeController& themeController
     )
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{confirmDialog}
+        , directConnectDialog{directConnectDialog}
         , themeController{&themeController}
         , terminalEngines{}
         , layouts{}
@@ -102,9 +107,11 @@ Toolbar::Toolbar(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
+    DirectConnectDialog* directConnectDialog,
     ThemeController& themeController
 )
-    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog, themeController))
+    : impl_(std::make_unique<
+            Implementation>(stateHolder, events, confirmDialog, directConnectDialog, themeController))
 {
     Log::info("Toolbar::Toolbar");
     impl_->updateSessionsList(
@@ -236,6 +243,27 @@ Nui::ElementRenderer Toolbar::operator()()
                     } else {
                         Log::error("Toolbar::EndSession: sessionArea is not set.");
                     }
+                },
+            },
+        }),
+        Snc::button({
+            .text = language->get("toolbar", "directConnect"),
+            .icon = Ui5Icons::connected(),
+            .attributes = {
+                onClick = [this]() {
+                    if (!impl_->directConnectDialog) {
+                        Log::error("Toolbar::DirectConnect: directConnectDialog is not set.");
+                        return;
+                    }
+                    impl_->directConnectDialog->open({
+                        .onConfirm = [this](DirectConnectDialog::ConfirmResult const& result) {
+                            if (!impl_->sessionArea) {
+                                Log::error("Toolbar::DirectConnect: sessionArea is not set.");
+                                return;
+                            }
+                            impl_->sessionArea->addDirectConnectSession(result.sshOptions);
+                        },
+                    });
                 },
             },
         }),
