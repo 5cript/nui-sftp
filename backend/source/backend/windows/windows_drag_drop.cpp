@@ -3,8 +3,9 @@
 #include <backend/windows/cotask_mem_string.hpp>
 #include <shared_data/directory_entry.hpp>
 
+#include <utility/path_utf.hpp>
+
 #include <nui/utility/scope_exit.hpp>
-#include <nui/utility/utf.hpp>
 
 #include <WebView2.h>
 #include <wrl/event.h>
@@ -153,8 +154,9 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                         // Add the file to message to be sent back to webview
                         CoTaskMemString pathStr{nullptr};
                         file->get_Path(pathStr.recepticle());
-                        auto fixed = std::filesystem::path{pathStr.toStandardString()}.generic_u8string();
-                        entries.emplace_back(leanDirectoryEntryFromPath(std::string{fixed.begin(), fixed.end()}));
+                        entries.emplace_back(leanDirectoryEntryFromPath(
+                            Utility::pathToUtf8Generic(std::filesystem::path{pathStr.toStandardString()})
+                        ));
                     }
                 }
 

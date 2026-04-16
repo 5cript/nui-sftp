@@ -33,7 +33,12 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
     // Drive one work() step from outside the strand. OperationQueue normally calls
     // workInStrand directly inside its batched umbrella, so this wrapper is only used by
     // callers that aren't already on the strand (standalone ops, tests).
-    auto fut = sftp_->performPromise([this]() { return workInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return workInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("DownloadOperation: work umbrella timed out.");
@@ -209,7 +214,12 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 {
-    auto fut = sftp_->performPromise([this]() { return handleSymlinkInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return handleSymlinkInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("DownloadOperation: handleSymlink umbrella timed out.");
@@ -263,7 +273,12 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
 
 std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 {
-    auto fut = sftp_->performPromise([this]() { return readOnceInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return readOnceInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("DownloadOperation: readOnce umbrella timed out.");
@@ -352,16 +367,19 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
 std::expected<void, DownloadOperation::Error>
 DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
-    const auto tempPath = options_.localPath.generic_string() + options_.tempFileSuffix;
+    auto tempPath = options_.localPath;
+    tempPath += options_.tempFileSuffix;
 
     if (options_.createMissingDirectories)
     {
         std::error_code mkErr{};
-        std::filesystem::create_directories(std::filesystem::path{tempPath}.parent_path(), mkErr);
+        std::filesystem::create_directories(tempPath.parent_path(), mkErr);
         if (mkErr)
         {
             Log::error(
-                "DownloadOperation: Failed to create parent directories for '{}': {}.", tempPath, mkErr.message()
+                "DownloadOperation: Failed to create parent directories for '{}': {}.",
+                tempPath.generic_string(),
+                mkErr.message()
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
@@ -372,25 +390,31 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         localFile_.open(tempPath, std::ios::binary | std::ios::app);
         if (!localFile_.is_open())
         {
-            Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath);
+            Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
             return std::unexpected(Error{.type = ErrorType::OpenFailure});
         }
 
         if (static_cast<std::uint64_t>(localFile_.tellp()) == options_.entry->size)
         {
-            Log::info("DownloadOperation: File '{}' already complete, will be renamed in finalize() step.", tempPath);
+            Log::info(
+                "DownloadOperation: File '{}' already complete, will be renamed in finalize() step.",
+                tempPath.generic_string()
+            );
             localFile_.close();
             return {};
         }
         else if (static_cast<std::uint64_t>(localFile_.tellp()) > options_.entry->size)
         {
-            Log::info("DownloadOperation: File '{}' is larger than expected, discarding and starting over.", tempPath);
+            Log::info(
+                "DownloadOperation: File '{}' is larger than expected, discarding and starting over.",
+                tempPath.generic_string()
+            );
             localFile_.close();
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else
         {
-            Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath);
+            Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath.generic_string());
             auto seekResult = stream.seekInStrand(localFile_.tellp());
             if (!seekResult.has_value())
                 return std::unexpected(Error{.type = ErrorType::FileStatFailed});
@@ -403,7 +427,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 
     if (!localFile_.is_open())
     {
-        Log::error("DownloadOperation: Failed to open file: {}", tempPath);
+        Log::error("DownloadOperation: Failed to open file: {}", tempPath.generic_string());
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
 
@@ -453,13 +477,16 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         }
     }
 
-    auto fut = sftp_->performPromise([this]() { return prepareInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return prepareInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("DownloadOperation: prepare umbrella timed out.");
-        return enterErrorState(
-            {.type = ErrorType::FutureTimeout, .extraInfo = "Timeout preparing download"}
-        );
+        return enterErrorState({.type = ErrorType::FutureTimeout, .extraInfo = "Timeout preparing download"});
     }
     auto result = fut.get();
     if (!result.has_value())
@@ -561,8 +588,10 @@ void DownloadOperation::cleanup()
 
     localFile_.close();
 
-    if (options_.doCleanup && std::filesystem::exists(options_.localPath.generic_string() + options_.tempFileSuffix))
-        std::filesystem::remove(options_.localPath.generic_string() + options_.tempFileSuffix);
+    auto tempPath = options_.localPath;
+    tempPath += options_.tempFileSuffix;
+    if (options_.doCleanup && std::filesystem::exists(tempPath))
+        std::filesystem::remove(tempPath);
 }
 
 void DownloadOperation::pause(bool doPause)
@@ -573,7 +602,12 @@ void DownloadOperation::pause(bool doPause)
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
 {
-    auto fut = sftp_->performPromise([this]() { return finalizeInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return finalizeInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("DownloadOperation: finalize umbrella timed out.");
@@ -602,7 +636,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     }
 
     std::error_code ec{};
-    std::filesystem::rename(options_.localPath.generic_string() + options_.tempFileSuffix, options_.localPath, ec);
+    auto tempPath = options_.localPath;
+    tempPath += options_.tempFileSuffix;
+    std::filesystem::rename(tempPath, options_.localPath, ec);
     if (ec)
     {
         Log::error("DownloadOperation: Failed to rename file: {}", ec.message());
@@ -651,9 +687,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     if (options_.entry)
     {
         using namespace std::chrono;
-        const auto sysTime = system_clock::time_point{
+        const auto sysTime = system_clock::time_point{duration_cast<system_clock::duration>(
             seconds{options_.entry->mtime} + nanoseconds{options_.entry->mtimeNsec}
-        };
+        )};
         const auto fileTime = std::chrono::file_clock::from_sys(sysTime);
         std::error_code mtimeError{};
         std::filesystem::last_write_time(options_.localPath, fileTime, mtimeError);

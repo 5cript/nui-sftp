@@ -1,5 +1,7 @@
 #include <backend/session.hpp>
 
+#include <utility/path_utf.hpp>
+
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
@@ -1095,7 +1097,7 @@ void Session::registerRpcSftpDeleteFiles()
                             transformedPaths.begin(),
                             [](std::string const& p)
                             {
-                                return std::filesystem::path{p};
+                                return Utility::pathFromUtf8(p);
                             }
                         );
 
@@ -1137,7 +1139,7 @@ void Session::registerRpcSftpRename()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        auto fut = channel->rename(std::filesystem::path{oldName}, std::filesystem::path{newName});
+                        auto fut = channel->rename(Utility::pathFromUtf8(oldName), Utility::pathFromUtf8(newName));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to rename file: timeout");
 
@@ -1223,7 +1225,7 @@ void Session::registerRpcSftpExistsBatch()
                         results.reserve(paths.size());
                         for (auto const& path : paths)
                         {
-                            auto fut = channel->stat(std::filesystem::path{path});
+                            auto fut = channel->stat(Utility::pathFromUtf8(path));
                             if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             {
                                 Log::warn(
@@ -1264,7 +1266,7 @@ void Session::registerRpcSftpStat()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        auto fut = channel->stat(std::filesystem::path{path});
+                        auto fut = channel->stat(Utility::pathFromUtf8(path));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to stat file: timeout");
 

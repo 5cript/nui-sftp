@@ -1,5 +1,7 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 
+#include <utility/path_utf.hpp>
+
 #include <nlohmann/json.hpp>
 #include <log/log.hpp>
 
@@ -336,7 +338,7 @@ namespace FileTracking
                     reply.error("Instance not found: " + instanceId);
                     return;
                 }
-                auto watch = inst->addWatch(std::filesystem::path{path}, recursive);
+                auto watch = inst->addWatch(Utility::pathFromUtf8(path), recursive);
                 if (!watch)
                 {
                     reply.error("Failed to add watch on path: " + path);
