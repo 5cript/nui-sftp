@@ -212,11 +212,27 @@ struct Opener::Implementation
 
     explicit Implementation(void* nativeWindow)
         : parentWindow{extractParentWindowHandle(nativeWindow)}
-        , connection{sdbus::createSessionBusConnection()}
-        , openUriProxy{
-              sdbus::createProxy(*connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath})
-          }
     {
+        try
+        {
+            connection = sdbus::createSessionBusConnection();
+            openUriProxy = sdbus::createProxy(
+                *connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath});
+        }
+        catch (sdbus::Error const& err)
+        {
+            Log::warn(
+                "Opener: could not connect to session bus ({}). "
+                "Opening files via xdg-desktop-portal will be unavailable.",
+                err.getMessage());
+        }
+        catch (std::exception const& err)
+        {
+            Log::warn(
+                "Opener: unexpected error connecting to session bus ({}). "
+                "Opening files via xdg-desktop-portal will be unavailable.",
+                err.what());
+        }
         Log::info("Opener: initialized with parentWindow='{}'", parentWindow);
     }
 };
@@ -234,6 +250,15 @@ Opener& Opener::operator=(Opener&&) noexcept = default;
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)
 {
     Log::info("Opener: openFile path='{}' openWith={} parentWindow='{}'", path.string(), openWith, impl_->parentWindow);
+
+    if (!impl_->openUriProxy)
+    {
+        constexpr auto const* msg =
+            "Session bus is unavailable; cannot open files via xdg-desktop-portal. "
+            "This typically happens when running as root or without a user D-Bus session.";
+        Log::error("Opener: {}", msg);
+        return std::unexpected{std::string{msg}};
+    }
 
     int const fd = ::open(path.c_str(), O_RDONLY);
     if (fd == -1)

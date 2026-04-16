@@ -60,9 +60,9 @@ namespace Persistence
         setupPersistence();
         const auto path = Nui::resolvePath(Constants::persistencePath);
 
+        std::optional<std::string> error{std::nullopt};
         try
         {
-            std::optional<std::string> error{std::nullopt};
             const auto before = [&path, &error]()
             {
                 try
@@ -109,37 +109,40 @@ namespace Persistence
             {
                 // Save something valid
                 appendWarning(dataFixer(nlohmann::json::object()));
-                onLoad(std::nullopt, *this, cachedWarning_);
-                return;
+                error = std::nullopt;
             }
-
-            stateCache_ = State{};
-            before.get_to(stateCache_);
-            auto warning = dataFixer(before);
-            auto missing = stateCache_.collectMissingMembers(stateCache_);
-            if (!missing.empty())
+            else
             {
-                if (warning)
+                stateCache_ = State{};
+                before.get_to(stateCache_);
+                auto warning = dataFixer(before);
+                auto missing = stateCache_.collectMissingMembers(stateCache_);
+                if (!missing.empty())
                 {
-                    *warning += "\n";
+                    if (warning)
+                    {
+                        *warning += "\n";
+                    }
+                    else
+                    {
+                        warning =
+                            "The following required fields were missing in the config and were set to defaults:\n";
+                    }
+                    for (auto const& member : missing)
+                    {
+                        *warning += fmt::format("- {}\n", member);
+                    }
                 }
-                else
-                {
-                    warning = "The following required fields were missing in the config and were set to defaults:\n";
-                }
-                for (auto const& member : missing)
-                {
-                    *warning += fmt::format("- {}\n", member);
-                }
+                appendWarning(warning);
             }
-            appendWarning(warning);
-            onLoad(error, *this, cachedWarning_);
         }
         catch (std::exception const& e)
         {
             Log::error("Failed to load config file: {}", e.what());
-            onLoad(fmt::format("Failed to load config file: {}", e.what()), *this, std::nullopt);
+            error = fmt::format("Failed to load config file: {}", e.what());
         }
+
+        onLoad(error, *this, cachedWarning_);
     }
 
     std::optional<std::string> StateHolder::dataFixer(nlohmann::json const& before)
