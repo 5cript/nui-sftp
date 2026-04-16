@@ -34,6 +34,7 @@ struct NewSessionDialog::Implementation
     };
     Nui::Observed<bool> showIconPicker{true};
     Nui::Observed<bool> showSessionTypePicker{true};
+    bool confirmOnClose{false};
     std::function<void(NewSessionDialog::ConfirmResult const&)> onConfirm;
 
     Implementation(std::string id)
@@ -64,17 +65,91 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
 
     std::vector<std::string> iconOptions(std::begin(sessionIconOptions), std::end(sessionIconOptions));
 
+    const auto nameInputId = fmt::format("NewSessionDialogInput_{}", impl_->id);
+    const auto sessionTypeSelectId = fmt::format("NewSessionDialogSessionTypeSelect_{}", impl_->id);
+    const auto iconSelectId = fmt::format("NewSessionDialogIconSelect_{}", impl_->id);
+
+    auto visibleFieldIds = [this, nameInputId, sessionTypeSelectId, iconSelectId]() {
+        std::vector<std::string> fields;
+        fields.push_back(nameInputId);
+        if (impl_->showSessionTypePicker.value())
+            fields.push_back(sessionTypeSelectId);
+        if (impl_->showIconPicker.value())
+            fields.push_back(iconSelectId);
+        return fields;
+    };
+
+    auto focusById = [](std::string const& fieldId) {
+        auto doc = Nui::val::global("document");
+        auto elem = doc.call<Nui::val>("getElementById", fieldId);
+        if (!elem.isNull() && !elem.isUndefined())
+            elem.call<void>("focus");
+    };
+
+    auto navigate = [visibleFieldIds, focusById](std::string const& currentId, int direction) -> bool {
+        const auto fields = visibleFieldIds();
+        for (std::size_t idx = 0; idx < fields.size(); ++idx)
+        {
+            if (fields[idx] != currentId)
+                continue;
+            const long long target = static_cast<long long>(idx) + direction;
+            if (target < 0 || target >= static_cast<long long>(fields.size()))
+                return false;
+            focusById(fields[static_cast<std::size_t>(target)]);
+            return true;
+        }
+        return false;
+    };
+
+    auto confirmIfValid = [this]() {
+        if (impl_->nameValid.value() != ScriptNuiComponents::ValueState::Valid)
+            return;
+        impl_->confirmOnClose = true;
+        impl_->dialog->close();
+    };
+
+    auto selectKeyHandler = [navigate, confirmIfValid](std::string fieldId) {
+        return [navigate, confirmIfValid, fieldId](Nui::WebApi::KeyboardEvent event) {
+            if (event.key() != "Enter")
+                return;
+            event.preventDefault();
+            if (!navigate(fieldId, +1))
+                confirmIfValid();
+        };
+    };
+
     // clang-format off
     return section{class_ = "new-session-section"}(
         span{}(language->getObserved("newSessionDialog", "sessionNameLabel")),
         Snc::textInput({
             .value = impl_->sessionName,
             .attributes = {
-                id = fmt::format("NewSessionDialogInput_{}", impl_->id),
+                id = nameInputId,
                 type = "Text",
                 "keyup"_event = [this](Nui::WebApi::KeyboardEvent event) {
                     const auto target = event.target();
                     checkInputValue(target["value"].as<std::string>());
+                },
+                "keydown"_event = [this, nameInputId, navigate, confirmIfValid](Nui::WebApi::KeyboardEvent event) {
+                    const auto key = event.key();
+                    if (key == "Enter")
+                    {
+                        event.preventDefault();
+                        const auto currentValue = event.target()["value"].as<std::string>();
+                        impl_->sessionName = currentValue;
+                        checkInputValue(currentValue);
+                        if (impl_->nameValid.value() != ScriptNuiComponents::ValueState::Valid)
+                            return;
+                        if (!navigate(nameInputId, +1))
+                            confirmIfValid();
+                    }
+                    else if (key == "ArrowDown")
+                    {
+                        event.preventDefault();
+                        const auto currentValue = event.target()["value"].as<std::string>();
+                        impl_->sessionName = currentValue;
+                        navigate(nameInputId, +1);
+                    }
                 }
             },
             .onChange = [this](std::string const& value, auto const&) {
@@ -92,6 +167,10 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
             Snc::select(Snc::SelectOptions<decltype(impl_->sessionType), std::vector<std::string>>{
                 .activeOption = impl_->sessionType,
                 .options = std::vector<std::string>{"ssh", "shell"},
+                .attributes = {
+                    id = sessionTypeSelectId,
+                    "keydown"_event = selectKeyHandler(sessionTypeSelectId),
+                },
                 .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
                 {
                     return span{}(
@@ -119,6 +198,10 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
             Snc::select(Snc::SelectOptions<decltype(impl_->icon), std::vector<std::string>>{
                 .activeOption = impl_->icon,
                 .options = std::move(iconOptions),
+                .attributes = {
+                    id = iconSelectId,
+                    "keydown"_event = selectKeyHandler(iconSelectId),
+                },
                 .popoverExtraClass = "new-session-icon-picker-popover",
                 .activeRenderer = [](auto const& stateful) -> Nui::ElementRenderer
                 {
@@ -151,16 +234,10 @@ void NewSessionDialog::open(OpenOptions options)
     impl_->showSessionTypePicker = options.showSessionTypePicker;
     impl_->icon = options.initialIcon;
     impl_->sessionType = options.initialSessionType == SessionType::ssh ? "ssh" : "shell";
-    if (options.initialName.empty())
-    {
-        impl_->sessionName = std::string{Implementation::defaultName};
-        impl_->nameValid = ScriptNuiComponents::ValueState::Valid;
-    }
-    else
-    {
-        impl_->sessionName = options.initialName;
-        checkInputValue(options.initialName);
-    }
+    impl_->confirmOnClose = false;
+    impl_->sessionName =
+        options.initialName.empty() ? std::string{Implementation::defaultName} : options.initialName;
+    checkInputValue(impl_->sessionName.value());
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     impl_->dialog->open({
@@ -173,8 +250,11 @@ void NewSessionDialog::open(OpenOptions options)
             if (!impl_->onConfirm)
                 return;
 
-            if (button && *button == Snc::Dialog::Button::Ok &&
-                impl_->nameValid.value() == ScriptNuiComponents::ValueState::Valid)
+            const bool okPressed = button && *button == Snc::Dialog::Button::Ok;
+            const bool confirmed = okPressed || impl_->confirmOnClose;
+            impl_->confirmOnClose = false;
+
+            if (confirmed && impl_->nameValid.value() == ScriptNuiComponents::ValueState::Valid)
             {
                 impl_->onConfirm(
                     ConfirmResult{
