@@ -15,8 +15,18 @@ ExecutingChannel::ExecutingChannel(
     , exitReceiver_{std::move(exitReceiver)}
     , onProcessChange_{std::move(onProcessChange)}
     , procInfoTimer_{}
+    , asyncState_{std::make_shared<AsyncState>()}
 {
     updatePtyProcs();
+}
+
+ExecutingChannel::~ExecutingChannel()
+{
+    // Moved-from instances have a null asyncState_; the live instance still
+    // owns the shared state and flips `alive` so pending timer / RPC lambdas
+    // short-circuit when they fire after destruction.
+    if (asyncState_)
+        asyncState_->alive = false;
 }
 
 void ExecutingChannel::open(
@@ -42,23 +52,39 @@ void ExecutingChannel::write(std::string const& data)
 
 void ExecutingChannel::updatePtyProcs()
 {
-    if (procInfoTimer_.hasActiveTimer())
+    if (!asyncState_ || asyncState_->queryInFlight)
         return;
+    asyncState_->queryInFlight = true;
+
+    // Capture by value so the lambdas are decoupled from `this`. If the
+    // channel is destroyed before the timer fires or before the RPC response
+    // arrives, the alive-flag in asyncState protects us.
+    auto state = asyncState_;
+    auto channelId = channelId_;
+    auto onProcessChange = onProcessChange_;
 
     Nui::setTimeout(
         500,
-        [this]()
+        [state, channelId, onProcessChange]()
         {
-            Log::info("ExecutingChannel: querying ptyProcesses for channelId={}", channelId_.value());
+            if (!state->alive)
+            {
+                state->queryInFlight = false;
+                return;
+            }
+            Log::info("ExecutingChannel: querying ptyProcesses for channelId={}", channelId.value());
             Nui::RpcClient::callWithBackChannel(
                 "ProcessStore::ptyProcesses",
-                [this](Nui::val val)
+                [state, channelId, onProcessChange](Nui::val val)
                 {
+                    state->queryInFlight = false;
+                    if (!state->alive)
+                        return;
                     if (val.hasOwnProperty("latest"))
                     {
-                        if (onProcessChange_)
-                            onProcessChange_(
-                                channelId_,
+                        if (onProcessChange)
+                            onProcessChange(
+                                channelId,
                                 fmt::format(
                                     "{} ({})",
                                     val["latest"]["cmdline"].as<std::string>(),
@@ -71,11 +97,16 @@ void ExecutingChannel::updatePtyProcs()
                         Log::warn("ptyProcesses did not return latest: {}", Nui::JSON::stringify(val));
                     }
                 },
-                channelId_.value()
+                channelId.value()
             );
         },
-        [this](Nui::TimerHandle&& handle)
+        [this, state](Nui::TimerHandle&& handle)
         {
+            // Fires synchronously-ish from setTimeout to deliver the handle.
+            // Guard `this` behind the alive flag to cover the unlikely case
+            // where destruction happens between schedule and delivery.
+            if (!state->alive)
+                return;
             procInfoTimer_ = std::move(handle);
         }
     );
@@ -89,6 +120,13 @@ void ExecutingChannel::resize(int cols, int rows)
 void ExecutingChannel::dispose(std::function<void()> onExit)
 {
     Log::info("ExecutingChannel: disposing channelId={}", channelId_.value());
+
+    // Mark async callbacks inert before anything else — the timer or an
+    // in-flight ptyProcesses RPC response must not reach `this` once the
+    // channel has been disposed.
+    if (asyncState_)
+        asyncState_->alive = false;
+    procInfoTimer_ = {};
 
     // Unregister receivers before telling the backend to exit so no stale
     // callbacks fire after the process is gone.
