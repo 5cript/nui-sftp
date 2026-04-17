@@ -87,6 +87,13 @@ namespace NuiFileExplorer
         std::vector<long long> filterMatchIndices{};
         std::unordered_map<long long, long long> filterMatchPosition{};
 
+        // Type-ahead: accumulates printable keystrokes while the side has focus. Each new
+        // key resets a 750ms timer; on timeout the buffer clears and any type-ahead
+        // highlight is lifted. The match is rendered using the existing search-highlight
+        // mechanism so it visually matches the search box's highlight style.
+        std::string typeAheadBuffer{};
+        Nui::val typeAheadTimerHandle{Nui::val::undefined()};
+
         Nui::Observed<std::vector<std::filesystem::path>> pathBoxSuggestions{};
         std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
         std::weak_ptr<Nui::Dom::BasicElement> pathBoxElement{};

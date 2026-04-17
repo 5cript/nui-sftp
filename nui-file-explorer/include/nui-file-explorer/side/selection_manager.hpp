@@ -109,6 +109,11 @@ namespace NuiFileExplorer
         /// Plain box-drag: replace range layer, clear ctrl mask.
         void selectRange(std::size_t begin, std::size_t endInclusive);
 
+        /// Jump the cursor to @p index as if it were a plain click: clears the ctrl mask,
+        /// collapses the range to a single-item selection at @p index, and scrolls it
+        /// into view. Used by type-ahead.
+        void jumpTo(std::size_t index);
+
         /// Ctrl+box-drag: add items into ctrlAdd_ without touching the range layer.
         void ctrlAddRange(std::size_t begin, std::size_t endInclusive);
 

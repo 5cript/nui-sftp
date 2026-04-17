@@ -247,6 +247,18 @@ namespace NuiFileExplorer
         rebuildSelection();
     }
 
+    void SelectionManager::jumpTo(std::size_t index)
+    {
+        if (index >= items_->value().size())
+            return;
+        ctrlAdd_.clear();
+        ctrlRemove_.clear();
+        flag_.reset();
+        anchor_ = index;
+        rebuildSelection();
+        maybeScrollActiveIntoView();
+    }
+
     void SelectionManager::ctrlAddRange(std::size_t begin, std::size_t endInclusive)
     {
         // Ctrl+drag: add items to ctrlAdd_, don't touch the range layer.
