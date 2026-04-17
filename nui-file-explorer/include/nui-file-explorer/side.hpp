@@ -173,6 +173,20 @@ namespace NuiFileExplorer
          */
         void applyFilter(std::string query);
 
+        /**
+         *  @brief Append @p key to the type-ahead buffer, (re)start the idle timer, and
+         *         jump to the first item whose filename starts with the accumulated buffer
+         *         (case-insensitive). The match is highlighted using the existing search
+         *         highlight so it looks the same as a search box hit.
+         */
+        void handleTypeAheadKey(std::string const& key);
+
+        /**
+         *  @brief Clear the type-ahead buffer and any type-ahead highlight. Leaves the
+         *         current selection in place.
+         */
+        void clearTypeAhead();
+
       private:
         Nui::ElementRenderer placesPanel();
 

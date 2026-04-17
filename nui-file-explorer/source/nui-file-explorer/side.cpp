@@ -32,6 +32,10 @@ namespace NuiFileExplorer
 {
     namespace
     {
+        // How long the type-ahead buffer survives between keystrokes. A new keystroke
+        // resets this; once it expires the buffer is cleared and the highlight is lifted.
+        constexpr int typeAheadIdleTimeoutMs = 750;
+
         std::vector<std::string> tokenize(std::string const& input)
         {
             std::vector<std::string> result;
@@ -119,6 +123,12 @@ namespace NuiFileExplorer
         // already dispatched before disconnect takes effect.
         if (impl_ && !impl_->resizeObserver.isNull() && !impl_->resizeObserver.isUndefined())
             impl_->resizeObserver.call<void>("disconnect");
+        if (impl_ && !impl_->typeAheadTimerHandle.isUndefined() &&
+            !impl_->typeAheadTimerHandle.isNull())
+        {
+            Nui::val::global("clearTimeout")(impl_->typeAheadTimerHandle);
+            impl_->typeAheadTimerHandle = Nui::val::undefined();
+        }
         if (impl_)
             *impl_->alive = false;
     }
@@ -200,8 +210,25 @@ namespace NuiFileExplorer
             }
         }
 
-        if (!impl_->selectionManager.onKeyboardEvent(event))
-            actionWasTaken.disarm();
+        if (impl_->selectionManager.onKeyboardEvent(event))
+            return;
+
+        // Type-ahead: a printable single-ASCII-character key, no ctrl/alt/meta. Shift is
+        // allowed (so "S" and "s" both work). The selection manager consumed arrow keys /
+        // Home / End / PageUp / PageDown / Ctrl+A above, so any remaining single-char key
+        // is fair game for type-ahead.
+        const auto& key = event.key();
+        if (!event.ctrlKey() && !event.altKey() && !event.metaKey() && key.size() == 1)
+        {
+            const auto c = static_cast<unsigned char>(key[0]);
+            if (c >= 0x20 && c < 0x7F)
+            {
+                handleTypeAheadKey(key);
+                return;
+            }
+        }
+
+        actionWasTaken.disarm();
     }
 
     Nui::ElementRenderer Side::operator()()
@@ -1060,6 +1087,58 @@ namespace NuiFileExplorer
                                                    : ItemWithInternals::SearchHighlight::Muted
             );
         }
+    }
+
+    void Side::handleTypeAheadKey(std::string const& key)
+    {
+        impl_->typeAheadBuffer += key;
+
+        // (Re)start the idle timer. Any prior pending timeout is cancelled so consecutive
+        // keystrokes within the idle window keep the buffer alive.
+        if (!impl_->typeAheadTimerHandle.isUndefined() && !impl_->typeAheadTimerHandle.isNull())
+            Nui::val::global("clearTimeout")(impl_->typeAheadTimerHandle);
+
+        impl_->typeAheadTimerHandle = Nui::val::global("setTimeout")(
+            Nui::bind(
+                [this]() {
+                    impl_->typeAheadTimerHandle = Nui::val::undefined();
+                    clearTypeAhead();
+                }
+            ),
+            typeAheadIdleTimeoutMs
+        );
+
+        auto needle = impl_->typeAheadBuffer;
+        Utility::Algorithm::toLowerCaseInplace(needle);
+
+        auto& items = impl_->items.value();
+
+        // When a filter is active, non-matching items don't render, so only consider items
+        // that are in the filter's match set; otherwise every item is a candidate.
+        const bool filterActive = !impl_->filterQuery.value().empty();
+
+        for (std::size_t i = 0; i < items.size(); ++i)
+        {
+            if (!items[i].isSelectable())
+                continue;
+            if (filterActive && impl_->filterMatchPosition.find(static_cast<long long>(i)) ==
+                                    impl_->filterMatchPosition.end())
+                continue;
+
+            auto name = items[i].displayFilename;
+            Utility::Algorithm::toLowerCaseInplace(name);
+            if (name.size() >= needle.size() && name.compare(0, needle.size(), needle) == 0)
+            {
+                impl_->selectionManager.jumpTo(i);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return;
+            }
+        }
+    }
+
+    void Side::clearTypeAhead()
+    {
+        impl_->typeAheadBuffer.clear();
     }
 
     void Side::applyFilter(std::string query)
