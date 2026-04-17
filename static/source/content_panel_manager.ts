@@ -110,19 +110,13 @@ class ContentPanelManager {
         );
 
         try {
-            Widget.attach(panel.main, args.host);
-            panel.main.update();
+            panel.attach(args.host);
         }
         catch (e) {
             console.error(e);
             console.log(JSON.stringify(e));
             return false;
         }
-
-        const resizeObserver = new ResizeObserver(() => {
-            panel.main.update();
-        });
-        resizeObserver.observe(args.host);
 
         this.panels.set(panelId, panel);
         return true;

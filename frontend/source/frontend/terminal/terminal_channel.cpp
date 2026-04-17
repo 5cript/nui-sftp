@@ -194,6 +194,13 @@ struct TerminalChannel::Implementation
     // the shared_ptr is released and weak_ptr::lock() returns nullptr, so stale callbacks
     // become no-ops instead of dereferencing the freed object.
     std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+    // xterm's onData/onResize return an IDisposable. Holding those explicitly
+    // and calling dispose() on teardown deregisters our Nui::bind functors
+    // from xterm's event emitter — otherwise the emitter can keep the C++
+    // std::function alive past the session's lifetime, and any late-fire
+    // (e.g. a queued resize during widget detach) reaches a freed `this`.
+    Nui::val onDataDisposable{Nui::val::undefined()};
+    Nui::val onResizeDisposable{Nui::val::undefined()};
     TerminalEngine* engine;
 
     Nui::val terminal() const
@@ -367,35 +374,32 @@ void TerminalChannel::open(
 
     Log::info("Channel terminal opened with id: '{}'", impl_->termId);
 
-    term.call<void>(
+    impl_->onDataDisposable = term.call<Nui::val>(
         "onData",
         Nui::bind(
-            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val data, Nui::val)
+            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val data)
             {
                 if (!aliveWeak.lock())
                     return;
                 write(data.as<std::string>(), true);
             },
-            std::placeholders::_1,
-            std::placeholders::_2
+            std::placeholders::_1
         )
     );
 
-    term.call<void>(
+    impl_->onResizeDisposable = term.call<Nui::val>(
         "onResize",
         Nui::bind(
-            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val obj, Nui::val)
+            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val obj)
             {
                 if (!aliveWeak.lock())
                     return;
                 if (impl_->isLocked)
                     return;
-                // Log::debug("Terminal resized {}:{}. ", obj["cols"].as<int>(), obj["rows"].as<int>());
                 if (auto* channel = impl_->channel(); channel)
                     channel->resize(obj["cols"].as<int>(), obj["rows"].as<int>());
             },
-            std::placeholders::_1,
-            std::placeholders::_2
+            std::placeholders::_1
         )
     );
 
@@ -432,6 +436,23 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
 
     auto cleanupFrontendChannel = [this, onComplete = std::move(onComplete)]()
     {
+        // Deregister our Nui::bind onData / onResize listeners FIRST so xterm
+        // can't fire them during its own dispose and so the JS emitter drops
+        // its last reference to the C++ std::function — otherwise the functor
+        // stays alive past the session, its `this` capture becomes dangling,
+        // and the next stray event call crashes with
+        // `getWasmTableEntry(index) is not a function`.
+        if (!impl_->onDataDisposable.isUndefined() && !impl_->onDataDisposable.isNull())
+        {
+            impl_->onDataDisposable.call<void>("dispose");
+            impl_->onDataDisposable = Nui::val::undefined();
+        }
+        if (!impl_->onResizeDisposable.isUndefined() && !impl_->onResizeDisposable.isNull())
+        {
+            impl_->onResizeDisposable.call<void>("dispose");
+            impl_->onResizeDisposable = Nui::val::undefined();
+        }
+
         auto term = impl_->terminal();
         if (term.isUndefined())
         {

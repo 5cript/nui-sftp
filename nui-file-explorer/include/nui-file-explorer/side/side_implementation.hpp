@@ -57,6 +57,10 @@ namespace NuiFileExplorer
         Nui::Observed<bool> isPlacesWide{false};
         Nui::Observed<std::optional<bool>> isPlacesOpen{std::nullopt};
         Nui::val resizeObserver{Nui::val::undefined()};
+        // Lifetime sentinel for ResizeObserver callback: the browser can deliver a queued
+        // entry after ~Side, at which point `this` is dangling. The callback locks this
+        // weak_ptr and no-ops when the Side is gone.
+        std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
         // Loading-state plumbing for the side. `isLoading` flips immediately when navigation
         // starts; `showLoadingHint` only flips after a debounce so fast navigations don't flash

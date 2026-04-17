@@ -50,6 +50,11 @@ export class ContentPanel {
     readonly engineType: string;
     readonly factories: PanelFactories;
     readonly openAddContextMenu: (anchorId: string | undefined) => void;
+    /// Observes the host element for size changes so Lumino re-lays-out the
+    /// panel. Held on the panel so detach() can disconnect it — otherwise the
+    /// observer pins `this.main` alive and keeps stale Nui::bind references
+    /// to the owning Session around after close.
+    private resizeObserver: ResizeObserver | undefined;
 
     constructor(
         id: string,
@@ -76,6 +81,20 @@ export class ContentPanel {
 
         this.dock.addRequested.connect(onAddRequested);
         this.main.addWidget(this.dock);
+    }
+
+    /**
+     * Attach the Lumino tree to @p host and start observing its size. Called
+     * from ContentPanelManager.addPanel after construction so attach errors
+     * propagate cleanly back to C++.
+     */
+    attach(host: HTMLElement) {
+        Widget.attach(this.main, host);
+        this.main.update();
+        this.resizeObserver = new ResizeObserver(() => {
+            this.main.update();
+        });
+        this.resizeObserver.observe(host);
     }
 
     /**
@@ -165,10 +184,26 @@ export class ContentPanel {
         }));
     }
 
-    /** Removes the panel's DOM element. Call on session close. */
+    /**
+     * Tears down the Lumino tree on session close.
+     *
+     * Dispose is cascading: it detaches every widget from the DOM (firing
+     * onAfterDetach → each widget's C++ deleter WHILE the Session is still
+     * alive), disconnects all signal handlers, and drops Lumino's internal
+     * references. That is critical — just removing the DOM element leaves
+     * the widgets alive in JS memory still holding Nui::bind handles for the
+     * Session that's about to be destroyed, and any later invocation of
+     * those stale handles crashes the WASM runtime with
+     * `getWasmTableEntry(index) is not a function`.
+     */
     detach() {
-        const mainEl = document.getElementById(this.main.id);
-        if (mainEl) mainEl.remove();
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = undefined;
+        }
+        if (!this.main.isDisposed) {
+            this.main.dispose();
+        }
     }
 
     // ── Dock construction ─────────────────────────────────────────────────
