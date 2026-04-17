@@ -1,11 +1,19 @@
 #include <shared_data/directory_entry.hpp>
 
+#include <utility/path_utf.hpp>
+
 namespace SharedData
 {
+    // Paths cross the RPC boundary as UTF-8. In-memory they are std::filesystem::path (native
+    // encoding: UTF-16 on Windows, UTF-8 on POSIX), so conversion happens here and nowhere else.
+    // Default nlohmann serialization of fs::path on MSVC uses path.string(), which goes through
+    // the active code page — that would corrupt any non-ASCII character, hence the explicit
+    // Utility::pathToUtf8Generic / pathFromUtf8 calls.
+
     void to_json(nlohmann::json& j, DirectoryEntry const& entry)
     {
         j = nlohmann::json{
-            {"path", entry.path},
+            {"path", Utility::pathToUtf8Generic(entry.path)},
             {"type", entry.type},
             {"size", entry.size},
             {"permissions", entry.permissions},
@@ -13,9 +21,9 @@ namespace SharedData
             {"mtimeNsec", entry.mtimeNsec},
         };
         if (!entry.fullPath.empty())
-            j["fullPath"] = entry.fullPath;
+            j["fullPath"] = Utility::pathToUtf8Generic(entry.fullPath);
         if (!entry.longName.empty())
-            j["longName"] = entry.longName;
+            j["longName"] = Utility::pathToUtf8Generic(entry.longName);
         if (entry.flags != 0)
             j["flags"] = entry.flags;
         if (entry.uid != 0)
@@ -37,21 +45,25 @@ namespace SharedData
         if (!entry.acl.empty())
             j["acl"] = entry.acl;
         if (entry.linkTarget)
-            j["linkTarget"] = entry.linkTarget->generic_string();
+            j["linkTarget"] = Utility::pathToUtf8Generic(*entry.linkTarget);
         if (entry.resolvedTarget)
             j["resolvedTarget"] = *entry.resolvedTarget;
     }
     void from_json(nlohmann::json const& j, DirectoryEntry& entry)
     {
+        const auto getOptionalPath = [&](char const* key, std::filesystem::path& target) {
+            if (auto found = j.find(key); found != j.end() && !found->is_null())
+                target = Utility::pathFromUtf8(found->get<std::string>());
+        };
         const auto getOptional = [&](char const* key, auto& target) {
             if (auto found = j.find(key); found != j.end() && !found->is_null())
                 found->get_to(target);
         };
 
-        j.at("path").get_to(entry.path);
+        entry.path = Utility::pathFromUtf8(j.at("path").get<std::string>());
         j.at("type").get_to(entry.type);
-        getOptional("fullPath", entry.fullPath);
-        getOptional("longName", entry.longName);
+        getOptionalPath("fullPath", entry.fullPath);
+        getOptionalPath("longName", entry.longName);
         getOptional("flags", entry.flags);
         getOptional("size", entry.size);
         getOptional("uid", entry.uid);
@@ -67,11 +79,7 @@ namespace SharedData
         getOptional("mtimeNsec", entry.mtimeNsec);
         getOptional("acl", entry.acl);
         if (auto found = j.find("linkTarget"); found != j.end() && !found->is_null())
-        {
-            std::string tgt;
-            found->get_to(tgt);
-            entry.linkTarget = std::filesystem::path{tgt};
-        }
+            entry.linkTarget = Utility::pathFromUtf8(found->get<std::string>());
         if (auto found = j.find("resolvedTarget"); found != j.end() && !found->is_null())
         {
             DirectoryEntry target{};

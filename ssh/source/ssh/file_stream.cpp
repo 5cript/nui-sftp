@@ -54,7 +54,7 @@ namespace SecureShell
         {
             if (!sftp->strand_->withinProcessingThread())
             {
-                sftp->performPromise(
+                (void)sftp->performPromise(
                         [this, isBackElement, sftp]() -> bool
                         {
                             closeInStrand(isBackElement);

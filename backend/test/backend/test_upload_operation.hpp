@@ -274,7 +274,7 @@ namespace Test
             std::string partialContent = testFileContent.substr(0, testFileContent.size() / 2);
             auto writeFut = file->write(partialContent);
             ASSERT_EQ(writeFut.wait_for(5s), std::future_status::ready);
-            writeFut.get();
+            (void)writeFut.get();
             file->close();
         }
 
@@ -941,7 +941,7 @@ namespace Test
             std::string partialContent = testFileContent + "Extra data to make the partial file larger.";
             auto writeFut = file->write(partialContent);
             ASSERT_EQ(writeFut.wait_for(5s), std::future_status::ready);
-            writeFut.get();
+            (void)writeFut.get();
             file->close();
         }
 
