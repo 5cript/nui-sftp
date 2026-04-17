@@ -1,0 +1,76 @@
+/*
+ * Styling for local-shell Lumino dock tabs.
+ *
+ * LocalShellTerminal sets `title.className = 'local-shell-widget'` which Lumino
+ * merges onto the `.lm-TabBar-tab` element, making the selectors below match
+ * only those tabs. SSH / file explorer / operation queue tabs are unaffected.
+ *
+ * Colours: label takes the theme accent; background is a near-neutral variant
+ * of the app background so contrast follows the current light/dark theme.
+ */
+
+.lm-TabBar-tab.local-shell-widget {
+    background-color: var(--darker-background);
+    color: var(--theme-color);
+}
+
+.lm-TabBar-tab.local-shell-widget.lm-mod-current {
+    background-color: var(--brighter-background);
+    color: var(--theme-color);
+}
+
+.lm-TabBar-tab.local-shell-widget:hover:not(.lm-mod-current) {
+    background-color: var(--background-color);
+}
+
+/*
+ * Thin warning banner shown above the xterm element when a local-shell panel
+ * sits inside an SSH session. Muted amber, text-only; toggled by the
+ * showLocalShellWarning UI option.
+ */
+
+:root {
+    --local-shell-banner-bg: #8a5a18;
+    --local-shell-banner-color: var(--color);
+}
+
+.local-shell-banner {
+    flex: 0 0 auto;
+    height: 18px;
+    line-height: 18px;
+    padding: 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    background-color: var(--local-shell-banner-bg);
+    color: var(--local-shell-banner-color);
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.local-shell-banner-text {
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.local-shell-banner-settings {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.85;
+}
+
+.local-shell-banner-settings:hover {
+    opacity: 1;
+}

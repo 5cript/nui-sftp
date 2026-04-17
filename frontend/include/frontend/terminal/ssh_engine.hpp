@@ -26,7 +26,13 @@ class SshTerminalEngine : public TerminalEngine
 
     void open(std::function<void(bool, std::string const&)> onOpen) override;
 
+    /**
+     * @brief Spawns an SSH shell channel. @p options is unused — SSH reads
+     *        all relevant state from the session-level settings captured at
+     *        engine construction.
+     */
     void createChannel(
+        ChannelCreationOptions const& options,
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,

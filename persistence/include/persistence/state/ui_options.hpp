@@ -17,6 +17,10 @@ namespace Persistence
         bool showHiddenFilesLocally{false};
         bool showHiddenFilesRemotely{false};
         bool fileGridPathBarOnTop{false};
+        // Shows a thin amber banner above local-shell terminals that live inside
+        // an SSH session, to disambiguate from the remote SSH terminal. Default
+        // on; power users can disable once they've internalised the tab colour.
+        bool showLocalShellWarning{true};
         // Items per page in the file grid pagination footer. The user prefers unpaginated UX,
         // so the default is intentionally large; the footer hides itself when the directory
         // (or filtered match set) fits within one page.
@@ -54,6 +58,7 @@ namespace Persistence
             showHiddenFilesLocally,
             showHiddenFilesRemotely,
             fileGridPathBarOnTop,
+            showLocalShellWarning,
             fileGridPageSize,
             neverShowAgainDialogs,
             localFavorites,

@@ -193,6 +193,7 @@ void SshTerminalEngine::createChannelImpl(
 }
 
 void SshTerminalEngine::createChannel(
+    ChannelCreationOptions const& /*options*/,
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,

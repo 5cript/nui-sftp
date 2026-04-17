@@ -64,9 +64,19 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
     const id = nanoid();
 
     // Resizing:
+    // Lumino collapses inactive dock tabs to near-zero dimensions, which would
+    // otherwise drive a refit that sends cols=0/rows=0 to the pty and clobbers
+    // the user's stty settings. Guard by contentRect and offsetParent so only
+    // genuine size changes propagate.
     const resizeObserver = new ResizeObserver((entries) => {
         globalThis.requestAnimationFrame(() => {
             if (!Array.isArray(entries) || !entries.length)
+                return;
+
+            const rect = entries[0].contentRect;
+            if (rect.width <= 0 || rect.height <= 0)
+                return;
+            if (host.offsetParent === null)
                 return;
 
             globalThis.terminalUtility.refitTerminal(id);
