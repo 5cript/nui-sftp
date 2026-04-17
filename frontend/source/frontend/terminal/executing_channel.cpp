@@ -46,7 +46,10 @@ void ExecutingChannel::write(std::string const& data)
         updatePtyProcs();
 
     Nui::RpcClient::callWithBackChannel(
-        "ProcessStore::write", [](Nui::val) {}, channelId_.value(), Nui::val::global("btoa")(data).as<std::string>()
+        "ProcessStore::write",
+        [](Nui::val) {},
+        channelId_.value(),
+        Nui::val::global("encodeUtf8Base64")(data).as<std::string>()
     );
 }
 

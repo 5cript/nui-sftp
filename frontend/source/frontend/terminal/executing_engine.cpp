@@ -110,7 +110,7 @@ void ExecutingTerminalEngine::createChannel(
         [handler](Nui::val val)
         {
             if (val.hasOwnProperty("data"))
-                handler(Nui::val::global("atob")(val["data"]).as<std::string>());
+                handler(Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>());
             else
                 Log::error("execTerminalStdout received message without data field");
         }
@@ -121,7 +121,7 @@ void ExecutingTerminalEngine::createChannel(
         [errorHandler](Nui::val val)
         {
             if (val.hasOwnProperty("data"))
-                errorHandler(Nui::val::global("atob")(val["data"]).as<std::string>());
+                errorHandler(Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>());
             else
                 Log::error("execTerminalStderr received message without data field");
         }

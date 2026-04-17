@@ -324,8 +324,7 @@ void RpcFilesystem::registerListFiles()
                     const auto entryPath = entry.path();
 
                     SharedData::DirectoryEntry dirEntry{};
-                    dirEntry.path =
-                        Utility::pathToUtf8Generic(fileNameOnly ? entryPath.filename() : entryPath);
+                    dirEntry.path = fileNameOnly ? entryPath.filename() : entryPath;
                     dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
                     dirEntry.permissions = entry.symlink_status().permissions();
 
@@ -468,7 +467,7 @@ void RpcFilesystem::registerProperties()
                 const auto path = Utility::pathFromUtf8(parameters["path"].get<std::string>());
 
                 SharedData::DirectoryEntry entry{};
-                entry.path = Utility::pathToUtf8Generic(path);
+                entry.path = path;
 
                 std::error_code symEc;
                 const auto symStatus = std::filesystem::symlink_status(path, symEc);

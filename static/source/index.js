@@ -24,4 +24,7 @@ import "./addressable_setting.ts";
     globalThis.decodeUtf8Base64 = (base64) => {
         return new TextDecoder().decode(Uint8Array.fromBase64(base64));
     }
+    globalThis.encodeUtf8Base64 = (str) => {
+        return new TextEncoder().encode(str).toBase64();
+    }
 })();

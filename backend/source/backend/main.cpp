@@ -184,7 +184,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
     );
 }
 
-Main::Main(ProgramOptions options, ForkPool* forkPool)
+Main::Main([[maybe_unused]] ProgramOptions options, ForkPool* forkPool)
     : shuttingDown_{false}
     , programDir_{boost::dll::program_location().parent_path().string()}
     , stateHolder_{programDir_}

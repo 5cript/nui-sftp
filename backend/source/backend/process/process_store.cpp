@@ -42,9 +42,13 @@ ProcessStore::ProcessStore(
     , hub_{&hub}
     , processes_{}
     , uuidGenerator_{}
-    , forkPool_{forkPool}
-{
 #ifndef _WIN32
+    , forkPool_{forkPool}
+#endif
+{
+#ifdef _WIN32
+    (void)forkPool;
+#else
     if (forkPool_)
         forkPool_->setMessageHandler(
             [this](nlohmann::json const& msg)

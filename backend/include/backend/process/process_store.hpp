@@ -77,8 +77,8 @@ class ProcessStore
     Nui::RpcHub* hub_;
     std::unordered_map<std::string, std::shared_ptr<Process>> processes_;
     boost::uuids::random_generator uuidGenerator_;
-    ForkPool* forkPool_{nullptr};
 #ifndef _WIN32
+    ForkPool* forkPool_{nullptr};
     std::unordered_map<std::string, ForkPoolProcess> forkPoolProcesses_;
 #endif
 };

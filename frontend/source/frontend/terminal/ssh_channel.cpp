@@ -75,7 +75,7 @@ void SshChannel::write(std::string const& data)
             // TODO: handle error
         },
         sshChannelId_.value(),
-        Nui::val::global("btoa")(data).as<std::string>()
+        Nui::val::global("encodeUtf8Base64")(data).as<std::string>()
     );
 }
 void SshChannel::resize(int cols, int rows)
