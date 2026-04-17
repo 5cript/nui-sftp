@@ -17,12 +17,19 @@
     grid-template-columns: max-content max-content 1fr max-content max-content;
     row-gap: 6px;
 
-    &>div:not(.settings-group-key-container):not(.settings-subgroup):not(.settings-visibility-box) {
+    &>div:not(.settings-group-key-container):not(.settings-subgroup):not(.settings-visibility-box):not(.addressable-setting),
+    &>div.addressable-setting>div {
         display: grid;
         grid-template-columns: subgrid;
         grid-column: 1 / -1;
         align-items: center;
         padding: 0 16px;
+    }
+
+    /* Addressable setting wrapper is layout-transparent so its inner div
+       participates in the parent subgrid directly (the rule above styles it). */
+    &>div.addressable-setting {
+        display: contents;
     }
 
     & .script-nui-switch {
@@ -161,11 +168,16 @@
     border-radius: 16px;
     padding: 8px 0;
 
-    &>div {
+    &>div:not(.addressable-setting),
+    &>div.addressable-setting>div {
         display: grid;
         grid-template-columns: subgrid;
         grid-column: 1 / -1;
         align-items: center;
         padding: 0 16px;
+    }
+
+    &>div.addressable-setting {
+        display: contents;
     }
 }

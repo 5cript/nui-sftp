@@ -58,8 +58,22 @@ class Session
 
     std::optional<std::string> getProcessIdIfExecutingEngine() const;
     auto makeChannelElement() -> Nui::ElementRenderer;
+    auto makeLocalShellChannelElement(std::string const& shellName) -> Nui::ElementRenderer;
     auto makeFileExplorerElement() -> Nui::ElementRenderer;
     auto makeOperationQueueElement() -> Nui::ElementRenderer;
+
+    /** @brief True if this session can host local-shell panels (SSH sessions only). */
+    bool supportsLocalShell() const;
+
+    /**
+     * @brief Prepares to spawn a local-shell panel for the named saved shell.
+     *
+     * Stashes the shell name so the next `local-shell:<name>` fabrication can
+     * look it up, then asks contentPanelManager to fulfil the pending add
+     * request with the prefixed layout id. The actual process spawn happens
+     * when localShellFactory (wired in initializeLayout) is invoked.
+     */
+    void openLocalShellChannel(std::string const& shellName);
 
     std::optional<nlohmann::json> getLayout() const;
     int tabId() const;

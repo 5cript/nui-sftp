@@ -75,12 +75,21 @@ std::string ExecutingTerminalEngine::id() const
 }
 
 void ExecutingTerminalEngine::createChannel(
+    ChannelCreationOptions const& options,
     std::function<void(std::string const&)> handler,
     std::function<void(std::string const&)> errorHandler,
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
     std::function<void(Ids::ChannelId const&)> onChannelLoss
 )
 {
+    auto const* execOptions = dynamic_cast<ExecutingChannelCreationOptions const*>(&options);
+    if (!execOptions)
+    {
+        Log::error("ExecutingTerminalEngine::createChannel called without ExecutingChannelCreationOptions");
+        onCreated(std::nullopt, "Internal error: missing ExecutingChannelCreationOptions");
+        return;
+    }
+
     // Generate a stable local ID for the RPC receptacle names so that stdout/stderr
     // receivers can be registered before ProcessStore::spawn is called, ensuring no
     // output is lost even if the process produces output immediately on start.
@@ -118,14 +127,16 @@ void ExecutingTerminalEngine::createChannel(
         }
     );
 
-    // Build the spawn parameters the same way the old single-channel engine did.
-    Nui::val obj = Nui::val::object();
-    obj.set("command", impl_->settings.engineOptions.command.generic_string());
+    auto const& execOpts = execOptions->executingOptions;
+    auto const& termios = execOptions->termios;
 
-    if (impl_->settings.engineOptions.arguments)
+    Nui::val obj = Nui::val::object();
+    obj.set("command", execOpts.command.generic_string());
+
+    if (execOpts.arguments)
     {
         Nui::val args = Nui::val::array();
-        for (auto const& arg : *impl_->settings.engineOptions.arguments)
+        for (auto const& arg : *execOpts.arguments)
             args.call<void>("push", arg);
         obj.set("arguments", args);
     }
@@ -134,10 +145,10 @@ void ExecutingTerminalEngine::createChannel(
         obj.set("arguments", Nui::val::array());
     }
 
-    if (impl_->settings.engineOptions.environment)
+    if (execOpts.environment)
     {
         Nui::val env = Nui::val::object();
-        for (auto const& [key, value] : *impl_->settings.engineOptions.environment)
+        for (auto const& [key, value] : *execOpts.environment)
             env.set(key.c_str(), value);
         obj.set("environment", env);
     }
@@ -146,14 +157,14 @@ void ExecutingTerminalEngine::createChannel(
         obj.set("environment", Nui::val::object());
     }
 
-    obj.set("defaultExitWaitTimeout", impl_->settings.engineOptions.exitTimeoutSeconds);
-    obj.set("cleanEnvironment", impl_->settings.engineOptions.cleanEnvironment);
-    obj.set("isPty", impl_->settings.engineOptions.isPty);
+    obj.set("defaultExitWaitTimeout", execOpts.exitTimeoutSeconds);
+    obj.set("cleanEnvironment", execOpts.cleanEnvironment);
+    obj.set("isPty", execOpts.isPty);
     obj.set("stdout", stdoutReceptacle);
     obj.set("stderr", stderrReceptacle);
     try
     {
-        obj.set("termios", asVal(impl_->settings.termios));
+        obj.set("termios", asVal(termios));
     }
     catch (std::exception const& exc)
     {

@@ -16,7 +16,23 @@ struct FrontendEvents : public AppWideEvents
     Nui::Observed<std::string> onNewSession{};
     Nui::Observed<bool> onLayoutsChanged{false};
     Nui::Observed<bool> settingsOpen{false};
+    /// Opens settings and scrolls to the rendered element whose DOM id equals
+    /// this string. Settings walks up from the element to find its
+    /// [data-settings-section] ancestor and activates that section first, so
+    /// the target is actually visible before the scroll.
+    /// Consumers should use `requestOpenSettingsAtId()` rather than setting
+    /// this directly.
+    Nui::Observed<std::optional<std::string>> requestedSettingScrollId{};
     Nui::Observed<Persistence::State> onSettingsChanged{};
     Nui::Observed<std::string> selectedTheme{std::string{Constants::defaultThemeName}};
     Nui::Observed<SharedData::DarkLightMode> darkLightMode{SharedData::DarkLightMode::System};
+
+    /// Open the settings dialog and scroll it to the element with the given
+    /// DOM id. The id must be present on something inside a rendered settings
+    /// section (see `addressableSetting()`).
+    void requestOpenSettingsAtId(std::string htmlId)
+    {
+        settingsOpen = true;
+        requestedSettingScrollId = std::move(htmlId);
+    }
 };

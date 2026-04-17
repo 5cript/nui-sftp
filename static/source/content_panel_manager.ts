@@ -1,5 +1,6 @@
 import { ContentPanel } from './content_panel';
 import { Terminal } from './content_panels/terminal';
+import { LocalShellTerminal } from './content_panels/local_shell_terminal';
 import { FileExplorer } from './content_panels/file_explorer';
 import { OperationQueue } from './content_panels/operation_queue';
 import { SessionOptions } from './content_panels/session_options';
@@ -22,6 +23,8 @@ interface addPanelArguments {
     layoutString: string;
     terminalFactory: () => HTMLElement;
     terminalDelete: (channelId: ChannelId | undefined) => any;
+    localShellFactory: (shellName: string) => HTMLElement;
+    localShellDelete: (channelId: ChannelId | undefined) => any;
     fileExplorerFactory: () => HTMLElement;
     fileExplorerDelete: () => any;
     operationQueueFactory: () => HTMLElement;
@@ -42,6 +45,8 @@ class ContentPanelManager {
     panels: Map<string, ContentPanel>;
     terminalFactory: () => HTMLElement | undefined;
     terminalDelete: (channelId: ChannelId | undefined) => any;
+    localShellFactory: (shellName: string) => HTMLElement | undefined;
+    localShellDelete: (channelId: ChannelId | undefined) => any;
     fileExplorerFactory: () => HTMLElement | undefined;
     fileExplorerDelete: () => any;
     operationQueueFactory: () => HTMLElement | undefined;
@@ -56,6 +61,8 @@ class ContentPanelManager {
         this.panels = new Map<string, ContentPanel>();
         this.terminalDelete = (_: ChannelId | undefined) => { return undefined; };
         this.terminalFactory = () => { return undefined; };
+        this.localShellDelete = (_: ChannelId | undefined) => { return undefined; };
+        this.localShellFactory = (_: string) => { return undefined; };
         this.fileExplorerDelete = () => { return undefined; };
         this.fileExplorerFactory = () => { return undefined; };
         this.operationQueueDelete = () => { return undefined; };
@@ -121,6 +128,23 @@ class ContentPanelManager {
     }
 
     private fabricateComponentFromId(id: string): Widget | undefined {
+        // Prefixed ids: "local-shell:<shellName>" picks a named shell from the
+        // user's saved sessions. Probe the factory up front — if the shell was
+        // since removed from settings the C++ factory returns undefined and we
+        // drop the widget entirely so makeDockFromLayout's filter skips it.
+        if (id.startsWith('local-shell:')) {
+            const shellName = id.slice('local-shell:'.length);
+            const node = this.localShellFactory(shellName);
+            if (!node) {
+                console.warn(`Dropping local-shell tab for missing shell config "${shellName}"`);
+                return undefined;
+            }
+            return new LocalShellTerminal(
+                shellName,
+                () => node,
+                this.localShellDelete
+            );
+        }
         switch (id) {
             case 'terminal':
                 return new Terminal('Terminal', this.terminalFactory, this.terminalDelete);
@@ -226,6 +250,7 @@ class ContentPanelManager {
             return false;
         }
         if (!args.terminalFactory || !args.terminalDelete ||
+            !args.localShellFactory || !args.localShellDelete ||
             !args.fileExplorerFactory || !args.fileExplorerDelete ||
             !args.operationQueueFactory || !args.operationQueueDelete ||
             !args.sessionOptionsFactory || !args.sessionOptionsDelete ||
@@ -241,6 +266,8 @@ class ContentPanelManager {
             layoutString,
             terminalFactory,
             terminalDelete,
+            localShellFactory,
+            localShellDelete,
             fileExplorerFactory,
             fileExplorerDelete,
             operationQueueFactory,
@@ -256,6 +283,8 @@ class ContentPanelManager {
 
         this.terminalFactory = terminalFactory;
         this.terminalDelete = terminalDelete;
+        this.localShellFactory = localShellFactory;
+        this.localShellDelete = localShellDelete;
         this.fileExplorerFactory = fileExplorerFactory;
         this.fileExplorerDelete = fileExplorerDelete;
         this.operationQueueFactory = operationQueueFactory;

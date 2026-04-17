@@ -29,6 +29,7 @@ target_sources(
         dialog/direct_connect_dialog.cpp
         dialog/dialog_buttons_keyboard_support.cpp
         settings/general_settings.cpp
+        settings/addressable_setting.cpp
         settings/optional_converters.cpp
         settings/sftp_options.cpp
         settings/ssh_options.cpp
@@ -150,6 +151,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/sync_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/local_shell_tab.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"

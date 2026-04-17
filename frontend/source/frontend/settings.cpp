@@ -101,6 +101,7 @@ struct Settings::Implementation
     Nui::Observed<bool> initialLoadDone{false};
 
     Nui::ListenRemover<decltype(FrontendEvents::settingsOpen)> settingsOpenListener{};
+    Nui::ListenRemover<decltype(FrontendEvents::requestedSettingScrollId)> requestedSettingScrollIdListener{};
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -234,6 +235,88 @@ Settings::Settings(
                     ));
                 }
             }
+        }
+    );
+
+    // Reacts to requestOpenSettingsAtId: poll until the target element is
+    // mounted (settings render is multi-frame on first open), walk up to its
+    // [data-settings-section] ancestor to decide which Section to activate,
+    // then scroll into view and briefly highlight.
+    impl_->requestedSettingScrollIdListener = Nui::smartListen(
+        impl_->events->requestedSettingScrollId,
+        [this](std::optional<std::string> const& htmlId)
+        {
+            if (!htmlId || htmlId->empty())
+                return;
+
+            // Consume the request immediately so re-entry via nullopt doesn't
+            // recurse and a follow-up request with the same id still fires.
+            const std::string idCopy = *htmlId;
+            impl_->events->requestedSettingScrollId = std::nullopt;
+
+            // Polls up to ~30 frames (~500ms @ 60Hz) for the element to mount.
+            // Settings rendering takes up to 3 rAF on first open; this comfortably
+            // absorbs that without arbitrary sleeps.
+            auto attempts = std::make_shared<int>(0);
+            static constexpr int maxAttempts = 30;
+            auto tryLocate = std::make_shared<std::function<void()>>();
+            *tryLocate = [this, idCopy, attempts, tryLocate]() {
+                auto document = Nui::val::global("document");
+                auto element = document.call<Nui::val>("getElementById", idCopy);
+                if (element.isNull() || element.isUndefined())
+                {
+                    if (++(*attempts) >= maxAttempts)
+                    {
+                        Log::warn(
+                            "requestedSettingScrollId: no element with id '{}' after {} frames",
+                            idCopy, maxAttempts
+                        );
+                        return;
+                    }
+                    Nui::val::global("requestAnimationFrame")(Nui::bind(*tryLocate));
+                    return;
+                }
+
+                auto section = element.call<Nui::val>("closest", std::string{"[data-settings-section]"});
+                if (section.isNull() || section.isUndefined())
+                {
+                    Log::warn(
+                        "requestedSettingScrollId: element '{}' has no [data-settings-section] ancestor",
+                        idCopy
+                    );
+                    return;
+                }
+
+                const auto sectionName = section["dataset"]["settingsSection"].as<std::string>();
+                if (sectionName == "GeneralSettings")
+                    impl_->activeSection = Section::GeneralSettings;
+                else if (sectionName == "GlobalInheritables")
+                    impl_->activeSection = Section::GlobalInheritables;
+                else if (sectionName == "Session")
+                    impl_->activeSection = Section::Session;
+                else
+                {
+                    Log::warn("requestedSettingScrollId: unknown section '{}'", sectionName);
+                    return;
+                }
+                Nui::globalEventContext.executeActiveEventsImmediately();
+
+                // Expand any collapsed settings-group ancestors so the target
+                // isn't hidden behind a max-height:0 group.
+                Nui::val::global("addressableSettings")
+                    .call<void>("expandCollapsedGroupsContaining", idCopy);
+
+                // rAF twice so the section display-swap + any group expansion
+                // have painted before scroll measurement.
+                auto raf = Nui::val::global("requestAnimationFrame");
+                raf(Nui::bind([raf, idCopy]() {
+                    raf(Nui::bind([idCopy]() {
+                        Nui::val::global("addressableSettings")
+                            .call<void>("scrollToAndHighlight", idCopy);
+                    }));
+                }));
+            };
+            (*tryLocate)();
         }
     );
 }
@@ -654,7 +737,9 @@ Nui::ElementRenderer Settings::sections()
         return div{
             class_ = "settings-page-sections"
         }(
-            div{style = observe(impl_->activeSection).generate(
+            div{
+                "data-settings-section"_attr = "GeneralSettings",
+                style = observe(impl_->activeSection).generate(
                 [this]() -> std::string
                 {
                     return *impl_->activeSection == Section::GeneralSettings ? "" : "display: none;";
@@ -666,13 +751,17 @@ Nui::ElementRenderer Settings::sections()
                     onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
                 }
             )),
-            div{style = observe(impl_->activeSection).generate(
+            div{
+                "data-settings-section"_attr = "GlobalInheritables",
+                style = observe(impl_->activeSection).generate(
                 [this]() -> std::string
                 {
                     return *impl_->activeSection == Section::GlobalInheritables ? "" : "display: none;";
                 }
             )}(inheritableSettings()),
-            div{style = observe(impl_->activeSection).generate(
+            div{
+                "data-settings-section"_attr = "Session",
+                style = observe(impl_->activeSection).generate(
                 [this]() -> std::string
                 {
                     return *impl_->activeSection == Section::Session ? "" : "display: none;";

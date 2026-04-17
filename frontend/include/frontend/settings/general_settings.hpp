@@ -40,6 +40,7 @@ struct GeneralSettings
         BoolSetting<> showHiddenFilesLocally;
         BoolSetting<> showHiddenFilesRemotely;
         BoolSetting<> fileGridPathBarOnTop;
+        BoolSetting<> showLocalShellWarning;
         NumberSetting<int, true> fileGridPageSize;
         MapSetting<> fileGridExtensionIcons;
         ListSetting<false, std::set> neverShowAgainDialogs;

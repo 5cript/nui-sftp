@@ -311,3 +311,24 @@
         }
     }
 }
+/* ── Addressable settings ─────────────────────────────────────────────────
+ * Settings wrapped in `addressableSetting(htmlId, ...)` can be jumped to from
+ * elsewhere in the app via FrontendEvents::requestOpenSettingsAtId(htmlId).
+ * The wrapper is declared display:contents in settings_group.css so it stays
+ * layout-transparent; the highlight therefore has to target the inner div. */
+
+.addressable-setting>div {
+    scroll-margin-top: 16px;
+    scroll-margin-bottom: 16px;
+    border-radius: 4px;
+}
+
+.addressable-setting--highlight>div {
+    animation: addressable-setting-flash 1500ms ease-out;
+}
+
+@keyframes addressable-setting-flash {
+    0%   { background-color: color-mix(in srgb, var(--theme-color) 55%, transparent); }
+    60%  { background-color: color-mix(in srgb, var(--theme-color) 30%, transparent); }
+    100% { background-color: transparent; }
+}

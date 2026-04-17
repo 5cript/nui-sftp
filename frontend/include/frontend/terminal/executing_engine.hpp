@@ -2,6 +2,7 @@
 
 #include <persistence/state/termios.hpp>
 #include <frontend/terminal/terminal_engine.hpp>
+#include <frontend/terminal/channel_creation_options.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 #include <persistence/state/session_options.hpp>
 #include <ids/ids.hpp>
@@ -11,10 +12,26 @@
 #include <string>
 
 /**
+ * @brief Per-call options required by ExecutingTerminalEngine::createChannel.
+ *
+ * The engine reads fresh command / environment / termios from this struct each
+ * time a channel is spawned — no engine-wide configuration is captured at
+ * construction. This keeps settings changes live (no app restart) and lets a
+ * single engine spawn different shells (bash, msys2, powershell, …) as
+ * sibling channels inside the same session.
+ */
+struct ExecutingChannelCreationOptions : ChannelCreationOptions
+{
+    Persistence::ExecutingSessionOptions executingOptions;
+    Persistence::Termios termios;
+};
+
+/**
  * @brief Terminal engine that manages local processes as channels.
  *
  * open() succeeds immediately (no connection to establish).
- * Each createChannel() call spawns one new process via ProcessStore::spawn.
+ * Each createChannel() call spawns one new process via ProcessStore::spawn
+ * using the ExecutingChannelCreationOptions passed in.
  * The process UUID returned by the backend is used as the ChannelId so that
  * write/resize/close operations can be routed without an extra lookup layer.
  */
@@ -23,8 +40,6 @@ class ExecutingTerminalEngine : public TerminalEngine
   public:
     struct Settings
     {
-        Persistence::ExecutingSessionOptions engineOptions;
-        Persistence::Termios termios;
         std::function<void(Ids::ChannelId const&, std::string)> onProcessChange;
     };
 
@@ -44,7 +59,14 @@ class ExecutingTerminalEngine : public TerminalEngine
         return "local";
     }
 
+    /**
+     * @brief Spawns a new local process.
+     *
+     * @p options must be an ExecutingChannelCreationOptions. If the dynamic
+     * cast fails, onCreated is invoked with std::nullopt and an error message.
+     */
     void createChannel(
+        ChannelCreationOptions const& options,
         std::function<void(std::string const&)> handler,
         std::function<void(std::string const&)> errorHandler,
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
