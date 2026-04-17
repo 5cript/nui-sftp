@@ -94,15 +94,15 @@ namespace NuiFileExplorer
             impl_->resizeObserver = Nui::val::global("ResizeObserver")
                                         .new_(
                                             Nui::bind(
-                                                [this](Nui::val entries, Nui::val)
+                                                [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val entries, Nui::val)
                                                 {
+                                                    if (!aliveWeak.lock())
+                                                        return;
                                                     const auto width = entries[0]["contentRect"]["width"].as<double>();
                                                     const bool wide = width >= 400.0;
                                                     if (wide != impl_->isPlacesWide.value())
                                                     {
                                                         impl_->isPlacesWide = wide;
-                                                        // Auto-open inline panel when crossing into wide mode,
-                                                        // auto-close popup when crossing into narrow mode.
                                                         Nui::globalEventContext.executeActiveEventsImmediately();
                                                     }
                                                 },
@@ -112,7 +112,16 @@ namespace NuiFileExplorer
                                         );
         }
     }
-    Side::~Side() = default;
+    Side::~Side()
+    {
+        // Tell the browser to stop delivering entries so no queued callback fires into
+        // freed memory. The alive flag below is a belt-and-braces guard for any entry
+        // already dispatched before disconnect takes effect.
+        if (impl_ && !impl_->resizeObserver.isNull() && !impl_->resizeObserver.isUndefined())
+            impl_->resizeObserver.call<void>("disconnect");
+        if (impl_)
+            *impl_->alive = false;
+    }
     Side::Side(Side&&) = default;
     Side& Side::operator=(Side&&) = default;
 

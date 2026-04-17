@@ -1205,9 +1205,6 @@ void Session::closeSelf()
     impl_->inertEverything = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    const bool isExecutingEngine =
-        std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine);
-
     auto closeSelfCompletion = [this]()
     {
         Log::info("Removing session layout from content panel manager.");
@@ -1224,40 +1221,33 @@ void Session::closeSelf()
             impl_->closeSelf(this);
     };
 
-    if (!isExecutingEngine &&
-        (impl_->frontendSessionManager.value() || (remoteSideModel() && remoteSideModel()->engine())))
+    // Always dispose the FrontendSessionManager first, for BOTH engine types.
+    // Skipping this path (the previous behaviour for ExecutingSessionOptions)
+    // let widget detach during removePanel start an async channel-dispose chain
+    // (via the deleter → onChannelClosedByUser → FSM::closeChannel → engine →
+    // ProcessStore::exit RPC) whose completion callback captured `this` through
+    // ExecutingTerminalEngine::Implementation — when the RPC response arrived
+    // after Session destruction it read freed memory as `impl_->termId`,
+    // producing the "Failed to get terminal with id to dispose it: <garbage>"
+    // UAF crash. Disposing the FSM first drains every channel's RPC while the
+    // Session is still alive; subsequent deleter-triggered closeChannel calls
+    // hit the `guardDisposal` short-circuit and do nothing.
+    if (impl_->frontendSessionManager.value())
     {
         Log::info("Session shutdown started.");
-
         impl_->operationQueue.deactivate();
         impl_->fileTrackingPanel.deactivate();
-        auto terminalDispose = [this, closeSelfCompletion]()
-        {
-            Log::info("Disposing frontend ssh manager.");
-            if (impl_->frontendSessionManager.value())
+        impl_->frontendSessionManager.value()->dispose(
+            [closeSelfCompletion]()
             {
-                impl_->frontendSessionManager.value()->dispose(
-                    [closeSelfCompletion]()
-                    {
-                        Log::info("Session.closeSelfCompletion()");
-                        closeSelfCompletion();
-                    }
-                );
+                Log::info("Session.closeSelfCompletion()");
+                closeSelfCompletion();
             }
-        };
-
-        // Not necessary, because the session destruction will take care of it:
-        // if (auto fileEngine = remoteSideModel()->engine(); fileEngine)
-        // {
-        //     Log::info("Disposing file engine.");
-        //     fileEngine->dispose(terminalDispose);
-        //     return;
-        // }
-        terminalDispose();
+        );
     }
     else
     {
-        Log::info("Session shutdown is already complete.");
+        Log::info("Session shutdown is already complete (no frontend session manager).");
         closeSelfCompletion();
     }
 }

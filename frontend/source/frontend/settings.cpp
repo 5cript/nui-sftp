@@ -216,22 +216,28 @@ Settings::Settings(
                     //  Frame 1: loader-only tree paints.
                     //  Frame 2: mount heavy sections() subtree (still covered by loader).
                     //  Frame 3: hide loader — content is already laid out underneath.
+                    // rAF callbacks receive a DOMHighResTimeStamp; the Nui::bind
+                    // functor must accept it or emscripten raises a BindingError
+                    // (void0ArgsFunctor called with 1 argument).
                     auto raf = Nui::val::global("requestAnimationFrame");
                     raf(Nui::bind(
-                        [raf, this]() {
+                        [raf, this](Nui::val) {
                             raf(Nui::bind(
-                                [raf, this]() {
+                                [raf, this](Nui::val) {
                                     impl_->wasInitiallyLoaded = true;
                                     Nui::globalEventContext.executeActiveEventsImmediately();
                                     raf(Nui::bind(
-                                        [this]() {
+                                        [this](Nui::val) {
                                             impl_->initialLoadDone = true;
                                             Nui::globalEventContext.executeActiveEventsImmediately();
-                                        }
+                                        },
+                                        std::placeholders::_1
                                     ));
-                                }
+                                },
+                                std::placeholders::_1
                             ));
-                        }
+                        },
+                        std::placeholders::_1
                     ));
                 }
             }
@@ -273,7 +279,9 @@ Settings::Settings(
                         );
                         return;
                     }
-                    Nui::val::global("requestAnimationFrame")(Nui::bind(*tryLocate));
+                    Nui::val::global("requestAnimationFrame")(
+                        Nui::bind([tryLocate](Nui::val) { (*tryLocate)(); }, std::placeholders::_1)
+                    );
                     return;
                 }
 
@@ -309,12 +317,12 @@ Settings::Settings(
                 // rAF twice so the section display-swap + any group expansion
                 // have painted before scroll measurement.
                 auto raf = Nui::val::global("requestAnimationFrame");
-                raf(Nui::bind([raf, idCopy]() {
-                    raf(Nui::bind([idCopy]() {
+                raf(Nui::bind([raf, idCopy](Nui::val) {
+                    raf(Nui::bind([idCopy](Nui::val) {
                         Nui::val::global("addressableSettings")
                             .call<void>("scrollToAndHighlight", idCopy);
-                    }));
-                }));
+                    }, std::placeholders::_1));
+                }, std::placeholders::_1));
             };
             (*tryLocate)();
         }
