@@ -113,6 +113,9 @@ nui_prepare_emscripten_target(
     PREJS
         ${PREJS_FILE}
     LEAN_INDEX_HTML_NO_INDEX_JS
+    # Emit index.wasm separately instead of base64-inlining it into index.js. Avoids V8 exploding
+    # while parsing a multi-hundred-MB source string (previously caused STATUS_BREAKPOINT on load).
+    UNPACKED_MODE on
     NPM_INSTALL_ARGS
         ${NUISCP_NPM_INSTALL_ARGS}
     EMSCRIPTEN_LINK_OPTIONS

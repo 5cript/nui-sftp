@@ -7,9 +7,163 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <title>Nui</title>
 
-    <style type="text/css" >
+    <style type="text/css">
         @import "./styles/main.css";
+
+        #scp-loader {
+            height: 100dvh;
+            width: 100%;
+            background-color: #303030;
+            color: #efefef;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 2.5rem;
+        }
+        #scp-loader__title {
+            font-size: 5rem;
+        }
+        #scp-loader__bar {
+            height: 60px;
+            width: 60%;
+            max-width: 900px;
+            background-color: #606060;
+            border-radius: 30px;
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+        }
+        #scp-loader__bar > .fill {
+            height: 100%;
+            width: 0%;
+            background-color: hsl(5, 40%, 45%);
+            position: absolute;
+            left: 0;
+            transition: width 0.2s linear, background-color 0.2s linear;
+        }
+        #scp-loader__bar > .text {
+            position: relative;
+            z-index: 1;
+            font-weight: bold;
+            color: #303030;
+            text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            font-size: 1.5rem;
+        }
+        #scp-loader__bar > .shine {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.5), transparent);
+            animation: scp-loader-shine 2s infinite;
+        }
+        #scp-loader__bar > .shine.hidden {
+            display: none;
+        }
+        @keyframes scp-loader-shine {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #scp-loader__bar > .shine { animation: none; }
+        }
     </style>
+
+    <!--
+        Progress bar + Emscripten Module hook. Installed BEFORE index.js runs so Emscripten picks up
+        the custom instantiateWasm implementation. Progress is tracked for index.wasm (the large file);
+        index.js is small glue that parses quickly.
+    -->
+    <script type="module">
+        const loader = document.getElementById("scp-loader");
+        const fill = document.getElementById("scp-loader__fill");
+        const text = document.getElementById("scp-loader__text");
+        const shine = document.getElementById("scp-loader__shine");
+
+        const fmtBytes = (n) => {
+            if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + " MB";
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + " KB";
+            return n + " B";
+        };
+
+        // Mirrors the hue ramp from frontend/source/frontend/components/progress_bar.cpp (red → green).
+        const hueFor = (pct, done) => done ? 120 : Math.max(5, 120 * Math.pow(pct / 100, 1.8));
+
+        const updateProgress = (received, total, label) => {
+            if (!fill || !text) return;
+            if (total > 0) {
+                const pct = (received / total) * 100;
+                fill.style.width = pct.toFixed(2) + "%";
+                fill.style.backgroundColor = `hsl(${Math.round(hueFor(pct, received >= total))}, 40%, 45%)`;
+                text.textContent = `${label} ${fmtBytes(received)} / ${fmtBytes(total)} (${pct.toFixed(1)}%)`;
+            } else {
+                text.textContent = `${label} ${fmtBytes(received)}`;
+            }
+        };
+
+        text.textContent = "Fetching runtime…";
+
+        // Emscripten looks up `Module` from the global scope before instantiating the WASM binary.
+        // `instantiateWasm` lets us replace the default fetch+compile pipeline with our own.
+        // We `tee()` the response body: one branch updates the progress bar, the other feeds
+        // WebAssembly.instantiateStreaming — so the WASM compiler ingests bytes as they arrive and
+        // never has to buffer the full binary or round-trip it through a JS string (which is what
+        // used to crash the renderer with STATUS_BREAKPOINT).
+        const moduleHooks = {
+            instantiateWasm(imports, successCallback) {
+                (async () => {
+                    try {
+                        const res = await fetch("nui://app.example/index.wasm");
+                        if (!res.ok)
+                            throw new Error(`HTTP ${res.status}`);
+                        const total = Number(res.headers.get("Content-Length") || 0);
+                        const [trackingStream, compileStream] = res.body.tee();
+
+                        // Progress tracker — drained in parallel with the compile stream.
+                        (async () => {
+                            const reader = trackingStream.getReader();
+                            let received = 0;
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                received += value.length;
+                                updateProgress(received, total, "Downloading runtime");
+                            }
+                        })();
+
+                        // The backend sets Content-Type: application/wasm; wrap with a fresh
+                        // Response so the type is preserved after tee().
+                        const compileResponse = new Response(compileStream, {
+                            headers: { "Content-Type": "application/wasm" },
+                        });
+                        const { instance, module } = await WebAssembly.instantiateStreaming(
+                            compileResponse,
+                            imports,
+                        );
+                        text.textContent = "Initializing…";
+                        shine?.classList.add("hidden");
+                        successCallback(instance, module);
+                    } catch (err) {
+                        console.error("WASM instantiation failed:", err);
+                        text.textContent = `Failed: ${err?.message || err}`;
+                    }
+                })();
+                return {}; // async — real result goes through successCallback
+            },
+            onRuntimeInitialized() {
+                loader?.remove();
+            },
+        };
+        // Preserve any pre-existing Module config (e.g. from Emscripten's prejs).
+        globalThis.Module = Object.assign(globalThis.Module || {}, moduleHooks);
+    </script>
 
     <!-- You have to import like this to achieve inlining of the script -->
     <script type="module" defer>
@@ -22,8 +176,12 @@
 </head>
 
 <body>
-    <div
-        style="height: 100dvh; width: 100%; background-color: #303030; display: flex; justify-content: center; align-items: center; color: #efefef">
-        <div style="font-size: 5rem;">Loading...</div>
+    <div id="scp-loader">
+        <div id="scp-loader__title">Loading...</div>
+        <div id="scp-loader__bar">
+            <div id="scp-loader__fill" class="fill"></div>
+            <div id="scp-loader__text" class="text">Starting…</div>
+            <div id="scp-loader__shine" class="shine"></div>
+        </div>
     </div>
 </body>
