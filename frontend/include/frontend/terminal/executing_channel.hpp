@@ -6,6 +6,7 @@
 #include <nui/frontend/api/timer.hpp>
 
 #include <functional>
+#include <memory>
 #include <string>
 
 /**
@@ -32,7 +33,7 @@ class ExecutingChannel : public ChannelInterface
         Nui::RpcClient::AutoUnregister exitReceiver,
         std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange
     );
-    ~ExecutingChannel() override = default;
+    ~ExecutingChannel() override;
     ExecutingChannel(ExecutingChannel&&) = default;
     ExecutingChannel& operator=(ExecutingChannel&&) = default;
     ExecutingChannel(ExecutingChannel const&) = delete;
@@ -60,10 +61,26 @@ class ExecutingChannel : public ChannelInterface
   private:
     void updatePtyProcs();
 
+    /**
+     * @brief Shared by every async callback the channel spawns (timer, RPC
+     *        response). The destructor / dispose() flip @c alive to false so
+     *        callbacks that fire after destruction short-circuit instead of
+     *        touching freed memory. @c queryInFlight is the re-entry guard
+     *        that replaces the old Nui::TimerHandle::hasActiveTimer() check,
+     *        which kept returning true after the timer had already fired —
+     *        blocking every subsequent process-info query.
+     */
+    struct AsyncState
+    {
+        bool alive{true};
+        bool queryInFlight{false};
+    };
+
     Ids::ChannelId channelId_;
     Nui::RpcClient::AutoUnregister stdoutReceiver_;
     Nui::RpcClient::AutoUnregister stderrReceiver_;
     Nui::RpcClient::AutoUnregister exitReceiver_;
     std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange_;
     Nui::TimerHandle procInfoTimer_;
+    std::shared_ptr<AsyncState> asyncState_;
 };
