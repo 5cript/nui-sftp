@@ -1,0 +1,275 @@
+import { Terminal } from './content_panels/terminal';
+import { LocalShellTerminal } from './content_panels/local_shell_terminal';
+import { FileExplorer } from './content_panels/file_explorer';
+import { OperationQueue } from './content_panels/operation_queue';
+import { SessionOptions } from './content_panels/session_options';
+import { FileTracking } from './content_panels/file_tracking';
+import {
+    BoxPanel,
+    DockPanel,
+    Widget,
+    TabBar,
+    DockLayout
+} from '@lumino/widgets';
+import { ChannelId } from './ids.ts';
+
+/**
+ * Factory / deleter callbacks that come from one specific Session's C++
+ * Nui::bind lambdas. These capture that Session's `this`, its
+ * FrontendSessionManager, its channelElements vector and layout id — so they
+ * are inherently per-session and must NEVER bleed across sessions.
+ */
+export interface PanelFactories {
+    terminalFactory: () => HTMLElement | undefined;
+    terminalDelete: (channelId: ChannelId | undefined) => any;
+    localShellFactory: (shellName: string) => HTMLElement | undefined;
+    localShellDelete: (channelId: ChannelId | undefined) => any;
+    fileExplorerFactory: () => HTMLElement | undefined;
+    fileExplorerDelete: () => any;
+    operationQueueFactory: () => HTMLElement | undefined;
+    operationQueueDelete: () => any;
+    sessionOptionsFactory: () => HTMLElement | undefined;
+    sessionOptionsDelete: () => any;
+    fileTrackingFactory: () => HTMLElement | undefined;
+    fileTrackingDelete: () => any;
+}
+
+/**
+ * A single session's Lumino dock panel tree plus the C++ factories that
+ * build its widgets. One ContentPanel per Session — owning all the
+ * per-session state that used to live (incorrectly) on the singleton
+ * ContentPanelManager.
+ *
+ * The manager keeps a map of these keyed by layout id; per-session state
+ * therefore can't be overwritten when a new session is added.
+ */
+export class ContentPanel {
+    readonly id: string;
+    readonly main: BoxPanel;
+    readonly dock: DockPanel;
+    readonly engineType: string;
+    readonly factories: PanelFactories;
+    readonly openAddContextMenu: (anchorId: string | undefined) => void;
+
+    constructor(
+        id: string,
+        engineType: string,
+        layoutString: string | undefined,
+        factories: PanelFactories,
+        openAddContextMenu: (anchorId: string | undefined) => void,
+        onAddRequested: (sender: DockPanel, widget: TabBar<Widget>) => void,
+    ) {
+        this.id = id;
+        this.engineType = engineType;
+        this.factories = factories;
+        this.openAddContextMenu = openAddContextMenu;
+
+        this.main = new BoxPanel({ spacing: 0 });
+        this.main.id = 'main_' + id;
+
+        if (layoutString === undefined || layoutString === null || layoutString === "") {
+            this.dock = this.makeDefaultDock();
+        } else {
+            this.dock = this.makeDockFromLayout(layoutString);
+        }
+        this.dock.id = 'dock_' + id;
+
+        this.dock.addRequested.connect(onAddRequested);
+        this.main.addWidget(this.dock);
+    }
+
+    /**
+     * Builds the widget for a layout id string. Local-shell tabs use the
+     * prefixed form `local-shell:<shellName>`; plain strings pick the matching
+     * generic panel type. Returns undefined if the factory can't service the
+     * request (e.g. the named shell has been removed from settings) — callers
+     * drop the widget rather than placing a blank tab.
+     */
+    fabricateComponentFromId(id: string): Widget | undefined {
+        if (id.startsWith('local-shell:')) {
+            const shellName = id.slice('local-shell:'.length);
+            const node = this.factories.localShellFactory(shellName);
+            if (!node) {
+                console.warn(`Dropping local-shell tab for missing shell config "${shellName}"`);
+                return undefined;
+            }
+            return new LocalShellTerminal(
+                shellName,
+                () => node,
+                this.factories.localShellDelete
+            );
+        }
+        switch (id) {
+            case 'terminal':
+                return new Terminal('Terminal', this.factories.terminalFactory, this.factories.terminalDelete);
+            case 'file-explorer':
+                return new FileExplorer('FileExplorer', this.factories.fileExplorerFactory, this.factories.fileExplorerDelete);
+            case 'operation-queue':
+                return new OperationQueue('OperationQueue', this.factories.operationQueueFactory, this.factories.operationQueueDelete);
+            case 'session-options':
+                return new SessionOptions('SessionOptions', this.factories.sessionOptionsFactory, this.factories.sessionOptionsDelete);
+            case 'file-tracking':
+                return new FileTracking('File Tracking', this.factories.fileTrackingFactory, this.factories.fileTrackingDelete);
+            default:
+                return undefined;
+        }
+    }
+
+    /** Updates a channel's tab title by channelId. Returns false if not found. */
+    renameTerminal(channelId: ChannelId, title: string): boolean {
+        for (const widget of this.dock.widgets()) {
+            const el = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
+            if (el) {
+                widget.title.label = title;
+                widget.title.caption = title;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Closes a channel widget by channelId. Returns false if not found. */
+    closeTerminalById(channelId: ChannelId): boolean {
+        for (const widget of this.dock.widgets()) {
+            const el = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
+            if (el) {
+                widget.close();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Closes a channel widget identified by its root DOM node. */
+    closeTerminalByNode(node: HTMLElement): boolean {
+        for (const widget of this.dock.widgets()) {
+            if (widget.node === node) {
+                widget.close();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns the current Lumino layout as a serialisable JSON object where
+     * widget references are replaced by their layoutId string (so a saved
+     * layout can later be rehydrated through fabricateComponentFromId).
+     */
+    saveLayout(): any {
+        return JSON.parse(JSON.stringify(this.dock.saveLayout(), (key, value) => {
+            if (key === 'widgets') {
+                return value.map((e: any) => e.layoutId);
+            }
+            return value;
+        }));
+    }
+
+    /** Removes the panel's DOM element. Call on session close. */
+    detach() {
+        const mainEl = document.getElementById(this.main.id);
+        if (mainEl) mainEl.remove();
+    }
+
+    // ── Dock construction ─────────────────────────────────────────────────
+
+    private makeDefaultDock(): DockPanel {
+        const f = this.factories;
+        const term = new Terminal('Terminal', f.terminalFactory, f.terminalDelete);
+        const explorer = new FileExplorer('FileExplorer', f.fileExplorerFactory, f.fileExplorerDelete);
+
+        const dock = new DockPanel({
+            addButtonEnabled: true,
+        });
+        dock.addWidget(term);
+        dock.addWidget(explorer, { mode: 'split-right', ref: term });
+        if (this.engineType === 'ssh') {
+            const queue = new OperationQueue('OperationQueue', f.operationQueueFactory, f.operationQueueDelete);
+            const fileTracking = new FileTracking('File Tracking', f.fileTrackingFactory, f.fileTrackingDelete);
+            dock.addWidget(queue, { mode: 'split-bottom', ref: term });
+            dock.addWidget(fileTracking, { mode: 'tab-after', ref: queue });
+        }
+        this.applyDefaultSplit(dock);
+        return dock;
+    }
+
+    private makeDockFromLayout(layoutString: string): DockPanel {
+        const dehydrated = JSON.parse(layoutString);
+
+        const deserializeArea = (area: any): any => {
+            if (!area) return null;
+
+            const type = ((area as any).type as string) || 'unknown';
+            if (type === 'unknown' || (type !== 'tab-area' && type !== 'split-area')) {
+                console.error(`Attempted to deserialize unknown type: ${type}`);
+                return null;
+            }
+
+            // Currently everything can only be constructed once!
+            const usedUpIds = new Set<string>();
+
+            if (type === 'tab-area') {
+                const { currentIndex, widgets } = area;
+                const hydrated = {
+                    type: 'tab-area',
+                    currentIndex: currentIndex || 0,
+                    widgets:
+                        (widgets &&
+                            (widgets.map((widget: any) => {
+                                if (usedUpIds.has(widget)) {
+                                    console.error(`Duplicate widget id: ${widget}`);
+                                    return null;
+                                }
+                                usedUpIds.add(widget);
+                                return this.fabricateComponentFromId(widget);
+                            }).filter((widget: any) => !!widget))) || [],
+                };
+
+                if (hydrated.currentIndex > hydrated.widgets.length - 1) {
+                    hydrated.currentIndex = 0;
+                }
+                return hydrated;
+            }
+
+            if (type === 'split-area') {
+                const { orientation, sizes, children } = area;
+                const hydrated = {
+                    type: 'split-area',
+                    orientation,
+                    sizes: sizes || [],
+                    children:
+                        (children &&
+                            (children.map((child: any) => deserializeArea(child))
+                                     .filter((child: any) => !!child))) || [],
+                };
+                return hydrated;
+            }
+        };
+
+        const dock = new DockPanel({
+            addButtonEnabled: true,
+        });
+        const area = { main: deserializeArea(dehydrated.main) };
+        if (area) {
+            const dockLayout = dock.layout as DockLayout;
+            dockLayout.restoreLayout(area as DockPanel.ILayoutConfig);
+        }
+        return dock;
+    }
+
+    private applyDefaultSplit(dock: DockPanel) {
+        const saved = dock.saveLayout();
+        const main = saved.main as DockLayout.ISplitAreaConfig;
+        if (main) {
+            const children = main.children;
+            if (children) {
+                const first = children[0] as DockLayout.ISplitAreaConfig;
+                if (first) {
+                    first.sizes = [0.5, 0.5];
+                }
+            }
+            main.sizes = [0.42, 0.58];
+        }
+        dock.restoreLayout(saved);
+    }
+}

@@ -1,20 +1,10 @@
-import { ContentPanel } from './content_panel';
-import { Terminal } from './content_panels/terminal';
-import { LocalShellTerminal } from './content_panels/local_shell_terminal';
-import { FileExplorer } from './content_panels/file_explorer';
-import { OperationQueue } from './content_panels/operation_queue';
-import { SessionOptions } from './content_panels/session_options';
-import { FileTracking } from './content_panels/file_tracking';
+import { ContentPanel, PanelFactories } from './content_panel';
 import {
-    BoxPanel,
     DockPanel,
     Widget,
-    TabBar,
-    DockLayout
+    TabBar
 } from '@lumino/widgets';
-import {
-    ChannelId
-} from './ids.ts';
+import { ChannelId } from './ids.ts';
 
 interface addPanelArguments {
     host: HTMLElement;
@@ -36,207 +26,22 @@ interface addPanelArguments {
     openAddContextMenu: (id: string | undefined) => void;
 }
 
-interface lastAddRequestArgs {
-    sender: DockPanel;
-    widget: TabBar<Widget>;
-}
-
+/**
+ * Registry of ContentPanel instances, one per Session. The manager holds no
+ * per-session state of its own — everything (factories, dock, open-add
+ * callback) lives on the ContentPanel so sessions never leak into each
+ * other.
+ *
+ * The only cross-panel bookkeeping is `lastAddRequest`, a short-lived pair
+ * recording "user just clicked the + button in panel X; when the popup menu
+ * resolves, fabricate whatever they chose into X's dock". It's cleared on
+ * fulfilment and only one such request can be pending at a time anyway.
+ */
 class ContentPanelManager {
-    panels: Map<string, ContentPanel>;
-    terminalFactory: () => HTMLElement | undefined;
-    terminalDelete: (channelId: ChannelId | undefined) => any;
-    localShellFactory: (shellName: string) => HTMLElement | undefined;
-    localShellDelete: (channelId: ChannelId | undefined) => any;
-    fileExplorerFactory: () => HTMLElement | undefined;
-    fileExplorerDelete: () => any;
-    operationQueueFactory: () => HTMLElement | undefined;
-    operationQueueDelete: () => any;
-    sessionOptionsFactory: () => HTMLElement | undefined;
-    sessionOptionsDelete: () => any;
-    fileTrackingFactory: () => HTMLElement | undefined;
-    fileTrackingDelete: () => any;
-    lastAddRequest: lastAddRequestArgs | undefined;
+    private panels: Map<string, ContentPanel> = new Map();
+    private lastAddRequest: { panelId: string; widget: TabBar<Widget> } | undefined;
 
-    constructor() {
-        this.panels = new Map<string, ContentPanel>();
-        this.terminalDelete = (_: ChannelId | undefined) => { return undefined; };
-        this.terminalFactory = () => { return undefined; };
-        this.localShellDelete = (_: ChannelId | undefined) => { return undefined; };
-        this.localShellFactory = (_: string) => { return undefined; };
-        this.fileExplorerDelete = () => { return undefined; };
-        this.fileExplorerFactory = () => { return undefined; };
-        this.operationQueueDelete = () => { return undefined; };
-        this.operationQueueFactory = () => { return undefined; };
-        this.sessionOptionsDelete = () => { return undefined; };
-        this.sessionOptionsFactory = () => { return undefined; };
-        this.fileTrackingDelete = () => { return undefined; };
-        this.fileTrackingFactory = () => { return undefined; };
-        this.lastAddRequest = undefined;
-    }
-
-    modifyDefaultLayout(dock: DockPanel) {
-        const saved = dock.saveLayout();
-        const main = saved.main as DockLayout.ISplitAreaConfig;
-        if (main) {
-            const children = main.children;
-            if (children) {
-                const first = children[0] as DockLayout.ISplitAreaConfig;
-                if (first) {
-                    first.sizes = [0.5, 0.5];
-                }
-            }
-            main.sizes = [0.42, 0.58];
-        }
-        dock.restoreLayout(saved);
-    }
-
-    fullfillLastAddRequest(whatToAdd: string) {
-        if (!this.lastAddRequest) {
-            console.error("No last add request to fulfill");
-            return;
-        }
-
-        const { sender, widget } = this.lastAddRequest;
-        const newComponent = this.fabricateComponentFromId(whatToAdd);
-        if (!newComponent) {
-            console.error(`Could not fabricate component of type ${whatToAdd}`);
-            return;
-        }
-        sender.addWidget(newComponent, { ref: widget.titles[0].owner });
-        this.lastAddRequest = undefined;
-    }
-
-    private makeDefaultDock(id: string, engineType: string): DockPanel {
-        let term = new Terminal('Terminal', this.terminalFactory, this.terminalDelete);
-        let explorer = new FileExplorer('FileExplorer', this.fileExplorerFactory, this.fileExplorerDelete);
-
-        let dock = new DockPanel({
-            addButtonEnabled: true,
-        });
-        dock.addWidget(term);
-        dock.addWidget(explorer, { mode: 'split-right', ref: term });
-        if (engineType == 'ssh') {
-            let queue = new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
-            let fileTracking = new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
-            dock.addWidget(queue, { mode: "split-bottom", ref: term });
-            dock.addWidget(fileTracking, { mode: "tab-after", ref: queue });
-        }
-        dock.id = 'dock_' + id;
-        this.modifyDefaultLayout(dock);
-
-        return dock;
-    }
-
-    private fabricateComponentFromId(id: string): Widget | undefined {
-        // Prefixed ids: "local-shell:<shellName>" picks a named shell from the
-        // user's saved sessions. Probe the factory up front — if the shell was
-        // since removed from settings the C++ factory returns undefined and we
-        // drop the widget entirely so makeDockFromLayout's filter skips it.
-        if (id.startsWith('local-shell:')) {
-            const shellName = id.slice('local-shell:'.length);
-            const node = this.localShellFactory(shellName);
-            if (!node) {
-                console.warn(`Dropping local-shell tab for missing shell config "${shellName}"`);
-                return undefined;
-            }
-            return new LocalShellTerminal(
-                shellName,
-                () => node,
-                this.localShellDelete
-            );
-        }
-        switch (id) {
-            case 'terminal':
-                return new Terminal('Terminal', this.terminalFactory, this.terminalDelete);
-            case 'file-explorer':
-                return new FileExplorer('FileExplorer', this.fileExplorerFactory, this.fileExplorerDelete);
-            case 'operation-queue':
-                return new OperationQueue('OperationQueue', this.operationQueueFactory, this.operationQueueDelete);
-            case 'session-options':
-                return new SessionOptions('SessionOptions', this.sessionOptionsFactory, this.sessionOptionsDelete);
-            case 'file-tracking':
-                return new FileTracking('File Tracking', this.fileTrackingFactory, this.fileTrackingDelete);
-            default:
-                return undefined;
-        }
-    }
-
-    private makeDockFromLayout(id: string, layoutString: string): DockPanel {
-        let dehydrated = JSON.parse(layoutString);
-
-        let deserializeArea = (area: any) => {
-            if (!area) {
-                return null;
-            }
-
-            const type = ((area as any).type as string) || 'unknown';
-            if (type === 'unknown' || (type !== 'tab-area' && type !== 'split-area')) {
-                console.error(`Attempted to deserialize unknown type: ${type}`);
-                return null;
-            }
-
-            // Currently everything can only be constructed once!
-            const usedUpIds = new Set<string>();
-
-            if (type === 'tab-area') {
-                const { currentIndex, widgets } = area;
-
-                const hydrated = {
-                    type: 'tab-area',
-                    currentIndex: currentIndex || 0,
-                    widgets:
-                        (widgets &&
-                            (widgets.map((widget: any) => {
-                                if (usedUpIds.has(widget)) {
-                                    console.error(`Duplicate widget id: ${widget}`);
-                                    return null;
-                                }
-                                usedUpIds.add(widget);
-                                return this.fabricateComponentFromId(widget);
-                            }).filter((widget: any) => !!widget))) || [],
-                };
-
-                if (hydrated.currentIndex > hydrated.widgets.length - 1) {
-                    hydrated.currentIndex = 0;
-                }
-
-                return hydrated;
-            }
-
-            if (type === 'split-area') {
-                const { orientation, sizes, children } = area;
-
-                const hydrated = {
-                    type: 'split-area',
-                    orientation,
-                    sizes: sizes || [],
-                    children:
-                        (children &&
-                            (children.map((child: any) => {
-                                return deserializeArea(child);
-                            }).filter((child: any) => !!child))) || [],
-                };
-
-                return hydrated;
-            }
-        };
-
-        let dock = new DockPanel({
-            addButtonEnabled: true,
-        });
-
-        const area = { main: deserializeArea(dehydrated.main) };
-        if (area) {
-            const dockLayout = dock.layout as DockLayout;
-            dockLayout.restoreLayout(area as DockPanel.ILayoutConfig);
-        }
-
-        dock.id = 'dock_' + id;
-
-        return dock;
-    }
-
-    addPanel(args: addPanelArguments) {
+    addPanel(args: addPanelArguments): boolean {
         if (!args) {
             console.error("No arguments provided to addPanel");
             return false;
@@ -260,172 +65,153 @@ class ContentPanelManager {
             return false;
         }
 
-        const {
-            host,
-            id,
-            layoutString,
-            terminalFactory,
-            terminalDelete,
-            localShellFactory,
-            localShellDelete,
-            fileExplorerFactory,
-            fileExplorerDelete,
-            operationQueueFactory,
-            operationQueueDelete,
-            sessionOptionsFactory,
-            sessionOptionsDelete,
-            fileTrackingFactory,
-            fileTrackingDelete,
-            openAddContextMenu
-        } = args!;
+        const factories: PanelFactories = {
+            terminalFactory: args.terminalFactory,
+            terminalDelete: args.terminalDelete,
+            localShellFactory: args.localShellFactory,
+            localShellDelete: args.localShellDelete,
+            fileExplorerFactory: args.fileExplorerFactory,
+            fileExplorerDelete: args.fileExplorerDelete,
+            operationQueueFactory: args.operationQueueFactory,
+            operationQueueDelete: args.operationQueueDelete,
+            sessionOptionsFactory: args.sessionOptionsFactory,
+            sessionOptionsDelete: args.sessionOptionsDelete,
+            fileTrackingFactory: args.fileTrackingFactory,
+            fileTrackingDelete: args.fileTrackingDelete,
+        };
 
-        console.log(args);
-
-        this.terminalFactory = terminalFactory;
-        this.terminalDelete = terminalDelete;
-        this.localShellFactory = localShellFactory;
-        this.localShellDelete = localShellDelete;
-        this.fileExplorerFactory = fileExplorerFactory;
-        this.fileExplorerDelete = fileExplorerDelete;
-        this.operationQueueFactory = operationQueueFactory;
-        this.operationQueueDelete = operationQueueDelete;
-        this.sessionOptionsFactory = sessionOptionsFactory;
-        this.sessionOptionsDelete = sessionOptionsDelete;
-        this.fileTrackingFactory = fileTrackingFactory;
-        this.fileTrackingDelete = fileTrackingDelete;
-
-        let main = new BoxPanel({ spacing: 0 });
-        main.id = 'main_' + id;
-
-        let dock: DockPanel;
-        if (layoutString === "" || layoutString === undefined || layoutString === null) {
-            dock = this.makeDefaultDock(id, args.engineType);
-        } else {
-            dock = this.makeDockFromLayout(id, layoutString);
-        }
-
-        dock.addRequested.connect((sender: DockPanel, widget: TabBar<Widget>) => {
-            console.log("Add requested");
+        const panelId = args.id;
+        const onAddRequested = (_sender: DockPanel, widget: TabBar<Widget>) => {
             try {
                 const addSelector = (TabBar as any).addButtonSelector || TabBar.addButtonSelector;
-                console.log(`Using add button selector: ${addSelector}`);
                 const addButton = widget.node.querySelector(addSelector) as HTMLElement | null;
-                console.log(`Add button: ${addButton}`);
-                if (addButton) {
-                    if (!addButton.id) {
-                        const id = (globalThis as any).generateId() as string;
-                        addButton.id = `add_button_${id}`;
-                    }
-                    // Open a context menu asking for what to add
-                    this.lastAddRequest = { sender, widget };
-                    openAddContextMenu(addButton.id);
-                }
-                else
+                if (!addButton) {
                     console.error("Could not find add button in tab bar");
+                    return;
+                }
+                if (!addButton.id) {
+                    const newId = (globalThis as any).generateId() as string;
+                    addButton.id = `add_button_${newId}`;
+                }
+                this.lastAddRequest = { panelId, widget };
+                args.openAddContextMenu(addButton.id);
             } catch (e) {
                 console.error(e);
             }
-        });
-        main.addWidget(dock);
+        };
 
-        const resizeObserver = new ResizeObserver(() => {
-            main.update();
-        });
-        resizeObserver.observe(host);
+        const panel = new ContentPanel(
+            panelId,
+            args.engineType,
+            args.layoutString,
+            factories,
+            args.openAddContextMenu,
+            onAddRequested,
+        );
 
         try {
-            Widget.attach(main, host);
-            main.update();
+            Widget.attach(panel.main, args.host);
+            panel.main.update();
         }
         catch (e) {
             console.error(e);
             console.log(JSON.stringify(e));
             return false;
         }
-        this.panels.set(id, main);
+
+        const resizeObserver = new ResizeObserver(() => {
+            panel.main.update();
+        });
+        resizeObserver.observe(args.host);
+
+        this.panels.set(panelId, panel);
         return true;
+    }
+
+    removePanel = (id: string) => {
+        const panel = this.panels.get(id);
+        if (!panel) return;
+        panel.detach();
+        this.panels.delete(id);
+        if (this.lastAddRequest && this.lastAddRequest.panelId === id) {
+            this.lastAddRequest = undefined;
+        }
     }
 
     getPanelById(id: string): ContentPanel | undefined {
         return this.panels.get(id);
     }
 
+    /**
+     * Kept for backwards compatibility with older callers that expected the
+     * Lumino DockPanel directly. New code should prefer getPanelById and go
+     * through ContentPanel's typed API.
+     */
     getDockPanelById(id: string): DockPanel | undefined {
-        let panel = this.panels.get(id);
-        if (panel) {
-            return panel.widgets[0] as DockPanel;
-        }
-        return undefined;
+        return this.panels.get(id)?.dock;
     }
 
     getPanelLayout(id: string): any | undefined {
-        let dock = this.getDockPanelById(id);
-        if (dock) {
-            return JSON.parse(JSON.stringify(dock.saveLayout(), (key, value) => {
-                if (key === 'widgets') {
-                    return value.map((e: any) => e.layoutId);
-                }
-                return value;
-            }));
+        return this.panels.get(id)?.saveLayout();
+    }
+
+    /**
+     * Completes a pending "+ click → context menu" request by fabricating the
+     * chosen widget with the originating panel's factories and inserting it
+     * into that panel's dock. The request is cleared even if fabrication
+     * fails so subsequent clicks aren't blocked.
+     */
+    fullfillLastAddRequest = (whatToAdd: string) => {
+        const request = this.lastAddRequest;
+        this.lastAddRequest = undefined;
+        if (!request) {
+            console.error("No last add request to fulfill");
+            return;
         }
-        return undefined;
+        const panel = this.panels.get(request.panelId);
+        if (!panel) {
+            console.error(`fullfillLastAddRequest: panel "${request.panelId}" no longer exists`);
+            return;
+        }
+        const component = panel.fabricateComponentFromId(whatToAdd);
+        if (!component) {
+            console.error(`Could not fabricate component of type ${whatToAdd}`);
+            return;
+        }
+        panel.dock.addWidget(component, { ref: request.widget.titles[0].owner });
     }
 
     renameTerminalById = (panelId: string, channelId: ChannelId, title: string) => {
-        const dock = this.getDockPanelById(panelId);
-        if (!dock) {
-            console.error(`renameTerminalById: no dock panel found for id ${panelId}`);
+        const panel = this.panels.get(panelId);
+        if (!panel) {
+            console.error(`renameTerminalById: no panel found for id ${panelId}`);
             return;
         }
-        for (const widget of dock.widgets()) {
-            const channelElement = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
-            if (channelElement) {
-                widget.title.label = title;
-                widget.title.caption = title;
-                return;
-            }
+        if (!panel.renameTerminal(channelId, title)) {
+            console.error(`renameTerminalById: could not find terminal widget with channel id ${channelId}`);
         }
-        console.error(`renameTerminalById: could not find terminal widget with channel id ${channelId}`);
     }
 
     closeTerminalByNode = (panelId: string, node: HTMLElement) => {
-        const dock = this.getDockPanelById(panelId);
-        if (!dock) {
-            console.error(`closeTerminalByNode: no dock panel found for id ${panelId}`);
+        const panel = this.panels.get(panelId);
+        if (!panel) {
+            console.error(`closeTerminalByNode: no panel found for id ${panelId}`);
             return;
         }
-        for (const widget of dock.widgets()) {
-            if (widget.node === node) {
-                widget.close();
-                return;
-            }
+        if (!panel.closeTerminalByNode(node)) {
+            console.error('closeTerminalByNode: could not find terminal widget to close');
         }
-        console.error('closeTerminalByNode: could not find terminal widget to close');
     }
 
     closeTerminalById = (panelId: string, channelId: ChannelId) => {
-        const dock = this.getDockPanelById(panelId);
-        if (!dock) {
-            console.error(`closeTerminalById: no dock panel found for id ${panelId}`);
+        const panel = this.panels.get(panelId);
+        if (!panel) {
+            console.error(`closeTerminalById: no panel found for id ${panelId}`);
             return;
         }
-        for (const widget of dock.widgets()) {
-            const channelElement = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
-            if (channelElement) {
-                widget.close();
-                return;
-            }
+        if (!panel.closeTerminalById(channelId)) {
+            console.error(`closeTerminalById: could not find terminal widget with channel id ${channelId}`);
         }
-        console.error(`closeTerminalById: could not find terminal widget with channel id ${channelId}`);
-    }
-
-    removePanel = (id: string) => {
-        console.log("remove panel");
-        let main = document.getElementById('main_' + id);
-        if (main) {
-            main.remove();
-        }
-        this.panels.delete(id);
     }
 };
 export { ContentPanelManager };
