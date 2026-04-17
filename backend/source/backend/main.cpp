@@ -67,14 +67,18 @@ namespace
         };
     };
 
-    auto readFile(std::filesystem::path const& path)
+    auto makeFileResponse(int code, std::string const& reason, std::filesystem::path file, std::string const& mimeType)
     {
-        std::ifstream reader{path, std::ios::binary};
-        reader.seekg(0, std::ios::end);
-        std::string content(reader.tellg(), '\0');
-        reader.seekg(0, std::ios::beg);
-        reader.read(&content[0], content.size());
-        return content;
+        std::unordered_multimap<std::string, std::string> headers = {
+            {"Content-Type"s, mimeType.empty() ? "application/octet-stream"s : mimeType},
+            {"Access-Control-Allow-Origin"s, "*"s},
+        };
+        return CustomSchemeResponse{
+            .statusCode = code,
+            .reasonPhrase = reason,
+            .headers = std::move(headers),
+            .bodyFile = std::move(file),
+        };
     };
 
     CustomScheme createFolderMapping(std::filesystem::path const& programDir, std::string const& schemeName)
@@ -141,17 +145,20 @@ namespace
 
                 Log::debug("Serving file: '{}'", file.string());
 
-                // Read file
-                auto content = readFile(file);
+                // Stream the file body via bodyFile — avoids loading the whole file into memory
+                // (matters for large assets like DWARF blobs). Empty files yield a 204.
+                std::error_code sizeEc;
+                const auto fileSize = std::filesystem::file_size(file, sizeEc);
+                const auto code = (!sizeEc && fileSize == 0) ? 204 : 200;
 
-                // Return file
-                const auto code = content.empty() ? 204 : 200;
-                return makeResponse(
-                    code,
-                    "OK",
-                    std::move(content),
-                    Roar::extensionToMime(file.extension().string()).value_or("application/octet-stream")
-                );
+                // Roar's MIME table has no entry for .wasm; emit application/wasm explicitly so that
+                // WebAssembly.instantiateStreaming() accepts the response and compiles the module as
+                // bytes arrive (otherwise the browser falls back to buffering the full binary first).
+                const auto ext = file.extension().string();
+                const auto mime = (ext == ".wasm")
+                    ? std::string{"application/wasm"}
+                    : Roar::extensionToMime(ext).value_or("application/octet-stream");
+                return makeFileResponse(code, "OK", file, mime);
             },
 
             // Windows: Is this secure like https (not http)? A lot of things are not allowed in http.

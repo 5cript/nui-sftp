@@ -228,7 +228,8 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
         if (endsWith(".css") && relative.parent_path().filename() == "themes")
             return firstOf(findFilesInSearchPaths(getThemeDirs(resourceDir), relative.filename()));
 
-        if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html"))
+        if (endsWith(".js") || endsWith(".map") || endsWith(".css") || endsWith(".ttf") || endsWith(".html") ||
+            endsWith(".wasm"))
         {
 #ifndef NDEBUG
             return firstOf(
