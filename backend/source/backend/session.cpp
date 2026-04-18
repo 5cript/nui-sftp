@@ -18,13 +18,15 @@ Session::Session(
     std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
     Nui::Window& wnd,
     Nui::RpcHub& hub,
-    Persistence::SftpOptions const& sftpOptions
+    Persistence::SftpOptions const& sftpOptions,
+    BulkResumeRegistry* bulkResumeRegistry
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
     , session_{std::move(session)}
     , operationQueue_{std::make_shared<
           OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(1))}
+    , bulkResumeRegistry_{bulkResumeRegistry}
 {}
 
 Session::~Session()
@@ -104,6 +106,12 @@ void Session::stop()
 
             Log::info("Stopping session '{}'", self->id_.value());
 
+            // Backup any in-flight or queued bulk operations before
+            // teardown so a seamless reconnect can adopt them.  Always
+            // happens — the frontend's adopt/discard signals (and the
+            // registry TTL) handle cleanup if no resume occurs.
+            if (self->bulkResumeRegistry_)
+                self->operationQueue_->dumpBulkResumes(*self->bulkResumeRegistry_);
             self->operationQueue_->cancelAll();
             self->operationQueue_.reset();
 
@@ -139,6 +147,62 @@ void Session::stop()
     );
 
     waitForPostedWork.get_future().get();
+}
+
+void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds)
+{
+    if (operationIds.empty())
+        return;
+
+    within_strand_do(
+        [weak = weak_from_this(), operationIds]()
+        {
+            auto self = weak.lock();
+            if (!self || !self->operationQueue_)
+                return;
+            if (!self->bulkResumeRegistry_)
+            {
+                Log::warn("Session::adoptBulkResumes called without a registry — ignoring");
+                return;
+            }
+            // Resume needs an SFTP channel.  All currently-supported bulk
+            // kinds re-enter the same Session::sftp::addBulk* code paths,
+            // which expect a channel id.  We adopt against the most-recently
+            // opened sftp channel by convention; if none exists, the resume
+            // is dropped back into the registry for a later attempt.
+            std::shared_ptr<SecureShell::SftpSession> sftp;
+            for (auto const& [channelId, weakChannel] : self->sftpChannels_)
+            {
+                if (auto locked = weakChannel.lock(); locked)
+                {
+                    sftp = locked;
+                    break;
+                }
+            }
+            if (!sftp)
+            {
+                Log::warn(
+                    "Session::adoptBulkResumes: no sftp channel open yet — deferring {} resume(s)",
+                    operationIds.size()
+                );
+                return;
+            }
+
+            for (auto const& opId : operationIds)
+            {
+                auto entry = self->bulkResumeRegistry_->take(opId);
+                if (!entry)
+                {
+                    Log::info(
+                        "Session::adoptBulkResumes: no backup for operation '{}' (already evicted?)",
+                        opId.value()
+                    );
+                    continue;
+                }
+                self->operationQueue_->adoptBulkResume(*sftp, opId, std::move(*entry));
+            }
+        }
+    );
 }
 
 void Session::doOperationQueueWork()

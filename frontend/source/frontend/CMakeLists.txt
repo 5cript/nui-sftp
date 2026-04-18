@@ -16,6 +16,7 @@ target_sources(
         toolbar.cpp
         session_area.cpp
         session.cpp
+        proto_session.cpp
         settings.cpp
         color.cpp
         icon_from_name.cpp

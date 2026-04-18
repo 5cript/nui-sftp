@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/terminal/channel_interface.hpp>
+#include <frontend/session_snapshot.hpp>
 #include <ids/ids.hpp>
 #include <nui/rpc.hpp>
 #include <nui/frontend/api/timer.hpp>
@@ -20,6 +21,10 @@ class ExecutingChannel : public ChannelInterface
 {
   public:
     /**
+     * @brief Primary ("clean construction") constructor.  Used by
+     *        ExecutingTerminalEngine::createChannel immediately after
+     *        ProcessStore::spawn returns.  The three receivers were registered
+     *        against freshly-generated receptacle names in the engine.
      * @param channelId        The process UUID returned by ProcessStore::spawn.
      * @param stdoutReceiver   Already-registered receiver for stdout data.
      * @param stderrReceiver   Already-registered receiver for stderr data.
@@ -28,6 +33,24 @@ class ExecutingChannel : public ChannelInterface
      */
     ExecutingChannel(
         Ids::ChannelId channelId,
+        Nui::RpcClient::AutoUnregister stdoutReceiver,
+        Nui::RpcClient::AutoUnregister stderrReceiver,
+        Nui::RpcClient::AutoUnregister exitReceiver,
+        std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange
+    );
+
+    /**
+     * @brief Adoption constructor.  Used by ExecutingTerminalEngine::adoptChannel
+     *        when taking over a process from a different engine instance during
+     *        a seamless reconnect.  The receivers must already be registered at
+     *        @p adoption.stdoutReceptacle / stderrReceptacle / "execTerminalExit_"
+     *        + adoption.processId so the backend, which is oblivious to the
+     *        engine swap, keeps hitting live handlers at the same receptacle
+     *        names.  Semantically identical to the primary constructor — the
+     *        separate overload exists so the call site reads "adoption".
+     */
+    ExecutingChannel(
+        LocalShellAdoption const& adoption,
         Nui::RpcClient::AutoUnregister stdoutReceiver,
         Nui::RpcClient::AutoUnregister stderrReceiver,
         Nui::RpcClient::AutoUnregister exitReceiver,

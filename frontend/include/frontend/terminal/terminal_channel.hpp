@@ -37,6 +37,14 @@ class TerminalChannel
     std::string stealTerminal();
     void connectionLossMode(bool isLocked);
     std::string getAllTextContent() const;
+    /**
+     * @brief Writes a serialized scrollback dump (output of getAllTextContent)
+     *        into the xterm instance.  Used to restore history after a
+     *        seamless reconnect swap.  Call after the terminal has been opened
+     *        but before any fresh live output arrives.
+     * @param serializedDump The xterm serializeAddon output to replay.
+     */
+    void replayContent(std::string const& serializedDump);
 
   private:
     struct Implementation;

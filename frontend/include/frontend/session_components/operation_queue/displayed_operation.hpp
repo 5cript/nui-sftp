@@ -72,6 +72,11 @@ struct DisplayedOperation
         }
     }
 
+    std::optional<ResumableOp> resumableDescriptor() const
+    {
+        return card_->resumableDescriptor();
+    }
+
   private:
     Ids::OperationId operationId_;
     SharedData::OperationType type_;

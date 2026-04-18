@@ -54,6 +54,16 @@ class SshTerminalEngine : public TerminalEngine
 
     Ids::SessionId sshSessionId() const;
 
+    /**
+     * @brief Swap in a new onConnectionLoss callback.  Used when a ProtoSession
+     *        is adopted into a Session — ProtoSession binds a minimal handler
+     *        while the engine is being opened, and the adopting Session
+     *        replaces it with its own onTerminalConnectionLoss so the full UI
+     *        (lost-connection overlay, in-session reconnect widget) reacts to
+     *        a later transport drop.
+     */
+    void setOnConnectionLoss(std::function<void()> onConnectionLoss);
+
   private:
     void disconnect(std::function<void()> onDisconnect, bool byLossOfConnection = false);
 

@@ -41,10 +41,22 @@ struct FrontendSessionManager::Implementation
 
 FrontendSessionManager::FrontendSessionManager(
     std::unique_ptr<TerminalEngine> engine,
-    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput,
+    bool eagerAuxEngine
 )
     : impl_{std::make_unique<Implementation>(std::move(engine), std::move(onLockedUserInput))}
-{}
+{
+    if (eagerAuxEngine)
+    {
+        // Settings::onProcessChange is wired only when createLocalShellChannel
+        // runs; here we leave it empty and let the first channel creation
+        // (fresh or adoption) supply it via a small patch path.
+        impl_->auxLocalShellEngine = std::make_unique<ExecutingTerminalEngine>(
+            ExecutingTerminalEngine::Settings{.onProcessChange = {}}
+        );
+        impl_->auxLocalShellEngine->open([](bool, std::string const&) {});
+    }
+}
 
 bool FrontendSessionManager::guardDisposal() const
 {
@@ -54,6 +66,13 @@ bool FrontendSessionManager::guardDisposal() const
         return true;
     }
     return false;
+}
+
+void FrontendSessionManager::setLockedUserInputHandler(
+    std::function<void(Ids::ChannelId, std::string const&)> handler
+)
+{
+    impl_->onLockedUserInput = std::move(handler);
 }
 
 void FrontendSessionManager::forEachChannel(
@@ -250,13 +269,20 @@ void FrontendSessionManager::createLocalShellChannel(
 
     // Lazy-create the aux engine. First caller wires onProcessChange; subsequent
     // calls reuse the same engine (single-aux-engine design — see plan).
+    // When the engine was eager-constructed (reconnect flow) it starts with an
+    // empty onProcessChange — patch it in here the first time a real callback
+    // is available.
     if (!impl_->auxLocalShellEngine)
     {
         Log::info("Lazily constructing aux local-shell engine");
         impl_->auxLocalShellEngine = std::make_unique<ExecutingTerminalEngine>(
-            ExecutingTerminalEngine::Settings{.onProcessChange = std::move(onProcessChange)}
+            ExecutingTerminalEngine::Settings{.onProcessChange = onProcessChange}
         );
         impl_->auxLocalShellEngine->open([](bool, std::string const&) {});
+    }
+    else
+    {
+        impl_->auxLocalShellEngine->setOnProcessChange(onProcessChange);
     }
 
     Log::info("Creating channel on aux local-shell engine");
@@ -405,6 +431,100 @@ TerminalEngine& FrontendSessionManager::engine()
     return *impl_->primaryEngine;
 }
 
+ExecutingTerminalEngine* FrontendSessionManager::auxiliaryLocalShellEngine()
+{
+    return impl_->auxLocalShellEngine.get();
+}
+
+void FrontendSessionManager::adoptLocalShellChannel(
+    Nui::val host,
+    LocalShellAdoption const& adoption,
+    std::function<void(Ids::ChannelId const&, std::string)> onProcessChange,
+    std::function<void(std::optional<Ids::ChannelId>, std::string const& info)> onChannelCreated,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss
+)
+{
+    using namespace std::string_literals;
+
+    if (guardDisposal())
+        return;
+
+    // The aux engine must exist by the time we adopt (eager-constructed on
+    // SSH sessions — see createSshEngine).  Keep a sharp check rather than
+    // silently creating one: a missing aux engine at this point signals a
+    // sequencing bug in the reconnect flow.
+    if (!impl_->auxLocalShellEngine)
+    {
+        Log::error("adoptLocalShellChannel called but aux engine is absent — adoption skipped");
+        onChannelCreated(std::nullopt, "Aux local-shell engine not constructed");
+        return;
+    }
+
+    // Wire the onProcessChange so subsequent title changes on THIS adopted
+    // channel reach Lumino.  Existing adopted channels keep whatever callback
+    // was in effect when they were previously created — this call is idempotent
+    // for matching callbacks but would overwrite for different ones (expected
+    // because all local-shell channels in a Session share the same title path).
+    impl_->auxLocalShellEngine->setOnProcessChange(onProcessChange);
+
+    auto* aux = impl_->auxLocalShellEngine.get();
+    const auto channelId = adoption.processId;
+
+    const bool adopted = aux->adoptChannel(
+        adoption,
+        [this, channelId](std::string const& data) {
+            if (auto* channel = impl_->findChannel(channelId))
+                channel->write(data, false);
+        },
+        [this, channelId](std::string const& data) {
+            if (auto* channel = impl_->findChannel(channelId))
+                channel->writeStderr(data, false);
+        },
+        [this, onChannelLoss](Ids::ChannelId const& lostChannelId) {
+            Log::info("Adopted local-shell channel lost (process exit): '{}'", lostChannelId.value());
+            onChannelLoss(lostChannelId);
+            closeChannel(lostChannelId);
+        }
+    );
+
+    if (!adopted)
+    {
+        onChannelCreated(std::nullopt, "aux engine refused adoption (duplicate id?)");
+        return;
+    }
+
+    [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
+        channelId, std::make_unique<TerminalChannel>(aux, channelId, impl_->onLockedUserInput)
+    );
+    if (channelIter == impl_->channels.end())
+    {
+        Log::error("Failed to wrap adopted local-shell channel in a TerminalChannel");
+        onChannelCreated(std::nullopt, "Failed to wrap adopted local-shell channel");
+        return;
+    }
+    impl_->channelEngine[channelId] = aux;
+
+    channelIter->second->open(
+        host,
+        adoption.terminalOptions,
+        [onChannelCreated, channelId, host, adoption](bool success, std::string const& info) mutable {
+            if (!success)
+            {
+                onChannelCreated(std::nullopt, info);
+                return;
+            }
+            host.call<void>("setAttribute", "data-channelid"s, channelId.value());
+            onChannelCreated(channelId, info);
+        }
+    );
+
+    // Replay the pre-disconnect scrollback into the freshly-opened xterm so
+    // the user sees visual continuity.  Must happen AFTER open() returns
+    // synchronously because replayContent needs the xterm termId to exist.
+    if (auto* channel = impl_->findChannel(channelId); channel && !adoption.savedScrollback.empty())
+        channel->replayContent(adoption.savedScrollback);
+}
+
 void FrontendSessionManager::focusFirst()
 {
     if (guardDisposal())
@@ -425,7 +545,7 @@ void FrontendSessionManager::open(std::function<void(bool, std::string const&)> 
         {
             if (!success)
             {
-                Log::error("Failed to open terminal: '{}'", info);
+                Log::error("Failed to open session: '{}'", info);
                 dispose(
                     [onOpen, info]()
                     {

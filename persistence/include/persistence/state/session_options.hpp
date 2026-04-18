@@ -50,6 +50,20 @@ namespace Persistence
         bool openSftpByDefault{true};
         std::vector<std::string> remoteFavorites{};
 
+        /**
+         * @brief Maximum number of automatic reconnect attempts after a
+         *        transport drop.  0 means "no automatic retries" (the dialog
+         *        is shown for the first attempt only, then gives up on
+         *        failure).  -1 means "unlimited" — the user can always Cancel.
+         */
+        int maxReconnectAttempts{-1};
+        /**
+         * @brief Cap on the exponential backoff delay between retries, in
+         *        milliseconds.  Delay sequence is min(1000 << (attempt-1),
+         *        maxReconnectBackoffMs).  Defaults to 16000 (16 s).
+         */
+        int maxReconnectBackoffMs{16000};
+
         // Referenceables:
         Referenceable<SshOptions> sshOptions{};
         Referenceable<SftpOptions> sftpOptions{};
@@ -65,7 +79,9 @@ namespace Persistence
             sshKeyPrivate,
             sshKeyPublic,
             openSftpByDefault,
-            remoteFavorites)
+            remoteFavorites,
+            maxReconnectAttempts,
+            maxReconnectBackoffMs)
     )
 
     struct SessionOptions : public DefaultMissingMember

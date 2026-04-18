@@ -4,6 +4,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/terminal/file_engine.hpp>
+#include <frontend/resumable_op.hpp>
 
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
@@ -208,6 +209,29 @@ class OperationQueue
         std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
         std::function<void(SharedData::SyncScanResult)> onLocalComplete
     );
+
+    /**
+     * @brief Extracts a resumable descriptor for every currently-in-flight
+     *        (not yet completed) card in both the priority and normal queues.
+     *        Used by Session::captureSnapshot to carry interrupted transfers
+     *        across a seamless reconnect; the replacement Session re-enqueues
+     *        each returned ResumableOp with tryContinue=true.
+     */
+    std::vector<ResumableOp> snapshotInFlight();
+
+    /**
+     * @brief Re-enqueues a non-bulk interrupted operation captured via
+     *        snapshotInFlight().  Used by Session::applySnapshot during a
+     *        seamless reconnect for the four single-file kinds
+     *        (Download/Upload/Delete/Rename).  Bulk kinds are no-ops here
+     *        — they are adopted backend-side via adoptBulkResumes().
+     *
+     *        Whether a re-enqueued single transfer resumes a partially-
+     *        transferred file or starts fresh is governed by the session
+     *        level tryContinue setting consumed by the backend; both
+     *        paths are idempotent against the live filesystem state.
+     */
+    void enqueueResumable(ResumableOp const& op);
 
     Nui::ElementRenderer operator()();
 

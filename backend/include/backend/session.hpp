@@ -4,6 +4,7 @@
 #include <ssh/sftp_session.hpp>
 #include <ids/ids.hpp>
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/rpc_helper.hpp>
 #include <persistence/state_holder.hpp>
 
@@ -34,7 +35,8 @@ class Session
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
         Nui::Window& wnd,
         Nui::RpcHub& hub,
-        Persistence::SftpOptions const& sftpOptions
+        Persistence::SftpOptions const& sftpOptions,
+        BulkResumeRegistry* bulkResumeRegistry
     );
 
     Session(const Session&) = delete;
@@ -45,6 +47,15 @@ class Session
 
     void start();
     void stop();
+
+    /**
+     * @brief Adopts previously-saved bulk operations into this session's
+     *        OperationQueue.  Each id is looked up in the registry; missing
+     *        entries (already evicted or never saved) are silently skipped.
+     *        Used by SessionManager::adoptBulkResume to drive the
+     *        seamless-reconnect resume path.
+     */
+    void adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds);
 
   private:
     /**
@@ -257,6 +268,9 @@ class Session
     int unthrottledLimitCounter_{0};
     std::unique_ptr<SecureShell::Session> session_{};
     std::shared_ptr<OperationQueue> operationQueue_;
+    /// Non-owning. Lifetime is the SessionManager's, which outlives all
+    /// sessions it created.
+    BulkResumeRegistry* bulkResumeRegistry_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
 };

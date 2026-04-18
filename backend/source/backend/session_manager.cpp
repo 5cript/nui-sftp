@@ -159,7 +159,8 @@ void SessionManager::addSession(
                     strand_,
                     *wnd_,
                     *hub_,
-                    sessionOptions.sftpOptions.value()
+                    sessionOptions.sftpOptions.value(),
+                    &bulkResumeRegistry_
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)
@@ -204,6 +205,8 @@ void SessionManager::registerRpc()
 {
     registerRpcSessionConnect();
     registerRpcSessionDisconnect();
+    registerRpcAdoptBulkResume();
+    registerRpcDiscardBulkResume();
 }
 
 void SessionManager::registerRpcSessionConnect()
@@ -267,6 +270,82 @@ void SessionManager::registerRpcSessionDisconnect()
                 catch (std::exception const& e)
                 {
                     Log::error("Error disconnecting to ssh server: {}", e.what());
+                    return reply({{"error", e.what()}});
+                }
+            }
+        );
+}
+
+void SessionManager::registerRpcAdoptBulkResume()
+{
+    on("SessionManager::adoptBulkResume")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
+            {
+                if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::adoptBulkResume", parameters}.hasValueDeep(
+                        "sessionId"
+                    ))
+                    return;
+                if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::adoptBulkResume", parameters}.hasValueDeep(
+                        "operationIds"
+                    ))
+                    return;
+
+                try
+                {
+                    const auto sessionId = Ids::makeSessionId(parameters["sessionId"].get<std::string>());
+                    std::vector<Ids::OperationId> ids;
+                    for (auto const& raw : parameters["operationIds"])
+                        ids.push_back(Ids::makeOperationId(raw.get<std::string>()));
+
+                    within_strand_do(
+                        [weak = weak_from_this(), sessionId, ids = std::move(ids)]()
+                        {
+                            auto self = weak.lock();
+                            if (!self)
+                                return;
+                            const auto iter = self->sessions_.find(sessionId);
+                            if (iter == self->sessions_.end())
+                            {
+                                Log::warn(
+                                    "adoptBulkResume: no session '{}' found — leaving registry untouched",
+                                    sessionId.value()
+                                );
+                                return;
+                            }
+                            iter->second->adoptBulkResumes(ids);
+                        }
+                    );
+                    return reply({{"success", true}});
+                }
+                catch (std::exception const& e)
+                {
+                    Log::error("Error in adoptBulkResume: {}", e.what());
+                    return reply({{"error", e.what()}});
+                }
+            }
+        );
+}
+
+void SessionManager::registerRpcDiscardBulkResume()
+{
+    on("SessionManager::discardBulkResume")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
+            {
+                if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::discardBulkResume", parameters}
+                         .hasValueDeep("operationIds"))
+                    return;
+
+                try
+                {
+                    for (auto const& raw : parameters["operationIds"])
+                        bulkResumeRegistry_.discard(Ids::makeOperationId(raw.get<std::string>()));
+                    return reply({{"success", true}});
+                }
+                catch (std::exception const& e)
+                {
+                    Log::error("Error in discardBulkResume: {}", e.what());
                     return reply({{"error", e.what()}});
                 }
             }

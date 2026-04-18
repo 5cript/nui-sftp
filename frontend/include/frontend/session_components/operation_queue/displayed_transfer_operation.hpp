@@ -105,6 +105,27 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
             progressBar_.setZeroAsComplete();
     }
 
+    std::optional<ResumableOp> resumableDescriptor() const override
+    {
+        if (isCompletedState())
+            return std::nullopt;
+        ResumableOp out;
+        if (type_ == SharedData::OperationType::Download)
+        {
+            out.kind = ResumableOp::Kind::Download;
+            out.src = remotePath_;
+            out.dst = localPath_;
+        }
+        else
+        {
+            out.kind = ResumableOp::Kind::Upload;
+            out.src = localPath_;
+            out.dst = remotePath_;
+        }
+        out.allowOverwrite = true;
+        return out;
+    }
+
   private:
     Components::ProgressBar progressBar_;
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};

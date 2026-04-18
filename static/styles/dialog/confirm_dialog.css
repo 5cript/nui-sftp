@@ -5,5 +5,5 @@
 }
 
 .confirm-dialog {
-    --script-nui-table-cell-background: var(--background-color);
+    --script-nui-components-table-cell-background: var(--background-color);
 }

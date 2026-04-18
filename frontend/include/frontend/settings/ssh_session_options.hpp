@@ -23,6 +23,8 @@ struct SshSessionOptions
     PathSetting<true> sshKeyPrivate;
     BoolSetting<> openSftpByDefault;
     ListSetting<> remoteFavorites;
+    NumberSetting<int, false> maxReconnectAttempts;
+    NumberSetting<int, false> maxReconnectBackoffMs;
 
     SshOptions sshOptions;
     SftpOptions sftpOptions;
