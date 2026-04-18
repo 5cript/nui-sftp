@@ -21,6 +21,7 @@
 #include <ui5-sap-icons/icons/synchronize.hpp>
 
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/spinner.hpp>
 #include <script-nui-components/style_variant.hpp>
 
 #include <fmt/format.h>
@@ -236,7 +237,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     {
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
-                                div{class_ = "sync-progress-spinner"}(),
+                                Snc::spinner({.size = "18px", .thickness = "3px"}),
                                 span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "listingFiles"))
                             ),
                             div{class_ = "sync-progress-counters"}(
@@ -257,7 +258,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     {
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
-                                div{class_ = "sync-progress-spinner"}(),
+                                Snc::spinner({.size = "18px", .thickness = "3px"}),
                                 span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "comparing"))
                             ),
                             div{class_ = "sync-progress-counters"}(

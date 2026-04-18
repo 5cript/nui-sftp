@@ -485,21 +485,6 @@
     font-size: 0.95rem;
 }
 
-/* CSS spinner */
-.sync-progress-spinner {
-    width: 18px;
-    height: 18px;
-    border: 3px solid var(--foreground-border-color);
-    border-top-color: var(--theme-color, #4a9eff);
-    border-radius: 50%;
-    animation: sync-spin 0.7s linear infinite;
-    flex-shrink: 0;
-}
-
-@keyframes sync-spin {
-    to { transform: rotate(360deg); }
-}
-
 .sync-progress-counters {
     display: flex;
     gap: 24px;
