@@ -67,7 +67,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 currentIndex_ = 0;
                 enterState(Running);
                 options_.overallProgressCallback(
-                    options_.localPath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, 0
+                    options_.localPath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, bulkBytesPerSecond_
                 );
                 return WorkStatus::MoreWork;
             }
@@ -102,7 +102,14 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, 0 /*TODO: proper bps*/
+                options_.localPath,
+                currentIndex_,
+                entries_.size() - 1,
+                0,
+                0,
+                0,
+                totalBytes_,
+                bulkBytesPerSecond_
             );
             return WorkStatus::MoreWork;
         }
@@ -121,7 +128,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 {
                     options_.overallProgressCallback(
                         options_.localPath, currentIndex_, entries_.size(),
-                        0, 0, currentBytes_, totalBytes_, 0
+                        0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
                     );
                 }
                 Log::info("BulkDownloadOperation: Bulk download completed.");
@@ -163,7 +170,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 // has no synthetic root, so every entry counts.
                 const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                 options_.overallProgressCallback(
-                    path, currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, 0 /*TODO: proper bps*/
+                    path, currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
                 );
             }
             else if (entry.isRegularFile() || entry.isSymlink())
@@ -178,19 +185,20 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                     downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
 
                     downloadOptions.progressCallback = [this, operationId = this->id(), remoteFullPath](
-                                                           auto, auto max, auto current, auto bytesPerSecond
+                                                           auto, auto max, auto current, auto /*bytesPerSecond*/
                                                        )
                     {
                         const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
+                        const auto bytesNow = currentBytes_ + current;
                         options_.overallProgressCallback(
                             remoteFullPath,
                             currentIndex_,
                             fileCount,
                             current,
                             max,
-                            currentBytes_ + current,
+                            bytesNow,
                             totalBytes_,
-                            bytesPerSecond
+                            updateBulkBytesPerSecond(bytesNow)
                         );
                     };
                     downloadOptions.symlinkHandling = options_.individualOptions.symlinkHandling;
@@ -279,6 +287,39 @@ std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPe
         }
     }
     return {};
+}
+
+std::make_signed_t<std::size_t> BulkDownloadOperation::updateBulkBytesPerSecond(std::uint64_t bytesNow)
+{
+    using namespace std::chrono_literals;
+    // Sample cadence and smoothing factor chosen so the displayed rate
+    // updates slowly enough to be readable. Raising the interval alone makes
+    // the number jump; EWMA dampens the jump so the rate eases toward the
+    // new value over a couple of samples.
+    constexpr auto sampleInterval = 1000ms;
+    constexpr double smoothingAlpha = 0.3;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (lastBpsSampleTime_.time_since_epoch().count() == 0)
+    {
+        lastBpsSampleTime_ = now;
+        lastBpsSampleBytes_ = bytesNow;
+        return bulkBytesPerSecond_;
+    }
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBpsSampleTime_);
+    if (duration < sampleInterval)
+        return bulkBytesPerSecond_;
+    const std::uint64_t bytesDelta = bytesNow >= lastBpsSampleBytes_ ? (bytesNow - lastBpsSampleBytes_) : 0;
+    const double rawBps = static_cast<double>(bytesDelta * 1000) / static_cast<double>(duration.count());
+    // First real sample seeds the average directly to avoid a slow ramp-up
+    // from zero; subsequent samples blend via EWMA.
+    const double smoothed = bulkBytesPerSecond_ == 0
+        ? rawBps
+        : smoothingAlpha * rawBps + (1.0 - smoothingAlpha) * static_cast<double>(bulkBytesPerSecond_);
+    bulkBytesPerSecond_ = static_cast<std::make_signed_t<std::size_t>>(smoothed);
+    lastBpsSampleTime_ = now;
+    lastBpsSampleBytes_ = bytesNow;
+    return bulkBytesPerSecond_;
 }
 
 std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> BulkDownloadOperation::workCurrentFile()

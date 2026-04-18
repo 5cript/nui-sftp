@@ -89,6 +89,8 @@ class BulkUploadOperation : public Operation
     std::expected<void, Error>
     createDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entry);
     void completeCurrentUpload();
+    /** @brief See BulkDownloadOperation::updateBulkBytesPerSecond. */
+    std::make_signed_t<std::size_t> updateBulkBytesPerSecond(std::uint64_t bytesNow);
 
   private:
     SecureShell::SftpSession* sftp_;
@@ -99,6 +101,11 @@ class BulkUploadOperation : public Operation
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};
+    // See BulkDownloadOperation: sampled bulk-level throughput so the card's
+    // bps doesn't reset between files.
+    std::chrono::steady_clock::time_point lastBpsSampleTime_{};
+    std::uint64_t lastBpsSampleBytes_{0};
+    std::make_signed_t<std::size_t> bulkBytesPerSecond_{0};
     std::chrono::seconds futureTimeout_{5};
     // Pairs are (localAbsSrc, remoteAbsDst) per entry.  See the download
     // equivalent for why this exists.

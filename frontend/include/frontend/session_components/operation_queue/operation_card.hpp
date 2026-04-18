@@ -115,7 +115,7 @@ class OperationCard : public OperationCardInterface
             },
             class_ = observe(state_).generate([this](){
                 const auto state = state_.value();
-                const auto isSubgridOperation = type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan || type_ == SharedData::OperationType::Delete;
+                const auto isSubgridOperation = type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan;
                 return fmt::format("opq-card {} {}", [&state]() -> std::string {
                     if (state == SharedData::OperationState::Completed)
                         return "opq-completed";

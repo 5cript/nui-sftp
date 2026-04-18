@@ -954,6 +954,33 @@ void LocalSideModel::uploadItemsConfirmed(
     auto flushAccepted = [this, &accepted, overwriteAlways]() {
         if (accepted->empty())
             return;
+        // Single-file fast path: a one-entry flush skips the bulk machinery
+        // so the operation appears as a regular transfer card (progress bar
+        // + resumable) rather than a bulk aggregate.  Directories stay on
+        // the bulk path because they need the Scan+Bulk pair.
+        if (accepted->size() == 1 && !accepted->front().isDirectory)
+        {
+            auto const& entry = accepted->front();
+            // For upload, BulkAddEntry.src is the LOCAL path (source) and
+            // .dst is the REMOTE path (destination) — see the pushEntry
+            // lambda above.  enqueueSingleUpload's parameter order is
+            // (remoteItem, localItem) so build accordingly.
+            SharedData::DirectoryEntry localEntry{};
+            localEntry.path = entry.src;
+            localEntry.size = entry.sizeBytes;
+            localEntry.type = SharedData::FileType::Regular;
+            SharedData::DirectoryEntry remoteEntry{};
+            remoteEntry.path = entry.dst;
+            remoteEntry.type = SharedData::FileType::Regular;
+            enqueueSingleUpload(
+                NuiFileExplorer::Item{remoteEntry},
+                NuiFileExplorer::Item{localEntry},
+                /*allowOverwrite=*/overwriteAlways,
+                /*insertRefresh=*/true
+            );
+            accepted->clear();
+            return;
+        }
         operationQueue_->enqueueBulkUpload(
             std::move(*accepted),
             /*allowOverwrite*/ overwriteAlways,

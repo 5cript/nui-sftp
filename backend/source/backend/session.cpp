@@ -647,11 +647,13 @@ void Session::registerRpcSftpCreateDirectory()
                     {
                         auto fut = channel->createDirectory(path);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to create directory: timeout");
+                            return reply.error(fmt::format("Failed to create directory '{}': timeout", path));
 
                         const auto result = fut.get();
                         if (!result.has_value())
-                            return reply.error("Failed to create directory: " + result.error().message);
+                            return reply.error(
+                                fmt::format("Failed to create directory '{}': {}", path, result.error().toString())
+                            );
 
                         Log::info("Created directory '{}'", path);
                         reply({{"success", true}});

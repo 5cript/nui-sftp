@@ -240,7 +240,16 @@ class Session
 
     void onFileExplorerConnectionClose();
     void onTerminalConnectionLoss();
-    void openSftp(std::string const& username);
+    /**
+     * @brief Open the SFTP subsystem for this session.
+     * @param username Remote username to use when formatting the default remote path.
+     * @param forceOpen If true, bypass the `opts.openSftpByDefault` gate.  The
+     *        reconnect path uses this so SFTP is re-opened whenever
+     *        `snapshot.sftpWasOpen` was true, regardless of the user's
+     *        "open by default" setting — otherwise `applySnapshot` runs with
+     *        no `fileEngine` and every `enqueueResumable` is dropped.
+     */
+    void openSftp(std::string const& username, bool forceOpen = false);
     void openLocalFilesystem();
     void closeSelf();
     void initializeLayout();

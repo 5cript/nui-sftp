@@ -691,6 +691,31 @@ void RemoteSideModel::downloadItemsConfirmed(
     auto flushAccepted = [this, &accepted, overwriteAlways]() {
         if (accepted->empty())
             return;
+        // Single-file fast path: a one-entry flush skips the bulk machinery
+        // so the operation appears as a regular transfer card (progress bar
+        // + resumable) rather than a bulk aggregate.  Directories stay on
+        // the bulk path because they need the Scan+Bulk pair.
+        if (accepted->size() == 1 && !accepted->front().isDirectory)
+        {
+            auto const& entry = accepted->front();
+            SharedData::DirectoryEntry remoteEntry{};
+            remoteEntry.path = entry.src;
+            remoteEntry.size = entry.sizeBytes;
+            remoteEntry.type = SharedData::FileType::Regular;
+            remoteEntry.mtime = entry.mtime;
+            remoteEntry.mtimeNsec = entry.mtimeNsec;
+            SharedData::DirectoryEntry localEntry{};
+            localEntry.path = entry.dst;
+            localEntry.type = SharedData::FileType::Regular;
+            enqueueSingleDownload(
+                NuiFileExplorer::Item{remoteEntry},
+                NuiFileExplorer::Item{localEntry},
+                /*allowOverwrite=*/overwriteAlways,
+                /*insertRefresh=*/true
+            );
+            accepted->clear();
+            return;
+        }
         // Terminal: flush the accumulated batch in a single RPC. The backend
         // skips per-file lstats for file entries (sizes are trusted) and
         // performs all queueing inside one strand dispatch — replacing N

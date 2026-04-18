@@ -70,7 +70,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 currentIndex_ = 0;
                 enterState(Running);
                 options_.overallProgressCallback(
-                    options_.remotePath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, 0
+                    options_.remotePath, currentIndex_, entries_.size(), 0, 0, 0, totalBytes_, bulkBytesPerSecond_
                 );
                 return WorkStatus::MoreWork;
             }
@@ -92,7 +92,14 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.remotePath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, 0
+                options_.remotePath,
+                currentIndex_,
+                entries_.size() - 1,
+                0,
+                0,
+                0,
+                totalBytes_,
+                bulkBytesPerSecond_
             );
             return WorkStatus::MoreWork;
         }
@@ -114,7 +121,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 {
                     options_.overallProgressCallback(
                         options_.remotePath, currentIndex_, entries_.size(),
-                        0, 0, currentBytes_, totalBytes_, 0
+                        0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
                     );
                 }
                 Log::info("BulkUploadOperation: Bulk upload completed.");
@@ -144,7 +151,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 // has no synthetic root, so every entry counts.
                 const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                 options_.overallProgressCallback(
-                    fullRemotePath(entry), currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, 0
+                    fullRemotePath(entry), currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
                 );
             }
             else if (entry.isRegularFile() || entry.isSymlink())
@@ -155,18 +162,19 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                     individualOpts.remotePath = fullRemotePath(entry);
                     individualOpts.localPath = fullLocalPath(entry);
                     individualOpts.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
-                    individualOpts.progressCallback = [this](auto, auto max, auto current, auto bytesPerSecond)
+                    individualOpts.progressCallback = [this](auto, auto max, auto current, auto /*bytesPerSecond*/)
                     {
                         const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
+                        const auto bytesNow = currentBytes_ + current;
                         options_.overallProgressCallback(
                             fullRemotePath(entries_[currentIndex_]),
                             currentIndex_,
                             fileCount,
                             current,
                             max,
-                            currentBytes_ + current,
+                            bytesNow,
                             totalBytes_,
-                            bytesPerSecond
+                            updateBulkBytesPerSecond(bytesNow)
                         );
                     };
                     individualOpts.symlinkHandling = options_.individualOptions.symlinkHandling;
@@ -214,6 +222,35 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
         }
     }
+}
+
+std::make_signed_t<std::size_t> BulkUploadOperation::updateBulkBytesPerSecond(std::uint64_t bytesNow)
+{
+    // Cadence/smoothing match BulkDownloadOperation — see that implementation
+    // for the rationale.
+    using namespace std::chrono_literals;
+    constexpr auto sampleInterval = 1000ms;
+    constexpr double smoothingAlpha = 0.3;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (lastBpsSampleTime_.time_since_epoch().count() == 0)
+    {
+        lastBpsSampleTime_ = now;
+        lastBpsSampleBytes_ = bytesNow;
+        return bulkBytesPerSecond_;
+    }
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBpsSampleTime_);
+    if (duration < sampleInterval)
+        return bulkBytesPerSecond_;
+    const std::uint64_t bytesDelta = bytesNow >= lastBpsSampleBytes_ ? (bytesNow - lastBpsSampleBytes_) : 0;
+    const double rawBps = static_cast<double>(bytesDelta * 1000) / static_cast<double>(duration.count());
+    const double smoothed = bulkBytesPerSecond_ == 0
+        ? rawBps
+        : smoothingAlpha * rawBps + (1.0 - smoothingAlpha) * static_cast<double>(bulkBytesPerSecond_);
+    bulkBytesPerSecond_ = static_cast<std::make_signed_t<std::size_t>>(smoothed);
+    lastBpsSampleTime_ = now;
+    lastBpsSampleBytes_ = bytesNow;
+    return bulkBytesPerSecond_;
 }
 
 std::expected<void, BulkUploadOperation::Error>

@@ -50,6 +50,11 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         if (currentFile.value() != progress.currentFile)
             currentFile = progress.currentFile;
 
+        if (filesDeleted_.value() != progress.filesDeleted)
+            filesDeleted_ = progress.filesDeleted;
+        if (totalFiles_.value() != progress.totalFiles)
+            totalFiles_ = progress.totalFiles;
+
         progressBar_.setProgress(progress.filesDeleted);
         progressBar_.max(static_cast<long long>(progress.totalFiles));
 
@@ -85,23 +90,45 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         using Nui::Elements::div;
         using Nui::Elements::span;
 
-        Log::info("Rendering bulk delete operation body");
-
         // clang-format off
-            return fragment(
-                span{}(
-                    observe(currentFile),
-                    [this](){
-                        return fmt::format("Deleting: '{}'", currentFile.value().empty() ? removePath_.generic_string() : currentFile.value());
-                    }
+        return div{
+            class_ = "opq-body opq-single"
+        }(
+            div{}(
+                div{
+                    class_ = "opq-transfer-route",
+                    alt = removePath_.generic_string()
+                }(
+                    span{
+                        class_ = "opq-route-segment"
+                    }(
+                        observe(currentFile),
+                        [this](){
+                            return fmt::format(
+                                "Deleting: '{}'",
+                                currentFile.value().empty() ? removePath_.generic_string() : currentFile.value()
+                            );
+                        }
+                    )
                 ),
-                progressBar_("grid-column: 3 / 5;")
-            );
+                span{
+                    class_ = "opq-status-text"
+                }(
+                    observe(filesDeleted_, totalFiles_),
+                    [this](){
+                        return fmt::format("{}/{}", filesDeleted_.value(), totalFiles_.value());
+                    }
+                )
+            ),
+            progressBar_()
+        );
         // clang-format on
     }
 
   private:
     Nui::Observed<std::string> currentFile{""};
+    Nui::Observed<std::uint64_t> filesDeleted_{0ull};
+    Nui::Observed<std::uint64_t> totalFiles_{0ull};
     std::filesystem::path removePath_;
     Components::ProgressBar progressBar_;
 };

@@ -1339,17 +1339,19 @@ Session::~Session()
     // adoptBulkResume failed and left entries in the registry.
     if (!impl_->trackedBulkResumes.empty())
     {
-        std::vector<std::string> ids;
-        ids.reserve(impl_->trackedBulkResumes.size());
+        Nui::val opIds = Nui::val::array();
+        std::size_t idx = 0;
         for (auto const& opId : impl_->trackedBulkResumes)
-            ids.push_back(opId.value());
+            opIds.set(idx++, opId.value());
+        Nui::val args = Nui::val::object();
+        args.set("operationIds", opIds);
         Nui::RpcClient::callWithBackChannel(
             "SessionManager::discardBulkResume",
-            [count = ids.size()](Nui::val val) {
+            [count = impl_->trackedBulkResumes.size()](Nui::val val) {
                 if (val.hasOwnProperty("error"))
                     Log::warn("discardBulkResume failed for {} id(s): {}", count, val["error"].as<std::string>());
             },
-            ids
+            args
         );
     }
 }
@@ -1396,12 +1398,12 @@ void Session::openLocalFilesystem()
     );
 }
 
-void Session::openSftp(std::string const& username)
+void Session::openSftp(std::string const& username, bool forceOpen)
 {
     if (impl_->frontendSessionManager.value() && impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
     {
         auto const& opts = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
-        if (opts.openSftpByDefault)
+        if (forceOpen || opts.openSftpByDefault)
         {
             Log::info("Opening SFTP by default");
             impl_->sftpIsOpen = true;
@@ -1501,7 +1503,7 @@ void Session::onOpenSession(bool success, std::string const& info)
                 *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
                 impl_->remoteUsername = user;
                 if (snapshot.sftpWasOpen)
-                    openSftp(user);
+                    openSftp(user, /*forceOpen=*/true);
                 applySnapshot(snapshot);
                 if (impl_->onReconnectSucceeded)
                     impl_->onReconnectSucceeded(this);
@@ -1764,6 +1766,7 @@ SessionSnapshot Session::captureSnapshot(bool withEjection)
     out.remoteUsername = impl_->remoteUsername;
     out.sftpWasOpen = impl_->sftpIsOpen;
     out.inFlightOps = impl_->operationQueue.snapshotInFlight();
+    Log::info("captureSnapshot: captured {} in-flight operation(s)", out.inFlightOps.size());
 
     // Local-shell channels: optionally evict them from the aux engine so the
     // adopting Session can pick them up at the backend level.  We skip this
@@ -1876,6 +1879,10 @@ void Session::applySnapshot(SessionSnapshot const& snapshot)
     // server-side via SessionManager::adoptBulkResume so the backend's
     // saved entry list never crosses the IPC boundary.  Their OperationIds
     // are also remembered for destructor-time cleanup.
+    Log::info(
+        "applySnapshot: replaying {} in-flight operation(s) from snapshot",
+        snapshot.inFlightOps.size()
+    );
     std::vector<std::string> bulkResumeIds;
     for (auto const& op : snapshot.inFlightOps)
     {
@@ -1903,6 +1910,12 @@ void Session::applySnapshot(SessionSnapshot const& snapshot)
     {
         auto* sshTerminalEngine =
             static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
+        Nui::val args = Nui::val::object();
+        args.set("sessionId", sshTerminalEngine->sshSessionId().value());
+        Nui::val opIds = Nui::val::array();
+        for (std::size_t idx = 0; idx < bulkResumeIds.size(); ++idx)
+            opIds.set(idx, bulkResumeIds[idx]);
+        args.set("operationIds", opIds);
         Nui::RpcClient::callWithBackChannel(
             "SessionManager::adoptBulkResume",
             [count = bulkResumeIds.size()](Nui::val val) {
@@ -1919,8 +1932,7 @@ void Session::applySnapshot(SessionSnapshot const& snapshot)
                     Log::info("adoptBulkResume queued {} bulk operation(s)", count);
                 }
             },
-            sshTerminalEngine->sshSessionId().value(),
-            bulkResumeIds
+            args
         );
     }
 

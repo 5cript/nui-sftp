@@ -104,6 +104,15 @@ class BulkDownloadOperation : public Operation
     std::filesystem::path fullLocalPath(SharedData::DirectoryEntry const& entry) const;
     std::expected<void, Error>
     applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
+    /**
+     *  @brief Update and return the bulk-level bytes/second.
+     *  @param bytesNow Cumulative bytes transferred so far across the bulk
+     *                  (completed files + in-flight file's current bytes).
+     *  @return Signed bps value to propagate to the frontend. Sampling is
+     *          debounced to ≥500ms intervals; between samples the last
+     *          computed value is returned unchanged.
+     */
+    std::make_signed_t<std::size_t> updateBulkBytesPerSecond(std::uint64_t bytesNow);
 
   private:
     SecureShell::SftpSession* sftp_;
@@ -114,6 +123,15 @@ class BulkDownloadOperation : public Operation
     std::uint64_t totalBytes_{0};
     std::uint64_t currentIndex_{0};
     std::uint64_t currentBytes_{0};
+    // Rolling bulk-level throughput. The per-file AsyncTransferContext's bps
+    // resets whenever we move to the next file, which makes the displayed
+    // number flicker to 0 between files. We sample the running cumulative
+    // byte count (completed files + the in-flight file's current bytes) on a
+    // ≥500ms cadence and report the delta-based rate so the bulk card shows
+    // a single coherent throughput across the whole operation.
+    std::chrono::steady_clock::time_point lastBpsSampleTime_{};
+    std::uint64_t lastBpsSampleBytes_{0};
+    std::make_signed_t<std::size_t> bulkBytesPerSecond_{0};
     std::chrono::seconds futureTimeout_{5};
     // Prescanned-flat-list override: when non-empty, indexed by the same
     // currentIndex_ as entries_, and carries the absolute remote/local
