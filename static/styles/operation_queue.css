@@ -283,8 +283,20 @@ header.opq-controls {
 .opq-status-text {
     white-space: nowrap;
     flex-shrink: 0;
+    color: var(--opq-muted);
+    text-align: right;
     font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
     font-variant-numeric: tabular-nums;
+}
+
+/* Fixed-width status cells so the count doesn't shift horizontally when the
+   speed string changes length (e.g. "1 KB/s" → "123.4 MB/s"). */
+.opq-status-count {
+    min-width: 70px;
+}
+
+.opq-status-speed {
+    min-width: 85px;
 }
 
 .opq-transfer-text {

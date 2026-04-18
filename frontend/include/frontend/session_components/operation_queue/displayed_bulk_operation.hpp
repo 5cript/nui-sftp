@@ -50,16 +50,6 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         return true;
     }
 
-    std::string statusText() const
-    {
-        return fmt::format(
-            "{}/{} - {}/s",
-            fileCurrentIndex.value(),
-            fileCount.value(),
-            Utility::formatBytes(bytesPerSecond.value(), Utility::determineOrderOfMagnitude(bytesPerSecond.value()))
-        );
-    }
-
     void setProgress(SharedData::BulkProgress const& progress)
     {
         if (currentFile.value() != progress.currentFile)
@@ -121,11 +111,24 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                     }
                 ),
                 span{
-                    class_ = "opq-status-text"
+                    class_ = "opq-status-text opq-status-count"
                 }(
-                    observe(fileCurrentIndex, fileCount, bytesPerSecond),
+                    observe(fileCurrentIndex, fileCount),
                     [this](){
-                        return statusText();
+                        return fmt::format("{}/{}", fileCurrentIndex.value(), fileCount.value());
+                    }
+                ),
+                span{
+                    class_ = "opq-status-text opq-status-speed"
+                }(
+                    observe(bytesPerSecond),
+                    [this](){
+                        return fmt::format(
+                            "{}/s",
+                            Utility::formatBytes(
+                                bytesPerSecond.value(), Utility::determineOrderOfMagnitude(bytesPerSecond.value())
+                            )
+                        );
                     }
                 )
             ),

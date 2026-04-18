@@ -1127,19 +1127,32 @@ std::vector<ResumableOp> OperationQueue::snapshotInFlight()
         impl_->priorityOperations.observedValues().value().size() +
         impl_->operations.observedValues().value().size()
     );
-    auto harvest = [&out](Map& container)
+    std::size_t scanned = 0;
+    std::size_t skippedCompleted = 0;
+    auto harvest = [&out, &scanned, &skippedCompleted](Map& container)
     {
         for (auto const& entry : container.observedValues().value())
         {
             if (!entry)
                 continue;
+            ++scanned;
             auto descriptor = entry->resumableDescriptor();
             if (descriptor)
                 out.push_back(std::move(*descriptor));
+            else
+                ++skippedCompleted;
         }
     };
     harvest(impl_->priorityOperations);
     harvest(impl_->operations);
+    Log::info(
+        "OperationQueue::snapshotInFlight: priority={} normal={} scanned={} skippedCompleted={} captured={}",
+        impl_->priorityOperations.observedValues().value().size(),
+        impl_->operations.observedValues().value().size(),
+        scanned,
+        skippedCompleted,
+        out.size()
+    );
     return out;
 }
 
@@ -1814,6 +1827,13 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
         );
         return;
     }
+
+    Log::info(
+        "OperationQueue::enqueueResumable: dispatching kind={} src={} dst={}",
+        static_cast<int>(op.kind),
+        op.src.generic_string(),
+        op.dst.generic_string()
+    );
 
     auto reportSingle = [kind = op.kind, src = op.src, dst = op.dst](
                             std::optional<Ids::OperationId> const& opId, std::string const& info)

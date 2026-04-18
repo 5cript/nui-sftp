@@ -47,7 +47,11 @@ namespace Utility
         switch (magnitude)
         {
             case OrderOfMagnitude::None:
-                return fmt::format("{} B", value);
+                // Extra leading space so the single-letter "B" unit occupies
+                // the same two-character slot as "KB"/"MB"/"GB"/"TB"; under a
+                // monospace / tabular-nums font this keeps the unit column
+                // aligned across magnitude transitions.
+                return fmt::format("{}  B", value);
             case OrderOfMagnitude::Kilo:
                 return fmt::format("{:.2f} KB", value / 1024.0);
             case OrderOfMagnitude::Mega:
