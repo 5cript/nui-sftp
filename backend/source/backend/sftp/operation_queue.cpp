@@ -319,17 +319,63 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             if (operationCompleted.error)
                 Log::error("Operation failed: {}", operationCompleted.error->toString());
 
-            // Log::info(
-            //     "Operation completed: id={}, reason={}, localPath='{}', remotePath='{}'",
-            //     operationCompleted.operationId.value(),
-            //     static_cast<int>(operationCompleted.reason),
-            //     operationCompleted.localPath ? operationCompleted.localPath->generic_string() : "<none>",
-            //     operationCompleted.remotePath ? operationCompleted.remotePath->generic_string() : "<none>"
-            // );
+            // Drop any resume backup tied to this operation — it has run to
+            // completion (success, failure, or cancel) and no longer needs
+            // a backup for reconnect adoption.
+            self->bulkResumeStash_.erase(operationCompleted.operationId);
 
             self->hub_->callRemote(self->rpcName("onOperationCompleted"), std::move(operationCompleted));
         }
     );
+}
+
+void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
+{
+    if (bulkResumeStash_.empty())
+        return;
+    Log::info(
+        "OperationQueue::dumpBulkResumes: persisting {} bulk-operation backup(s)",
+        bulkResumeStash_.size()
+    );
+    for (auto& [opId, entry] : bulkResumeStash_)
+        registry.store(opId, std::move(entry));
+    bulkResumeStash_.clear();
+}
+
+void OperationQueue::adoptBulkResume(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId const& operationId,
+    BulkResumeEntry entry
+)
+{
+    Log::info(
+        "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' (kind={}, {} entries)",
+        operationId.value(),
+        static_cast<int>(entry.kind),
+        entry.request.entries.size()
+    );
+
+    // For bulk download/upload the frontend reserves one extra id at the
+    // back of the per-entry id list for the aggregate card.  On adopt we
+    // reuse the original aggregate id (so the surviving frontend card
+    // re-attaches) and synthesise fresh per-entry ids since their cards
+    // no longer exist in the new session.
+    auto operationIdFor = [](std::size_t) {
+        return Ids::generateOperationId();
+    };
+
+    switch (entry.kind)
+    {
+        case BulkResumeEntry::Kind::BulkDownload:
+            addBulkDownloadOperation(sftp, entry.request, operationIdFor, operationId);
+            break;
+        case BulkResumeEntry::Kind::BulkUpload:
+            addBulkUploadOperation(sftp, entry.request, operationIdFor, operationId);
+            break;
+        case BulkResumeEntry::Kind::BulkDelete:
+            addBulkDeleteOperation(sftp, entry.request, operationId);
+            break;
+    }
 }
 
 void OperationQueue::deepPause(bool pause)
@@ -696,6 +742,20 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             }
         );
 
+        // Synthetic single-entry resume backup: re-issuing this through
+        // adopt walks the same scan+bulk path, so the entry list itself
+        // doesn't matter — we just need the directory paths preserved.
+        SharedData::BulkAddRequest synthetic{
+            .entries = {SharedData::BulkAddEntry{.src = remotePath, .dst = localPath, .isDirectory = true}},
+            .allowOverwrite = allowOverwrite,
+            .insertRefresh = insertRefresh,
+            .mode = mode,
+        };
+        bulkResumeStash_.insert_or_assign(
+            operationId,
+            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = std::move(synthetic)}
+        );
+
         return {};
     }
     else
@@ -809,6 +869,19 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         "Bulk download: queued one bulk card (for files) + {} directory entries",
         directoryCount
     );
+
+    // Stash the request keyed by the aggregate bulk card id so a teardown
+    // can hand it to the resume registry.  Mixed file/directory entries
+    // are preserved as-is — adopt re-issues the request through this same
+    // function which performs the same file/directory partition.
+    if (!request.entries.empty())
+    {
+        bulkResumeStash_.insert_or_assign(
+            bulkCardId,
+            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = request}
+        );
+    }
+
     return request.entries.size();
 }
 
@@ -952,6 +1025,21 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             }
         );
 
+        // Synthetic single-entry resume — keyed by the bulk card's id
+        // (bulkId here, since the BulkUpload onOperationAdded uses bulkId
+        // as the frontend's card id).  Adopt walks the same scan+bulk
+        // path on replay.
+        SharedData::BulkAddRequest synthetic{
+            .entries = {SharedData::BulkAddEntry{.src = localPath, .dst = remotePath, .isDirectory = true}},
+            .allowOverwrite = allowOverwrite,
+            .insertRefresh = insertRefresh,
+            .mode = mode,
+        };
+        bulkResumeStash_.insert_or_assign(
+            bulkId,
+            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = std::move(synthetic)}
+        );
+
         return {};
     }
     else
@@ -1057,6 +1145,15 @@ std::size_t OperationQueue::addBulkUploadOperation(
         "Bulk upload: queued one bulk card (for files) + {} directory entries",
         directoryCount
     );
+
+    if (!request.entries.empty())
+    {
+        bulkResumeStash_.insert_or_assign(
+            bulkCardId,
+            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = request}
+        );
+    }
+
     return request.entries.size();
 }
 
@@ -1261,6 +1358,15 @@ std::size_t OperationQueue::addBulkDeleteOperation(
         request.entries.size() - enqueuedDirs,
         enqueuedDirs
     );
+
+    if (!request.entries.empty())
+    {
+        bulkResumeStash_.insert_or_assign(
+            bulkOperationId,
+            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDelete, .request = request}
+        );
+    }
+
     return request.entries.size();
 }
 

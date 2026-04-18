@@ -147,6 +147,28 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         }
     }
 
+    std::optional<ResumableOp> resumableDescriptor() const override
+    {
+        if (isCompletedState())
+            return std::nullopt;
+        ResumableOp out;
+        if (type_ == SharedData::OperationType::BulkDownload)
+        {
+            out.kind = ResumableOp::Kind::BulkDownload;
+            out.src = remotePath_;
+            out.dst = localPath_;
+        }
+        else
+        {
+            out.kind = ResumableOp::Kind::BulkUpload;
+            out.src = localPath_;
+            out.dst = remotePath_;
+        }
+        out.allowOverwrite = true;
+        out.operationId = operationId();
+        return out;
+    }
+
   private:
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;

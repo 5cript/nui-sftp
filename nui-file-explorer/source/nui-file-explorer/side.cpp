@@ -514,6 +514,48 @@ namespace NuiFileExplorer
         return impl_->iconSpacing.value();
     }
 
+    bool Side::showHiddenFiles() const
+    {
+        return impl_->showHiddenFiles.value();
+    }
+
+    void Side::showHiddenFiles(bool value)
+    {
+        if (impl_->showHiddenFiles.value() == value)
+            return;
+        impl_->showHiddenFiles = value;
+        if (impl_->settings.onShowHiddenFilesChanged)
+            impl_->settings.onShowHiddenFilesChanged(value);
+        updateItems(true, false);
+    }
+
+    std::pair<SortCriterion, bool> Side::sort() const
+    {
+        return impl_->sorting.value();
+    }
+
+    void Side::sort(std::pair<SortCriterion, bool> value)
+    {
+        impl_->sorting = value;
+        impl_->sortItems();
+        impl_->items.modify();
+    }
+
+    std::optional<bool> Side::placesOpen() const
+    {
+        return impl_->isPlacesOpen.value();
+    }
+
+    void Side::placesOpen(std::optional<bool> value)
+    {
+        impl_->isPlacesOpen = value;
+    }
+
+    bool Side::placesWide() const
+    {
+        return impl_->isPlacesWide.value();
+    }
+
     void Side::onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event)
     {
         event.stopPropagation();

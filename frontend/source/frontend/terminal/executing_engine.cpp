@@ -5,6 +5,8 @@
 
 #include <nui/rpc.hpp>
 
+#include <algorithm>
+#include <ranges>
 #include <unordered_map>
 
 using namespace std::string_literals;
@@ -15,11 +17,18 @@ struct ExecutingTerminalEngine::Implementation
     std::string engineId;
 
     std::unordered_map<Ids::ChannelId, ExecutingChannel, Ids::IdHash> channels;
+    /**
+     * @brief stdout / stderr receptacle names per channel, needed only when a
+     *        channel is ejected (so the adopting engine can re-register
+     *        handlers at the same names without the backend noticing).
+     */
+    std::unordered_map<Ids::ChannelId, std::pair<std::string, std::string>, Ids::IdHash> receptacleNames;
 
     explicit Implementation(ExecutingTerminalEngine::Settings&& settings)
         : settings{std::move(settings)}
         , engineId{Nui::val::global("generateId")().as<std::string>()}
         , channels{}
+        , receptacleNames{}
     {}
 };
 
@@ -181,6 +190,8 @@ void ExecutingTerminalEngine::createChannel(
         "ProcessStore::spawn",
         [this,
             localId,
+            stdoutReceptacle,
+            stderrReceptacle,
             sharedStdout = std::move(sharedStdout),
             sharedStderr = std::move(sharedStderr),
             onCreated = std::move(onCreated),
@@ -209,11 +220,16 @@ void ExecutingTerminalEngine::createChannel(
                 {
                     Log::info("ExecutingTerminalEngine: process '{}' exited.", channelId.value());
                     onChannelLoss(channelId);
+                    impl_->receptacleNames.erase(channelId);
                     impl_->channels.erase(channelId);
                 }
             );
             auto sharedExit = std::make_shared<Nui::RpcClient::AutoUnregister>(std::move(exitReceiver));
 
+            // try_emplace is required here (not emplace) because ExecutingChannel is not
+            // copy-constructible and the arguments must be perfect-forwarded directly into
+            // the in-place construction — an emplace rvalue-piecewise round-trip would
+            // attempt a disallowed copy of the AutoUnregister receivers.
             impl_->channels.try_emplace(
                 channelId,
                 channelId,
@@ -222,6 +238,7 @@ void ExecutingTerminalEngine::createChannel(
                 std::move(*sharedExit),
                 impl_->settings.onProcessChange
             );
+            impl_->receptacleNames.emplace(channelId, std::make_pair(stdoutReceptacle, stderrReceptacle));
 
             Log::info(
                 "ExecutingTerminalEngine: channel emplace done, calling onCreated for channelId={}", channelId.value()
@@ -261,4 +278,131 @@ ChannelInterface* ExecutingTerminalEngine::channel(Ids::ChannelId const& channel
 {
     auto iter = impl_->channels.find(channelId);
     return iter != impl_->channels.end() ? &iter->second : nullptr;
+}
+
+void ExecutingTerminalEngine::setOnProcessChange(
+    std::function<void(Ids::ChannelId const&, std::string)> onProcessChange
+)
+{
+    impl_->settings.onProcessChange = std::move(onProcessChange);
+}
+
+std::optional<ExecutingTerminalEngine::EjectedChannel>
+ExecutingTerminalEngine::ejectChannel(Ids::ChannelId const& channelId)
+{
+    const auto nameIter = impl_->receptacleNames.find(channelId);
+    if (nameIter == impl_->receptacleNames.end())
+    {
+        Log::warn("ExecutingTerminalEngine::ejectChannel: unknown channel '{}'", channelId.value());
+        return std::nullopt;
+    }
+
+    EjectedChannel out{
+        .processId = channelId,
+        .stdoutReceptacle = nameIter->second.first,
+        .stderrReceptacle = nameIter->second.second,
+    };
+
+    // Removing the channel destroys its ExecutingChannel, which unregisters the
+    // stdout/stderr/exit receivers.  The destructor path does NOT send
+    // ProcessStore::exit — only dispose() does — so the backend process keeps
+    // running, free to be adopted by another engine via adoptChannel.
+    impl_->receptacleNames.erase(nameIter);
+    impl_->channels.erase(channelId);
+
+    Log::info("ExecutingTerminalEngine: ejected channel '{}'", channelId.value());
+    return out;
+}
+
+std::vector<ExecutingTerminalEngine::EjectedChannel> ExecutingTerminalEngine::ejectAllChannels()
+{
+    std::vector<EjectedChannel> out;
+    out.reserve(impl_->receptacleNames.size());
+    std::ranges::transform(
+        impl_->receptacleNames,
+        std::back_inserter(out),
+        [](auto const& entry) {
+            return EjectedChannel{
+                .processId = entry.first,
+                .stdoutReceptacle = entry.second.first,
+                .stderrReceptacle = entry.second.second,
+            };
+        }
+    );
+    impl_->receptacleNames.clear();
+    impl_->channels.clear();
+    Log::info("ExecutingTerminalEngine: ejected {} channels", out.size());
+    return out;
+}
+
+bool ExecutingTerminalEngine::adoptChannel(
+    LocalShellAdoption const& adoption,
+    std::function<void(std::string const&)> handler,
+    std::function<void(std::string const&)> errorHandler,
+    std::function<void(Ids::ChannelId const&)> onChannelLoss
+)
+{
+    if (impl_->channels.contains(adoption.processId))
+    {
+        Log::error(
+            "ExecutingTerminalEngine::adoptChannel: channel '{}' already present — refusing duplicate adoption",
+            adoption.processId.value()
+        );
+        return false;
+    }
+
+    // Register fresh handlers at the original receptacle names.  The backend
+    // kept calling hub->callRemote(<original-name>, ...) throughout the engine
+    // swap; these registrations restore routing.
+    auto stdoutReceiver = Nui::RpcClient::autoRegisterFunction(
+        adoption.stdoutReceptacle,
+        [handler](Nui::val val)
+        {
+            if (val.hasOwnProperty("data"))
+                handler(Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>());
+            else
+                Log::error("execTerminalStdout (adopted) received message without data field");
+        }
+    );
+
+    auto stderrReceiver = Nui::RpcClient::autoRegisterFunction(
+        adoption.stderrReceptacle,
+        [errorHandler](Nui::val val)
+        {
+            if (val.hasOwnProperty("data"))
+                errorHandler(Nui::val::global("decodeUtf8Base64")(val["data"]).as<std::string>());
+            else
+                Log::error("execTerminalStderr (adopted) received message without data field");
+        }
+    );
+
+    const auto channelId = adoption.processId;
+    auto exitReceiver = Nui::RpcClient::autoRegisterFunction(
+        "execTerminalExit_" + channelId.value(),
+        [this, channelId, onChannelLoss](Nui::val)
+        {
+            Log::info("ExecutingTerminalEngine (adopted): process '{}' exited.", channelId.value());
+            onChannelLoss(channelId);
+            impl_->receptacleNames.erase(channelId);
+            impl_->channels.erase(channelId);
+        }
+    );
+
+    // try_emplace for the same reason as in createChannel — ExecutingChannel is
+    // not copy-constructible and the AutoUnregister receivers must flow into
+    // the in-place constructor without an intermediate copy.
+    impl_->channels.try_emplace(
+        channelId,
+        adoption,
+        std::move(stdoutReceiver),
+        std::move(stderrReceiver),
+        std::move(exitReceiver),
+        impl_->settings.onProcessChange
+    );
+    impl_->receptacleNames.emplace(
+        channelId, std::make_pair(adoption.stdoutReceptacle, adoption.stderrReceptacle)
+    );
+
+    Log::info("ExecutingTerminalEngine: adopted channel '{}'", channelId.value());
+    return true;
 }

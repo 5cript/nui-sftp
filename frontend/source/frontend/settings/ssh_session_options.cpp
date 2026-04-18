@@ -48,6 +48,28 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, Inpu
           onChange,
           valueReset(remoteFavorites, onChange, Persistence::SshSessionOptions{}.remoteFavorites)
       }
+    , maxReconnectAttempts{
+          language->getObserved("settings", "sessionSettings", "maxReconnectAttempts"),
+          onChange,
+          valueReset(
+              maxReconnectAttempts, onChange, Persistence::SshSessionOptions{}.maxReconnectAttempts
+          ),
+          {
+              .minValue = -1,
+              .maxValue = 1000,
+          }
+      }
+    , maxReconnectBackoffMs{
+          language->getObserved("settings", "sessionSettings", "maxReconnectBackoffMs"),
+          onChange,
+          valueReset(
+              maxReconnectBackoffMs, onChange, Persistence::SshSessionOptions{}.maxReconnectBackoffMs
+          ),
+          {
+              .minValue = 1000,
+              .maxValue = 600000,
+          }
+      }
     , sshOptions{onChange, inputDialog, multiInputDialog}
     , sftpOptions{onChange}
 {}
@@ -61,6 +83,8 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
     assignIfValid(state.sshKeyPrivate, sshKeyPrivate);
     assignIfValid(state.openSftpByDefault, openSftpByDefault);
     state.remoteFavorites = remoteFavorites.value();
+    assignIfValid(state.maxReconnectAttempts, maxReconnectAttempts);
+    assignIfValid(state.maxReconnectBackoffMs, maxReconnectBackoffMs);
     sshOptions.applyToState(state.sshOptions.value());
     sftpOptions.applyToState(state.sftpOptions.value());
 
@@ -77,6 +101,8 @@ void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& stat
     sshKeyPrivate.value(state.sshKeyPrivate);
     openSftpByDefault.value(state.openSftpByDefault);
     remoteFavorites.value(state.remoteFavorites);
+    maxReconnectAttempts.value(state.maxReconnectAttempts);
+    maxReconnectBackoffMs.value(state.maxReconnectBackoffMs);
     sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
     sftpOptions.loadFromState(state.sftpOptions.value(), loadRefs);
 

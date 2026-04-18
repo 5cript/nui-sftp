@@ -125,6 +125,12 @@ globalThis.terminalUtility.dumpTerminal = (id) => {
         return undefined;
     return found.addons.serializeAddon.serialize();
 };
+globalThis.terminalUtility.replayIntoTerminal = (id, text) => {
+    const found = globalThis.terminalUtility.get(id);
+    if (!found)
+        return;
+    found.terminal.write(text);
+};
 globalThis.terminalUtility.get = (id) => {
     if (!globalThis.terminalUtility.terminals.has(id))
         return undefined;
@@ -337,6 +343,18 @@ std::string TerminalChannel::getAllTextContent() const
         return "";
     }
     return result.as<std::string>();
+}
+
+void TerminalChannel::replayContent(std::string const& serializedDump)
+{
+    if (impl_->termId.empty())
+    {
+        Log::error("Cannot replay terminal content: no terminal id");
+        return;
+    }
+    if (serializedDump.empty())
+        return;
+    terminalUtility().call<void>("replayIntoTerminal", impl_->termId, serializedDump);
 }
 
 std::string TerminalChannel::stealTerminal()

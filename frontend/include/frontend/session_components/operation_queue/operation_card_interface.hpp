@@ -1,5 +1,7 @@
 #pragma once
 
+#include <frontend/resumable_op.hpp>
+
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
@@ -16,6 +18,7 @@
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
+#include <optional>
 
 class OperationCardInterface
 {
@@ -32,4 +35,16 @@ class OperationCardInterface
     virtual Nui::ElementRenderer operator()() const = 0;
     virtual void setError(SharedData::OperationError const& error) = 0;
     virtual void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries) = 0;
+
+    /**
+     * @brief Describe this operation so it can be re-enqueued (with
+     *        tryContinue=true) after a seamless reconnect.  Scan/sync
+     *        operations return std::nullopt and are dropped from the snapshot.
+     *        Completed / failed / canceled cards should also return nullopt
+     *        — only in-flight work needs resuming.
+     */
+    virtual std::optional<ResumableOp> resumableDescriptor() const
+    {
+        return std::nullopt;
+    }
 };

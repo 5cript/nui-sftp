@@ -44,10 +44,19 @@ class FrontendSessionManager
      *                           channel is in connection-loss mode and the user
      *                           types into the xterm widget.  Allows the owner
      *                           to buffer or react to the input.
+     * @param eagerAuxEngine     If true, construct the auxiliary
+     *                           ExecutingTerminalEngine up-front rather than on
+     *                           first local-shell use.  Required for seamless
+     *                           reconnect so the new session's FSM can adopt
+     *                           ejected local-shell channels at construction
+     *                           time even if the user hasn't opened a local
+     *                           shell tab yet.  Defaults to false for parity
+     *                           with pre-reconnect behaviour.
      */
     FrontendSessionManager(
         std::unique_ptr<TerminalEngine> engine,
-        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput,
+        bool eagerAuxEngine = false
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FrontendSessionManager);
 
@@ -109,6 +118,26 @@ class FrontendSessionManager
         Persistence::TerminalOptions const& terminalOptions,
         Persistence::ExecutingSessionOptions const& shellOptions,
         Persistence::Termios const& termios,
+        std::function<void(Ids::ChannelId const&, std::string)> onProcessChange,
+        std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated,
+        std::function<void(Ids::ChannelId const&)> onChannelLoss
+    );
+
+    /**
+     * @brief Adopts a local-shell process ejected from another Session's FSM.
+     *
+     * Equivalent to createLocalShellChannel except the backend process is not
+     * spawned (it's still running from the previous Session).  Registers fresh
+     * stdout/stderr/exit receivers at the receptacle names embedded in
+     * @p adoption, wraps the resulting aux-engine channel in a TerminalChannel,
+     * and opens the xterm.js widget on @p host.  After open(), the caller
+     * should replay adoption.savedScrollback into the TerminalChannel via
+     * replayContent() so the user sees the pre-disconnect output above the
+     * live prompt.
+     */
+    void adoptLocalShellChannel(
+        Nui::val host,
+        LocalShellAdoption const& adoption,
         std::function<void(Ids::ChannelId const&, std::string)> onProcessChange,
         std::function<void(std::optional<Ids::ChannelId> /*channelId*/, std::string const& info)> onChannelCreated,
         std::function<void(Ids::ChannelId const&)> onChannelLoss
@@ -188,6 +217,14 @@ class FrontendSessionManager
     TerminalEngine& engine();
 
     /**
+     * @brief Returns a pointer to the auxiliary local-shell engine, or nullptr
+     *        if it has not been constructed (lazy mode and no local-shell tab
+     *        has been opened yet).  Used by Session::captureSnapshot to eject
+     *        local-shell channels and by Session::applySnapshot to adopt them.
+     */
+    ExecutingTerminalEngine* auxiliaryLocalShellEngine();
+
+    /**
      * @brief Focuses the xterm.js widget of the first channel, if any exists.
      */
     void focusFirst();
@@ -204,6 +241,15 @@ class FrontendSessionManager
      * @param filter  Which engine's channels to write to.
      */
     void broadcast(std::string const& msg, EngineFilter filter = EngineFilter::PrimaryOnly);
+
+    /**
+     * @brief Swap in the locked-user-input handler.  Used when a ProtoSession
+     *        is adopted into a Session — ProtoSession binds a no-op while it's
+     *        only probing the connection, and the Session replaces it with
+     *        its own handler on adoption.  Only affects channels created after
+     *        this call — existing channels copy the handler at construction.
+     */
+    void setLockedUserInputHandler(std::function<void(Ids::ChannelId, std::string const&)> handler);
 
     /**
      * @brief Enables or disables connection-loss mode.

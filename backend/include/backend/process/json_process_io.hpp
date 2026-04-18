@@ -60,10 +60,7 @@ class JsonFraming
      * @return false if a framing or JSON parse error occurred (onResult already
      *         called with the error); true otherwise.
      */
-    static bool parseAccum(
-        std::string& accum,
-        std::function<void(ResultType const&)> const& onResult
-    )
+    static bool parseAccum(std::string& accum, std::function<void(ResultType const&)> const& onResult)
     {
         std::string_view view{accum};
         std::size_t totalConsumed = 0;
@@ -84,8 +81,6 @@ class JsonFraming
             std::string_view payload = view.substr(frameHeaderSize, bodyLen);
             view.remove_prefix(frameHeaderSize + bodyLen);
             totalConsumed += frameHeaderSize + bodyLen;
-
-            spdlog::info("Received message: {}", payload);
             try
             {
                 onResult(nlohmann::json::parse(payload));
@@ -159,14 +154,12 @@ class JsonProcessIo : public JsonFraming
             boost::asio::buffer(readBufferCurrent_.data(), readBufferCurrent_.size()),
             [this](boost::system::error_code ec, std::size_t bytes_transferred)
             {
-                spdlog::debug("Read {} bytes", bytes_transferred);
                 if (ec)
                 {
                     spdlog::error("Error reading from input: {}", ec.message());
                     onResult_(std::unexpected(ec.message()));
                     return;
                 }
-                spdlog::trace("Read data: {}", std::string_view(readBufferCurrent_.data(), bytes_transferred));
                 readBufferAccum_.append(readBufferCurrent_, 0, bytes_transferred);
                 if (!parseAccum(readBufferAccum_, onResult_))
                     return;

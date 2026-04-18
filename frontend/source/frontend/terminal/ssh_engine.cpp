@@ -30,6 +30,11 @@ struct SshTerminalEngine::Implementation
 SshTerminalEngine::SshTerminalEngine(Settings settings)
     : impl_{std::make_unique<Implementation>(std::move(settings))}
 {}
+
+void SshTerminalEngine::setOnConnectionLoss(std::function<void()> onConnectionLoss)
+{
+    impl_->settings.onConnectionLoss = std::move(onConnectionLoss);
+}
 SshTerminalEngine::~SshTerminalEngine()
 {
     if (!moveDetector_.wasMoved() && !impl_->wasDisposed)

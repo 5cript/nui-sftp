@@ -20,6 +20,22 @@ ExecutingChannel::ExecutingChannel(
     updatePtyProcs();
 }
 
+ExecutingChannel::ExecutingChannel(
+    LocalShellAdoption const& adoption,
+    Nui::RpcClient::AutoUnregister stdoutReceiver,
+    Nui::RpcClient::AutoUnregister stderrReceiver,
+    Nui::RpcClient::AutoUnregister exitReceiver,
+    std::function<void(Ids::ChannelId const&, std::string const&)> onProcessChange
+)
+    : ExecutingChannel{
+          adoption.processId,
+          std::move(stdoutReceiver),
+          std::move(stderrReceiver),
+          std::move(exitReceiver),
+          std::move(onProcessChange),
+      }
+{}
+
 ExecutingChannel::~ExecutingChannel()
 {
     // Moved-from instances have a null asyncState_; the live instance still

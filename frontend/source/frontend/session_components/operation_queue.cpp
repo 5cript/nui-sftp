@@ -13,6 +13,7 @@
 
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <constants/sftp.hpp>
 
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
@@ -1118,6 +1119,30 @@ Nui::Observed<bool>& OperationQueue::pausedState()
     return impl_->paused;
 }
 
+std::vector<ResumableOp> OperationQueue::snapshotInFlight()
+{
+    std::vector<ResumableOp> out;
+    using Map = ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map>;
+    out.reserve(
+        impl_->priorityOperations.observedValues().value().size() +
+        impl_->operations.observedValues().value().size()
+    );
+    auto harvest = [&out](Map& container)
+    {
+        for (auto const& entry : container.observedValues().value())
+        {
+            if (!entry)
+                continue;
+            auto descriptor = entry->resumableDescriptor();
+            if (descriptor)
+                out.push_back(std::move(*descriptor));
+        }
+    };
+    harvest(impl_->priorityOperations);
+    harvest(impl_->operations);
+    return out;
+}
+
 void OperationQueue::unpause()
 {
     if (!impl_->paused.value())
@@ -1776,6 +1801,104 @@ void OperationQueue::enqueueBulkUpload(
         mode,
         std::move(onBulkAck)
     );
+}
+
+void OperationQueue::enqueueResumable(ResumableOp const& op)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error(
+            "OperationQueue::enqueueResumable: no file engine, cannot resume kind={} src={}",
+            static_cast<int>(op.kind),
+            op.src.generic_string()
+        );
+        return;
+    }
+
+    auto reportSingle = [kind = op.kind, src = op.src, dst = op.dst](
+                            std::optional<Ids::OperationId> const& opId, std::string const& info)
+    {
+        if (opId)
+        {
+            Log::info(
+                "Resumed operation kind={} src={} dst={} as id {}",
+                static_cast<int>(kind),
+                src.generic_string(),
+                dst.generic_string(),
+                opId->value()
+            );
+        }
+        else
+        {
+            Log::error(
+                "Failed to re-enqueue operation kind={} src={} dst={}: {}",
+                static_cast<int>(kind),
+                src.generic_string(),
+                dst.generic_string(),
+                info
+            );
+        }
+    };
+
+    // Build a minimal Item from a path.  The size hint biases the backend
+    // toward the streaming/big-file code path so a partial transfer can
+    // resume; the small-file path doesn't honour tryContinue.
+    auto makeItem = [](std::filesystem::path const& path) {
+        SharedData::DirectoryEntry entry{};
+        entry.path = path;
+        entry.type = SharedData::FileType::Regular;
+        entry.size = static_cast<std::uint64_t>(Constants::bigFileCutOff) + 1;
+        return NuiFileExplorer::Item{entry};
+    };
+
+    switch (op.kind)
+    {
+        case ResumableOp::Kind::Download:
+            enqueueDownload(
+                makeItem(op.src),
+                makeItem(op.dst),
+                reportSingle,
+                op.allowOverwrite,
+                /*insertRefresh=*/true,
+                op.createMissingDirectories,
+                SharedData::OperationMode::Queued
+            );
+            break;
+        case ResumableOp::Kind::Upload:
+            enqueueUpload(
+                makeItem(op.dst),
+                makeItem(op.src),
+                reportSingle,
+                op.allowOverwrite,
+                /*insertRefresh=*/true,
+                op.createMissingDirectories,
+                SharedData::OperationMode::Queued
+            );
+            break;
+        case ResumableOp::Kind::Rename:
+            enqueueRename(op.src, op.dst, reportSingle, SharedData::OperationMode::Queued);
+            break;
+        case ResumableOp::Kind::Delete:
+            enqueueDelete(
+                {op.src},
+                op.recursive,
+                [src = op.src](std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info) {
+                    if (ids)
+                        Log::info("Resumed delete of {} ({} op(s) created)", src.generic_string(), ids->size());
+                    else
+                        Log::error("Failed to re-enqueue delete of {}: {}", src.generic_string(), info);
+                },
+                SharedData::OperationMode::Queued
+            );
+            break;
+        case ResumableOp::Kind::BulkDownload:
+        case ResumableOp::Kind::BulkUpload:
+        case ResumableOp::Kind::BulkDelete:
+            // Bulk kinds are adopted via SessionManager::adoptBulkResume —
+            // see Session::applySnapshot.  This helper handles only the
+            // single-file kinds.
+            break;
+    }
 }
 
 void OperationQueue::enqueueBulkDelete(

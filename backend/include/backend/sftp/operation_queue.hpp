@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/all_operations.hpp>
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/rpc.hpp>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <atomic>
 
@@ -179,6 +181,28 @@ class OperationQueue
 
     bool hasPriorityWork() const;
 
+    /**
+     * @brief Moves every still-tracked bulk-operation backup into @p
+     *        registry, keyed by the bulk's OperationId.  Called by Session
+     *        during teardown so a seamless reconnect can adopt them.
+     *
+     *        Covers both queued-not-started bulks and bulks already running
+     *        — for the latter we re-issue the full original entry list and
+     *        rely on the per-file tryContinue path to skip whole files
+     *        already present (the in-progress file's bytes are not
+     *        byte-checkpointed here).
+     */
+    void dumpBulkResumes(BulkResumeRegistry& registry);
+
+    /**
+     * @brief Re-enqueues the bulk operation described by @p entry against
+     *        this queue, reusing @p operationId as the bulk-card id so the
+     *        frontend's existing card surface stays attached.  Called from
+     *        Session::adoptBulkResumes after pulling @p entry out of the
+     *        registry.
+     */
+    void adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
+
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
     void deepPause(bool pause);
@@ -213,4 +237,9 @@ class OperationQueue
     // Keyed by operationId.value(). Called when a sync-only scan completes and ejects its results.
     std::map<std::string, std::function<void(std::vector<SharedData::DirectoryEntry>, std::uint64_t)>>
         syncScanCallbacks_{};
+
+    // Per-bulk backup snapshot, populated when a bulk-add path enqueues an
+    // op and erased once the op completes (success or failure).  Keyed by
+    // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
+    std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
 };

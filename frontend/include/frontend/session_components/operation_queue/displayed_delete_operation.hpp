@@ -56,6 +56,28 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
+    std::optional<ResumableOp> resumableDescriptor() const override
+    {
+        if (isCompletedState())
+            return std::nullopt;
+        ResumableOp out;
+        // BulkDelete reuses this card class; differentiate so the resume
+        // routes to the backend's saved-entry-list path instead of the
+        // single-Delete frontend path.
+        if (type_ == SharedData::OperationType::BulkDelete)
+        {
+            out.kind = ResumableOp::Kind::BulkDelete;
+            out.operationId = operationId();
+        }
+        else
+        {
+            out.kind = ResumableOp::Kind::Delete;
+            out.recursive = true;
+        }
+        out.src = removePath_;
+        return out;
+    }
+
     Nui::ElementRenderer body() const override
     {
         using namespace Nui::Elements;

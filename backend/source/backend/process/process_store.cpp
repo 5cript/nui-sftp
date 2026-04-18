@@ -166,8 +166,6 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
     auto const type = msg.value("type", std::string{});
     auto const procId = msg.value("id", std::string{});
 
-    Log::debug("Received message from fork pool worker: type='{}' id='{}' msg='{}'", type, procId, msg.dump());
-
     if (type == "open")
     {
         wnd_->runInJavascriptThread(

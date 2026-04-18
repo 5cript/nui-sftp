@@ -31,6 +31,17 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
         return false;
     }
 
+    std::optional<ResumableOp> resumableDescriptor() const override
+    {
+        if (isCompletedState())
+            return std::nullopt;
+        ResumableOp out;
+        out.kind = ResumableOp::Kind::Rename;
+        out.src = sourcePath_;
+        out.dst = destinationPath_;
+        return out;
+    }
+
     Nui::ElementRenderer body() const override
     {
         using namespace Nui::Elements;

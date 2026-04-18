@@ -237,7 +237,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     {
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
-                                Snc::spinner({.size = "18px", .thickness = "3px"}),
+                                Snc::spinner({.size = "18px", .thickness = "3px", .color = std::nullopt}),
                                 span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "listingFiles"))
                             ),
                             div{class_ = "sync-progress-counters"}(
@@ -258,7 +258,7 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                     {
                         return div{class_ = "sync-progress-step"}(
                             div{class_ = "sync-progress-step-header"}(
-                                Snc::spinner({.size = "18px", .thickness = "3px"}),
+                                Snc::spinner({.size = "18px", .thickness = "3px", .color = std::nullopt}),
                                 span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "comparing"))
                             ),
                             div{class_ = "sync-progress-counters"}(

@@ -2,6 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/password/password_provider.hpp>
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_helper.hpp>
@@ -72,6 +73,22 @@ class SessionManager
     /// Removes a session and closes all its channels. Safe to call from any thread.
     void removeSession(Ids::SessionId sessionId);
 
+    /**
+     * @brief Handles "Session::sftp::adoptBulkResume" — pulls saved bulk
+     *        operations from @c bulkResumeRegistry_ and re-enqueues them
+     *        into the named session's OperationQueue.  Called from
+     *        Session::applySnapshot during a seamless reconnect.
+     */
+    void registerRpcAdoptBulkResume();
+
+    /**
+     * @brief Handles "Session::sftp::discardBulkResume" — removes saved
+     *        bulk-operation backups by id without consuming them.  Called
+     *        from the dying frontend Session's destructor when the user
+     *        abandons the reconnect.
+     */
+    void registerRpcDiscardBulkResume();
+
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
@@ -80,6 +97,9 @@ class SessionManager
     std::map<int, PasswordProvider*> passwordProviders_{};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
+    /// Backups of bulk operations interrupted by lost connection; consumed
+    /// by adoptBulkResume on reconnect or evicted via TTL.
+    BulkResumeRegistry bulkResumeRegistry_{};
 };
 
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);

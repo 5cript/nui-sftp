@@ -3,13 +3,16 @@
 #include <persistence/state/termios.hpp>
 #include <frontend/terminal/terminal_engine.hpp>
 #include <frontend/terminal/channel_creation_options.hpp>
+#include <frontend/session_snapshot.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 #include <persistence/state/session_options.hpp>
 #include <ids/ids.hpp>
 #include <nui/utility/move_detector.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 /**
  * @brief Per-call options required by ExecutingTerminalEngine::createChannel.
@@ -79,6 +82,69 @@ class ExecutingTerminalEngine : public TerminalEngine
 
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) override;
     ChannelInterface* channel(Ids::ChannelId const& channelId) override;
+
+    /**
+     * @brief Swap in a new onProcessChange callback.  Used by FSM when it
+     *        eager-constructed the engine before an onProcessChange was
+     *        available (the first createLocalShellChannel call supplies one);
+     *        also used on reconnect to rewire the callback from the dying
+     *        Session onto the new Session's layout id.  Only affects channels
+     *        created after this call — existing channels keep the callback
+     *        they were constructed with.
+     */
+    void setOnProcessChange(std::function<void(Ids::ChannelId const&, std::string)> onProcessChange);
+
+    /**
+     * @brief Partial adoption record the engine can produce on its own.  The
+     *        caller (FSM / Session::captureSnapshot) enriches this with the
+     *        shell config name, cmdline, terminal options, termios, execOpts
+     *        and scrollback before storing it in SessionSnapshot.
+     */
+    struct EjectedChannel
+    {
+        Ids::ChannelId processId;
+        std::string stdoutReceptacle;
+        std::string stderrReceptacle;
+    };
+
+    /**
+     * @brief Hands ownership of @p channelId out of this engine without
+     *        terminating the backend process.  The ExecutingChannel is
+     *        destroyed (so its stdout/stderr/exit receivers unregister) but
+     *        the ProcessStore::exit RPC is NOT sent, so the process keeps
+     *        running and can be adopted by another engine via adoptChannel.
+     *        The caller is responsible for re-registering handlers at the
+     *        returned receptacle names before backend output is lost.
+     * @return EjectedChannel if the id was known, nullopt otherwise.
+     */
+    std::optional<EjectedChannel> ejectChannel(Ids::ChannelId const& channelId);
+
+    /**
+     * @brief Eject every live channel in one go.  Equivalent to calling
+     *        ejectChannel for each id but more efficient (single pass).
+     */
+    std::vector<EjectedChannel> ejectAllChannels();
+
+    /**
+     * @brief Take over a process that another engine previously ejected.
+     *        Registers fresh stdout/stderr/exit receivers at the receptacle
+     *        names from @p adoption and emplaces a new ExecutingChannel bound
+     *        to adoption.processId.  Backend is oblivious — it continues
+     *        calling the same receptacle names, which now land on this engine.
+     * @param adoption       Adoption record from the ejecting engine, enriched
+     *                       with any session-level metadata by the caller.
+     * @param handler        stdout sink (FSM wires this to the new TerminalChannel).
+     * @param errorHandler   stderr sink.
+     * @param onChannelLoss  Called when the backend later reports process exit.
+     * @return true on success; false if the channel id is already in use on
+     *         this engine (duplicate adoption).
+     */
+    bool adoptChannel(
+        LocalShellAdoption const& adoption,
+        std::function<void(std::string const&)> handler,
+        std::function<void(std::string const&)> errorHandler,
+        std::function<void(Ids::ChannelId const&)> onChannelLoss
+    );
 
   private:
     struct Implementation;

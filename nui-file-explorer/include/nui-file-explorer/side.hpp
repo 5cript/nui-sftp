@@ -84,6 +84,49 @@ namespace NuiFileExplorer
         unsigned int iconSpacing() const;
 
         /**
+         * @brief Whether hidden files are currently shown on this side.
+         */
+        bool showHiddenFiles() const;
+
+        /**
+         * @brief Apply the hidden-file visibility setting.  Invokes the
+         *        SideSettings::onShowHiddenFilesChanged callback and re-sorts
+         *        visible items — same semantic as toggling via the head-menu
+         *        button, minus the user-gesture source.
+         */
+        void showHiddenFiles(bool value);
+
+        /**
+         * @brief Current sort criterion and ascending flag (criterion, ascending).
+         */
+        std::pair<SortCriterion, bool> sort() const;
+
+        /**
+         * @brief Apply a sort criterion + direction and re-sort in place.
+         */
+        void sort(std::pair<SortCriterion, bool> value);
+
+        /**
+         * @brief Places panel open/closed state.  std::nullopt means "follow
+         *        the responsive width default", which the ResizeObserver flips
+         *        between wide (inline) and narrow (popup) modes.
+         */
+        std::optional<bool> placesOpen() const;
+
+        /**
+         * @brief Force the places panel into the given open state, or clear
+         *        the override to fall back to responsive width default.
+         */
+        void placesOpen(std::optional<bool> value);
+
+        /**
+         * @brief Whether the hosting element is currently wide enough for the
+         *        inline (always-open) places-panel layout.  Derived from
+         *        ResizeObserver; not writable by callers.
+         */
+        bool placesWide() const;
+
+        /**
          * @brief Returns all selected items.
          */
         std::vector<Item> selectedItems() const;
