@@ -112,10 +112,11 @@
 
         // Emscripten looks up `Module` from the global scope before instantiating the WASM binary.
         // `instantiateWasm` lets us replace the default fetch+compile pipeline with our own.
-        // We `tee()` the response body: one branch updates the progress bar, the other feeds
-        // WebAssembly.instantiateStreaming — so the WASM compiler ingests bytes as they arrive and
-        // never has to buffer the full binary or round-trip it through a JS string (which is what
-        // used to crash the renderer with STATUS_BREAKPOINT).
+        // A pass-through ReadableStream lets us report progress in lockstep with the WASM
+        // compiler: each chunk is measured immediately before it is enqueued for compilation,
+        // and backpressure is driven by the compiler pulling. Using tee() instead caused the
+        // compile branch to finish (and the loader to be removed) before the tracking branch
+        // had caught up, so the bar never visibly advanced.
         const moduleHooks = {
             instantiateWasm(imports, successCallback) {
                 (async () => {
@@ -124,23 +125,28 @@
                         if (!res.ok)
                             throw new Error(`HTTP ${res.status}`);
                         const total = Number(res.headers.get("Content-Length") || 0);
-                        const [trackingStream, compileStream] = res.body.tee();
 
-                        // Progress tracker — drained in parallel with the compile stream.
-                        (async () => {
-                            const reader = trackingStream.getReader();
-                            let received = 0;
-                            while (true) {
+                        const reader = res.body.getReader();
+                        let received = 0;
+                        const progressStream = new ReadableStream({
+                            async pull(controller) {
                                 const { done, value } = await reader.read();
-                                if (done) break;
-                                received += value.length;
+                                if (done) {
+                                    controller.close();
+                                    return;
+                                }
+                                received += value.byteLength;
                                 updateProgress(received, total, "Downloading runtime");
-                            }
-                        })();
+                                controller.enqueue(value);
+                            },
+                            cancel(reason) {
+                                return reader.cancel(reason);
+                            },
+                        });
 
-                        // The backend sets Content-Type: application/wasm; wrap with a fresh
-                        // Response so the type is preserved after tee().
-                        const compileResponse = new Response(compileStream, {
+                        // The backend sets Content-Type: application/wasm; re-stamp it on the
+                        // wrapped stream so instantiateStreaming accepts it.
+                        const compileResponse = new Response(progressStream, {
                             headers: { "Content-Type": "application/wasm" },
                         });
                         const { instance, module } = await WebAssembly.instantiateStreaming(
