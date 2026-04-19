@@ -96,6 +96,58 @@ class ObservedRandomAccessMap
         observedValues_.erase(dequeIt);
     }
 
+    /**
+     * @brief Move the entry for @p key to position @p newIndex in the
+     *        underlying deque.  No-op when @p key is absent or already at
+     *        @p newIndex.  @p newIndex is clamped to `[0, size()-1]`.
+     *
+     *        Issued as a single `Nui::Observed::erase()` + `insert()` pair so
+     *        only the moved card's DOM subtree is rebuilt — the in-between
+     *        cards stay mounted.  The owning `shared_ptr<ValueT>` is
+     *        preserved across the move, so the card's internal `Nui::Observed`
+     *        state (progress bars, completion timers, dialog handles) is
+     *        fully retained.
+     */
+    void move(KeyT const& key, std::size_t newIndex)
+    {
+        auto mapIt = keyToPointerMap_.find(key);
+        if (mapIt == keyToPointerMap_.end())
+            return;
+
+        auto const& staticDeque = observedValues_.value();
+        if (staticDeque.empty())
+            return;
+
+        ValueT* ptr = mapIt->second;
+        std::size_t oldIndex = 0;
+        bool found = false;
+        for (std::size_t idx = 0; idx < staticDeque.size(); ++idx)
+        {
+            if (staticDeque[idx].get() == ptr)
+            {
+                oldIndex = idx;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
+
+        if (newIndex >= staticDeque.size())
+            newIndex = staticDeque.size() - 1;
+        if (oldIndex == newIndex)
+            return;
+
+        // Shared_ptr keeps the entry alive across the erase; insert moves it
+        // back into the deque at the new position.  The intervening cards see
+        // only their grid-row index shift — no DOM teardown.
+        auto entry = observedValues_.value()[oldIndex];
+        observedValues_.erase(observedValues_.begin() + static_cast<std::ptrdiff_t>(oldIndex));
+        observedValues_.insert(
+            observedValues_.begin() + static_cast<std::ptrdiff_t>(newIndex), std::move(entry)
+        );
+    }
+
     Nui::Observed<std::deque<std::shared_ptr<ValueT>>>& observedValues()
     {
         return observedValues_;

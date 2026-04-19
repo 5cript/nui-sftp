@@ -49,6 +49,24 @@ class OperationQueue
     void cancel(Ids::OperationId id);
 
     /**
+     * @brief Move @p operationId within the regular `operations_` queue to
+     *        the absolute index @p newIndex.  Dispatched through the strand
+     *        so it cannot interleave with `work()`; the running op (deque
+     *        front) is therefore safely repositioned.
+     *
+     *        No-ops silently when:
+     *          - the queue is not paused (the frontend must pause first;
+     *            this is the safety belt for races against unpause),
+     *          - the id refers to a priority op (priority queue is not
+     *            user-reorderable in this UI),
+     *          - the id is no longer in the queue (op completed meanwhile).
+     *
+     *        On a successful move emits `onOperationsReordered` so the
+     *        frontend can reflect the new order without optimistic updates.
+     */
+    void moveOperation(Ids::OperationId operationId, std::size_t newIndex);
+
+    /**
      * @brief Returns true if it should be called without delay again.
      *
      * @return true

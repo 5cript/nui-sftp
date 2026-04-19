@@ -126,17 +126,21 @@ header.opq-controls {
     overflow-y: auto;
     gap: 1px;
     min-height: 0;
-    grid-template-columns: min-content 1fr 1fr max-content max-content max-content;
+    /* 7 columns: kick-to-top (0 width when not paused) + icon + 2x body + clock + err + cancel.
+       The 0-width first column means the kick column collapses entirely on the
+       unpaused surface, so layout is identical to the pre-feature state. The
+       column width is rewritten to min-content under [data-paused] below. */
+    grid-template-columns: 0 min-content 1fr 1fr max-content max-content max-content;
     grid-auto-rows: 36px;
 }
 
-/* Transparent pass-through wrappers so cards remain direct grid children.
-   .opq-live-wrapper is emitted by the page-switch observe/renderer when the
-   user is on the live page; it hosts both priority and regular lists and must
-   also pass through so its grandchildren land as direct .opq-list grid cells. */
+.operation-queue[data-paused] .opq-list {
+    grid-template-columns: min-content min-content 1fr 1fr max-content max-content max-content;
+}
+
+/* Transparent pass-through wrappers so cards remain direct grid children. */
 .opq-priority-list,
-.opq-regular-list,
-.opq-live-wrapper {
+.opq-regular-list {
     display: contents;
 
     &>:nth-child(even) {
@@ -175,8 +179,9 @@ header.opq-controls {
     height: 36px;
     fill: currentColor;
 
-    /* first child — icon */
-    &>div:first-child {
+    /* second child — type icon (first child is the kick-to-top button which
+       collapses to 0 when not paused). */
+    &>div:nth-child(2) {
         width: 20px;
         height: 20px;
         margin-right: 8px;
@@ -205,9 +210,69 @@ header.opq-controls {
 .opq-card-subgrid {
     display: grid;
     grid-template-columns: subgrid;
-    grid-column: span 6;
+    grid-column: span 7;
     align-items: center;
     grid-template-rows: 36px;
+}
+
+/* Kick-to-top button.  Always rendered (per-card cost = 1 click closure),
+   visibility toggled purely via CSS rules driven by the root [data-paused]
+   attribute.  No per-card observed needed. */
+.op-kick-up {
+    width: 0;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--opq-muted);
+    cursor: pointer;
+    fill: currentColor;
+    pointer-events: none;
+    visibility: hidden;
+    transition: color 100ms ease;
+
+    & svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    &:hover {
+        color: var(--opq-accent, #6cf);
+    }
+}
+
+/* Kick-to-top is only meaningful on the live regular queue. The `.opq-reorderable`
+   class is set exclusively on that surface, so Failed / Priority / history
+   pages — which reuse `.opq-regular-list` for their grid layout — never show
+   the button even while paused. */
+.operation-queue[data-paused] .opq-reorderable .op-kick-up {
+    width: 22px;
+    visibility: visible;
+    pointer-events: auto;
+    margin-right: 4px;
+}
+
+/* Drag affordances.  The card's `draggable=true` attribute is always set;
+   the dragstart handler at the list level cancels the drag when not paused.
+   These rules just communicate the state visually. */
+.operation-queue[data-paused] .opq-reorderable > .opq-card {
+    cursor: grab;
+}
+
+.operation-queue[data-paused] .opq-reorderable > .opq-card.opq-dragging {
+    cursor: grabbing;
+    opacity: 0.55;
+}
+
+/* Drop indicators — applied directly via classList from the dragover handler
+   to avoid an Observed<bool> per card.  Painted with inset box-shadow so they
+   don't shift layout. */
+.operation-queue[data-paused] .opq-reorderable > .opq-card.opq-drop-above {
+    box-shadow: inset 0 2px 0 var(--opq-accent, #6cf);
+}
+
+.operation-queue[data-paused] .opq-reorderable > .opq-card.opq-drop-below {
+    box-shadow: inset 0 -2px 0 var(--opq-accent, #6cf);
 }
 
 .opq-card:hover {
