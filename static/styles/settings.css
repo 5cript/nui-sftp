@@ -58,6 +58,10 @@
     background-color: var(--background-color);
 }
 
+.setting-table-container > .script-nui-resizable-table {
+    max-height: 400px;
+}
+
 .settings-page-header {
     display: grid;
     grid-template-columns: auto auto 1fr auto;

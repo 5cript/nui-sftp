@@ -146,8 +146,10 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            (*table_)(
-                {observeEngagedToBool(disabled)}
+            div{class_ = "setting-table-container"}(
+                (*table_)(
+                    {observeEngagedToBool(disabled)}
+                )
             ),
             reset(),
             help()
