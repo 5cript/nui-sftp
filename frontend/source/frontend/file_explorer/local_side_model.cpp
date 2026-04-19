@@ -18,6 +18,7 @@
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/edit.hpp>
 #include <ui5-sap-icons/icons/detail-view.hpp>
+#include <ui5-sap-icons/icons/show.hpp>
 #include <ui5-sap-icons/icons/add-favorite.hpp>
 #include <ui5-sap-icons/icons/unfavorite.hpp>
 
@@ -1222,6 +1223,15 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             },
             !singleItem
         ),
+        Snc::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", "openInFileManager"),
+            Ui5Icons::show(),
+            [this, selectedItems]()
+            {
+                onOpenInFileManager(selectedItems.front());
+            },
+            !singleItem
+        ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "delete"),
@@ -1294,6 +1304,45 @@ void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
         },
         (*currentPath_ / item.path).generic_string(),
         openWith
+    );
+}
+
+void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
+{
+    const auto absolutePath = (*currentPath_ / item.path).generic_string();
+    Log::info("Open in file manager requested: {}", absolutePath);
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::openInFileManager",
+        [this](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+            {
+                Log::error("Invalid response from RpcFilesystem::openInFileManager");
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "openInFileManagerFailed"),
+                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            const auto success = val["success"].as<bool>();
+            if (!success)
+            {
+                const auto error = val["error"].as<std::string>();
+                Log::error("Failed to open in file manager: {}", error);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "openInFileManagerFailed"),
+                    .text = error,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+        },
+        absolutePath
     );
 }
 

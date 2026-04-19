@@ -287,3 +287,85 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
 
     return {};
 }
+
+std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
+{
+    Log::info(
+        "Opener: openInFileManager path='{}' parentWindow='{}'", path.string(), impl_->parentWindow);
+
+    if (!impl_->openUriProxy)
+    {
+        constexpr auto const* msg =
+            "Session bus is unavailable; cannot open file manager via xdg-desktop-portal. "
+            "This typically happens when running as root or without a user D-Bus session.";
+        Log::error("Opener: {}", msg);
+        return std::unexpected{std::string{msg}};
+    }
+
+    std::error_code directoryCheckEc;
+    const bool isDirectory = std::filesystem::is_directory(path, directoryCheckEc);
+
+    if (isDirectory)
+    {
+        // Directories: bypass the portal. The portal's OpenURI method is unreliable for
+        // file:// URIs (some backends reject it, others silently drop it), and OpenDirectory
+        // is spec'd to open the *parent* of its fd — not useful when the user picked a dir.
+        // g_app_info_launch_default_for_uri talks directly to the user's preferred file
+        // manager via the shared MIME DB, which is exactly what we want here.
+        GError* uriError = nullptr;
+        gchar* const uri = g_filename_to_uri(path.c_str(), nullptr, &uriError);
+        if (!uri)
+        {
+            const std::string msg = uriError ? uriError->message : "g_filename_to_uri failed";
+            Log::error("Opener: failed to build file URI for '{}': {}", path.string(), msg);
+            if (uriError)
+                g_error_free(uriError);
+            return std::unexpected{msg};
+        }
+
+        GError* launchError = nullptr;
+        const gboolean launched = g_app_info_launch_default_for_uri(uri, nullptr, &launchError);
+        Log::info("Opener: launching file manager for URI '{}'", uri);
+        g_free(uri);
+        if (!launched)
+        {
+            const std::string msg = launchError ? launchError->message : "launch failed";
+            Log::error("Opener: g_app_info_launch_default_for_uri failed: {}", msg);
+            if (launchError)
+                g_error_free(launchError);
+            return std::unexpected{msg};
+        }
+
+        return {};
+    }
+
+    // File (or nonexistent — portal will reject that): OpenDirectory opens the
+    // file's parent directory in the file manager. Most file managers highlight
+    // the file, which is the common "reveal in file manager" behavior.
+    int const fd = ::open(path.c_str(), O_RDONLY);
+    if (fd == -1)
+    {
+        Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
+        return std::unexpected{std::string{"Failed to open file: "} + std::strerror(errno)};
+    }
+
+    const std::map<std::string, sdbus::Variant> options;
+    try
+    {
+        sdbus::ObjectPath handle;
+        impl_->openUriProxy->callMethod("OpenDirectory")
+            .onInterface(openUriInterface)
+            .withArguments(impl_->parentWindow, sdbus::UnixFd{fd}, options)
+            .storeResultsTo(handle);
+        Log::info(
+            "Opener: OpenURI.OpenDirectory portal call succeeded, request handle='{}'",
+            static_cast<std::string>(handle));
+    }
+    catch (sdbus::Error const& err)
+    {
+        Log::error("Opener: OpenURI.OpenDirectory portal call failed: {}", err.getMessage());
+        return std::unexpected{err.getMessage()};
+    }
+
+    return {};
+}

@@ -137,6 +137,7 @@ RpcFilesystem::RpcFilesystem(
     registerDoesExistBatch();
     registerWriteFile();
     registerOpen();
+    registerOpenInFileManager();
 }
 
 void RpcFilesystem::registerRemove()
@@ -655,6 +656,25 @@ void RpcFilesystem::registerOpen()
                 if (!result)
                 {
                     Log::error("Failed to open file '{}': {}", filePath, result.error());
+                    return reply.error(result.error());
+                }
+
+                reply({{"success", true}});
+            }
+        );
+}
+
+void RpcFilesystem::registerOpenInFileManager()
+{
+    on("RpcFilesystem::openInFileManager")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply, std::string const& filePath)
+            {
+                Log::info("RpcFilesystem::openInFileManager called for path: {}", filePath);
+                auto result = opener_->openInFileManager(Utility::pathFromUtf8(filePath));
+                if (!result)
+                {
+                    Log::error("Failed to open file manager for '{}': {}", filePath, result.error());
                     return reply.error(result.error());
                 }
 

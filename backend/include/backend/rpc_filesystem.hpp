@@ -28,6 +28,7 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     void registerDoesExistBatch();
     void registerWriteFile();
     void registerOpen();
+    void registerOpenInFileManager();
 
   private:
     Persistence::LocalFilesystemOptions options_;

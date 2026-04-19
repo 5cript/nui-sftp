@@ -90,6 +90,12 @@ class LocalSideModel
     void onError(std::string const& error) override;
     void onOpen(NuiFileExplorer::Item const& item, bool openWith);
 
+    /**
+     *  @brief Reveal @p item in the native file manager. Opens the parent directory with the item
+     *         highlighted for files, or opens the directory itself for directories.
+     */
+    void onOpenInFileManager(NuiFileExplorer::Item const& item);
+
     bool isLeft() const override
     {
         return true;

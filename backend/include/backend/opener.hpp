@@ -17,6 +17,13 @@ class Opener
 
     std::expected<void, std::string> openFile(std::filesystem::path const& path, bool openWith);
 
+    /**
+     *  @brief Open the native file manager showing @p path.
+     *  @details For a directory, opens the file manager at that directory. For a file, opens the
+     *           parent directory and asks the file manager to highlight the file.
+     */
+    std::expected<void, std::string> openInFileManager(std::filesystem::path const& path);
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

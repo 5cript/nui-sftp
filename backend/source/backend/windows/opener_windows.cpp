@@ -112,3 +112,38 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
 
     return {};
 }
+
+std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
+{
+    const auto pathStrU16 = path.native();
+    const auto pathWstr = std::wstring{pathStrU16.begin(), pathStrU16.end()};
+
+    std::error_code directoryCheckEc;
+    const bool isDirectory = std::filesystem::is_directory(path, directoryCheckEc);
+
+    if (isDirectory)
+    {
+        // Directory: open Explorer at this directory via the "explore" verb.
+        INT_PTR const result = reinterpret_cast<INT_PTR>(
+            ShellExecuteW(nullptr, L"explore", pathWstr.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+        );
+        if (result <= 32)
+            return std::unexpected{shellExecuteErrorToString(result)};
+        return {};
+    }
+
+    // File: reveal it in Explorer (opens the parent and highlights the item).
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    const HRESULT parseHr = SHParseDisplayName(pathWstr.c_str(), nullptr, &pidl, 0, nullptr);
+    if (FAILED(parseHr) || !pidl)
+        return std::unexpected{"SHParseDisplayName failed"};
+
+    const HRESULT openHr = SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+    ILFree(pidl);
+    if (FAILED(openHr))
+        return std::unexpected{"SHOpenFolderAndSelectItems failed"};
+
+    return {};
+}
