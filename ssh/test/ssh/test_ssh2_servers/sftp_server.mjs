@@ -226,7 +226,8 @@ const server = new Server({
 
                         if (flags & OPEN_MODE.WRITE) {
                             if (flags & OPEN_MODE.TRUNC) {
-                                result.content = '';
+                                result.content = Buffer.alloc(0);
+                                result.stat.size = 0;
                             }
                         }
                     }
@@ -260,17 +261,20 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.EOF);
                     }
 
-                    // Simulate writing data to the file at the specified offset
+                    // Simulate writing data to the file at the specified offset.
+                    // Keep content as Buffer end-to-end; converting to UTF-8 strings
+                    // here would corrupt any byte > 0x7F (replacement char), which
+                    // breaks every binary payload (gzip, bzip2, zstd, ...).
                     result.content = Buffer.concat([
-                        Buffer.from(result.content.slice(0, offset)),
+                        result.content.slice(0, offset),
                         data,
-                        Buffer.from(result.content.slice(offset + data.length))
-                    ]).toString('utf8');
+                        result.content.slice(offset + data.length)
+                    ]);
                     result.stat.size = result.content.length;
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
 
-                    logMessage(`Write to file at offset ${offset}: ${data.toString('utf8')}`);
+                    logMessage(`Write to file at offset ${offset}: ${data.length} bytes`);
                 });
 
                 sftpStream.on('READ', (reqid, handleRaw, offset, length) => {
@@ -300,7 +304,9 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.EOF);
                     }
 
-                    const data = Buffer.from(result.content.slice(offset, Math.min(offset + length, size)), 'utf8');
+                    // result.content is a Buffer; slice() returns a Buffer view —
+                    // send it directly without UTF-8 round-tripping.
+                    const data = result.content.slice(offset, Math.min(offset + length, size));
                     logMessage(`Read ${data.length} bytes from offset ${offset}`);
 
                     sftpStream.data(reqid, data);

@@ -8,6 +8,8 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <utility>
 
 namespace TarArchive::Detail
@@ -17,8 +19,8 @@ namespace TarArchive::Detail
         class Bzip2Sink final : public ByteSink
         {
           public:
-            explicit Bzip2Sink(std::ofstream output) noexcept
-                : output_{std::move(output)}
+            explicit Bzip2Sink(std::unique_ptr<ByteSink> downstream) noexcept
+                : output_{std::move(downstream)}
             {}
 
             std::expected<void, TarError> initialise(int blockSize, int workFactor)
@@ -63,11 +65,7 @@ namespace TarArchive::Detail
                 if (!flushed)
                     return flushed;
                 finished_ = true;
-                output_.flush();
-                if (!output_)
-                    return std::unexpected(makeError(TarErrorCode::IoError, "flush failed", errno));
-                output_.close();
-                return {};
+                return output_->finish();
             }
 
           private:
@@ -87,14 +85,11 @@ namespace TarArchive::Detail
                     const std::size_t produced = scratch_.size() - stream_.avail_out;
                     if (produced > 0u)
                     {
-                        output_.write(
-                            reinterpret_cast<char const*>(scratch_.data()),
-                            static_cast<std::streamsize>(produced)
+                        auto downstreamResult = output_->write(
+                            std::span<std::byte const>{scratch_.data(), produced}
                         );
-                        if (!output_)
-                            return std::unexpected(makeError(
-                                TarErrorCode::IoError, "bzip2 output write failed", errno
-                            ));
+                        if (!downstreamResult)
+                            return std::unexpected(downstreamResult.error());
                     }
 
                     if (action == BZ_RUN && stream_.avail_in == 0u)
@@ -106,7 +101,7 @@ namespace TarArchive::Detail
                 }
             }
 
-            std::ofstream output_;
+            std::unique_ptr<ByteSink> output_;
             bz_stream stream_{};
             std::array<std::byte, scratchBufferSize> scratch_{};
             bool initialised_{false};
@@ -196,11 +191,11 @@ namespace TarArchive::Detail
     }
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeBzip2Sink(std::ofstream output, CompressionOptions const& options)
+    makeBzip2Sink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options)
     {
         const int blockSize = options.bzip2BlockSize.value_or(9);
         const int workFactor = options.bzip2WorkFactor.value_or(0);
-        auto sink = std::make_unique<Bzip2Sink>(std::move(output));
+        auto sink = std::make_unique<Bzip2Sink>(std::move(downstream));
         const auto initialised = sink->initialise(blockSize, workFactor);
         if (!initialised)
             return std::unexpected(initialised.error());

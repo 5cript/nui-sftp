@@ -106,6 +106,40 @@ namespace TarArchive
     }
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
+    wrapSinkWithCodec(
+        std::unique_ptr<ByteSink> downstream,
+        Compression codec,
+        CompressionOptions const& options
+    )
+    {
+        switch (codec)
+        {
+            case Compression::None:
+                return downstream;
+            case Compression::Gzip:
+                return Detail::makeGzipSink(std::move(downstream), options);
+            case Compression::Bzip2:
+                return Detail::makeBzip2Sink(std::move(downstream), options);
+            case Compression::Zstd:
+                return Detail::makeZstdSink(std::move(downstream), options);
+            case Compression::Xz:
+#ifdef TAR_ARCHIVE_WITH_XZ
+                return Detail::makeXzSink(std::move(downstream), options);
+#else
+                return std::unexpected(makeError(
+                    TarErrorCode::UnknownCompression, "xz support not compiled in"
+                ));
+#endif
+            case Compression::Auto:
+                return std::unexpected(makeError(
+                    TarErrorCode::UnknownCompression,
+                    "wrapSinkWithCodec requires a resolved codec; got Auto"
+                ));
+        }
+        return std::unexpected(makeError(TarErrorCode::UnknownCompression, "unhandled codec"));
+    }
+
+    std::expected<std::unique_ptr<ByteSink>, TarError>
     makeSink(
         std::filesystem::path const& path, Compression codec, CompressionOptions const& options
     )
@@ -117,31 +151,9 @@ namespace TarArchive
         if (!outputOrError)
             return std::unexpected(outputOrError.error());
 
-        switch (resolved)
-        {
-            case Compression::None:
-                return Detail::makeRawSink(std::move(*outputOrError));
-            case Compression::Gzip:
-                return Detail::makeGzipSink(std::move(*outputOrError), options);
-            case Compression::Bzip2:
-                return Detail::makeBzip2Sink(std::move(*outputOrError), options);
-            case Compression::Zstd:
-                return Detail::makeZstdSink(std::move(*outputOrError), options);
-            case Compression::Xz:
-#ifdef TAR_ARCHIVE_WITH_XZ
-                return Detail::makeXzSink(std::move(*outputOrError), options);
-#else
-                return std::unexpected(makeError(
-                    TarErrorCode::UnknownCompression, "xz support not compiled in"
-                ));
-#endif
-            case Compression::Auto:
-                return std::unexpected(makeError(
-                    TarErrorCode::UnknownCompression,
-                    "compression could not be inferred from extension"
-                ));
-        }
-        return std::unexpected(makeError(TarErrorCode::UnknownCompression, "unhandled codec"));
+        return wrapSinkWithCodec(
+            Detail::makeRawSink(std::move(*outputOrError)), resolved, options
+        );
     }
 
     std::expected<std::unique_ptr<ByteSource>, TarError>

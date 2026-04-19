@@ -139,6 +139,26 @@ namespace TarArchive
     makeSource(std::filesystem::path const& path, Compression codec);
 
     /**
+     * @brief Wrap an existing ByteSink in a compression layer.
+     *
+     * The returned sink consumes plaintext via @ref ByteSink::write and forwards the
+     * compressed bytes to @p downstream. On @ref ByteSink::finish the codec emits its
+     * trailer and then calls @p downstream->finish() so the caller does not need to
+     * close the underlying sink separately.
+     *
+     * Use this when the destination is not a regular file — e.g. an SFTP stream sink
+     * that cannot be opened via @ref makeSink. @p codec must be a concrete codec;
+     * passing Compression::Auto returns UnknownCompression because there is no path
+     * to derive the codec from.
+     */
+    std::expected<std::unique_ptr<ByteSink>, TarError>
+    wrapSinkWithCodec(
+        std::unique_ptr<ByteSink> downstream,
+        Compression codec,
+        CompressionOptions const& options = {}
+    );
+
+    /**
      * @brief Read the first bytes of the file and identify the compression codec from magic bytes.
      * Returns Compression::None if none of the supported magic sequences match.
      */

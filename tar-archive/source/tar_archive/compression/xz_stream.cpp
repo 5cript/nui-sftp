@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <utility>
 
 namespace TarArchive::Detail
@@ -20,8 +22,8 @@ namespace TarArchive::Detail
         class XzSink final : public ByteSink
         {
           public:
-            explicit XzSink(std::ofstream output) noexcept
-                : output_{std::move(output)}
+            explicit XzSink(std::unique_ptr<ByteSink> downstream) noexcept
+                : output_{std::move(downstream)}
             {}
 
             std::expected<void, TarError> initialise(std::uint32_t preset)
@@ -68,11 +70,7 @@ namespace TarArchive::Detail
                 if (!flushed)
                     return flushed;
                 finished_ = true;
-                output_.flush();
-                if (!output_)
-                    return std::unexpected(makeError(TarErrorCode::IoError, "flush failed", errno));
-                output_.close();
-                return {};
+                return output_->finish();
             }
 
           private:
@@ -94,14 +92,11 @@ namespace TarArchive::Detail
                     const std::size_t produced = scratch_.size() - stream_.avail_out;
                     if (produced > 0u)
                     {
-                        output_.write(
-                            reinterpret_cast<char const*>(scratch_.data()),
-                            static_cast<std::streamsize>(produced)
+                        auto downstreamResult = output_->write(
+                            std::span<std::byte const>{scratch_.data(), produced}
                         );
-                        if (!output_)
-                            return std::unexpected(makeError(
-                                TarErrorCode::IoError, "xz output write failed", errno
-                            ));
+                        if (!downstreamResult)
+                            return std::unexpected(downstreamResult.error());
                     }
 
                     if (status == LZMA_STREAM_END)
@@ -113,7 +108,7 @@ namespace TarArchive::Detail
                 }
             }
 
-            std::ofstream output_;
+            std::unique_ptr<ByteSink> output_;
             lzma_stream stream_ = LZMA_STREAM_INIT;
             std::array<std::byte, scratchBufferSize> scratch_{};
             bool initialised_{false};
@@ -203,12 +198,12 @@ namespace TarArchive::Detail
     }
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeXzSink(std::ofstream output, CompressionOptions const& options)
+    makeXzSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options)
     {
         std::uint32_t preset = static_cast<std::uint32_t>(options.xzPreset.value_or(6));
         if (options.xzExtreme)
             preset |= LZMA_PRESET_EXTREME;
-        auto sink = std::make_unique<XzSink>(std::move(output));
+        auto sink = std::make_unique<XzSink>(std::move(downstream));
         const auto initialised = sink->initialise(preset);
         if (!initialised)
             return std::unexpected(initialised.error());

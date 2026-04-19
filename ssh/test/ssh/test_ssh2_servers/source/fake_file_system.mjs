@@ -45,6 +45,13 @@ const defined = (obj) => {
 };
 
 const file = (name, contentString, stat) => {
+    // Store content as a Buffer so binary data round-trips through WRITE/READ
+    // without UTF-8 mangling. Fixtures pass ASCII strings; Buffer.from re-encodes
+    // them losslessly, and subsequent client writes (which arrive as Buffers)
+    // can be concatenated without lossy .toString('utf8') round trips.
+    const content = Buffer.isBuffer(contentString)
+        ? contentString
+        : Buffer.from(contentString || '', 'utf8');
     const result = {
         type: 'file',
         name: name,
@@ -53,9 +60,9 @@ const file = (name, contentString, stat) => {
             ...defined(stat),
             mode: ((stat && stat.mode) || 0o644) | S_IFREG,
         },
-        content: contentString || '',
+        content,
     };
-    result.stat.size = contentString ? contentString.length : 0;
+    result.stat.size = content.length;
     Object.setPrototypeOf(result, fdsProto);
     return result;
 }

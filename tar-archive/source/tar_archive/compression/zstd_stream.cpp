@@ -7,6 +7,8 @@
 
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -17,8 +19,8 @@ namespace TarArchive::Detail
         class ZstdSink final : public ByteSink
         {
           public:
-            explicit ZstdSink(std::ofstream output) noexcept
-                : output_{std::move(output)}
+            explicit ZstdSink(std::unique_ptr<ByteSink> downstream) noexcept
+                : output_{std::move(downstream)}
             {}
 
             std::expected<void, TarError> initialise(int compressionLevel)
@@ -73,14 +75,11 @@ namespace TarArchive::Detail
                         ));
                     if (outBuffer.pos > 0u)
                     {
-                        output_.write(
-                            reinterpret_cast<char const*>(scratch_.data()),
-                            static_cast<std::streamsize>(outBuffer.pos)
+                        auto downstreamResult = output_->write(
+                            std::span<std::byte const>{scratch_.data(), outBuffer.pos}
                         );
-                        if (!output_)
-                            return std::unexpected(makeError(
-                                TarErrorCode::IoError, "zstd output write failed", errno
-                            ));
+                        if (!downstreamResult)
+                            return std::unexpected(downstreamResult.error());
                     }
                 }
                 return {};
@@ -96,11 +95,7 @@ namespace TarArchive::Detail
                 if (!drained)
                     return drained;
                 finished_ = true;
-                output_.flush();
-                if (!output_)
-                    return std::unexpected(makeError(TarErrorCode::IoError, "flush failed", errno));
-                output_.close();
-                return {};
+                return output_->finish();
             }
 
           private:
@@ -121,21 +116,18 @@ namespace TarArchive::Detail
                         ));
                     if (outBuffer.pos > 0u)
                     {
-                        output_.write(
-                            reinterpret_cast<char const*>(scratch_.data()),
-                            static_cast<std::streamsize>(outBuffer.pos)
+                        auto downstreamResult = output_->write(
+                            std::span<std::byte const>{scratch_.data(), outBuffer.pos}
                         );
-                        if (!output_)
-                            return std::unexpected(makeError(
-                                TarErrorCode::IoError, "zstd output write failed", errno
-                            ));
+                        if (!downstreamResult)
+                            return std::unexpected(downstreamResult.error());
                     }
                     if (remaining == 0u)
                         return {};
                 }
             }
 
-            std::ofstream output_;
+            std::unique_ptr<ByteSink> output_;
             ZSTD_CStream* context_{nullptr};
             std::vector<std::byte> scratch_{};
             bool finished_{false};
@@ -229,10 +221,10 @@ namespace TarArchive::Detail
     }
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeZstdSink(std::ofstream output, CompressionOptions const& options)
+    makeZstdSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options)
     {
         const int compressionLevel = options.zstdLevel.value_or(ZSTD_CLEVEL_DEFAULT);
-        auto sink = std::make_unique<ZstdSink>(std::move(output));
+        auto sink = std::make_unique<ZstdSink>(std::move(downstream));
         const auto initialised = sink->initialise(compressionLevel);
         if (!initialised)
             return std::unexpected(initialised.error());
