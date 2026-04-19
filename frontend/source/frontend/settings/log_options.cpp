@@ -78,6 +78,13 @@ LogOptions::LogOptions(std::function<void()> const& onChange)
           }
       }
     , onChange_{onChange}
+    , logLevelListener_{Nui::smartListen(
+          logLevel.state(),
+          [](Log::Level const& level)
+          {
+              Log::setLevel(level);
+          }
+      )}
 {}
 
 void LogOptions::applyToState(Persistence::LogOptions& state) const

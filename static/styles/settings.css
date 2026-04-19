@@ -47,10 +47,15 @@
     flex-grow: 1;
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
 
     background-color: var(--background-color);
     overflow: hidden;
+}
+
+.settings-restart-banner:not(:empty) {
+    padding: 8px 16px 0 16px;
+    background-color: var(--background-color);
 }
 
 .settings-page-header {

@@ -7,6 +7,8 @@
 
 #include <persistence/state/log_options.hpp>
 
+#include <nui/event_system/listen.hpp>
+
 #include <functional>
 
 struct LogOptions : public GroupKeys
@@ -24,4 +26,5 @@ struct LogOptions : public GroupKeys
 
   private:
     std::function<void()> onChange_;
+    Nui::ListenRemover<Nui::Observed<Log::Level>> logLevelListener_;
 };
