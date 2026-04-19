@@ -22,7 +22,9 @@
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/refresh.hpp>
 #include <ui5-sap-icons/icons/edit.hpp>
+#include <ui5-sap-icons/icons/high-priority.hpp>
 
+#include <utility/language.hpp>
 #include <utility/convert_naming_convention.hpp>
 #include <utility/visit_overloaded.hpp>
 #include <utility/format_bytes.hpp>
@@ -129,7 +131,27 @@ class OperationCard : public OperationCardInterface
                         return "";
                 }(), !isSubgridOperation ? "opq-card-gridspan": "opq-card-subgrid");
             }),
+            // Stable per-card identity: lets the queue's delegated drag handlers
+            // resolve which card a dragstart/drop targets via closest("[data-op-id]").
+            "data-op-id"_attr = operationId_.value(),
+            // Always draggable; the dragstart handler at the list level rejects
+            // non-paused drags via preventDefault — keeps gating in one place.
+            "draggable"_attr = "true",
         }(
+            // Kick-to-top button. Visibility gated purely by CSS using
+            // .operation-queue[data-paused] selector — no per-card observed
+            // state, so cost stays O(1) per card no matter the queue length.
+            div{
+                class_ = "op-kick-up",
+                onClick = [this](Nui::val event){
+                    // Stop the click from bubbling to the card root (which is
+                    // also a drag source / potential parent click target).
+                    event.call<void>("stopPropagation");
+                    if (kickToTopHandler_)
+                        kickToTopHandler_();
+                },
+                Nui::Attributes::title = language->get("operationQueue", "kickToTopTitle"),
+            }(Ui5Icons::high_priority()),
             // Icon
             div{}(
                 observe(state_),
@@ -320,6 +342,11 @@ class OperationCard : public OperationCardInterface
         failedEntries_ = std::move(entries);
     }
 
+    void setKickToTopHandler(std::function<void()> handler) override
+    {
+        kickToTopHandler_ = std::move(handler);
+    }
+
   protected:
     mutable std::weak_ptr<Nui::Dom::BasicElement> cardElement_;
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
@@ -333,4 +360,5 @@ class OperationCard : public OperationCardInterface
     std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown_;
     std::function<void()> onCompleteAction_;
     Nui::Observed<std::vector<std::pair<std::filesystem::path, SharedData::OperationError>>> failedEntries_;
+    std::function<void()> kickToTopHandler_;
 };

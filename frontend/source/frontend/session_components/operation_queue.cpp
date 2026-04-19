@@ -18,6 +18,7 @@
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
+#include <nui/frontend/api/drag_event.hpp>
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/svg.hpp>
 #include <nui/frontend/api/json.hpp>
@@ -76,7 +77,7 @@ struct OperationQueue::Implementation
     // Pagination / navigation state.
     Nui::Observed<int> pageCount{1};
     Nui::Observed<int> currentPage{0}; // pageCount-1 is the live page.
-    Nui::Observed<int> activeTab{0}; // 0 = Queue (live + history), 1 = Failed
+    Nui::Observed<int> activeTab{0}; // 0 = Queue (live + history), 1 = Failed, 2 = Priority
     // True until the user explicitly clicks a non-live history page. While
     // true, the live page follows overflow growth so the user is not yanked
     // into a stale history page when a new eviction bumps pageCount.
@@ -102,6 +103,37 @@ struct OperationQueue::Implementation
     Nui::Observed<bool> minimizedSyncVisible{false};
     Nui::Observed<int> minimizedSyncShine{0};
     std::function<void()> minimizedSyncRestore{};
+
+    // Drag-state (regular-queue reorder).  Held outside any per-card observed
+    // so the hover indicator costs zero per-card overhead and avoids extra
+    // re-renders.  `currentHoverEl` is the DOM element the drop indicator is
+    // currently attached to via direct classList manipulation (mirroring
+    // icon_flavor's setHoverItem pattern).
+    Nui::val currentHoverEl{Nui::val::null()};
+    bool currentHoverBelow{false};
+
+    void clearDragHover()
+    {
+        if (currentHoverEl.isNull() || currentHoverEl.isUndefined())
+            return;
+        auto cl = currentHoverEl["classList"];
+        cl.call<void>("remove", std::string{"opq-drop-above"});
+        cl.call<void>("remove", std::string{"opq-drop-below"});
+        currentHoverEl = Nui::val::null();
+    }
+
+    void setDragHover(Nui::val targetEl, bool below)
+    {
+        if (!currentHoverEl.isNull() && !currentHoverEl.isUndefined() &&
+            currentHoverEl.equals(targetEl) && currentHoverBelow == below)
+            return;
+        clearDragHover();
+        if (targetEl.isNull() || targetEl.isUndefined())
+            return;
+        targetEl["classList"].call<void>("add", std::string{below ? "opq-drop-below" : "opq-drop-above"});
+        currentHoverEl = std::move(targetEl);
+        currentHoverBelow = below;
+    }
 
     DisplayedOperation* findOperation(Ids::OperationId const& id)
     {
@@ -540,6 +572,16 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onOperationsReordered", impl_->sessionId.value()),
+            [this](SharedData::OperationsReordered const& evt)
+            {
+                onOperationsReordered(evt);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onSyncScanResult", impl_->sessionId.value()),
             [this](Nui::val val)
             {
@@ -806,6 +848,17 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     {
         Log::error("Failed to create operation card for operation id: {}", added.operationId.value());
         return;
+    }
+    // Kick-to-top is meaningful only for the regular queue. Priority cards do
+    // not get a handler — even though the button is rendered, CSS hides it
+    // when the parent is the priority list (see .opq-priority-list rule).
+    if (added.mode != SharedData::OperationMode::PriorityQueued)
+    {
+        card->setKickToTopHandler(
+            [this, opId = added.operationId]() {
+                requestMoveOperation(opId, 0);
+            }
+        );
     }
     Log::info("Inserting operation id: {} into operation queue", added.operationId.value());
     try
@@ -1278,6 +1331,40 @@ void OperationQueue::hideMinimizedSync()
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
+void OperationQueue::onOperationsReordered(SharedData::OperationsReordered const& evt)
+{
+    if (!evt.applied)
+    {
+        // Backend refused or no-oped (queue not paused, op completed, priority
+        // op, etc.). Frontend never optimistically reorders, so there is
+        // nothing to roll back; this branch exists so the frontend has a
+        // definitive resolution signal it can hook into later if needed.
+        return;
+    }
+    impl_->operations.move(evt.operationId, static_cast<std::size_t>(evt.newIndex));
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::requestMoveOperation(Ids::OperationId const& opId, std::size_t newIndex)
+{
+    if (!impl_->paused.value())
+    {
+        // Local guard — backend has its own pause check, but failing fast here
+        // avoids a wasted round trip and a refused log on the backend side.
+        return;
+    }
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::moveOperation", impl_->sessionId.value()),
+        [opId](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (!result)
+                Log::error("moveOperation RPC failed for op {}: {}", opId.value(), result.error.value());
+        },
+        opId,
+        static_cast<std::int32_t>(newIndex)
+    );
+}
+
 void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
 {
     if (result)
@@ -1383,6 +1470,158 @@ void OperationQueue::changeAutoClean(bool doClean)
     );
 }
 
+Nui::ElementRenderer OperationQueue::makeRegularLiveList()
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+
+    // Resolve the card element (and its op id) for an arbitrary event target
+    // by walking up through `closest("[data-op-id]")`.  Mirrors the resolver
+    // in flavor_implementation.cpp:79-88.
+    auto resolveCard = [](Nui::val target) -> std::pair<Nui::val, std::string> {
+        if (target.isNull() || target.isUndefined())
+            return {Nui::val::null(), {}};
+        auto node = target.call<Nui::val>("closest", std::string{"[data-op-id]"});
+        if (node.isNull() || node.isUndefined())
+            return {Nui::val::null(), {}};
+        auto attr = node.call<Nui::val>("getAttribute", std::string{"data-op-id"});
+        if (attr.isNull() || attr.isUndefined())
+            return {Nui::val::null(), {}};
+        return {std::move(node), attr.as<std::string>()};
+    };
+
+    // Look up an op's current index in the live regular queue.  Returns -1
+    // if the op completed/was removed between drag start and drop.
+    auto findIndex = [this](std::string const& opId) -> int {
+        auto const& deque = impl_->operations.observedValues().value();
+        for (std::size_t idx = 0; idx < deque.size(); ++idx)
+        {
+            if (deque[idx]->key().value() == opId)
+                return static_cast<int>(idx);
+        }
+        return -1;
+    };
+
+    return div{
+        // `opq-reorderable` marks this list as the only surface where drag and
+        // kick-to-top are valid.  Failed / Priority / history pages all reuse
+        // .opq-regular-list for their grid layout, but those surfaces must NOT
+        // show the affordance — the CSS gate uses .opq-reorderable to scope it.
+        class_ = "opq-regular-list opq-reorderable",
+        // Delegated drag handlers — one set for the entire list, regardless
+        // of card count.  Each handler resolves the affected card via
+        // resolveCard().  This is the "many items" optimization the user
+        // pointed at in icon_flavor.cpp.
+        "dragstart"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+            if (!impl_->paused.value())
+            {
+                event.val().call<void>("preventDefault");
+                return;
+            }
+            auto [el, opId] = resolveCard(event.val()["target"]);
+            if (opId.empty())
+            {
+                event.val().call<void>("preventDefault");
+                return;
+            }
+            auto dt = event.val()["dataTransfer"];
+            if (dt.isNull() || dt.isUndefined())
+                return;
+            dt.call<void>("setData", std::string{"text/plain"}, opId);
+            dt.set("effectAllowed", std::string{"move"});
+            // Visual cue on the dragged card itself (separate from drop target).
+            el["classList"].call<void>("add", std::string{"opq-dragging"});
+        },
+        "dragend"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+            // Always clear visuals — fires whether the drop succeeded or not.
+            auto [el, _opId] = resolveCard(event.val()["target"]);
+            if (!el.isNull() && !el.isUndefined())
+                el["classList"].call<void>("remove", std::string{"opq-dragging"});
+            impl_->clearDragHover();
+        },
+        "dragover"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+            if (!impl_->paused.value())
+                return;
+            // Always preventDefault on dragover or the drop event will not fire.
+            event.val().call<void>("preventDefault");
+            auto [el, _opId] = resolveCard(event.val()["target"]);
+            if (el.isNull() || el.isUndefined())
+            {
+                impl_->clearDragHover();
+                return;
+            }
+            const auto rect = el.call<Nui::val>("getBoundingClientRect");
+            const auto top = rect["top"].as<double>();
+            const auto height = rect["height"].as<double>();
+            const auto y = event.val()["clientY"].as<double>();
+            const bool below = (y - top) > (height * 0.5);
+            impl_->setDragHover(std::move(el), below);
+        },
+        "dragleave"_event = [this](Nui::WebApi::DragEvent event) {
+            // Only clear when leaving the list container as a whole (not when
+            // moving between cards inside it).  Same guard as
+            // flavor_implementation.cpp:144-153.
+            auto related = event.val()["relatedTarget"];
+            auto current = event.val()["currentTarget"];
+            if (!related.isNull() && !related.isUndefined() &&
+                !current.isNull() && !current.isUndefined() &&
+                current.call<bool>("contains", related))
+            {
+                return;
+            }
+            impl_->clearDragHover();
+        },
+        "drop"_event = [this, resolveCard, findIndex](Nui::WebApi::DragEvent event) {
+            if (!impl_->paused.value())
+                return;
+            event.val().call<void>("preventDefault");
+
+            auto dt = event.val()["dataTransfer"];
+            std::string draggedId;
+            if (!dt.isNull() && !dt.isUndefined())
+            {
+                draggedId = dt.call<Nui::val>("getData", std::string{"text/plain"}).as<std::string>();
+            }
+
+            const bool below = impl_->currentHoverBelow;
+            impl_->clearDragHover();
+
+            if (draggedId.empty())
+                return;
+
+            auto [_el, targetId] = resolveCard(event.val()["target"]);
+            if (targetId.empty() || targetId == draggedId)
+                return;
+
+            const int oldIndex = findIndex(draggedId);
+            const int targetIndex = findIndex(targetId);
+            if (oldIndex < 0 || targetIndex < 0)
+                return;
+
+            // Translate (above|below target) into an absolute desired index.
+            // Compensates for the deque shrinking by one when oldIndex < targetIndex.
+            int newIndex = below ? (targetIndex + 1) : targetIndex;
+            if (oldIndex < newIndex)
+                newIndex -= 1;
+
+            const int size = static_cast<int>(impl_->operations.observedValues().value().size());
+            if (newIndex < 0)
+                newIndex = 0;
+            if (newIndex >= size)
+                newIndex = size - 1;
+            if (newIndex == oldIndex)
+                return;
+
+            requestMoveOperation(Ids::makeOperationId(draggedId), static_cast<std::size_t>(newIndex));
+        },
+    }(
+        impl_->operations.observedValues().map(
+            [](auto, auto const& element) { return (*element)(); }
+        )
+    );
+}
+
 Nui::ElementRenderer OperationQueue::operator()()
 {
     using namespace Nui::Elements;
@@ -1406,6 +1645,15 @@ Nui::ElementRenderer OperationQueue::operator()()
     // clang-format off
     return div{
         class_ = "operation-queue",
+        // Single source of truth for "kick-to-top + drag are active".  Optional
+        // returning nullopt removes the attribute entirely so CSS rules like
+        // `.operation-queue[data-paused] .op-kick-up` only match while paused.
+        // Avoids putting an Observed<bool> on every card.
+        "data-paused"_attr = observe(impl_->paused).generate([this]() -> std::optional<std::string> {
+            if (impl_->paused.value())
+                return std::optional<std::string>{"true"};
+            return std::nullopt;
+        }),
         tabIndex = 0,
         "keydown"_event = [this](Nui::WebApi::KeyboardEvent event) {
             const auto key = event.key();
@@ -1495,7 +1743,10 @@ Nui::ElementRenderer OperationQueue::operator()()
                     .generate(makeSummaryText)
             )
         ),
-        // Tab bar — Queue (live + history via pagination) vs Failed.
+        // Tab bar — Queue (live + history via pagination) vs Failed vs Priority.
+        // Priority lives in its own tab (rather than on top of the live page)
+        // because it's intentionally non-reorderable — keeping it on the same
+        // surface as the drag-reorderable regular queue would be confusing UX.
         div{class_ = "opq-tabs"}(
             div{
                 class_ = observe(impl_->activeTab).generate([this]() {
@@ -1503,6 +1754,13 @@ Nui::ElementRenderer OperationQueue::operator()()
                 }),
                 onClick = [this](Nui::val) { impl_->activeTab = 0; },
             }(span{}(language->getObserved("operationQueue", "tabQueue"))),
+            div{
+                class_ = observe(impl_->activeTab).generate([this]() {
+                    return std::string{"opq-tab"} + (impl_->activeTab.value() == 2 ? " selected" : "");
+                }),
+                onClick = [this](Nui::val) { impl_->activeTab = 2; },
+            }(span{}(language->getObserved("operationQueue", "tabPriority")))
+            ,
             div{
                 class_ = observe(impl_->activeTab).generate([this]() {
                     return std::string{"opq-tab"} + (impl_->activeTab.value() == 1 ? " selected" : "");
@@ -1537,14 +1795,15 @@ Nui::ElementRenderer OperationQueue::operator()()
                 },
             })
         ),
-        // Main content — switches between live page (reactive, preserves
-        // single-insert perf), a static history-page slice, or the Failed tab.
+        // Main content — switches between live regular-queue page, a static
+        // history-page slice, the Failed tab, or the new Priority tab.
         div{
             class_ = "opq-list"
         }(
-            // Only subscribe to tab + paging state here.  `failed` mutations
-            // must NOT tear down the live reactive ranges below, or every new
-            // failure would wipe the live list and re-create all card nodes.
+            // Only subscribe to tab + paging state here.  `failed` and
+            // `priorityOperations` mutations must NOT tear down the live
+            // regular-queue ranges below, or every new addition would wipe
+            // the live list and re-create all card nodes.
             Nui::observe(impl_->activeTab, impl_->currentPage, impl_->pageCount),
             [this]() -> Nui::ElementRenderer
             {
@@ -1561,35 +1820,38 @@ Nui::ElementRenderer OperationQueue::operator()()
                     );
                 }
 
+                if (impl_->activeTab.value() == 2)
+                {
+                    // Priority tab: non-reorderable.  Cards still render with
+                    // the kick-to-top button DOM, but no handler is installed
+                    // (see onOperationAdded) and CSS hides the button on this
+                    // surface via .opq-priority-list .op-kick-up { display:none }.
+                    return div{class_ = "opq-priority-list"}(
+                        Nui::range(impl_->priorityOperations.observedValues()),
+                        [](long long, auto const& element) -> Nui::ElementRenderer {
+                            return (*element)();
+                        }
+                    );
+                }
+
                 const int page = impl_->currentPage.value();
                 const int pageMax = impl_->pageCount.value() - 1;
 
                 if (page >= pageMax)
                 {
-                    // Live page: original reactive markup wrapped in one host
-                    // div with display:contents (see operation_queue.css) so
-                    // priority/regular cards remain direct .opq-list grid
-                    // children.  Re-entering re-establishes the Observed
-                    // subscription so subsequent enqueue/dequeue stays single-diff.
-                    return div{class_ = "opq-live-wrapper"}(
-                        div{class_ = "opq-priority-list"}(
-                            // TODO: Make after element depend on list length > 0
-                            Nui::range(impl_->priorityOperations.observedValues())
-                                .after(div{class_ = "opq-priority-separator"}()),
-                            [](auto, auto const& element) -> Nui::ElementRenderer
-                            {
-                                return (*element)();
-                            }
-                        ),
-                        div{class_ = "opq-regular-list"}(
-                            impl_->operations.observedValues().map(
-                                [](auto, auto const& element) { return (*element)(); }
-                            )
-                        )
-                    );
+                    // Live regular-queue page.  Drag handlers are delegated at
+                    // this list level (not per-card) — see icon_flavor.cpp /
+                    // flavor_implementation.cpp for the same pattern in the
+                    // file explorer.  This keeps DnB cost O(1) regardless of
+                    // queue size.
+                    return makeRegularLiveList();
                 }
 
-                // History page: static slice of evicted cards.
+                // History page: static slice of evicted cards.  Not reorderable;
+                // the .opq-regular-list class still applies but no draggable
+                // attribute is set on history cards' wrapping (the cards
+                // themselves carry draggable=true but the parent has no drag
+                // handler so it fizzles).
                 const int pageSize = std::max(1, impl_->liveQueuePageSize);
                 const int begin = page * pageSize;
                 const int end = std::min(begin + pageSize, static_cast<int>(impl_->history.size()));

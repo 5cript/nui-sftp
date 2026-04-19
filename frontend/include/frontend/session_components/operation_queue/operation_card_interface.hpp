@@ -18,6 +18,7 @@
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
+#include <functional>
 #include <optional>
 
 class OperationCardInterface
@@ -35,6 +36,16 @@ class OperationCardInterface
     virtual Nui::ElementRenderer operator()() const = 0;
     virtual void setError(SharedData::OperationError const& error) = 0;
     virtual void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries) = 0;
+
+    /**
+     * @brief Install a click handler for the kick-to-top affordance.  The
+     *        OperationQueue calls this after the card is constructed so the
+     *        button can directly trigger a `moveOperation(id, 0)` RPC
+     *        without coupling the card to the queue.  Empty handler =
+     *        button is rendered but is a no-op (and is hidden by CSS unless
+     *        the queue root has `data-paused`).
+     */
+    virtual void setKickToTopHandler(std::function<void()> handler) = 0;
 
     /**
      * @brief Describe this operation so it can be re-enqueued (with

@@ -34,8 +34,10 @@ operationQueue:
   cancelAll: "Cancel All"
   tabQueue: "Queue"
   tabFailed: "Failed"
+  tabPriority: "Priority"
   resumeMinimizedSync: "Resume Sync"
   restoreMinimizedSyncTitle: "Restore minimized sync dialog"
+  kickToTopTitle: "Move to top of queue"
 syncDialog:
   titleFormat: "Synchronize: {} / {}"
   minimizeTitle: "Minimize"

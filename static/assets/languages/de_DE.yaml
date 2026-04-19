@@ -91,8 +91,10 @@ operationQueue:
   cancelAll: "Alle abbrechen"
   tabQueue: "Warteschlange"
   tabFailed: "Fehlgeschlagen"
+  tabPriority: "Priorität"
   resumeMinimizedSync: "Sync fortsetzen"
   restoreMinimizedSyncTitle: "Minimierten Sync-Dialog wiederherstellen"
+  kickToTopTitle: "Nach oben verschieben"
 syncDialog:
   titleFormat: "Synchronisieren: {} / {}"
   minimizeTitle: "Minimieren"

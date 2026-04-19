@@ -6,6 +6,7 @@
 #include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/is_paused.hpp>
 
@@ -303,6 +304,100 @@ void OperationQueue::cancel(Ids::OperationId id)
             const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
             if (erasedFromRegular == 0)
                 std::erase_if(self->priorityOperations_, cancelPredicate);
+        }
+    );
+}
+
+void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
+{
+    within_strand_do(
+        [weak = weak_from_this(), operationId = std::move(operationId), newIndex]() mutable
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
+            // Pessimistic resolution: every exit path emits onOperationsReordered
+            // so the frontend always gets a definitive "this move was/was not
+            // applied" — never silently dropped. The frontend's listener relies
+            // on this to apply or discard the user's intended reorder.
+            auto emitResolution = [&self, &operationId](std::size_t resolvedIndex, bool applied)
+            {
+                self->hub_->callRemote(
+                    self->rpcName("onOperationsReordered"),
+                    SharedData::OperationsReordered{
+                        .operationId = operationId,
+                        .newIndex = static_cast<std::int32_t>(resolvedIndex),
+                        .applied = applied,
+                    }
+                );
+            };
+
+            // Pause is the only safe window: while running, work() can be
+            // mid-batch with raw pointers into the deque (see workQueue()),
+            // and reordering would alter the indices it iterates.
+            if (!self->paused_)
+            {
+                Log::warn(
+                    "OperationQueue::moveOperation refused — queue not paused (op '{}')",
+                    operationId.value()
+                );
+                return emitResolution(newIndex, false);
+            }
+
+            // Priority queue is intentionally not user-reorderable.
+            for (auto const& [pid, _op] : self->priorityOperations_)
+            {
+                if (pid == operationId)
+                {
+                    Log::warn(
+                        "OperationQueue::moveOperation refused — '{}' is a priority op",
+                        operationId.value()
+                    );
+                    return emitResolution(newIndex, false);
+                }
+            }
+
+            auto& queue = self->operations_;
+            std::size_t oldIndex = 0;
+            bool found = false;
+            for (std::size_t idx = 0; idx < queue.size(); ++idx)
+            {
+                if (queue[idx].first == operationId)
+                {
+                    oldIndex = idx;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                // Op completed/canceled between click and strand tick — silent
+                // resolution; the frontend already removed the card via
+                // onOperationCompleted, so applied=false is purely informational.
+                return emitResolution(newIndex, false);
+            }
+
+            if (queue.empty())
+                return emitResolution(newIndex, false);
+            if (newIndex >= queue.size())
+                newIndex = queue.size() - 1;
+            if (oldIndex == newIndex)
+                return emitResolution(newIndex, false);
+
+            auto entry = std::move(queue[oldIndex]);
+            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(oldIndex));
+            queue.insert(queue.begin() + static_cast<std::ptrdiff_t>(newIndex), std::move(entry));
+
+            Log::info(
+                "OperationQueue::moveOperation '{}' from {} to {} (queue size {})",
+                operationId.value(),
+                oldIndex,
+                newIndex,
+                queue.size()
+            );
+
+            emitResolution(newIndex, true);
         }
     );
 }
@@ -1537,6 +1632,25 @@ void OperationQueue::registerRpc()
                     return reply(SharedData::error("OperationQueue no longer exists"));
 
                 self->cancelAll();
+                return reply(SharedData::success());
+            }
+        );
+
+    on(rpcName("moveOperation"))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, Ids::OperationId operationId, std::int32_t newIndex
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply(SharedData::error("OperationQueue no longer exists"));
+
+                // Reply immediately to release the frontend's backchannel temp
+                // RPC name. The actual move + onOperationsReordered broadcast
+                // happen asynchronously inside moveOperation's strand task.
+                const auto clamped = newIndex < 0 ? std::size_t{0} : static_cast<std::size_t>(newIndex);
+                self->moveOperation(std::move(operationId), clamped);
                 return reply(SharedData::success());
             }
         );

@@ -17,6 +17,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
@@ -252,6 +253,16 @@ class OperationQueue
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
+    void onOperationsReordered(SharedData::OperationsReordered const& evt);
+    void requestMoveOperation(Ids::OperationId const& opId, std::size_t newIndex);
+
+    /**
+     * @brief Build the live regular-queue list element, attaching delegated
+     *        drag handlers (one set of dragstart/dragover/dragleave/drop on
+     *        the list container) so per-card cost stays O(1).  Modeled on
+     *        icon_flavor.cpp / flavor_implementation.cpp's drag delegation.
+     */
+    Nui::ElementRenderer makeRegularLiveList();
 
   private:
     struct Implementation;
