@@ -3,6 +3,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
+#include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <persistence/state_holder.hpp>
@@ -41,12 +42,14 @@ class SideModel : public NuiFileExplorer::ISideModel
         Persistence::UiOptions uiOptions,
         ConfirmDialog* confirmDialog,
         InputDialog* inputDialog,
-        FilePropertyDialog* filePropertyDialog
+        FilePropertyDialog* filePropertyDialog,
+        ArchiveTransferDialog* archiveTransferDialog
     )
         : uiOptions_{std::move(uiOptions)}
         , confirmDialog_{confirmDialog}
         , inputDialog_{inputDialog}
         , filePropertyDialog_{filePropertyDialog}
+        , archiveTransferDialog_{archiveTransferDialog}
     {}
     ~SideModel() override = default;
     SideModel(const SideModel&) = delete;
@@ -104,6 +107,7 @@ class SideModel : public NuiFileExplorer::ISideModel
     ConfirmDialog* confirmDialog_;
     InputDialog* inputDialog_;
     FilePropertyDialog* filePropertyDialog_;
+    ArchiveTransferDialog* archiveTransferDialog_;
     std::vector<NuiFileExplorer::Item> items_{};
     OperationQueue* operationQueue_{nullptr};
     Nui::Observed<std::filesystem::path> currentPath_{};

@@ -9,6 +9,7 @@
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
 #include <log/log.hpp>
 
@@ -23,6 +24,7 @@ struct MainPage::Implementation
     ConfirmDialog confirmDialog;
     InputDialog newItemAskDialog;
     FilePropertyDialog filePropertyDialog;
+    ArchiveTransferDialog archiveTransferDialog;
     DirectConnectDialog directConnectDialog;
     PasswordPrompter prompter;
     MultiInputDialog multiInputDialog;
@@ -39,12 +41,13 @@ struct MainPage::Implementation
         , confirmDialog{"ConfirmDialog", *stateHolder}
         , newItemAskDialog{"AskDialog"}
         , filePropertyDialog{"FilePropertyDialog"}
+        , archiveTransferDialog{"ArchiveTransferDialog"}
         , directConnectDialog{"DirectConnectDialog", stateHolder}
         , prompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &toolbar}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog}
@@ -132,6 +135,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->prompter.dialog(),
         impl_->confirmDialog(),
         impl_->filePropertyDialog(),
+        impl_->archiveTransferDialog(),
         impl_->directConnectDialog(),
         impl_->multiInputDialog(),
         impl_->settings(),

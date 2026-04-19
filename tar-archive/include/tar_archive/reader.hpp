@@ -51,6 +51,15 @@ namespace TarArchive
          */
         std::expected<std::optional<EntryReader>, TarError> nextEntry();
 
+        /**
+         * @brief Wrap an externally-provided ByteSource in a Reader.
+         *
+         * Typically you'll use Archive::openReader, which owns the source. This
+         * factory exists for callers that need to plug into a source they already
+         * control. Ownership of the source transfers to the Reader.
+         */
+        static Reader makeFromSource(std::unique_ptr<ByteSource> source);
+
       private:
         friend class Archive;
         friend class EntryReader;
@@ -59,9 +68,6 @@ namespace TarArchive
         std::unique_ptr<Implementation> impl_;
 
         explicit Reader(std::unique_ptr<Implementation> implementation) noexcept;
-
-        /** @brief Factory used by Archive. Defined alongside the Implementation. */
-        static Reader makeFromSource(std::unique_ptr<ByteSource> source);
 
         std::expected<std::size_t, TarError> readEntryPayload(std::span<std::byte> buf);
         std::expected<void, TarError> skipRemaining();

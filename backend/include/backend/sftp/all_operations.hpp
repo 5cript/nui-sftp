@@ -7,6 +7,8 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <backend/sftp/bulk_upload_operation.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
+#include <backend/sftp/archive_download_operation.hpp>
+#include <backend/sftp/archive_upload_operation.hpp>
 
 template <typename FunctionT>
 auto Operation::visit(FunctionT&& func) const
@@ -45,6 +47,14 @@ auto Operation::visit(FunctionT&& func) const
         case Rename:
         {
             return func(static_cast<RenameOperation const&>(*this));
+        }
+        case ArchiveDownload:
+        {
+            return func(static_cast<ArchiveDownloadOperation const&>(*this));
+        }
+        case ArchiveUpload:
+        {
+            return func(static_cast<ArchiveUploadOperation const&>(*this));
         }
         default:
         {

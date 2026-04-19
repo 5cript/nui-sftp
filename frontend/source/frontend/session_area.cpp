@@ -54,6 +54,7 @@ struct SessionArea::Implementation
     InputDialog* newItemAskDialog;
     ConfirmDialog* confirmDialog;
     FilePropertyDialog* filePropertyDialog;
+    ArchiveTransferDialog* archiveTransferDialog;
     Toolbar* toolbar;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
@@ -72,6 +73,7 @@ struct SessionArea::Implementation
         InputDialog* newItemAskDialog,
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
+        ArchiveTransferDialog* archiveTransferDialog,
         Toolbar* toolbar
     )
         : stateHolder{stateHolder}
@@ -79,6 +81,7 @@ struct SessionArea::Implementation
         , newItemAskDialog{newItemAskDialog}
         , confirmDialog{confirmDialog}
         , filePropertyDialog{filePropertyDialog}
+        , archiveTransferDialog{archiveTransferDialog}
         , toolbar{toolbar}
         , sessions{}
         , dropHandlerUnregister_{}
@@ -98,10 +101,18 @@ SessionArea::SessionArea(
     InputDialog* newItemAskDialog,
     ConfirmDialog* confirmDialog,
     FilePropertyDialog* filePropertyDialog,
+    ArchiveTransferDialog* archiveTransferDialog,
     Toolbar* toolbar
 )
-    : impl_{std::make_unique<
-          Implementation>(stateHolder, events, newItemAskDialog, confirmDialog, filePropertyDialog, toolbar)}
+    : impl_{std::make_unique<Implementation>(
+          stateHolder,
+          events,
+          newItemAskDialog,
+          confirmDialog,
+          filePropertyDialog,
+          archiveTransferDialog,
+          toolbar
+      )}
 {
     impl_->tabs.onClose(
         [this](int id)
@@ -289,6 +300,7 @@ Session::Params SessionArea::makeSessionParams(
     params.newItemAskDialog = impl_->newItemAskDialog;
     params.confirmDialog = impl_->confirmDialog;
     params.filePropertyDialog = impl_->filePropertyDialog;
+    params.archiveTransferDialog = impl_->archiveTransferDialog;
     params.sessionOptions = std::move(engineOptions);
     params.uiOptions = std::move(uiOptions);
     params.initialName = std::move(displayName);

@@ -106,6 +106,24 @@ namespace
                         .error = error,
                     };
                 },
+                [reason, operationId, error](ArchiveDownloadOperation const&)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .error = error,
+                    };
+                },
+                [reason, operationId, error](ArchiveUploadOperation const&)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .error = error,
+                    };
+                },
                 [reason, operationId](std::nullopt_t)
                 {
                     return OperationQueue::OperationCompleted{
@@ -858,6 +876,230 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         Log::error("Remote path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(result->type));
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
     }
+}
+
+namespace
+{
+    /**
+     * @brief Map a user-facing 1..9 level to codec-native CompressionOptions.
+     *
+     * Keeps the frontend ignorant of codec specifics: the slider just says
+     * "1 = fastest, 9 = smallest" and this picks a sensible setting per codec.
+     */
+    TarArchive::CompressionOptions compressionOptionsFromLevel(
+        TarArchive::Compression codec, int userLevel
+    )
+    {
+        const int clampedLevel = std::clamp(userLevel, 1, 9);
+        TarArchive::CompressionOptions options{};
+        switch (codec)
+        {
+            case TarArchive::Compression::Gzip:
+                options.gzipLevel = clampedLevel;
+                break;
+            case TarArchive::Compression::Bzip2:
+                options.bzip2BlockSize = clampedLevel;
+                break;
+            case TarArchive::Compression::Zstd:
+                // Linear map 1..9 → 1..22 (rounded).
+                options.zstdLevel =
+                    1 + static_cast<int>((clampedLevel - 1) * 21.0 / 8.0 + 0.5);
+                break;
+            case TarArchive::Compression::Xz:
+                options.xzPreset = std::clamp(clampedLevel - 1, 0, 9);
+                break;
+            case TarArchive::Compression::None:
+            case TarArchive::Compression::Auto:
+                break;
+        }
+        return options;
+    }
+}
+
+std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::filesystem::path const& localArchivePath,
+    TarArchive::Compression compression,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode
+)
+{
+    // Assumed in strand.
+
+    if (entries.empty())
+    {
+        Log::error("addArchiveDownloadOperation: no entries provided.");
+        return std::unexpected(Operation::Error{
+            .type = Operation::ErrorType::InvalidPath,
+            .extraInfo = "archive has no entries",
+        });
+    }
+
+    std::uint64_t totalPayloadBytes = 0u;
+    for (auto const& entry : entries)
+    {
+        if (entry.type == SharedData::FileType::Regular)
+            totalPayloadBytes += entry.size;
+    }
+
+    ArchiveDownloadOperation::Options opts{};
+    opts.entries = std::move(entries);
+    opts.localArchivePath = localArchivePath;
+    opts.compression = compression;
+    opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
+    opts.mayOverwrite = mayOverwrite;
+    opts.createMissingDirectories = true;
+    opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
+    opts.progressCallback =
+        [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](
+            auto min, auto max, auto current, auto bytesPerSecond
+        )
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->within_strand_do(
+            [weak, name, operationId, min, max, current, bytesPerSecond]()
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::TransferProgress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    }
+                );
+            }
+        );
+    };
+
+    auto& targetQueue =
+        (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    targetQueue.emplace_back(
+        operationId, std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts))
+    );
+
+    Log::info(
+        "OperationQueue::{}::onOperationAdded (ArchiveDownload, {} entries, {} bytes)",
+        sessionId_.value(),
+        opts.entries.size(),
+        totalPayloadBytes
+    );
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = operationId,
+            .type = SharedData::OperationType::ArchiveDownload,
+            .mode = mode,
+            .insertRefresh = false,
+            .totalBytes = totalPayloadBytes,
+            .localPath = localArchivePath,
+        }
+    );
+
+    return {};
+}
+
+std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    std::vector<std::filesystem::path> localPaths,
+    std::filesystem::path const& remoteArchivePath,
+    TarArchive::Compression compression,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode
+)
+{
+    // Assumed in strand.
+    if (localPaths.empty())
+    {
+        Log::error("addArchiveUploadOperation: no local paths provided.");
+        return std::unexpected(Operation::Error{
+            .type = Operation::ErrorType::InvalidPath,
+            .extraInfo = "archive has no entries",
+        });
+    }
+
+    // Rough totalBytes estimate for the OperationAdded event; actual progress
+    // comes from the per-chunk callback. The resolved-entries lstat happens
+    // inside the operation itself.
+    std::uint64_t estimatedTotalBytes = 0u;
+    for (auto const& localPath : localPaths)
+    {
+        std::error_code sizeErr{};
+        const auto size = std::filesystem::file_size(localPath, sizeErr);
+        if (!sizeErr)
+            estimatedTotalBytes += size;
+    }
+
+    ArchiveUploadOperation::Options opts{};
+    opts.localPaths = std::move(localPaths);
+    opts.remoteArchivePath = remoteArchivePath;
+    opts.compression = compression;
+    opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
+    opts.mayOverwrite = mayOverwrite;
+    opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
+    opts.progressCallback =
+        [weak = weak_from_this(), operationId, name = rpcName("onArchiveUploadProgress")](
+            auto min, auto max, auto current, auto bytesPerSecond
+        )
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        self->within_strand_do(
+            [weak, name, operationId, min, max, current, bytesPerSecond]()
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::TransferProgress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    }
+                );
+            }
+        );
+    };
+
+    auto& targetQueue =
+        (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    targetQueue.emplace_back(
+        operationId, std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts))
+    );
+
+    Log::info(
+        "OperationQueue::{}::onOperationAdded (ArchiveUpload, {} paths, ~{} bytes)",
+        sessionId_.value(),
+        opts.localPaths.size(),
+        estimatedTotalBytes
+    );
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = operationId,
+            .type = SharedData::OperationType::ArchiveUpload,
+            .mode = mode,
+            .insertRefresh = false,
+            .totalBytes = estimatedTotalBytes,
+            .remotePath = remoteArchivePath,
+        }
+    );
+    return {};
 }
 
 std::size_t OperationQueue::addBulkDownloadOperation(

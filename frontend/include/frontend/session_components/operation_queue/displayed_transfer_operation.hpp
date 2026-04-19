@@ -47,29 +47,41 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         using Nui::Elements::span;
 
         // clang-format off
-        const auto& srcPath = type_ == SharedData::OperationType::Download
-            ? remotePath_ : localPath_;
-        const auto& dstPath = type_ == SharedData::OperationType::Download
-            ? localPath_ : remotePath_;
+        const bool isDownloadOrientation =
+            type_ == SharedData::OperationType::Download ||
+            type_ == SharedData::OperationType::ArchiveDownload;
+        const auto& srcPath = isDownloadOrientation ? remotePath_ : localPath_;
+        const auto& dstPath = isDownloadOrientation ? localPath_ : remotePath_;
+        const bool hasBothPaths = !srcPath.empty() && !dstPath.empty();
+        const auto& solePath = srcPath.empty() ? dstPath : srcPath;
+
+        Nui::ElementRenderer routeDiv;
+        if (hasBothPaths)
+        {
+            routeDiv = div{
+                class_ = "opq-transfer-route",
+                alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
+            }(
+                span{class_ = "opq-route-segment"}(srcPath.generic_string()),
+                span{class_ = "opq-route-arrow"}(Svgs::arrowRight()),
+                span{class_ = "opq-route-segment"}(dstPath.generic_string())
+            );
+        }
+        else
+        {
+            routeDiv = div{
+                class_ = "opq-transfer-route",
+                alt = solePath.generic_string()
+            }(
+                span{class_ = "opq-route-segment"}(solePath.generic_string())
+            );
+        }
 
         return div{
             class_ = "opq-body opq-single"
         }(
             div{}(
-                div{
-                    class_ = "opq-transfer-route",
-                    alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
-                }(
-                    span{
-                        class_ = "opq-route-segment"
-                    }(srcPath.generic_string()),
-                    span{
-                        class_ = "opq-route-arrow"
-                    }(Svgs::arrowRight()),
-                    span{
-                        class_ = "opq-route-segment"
-                    }(dstPath.generic_string())
-                ),
+                std::move(routeDiv),
                 div{
                     class_ = "opq-bytes-per-second"
                 }(

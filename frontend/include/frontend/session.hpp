@@ -10,6 +10,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
+#include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/session_snapshot.hpp>
@@ -39,6 +40,7 @@ class Session
         InputDialog* newItemAskDialog = nullptr;
         ConfirmDialog* confirmDialog = nullptr;
         FilePropertyDialog* filePropertyDialog = nullptr;
+        ArchiveTransferDialog* archiveTransferDialog = nullptr;
 
         /* Configuration captured at add-time */
         Persistence::SessionOptions sessionOptions{};

@@ -221,6 +221,7 @@ struct Session::Implementation
             auto* filePropertyDialog = params.filePropertyDialog;
             auto* confirmDialog = params.confirmDialog;
             auto* inputDialog = params.newItemAskDialog;
+            auto* archiveTransferDialog = params.archiveTransferDialog;
             auto const& uiOptions = params.uiOptions;
             if (std::holds_alternative<Persistence::SshSessionOptions>(params.sessionOptions.engine))
             {
@@ -243,13 +244,14 @@ struct Session::Implementation
                         },
                         .pageSize = uiOptions.fileGridPageSize,
                 },
-                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog),
+                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog),
                     std::make_unique<RemoteSideModel>(
                         this->uiOptions,
                         std::get<Persistence::SshSessionOptions>(this->engineOptions.engine).remoteFavorites,
                         confirmDialog,
                         inputDialog,
-                        filePropertyDialog
+                        filePropertyDialog,
+                        archiveTransferDialog
                     ),
                 };
             } else {
@@ -264,7 +266,7 @@ struct Session::Implementation
                     },
                     .pageSize = uiOptions.fileGridPageSize,
                 },
-                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog)
+                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog)
                 };
             }
         }()}

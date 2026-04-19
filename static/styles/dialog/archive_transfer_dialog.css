@@ -1,0 +1,147 @@
+/* Archive transfer dialog — precision control-panel layout.
+   Two labeled rows on a fixed grid; theme-color edge marker; monospace for
+   the technical bits (extension dropdown + level readout). */
+
+.archive-transfer-dialog {
+    --atd-mono: Inconsolata, "Hack", "JetBrains Mono", Terminus, Consolas, monospace;
+    --atd-edge: color-mix(in srgb, var(--theme-color) 65%, transparent);
+    --atd-rule: color-mix(in srgb, var(--theme-color) 22%, transparent);
+    --atd-readout-bg: color-mix(in srgb, var(--theme-color) 14%, var(--background-color-fields));
+    --atd-readout-fg: color-mix(in srgb, var(--theme-color) 70%, var(--color));
+
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    grid-auto-rows: min-content;
+    column-gap: 14px;
+    row-gap: 12px;
+    align-items: center;
+
+    width: clamp(560px, 46vw, 760px);
+    padding: 14px 18px 16px;
+    margin: 0;
+
+    /* Theme edge marker — a single hairline accent that anchors the dialog. */
+    box-shadow: inset 4px 0 0 0 var(--atd-edge);
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--theme-color) 4%, transparent) 0%,
+            transparent 80px);
+}
+
+.archive-transfer-dialog-label {
+    align-self: center;
+    justify-self: end;
+    font-family: var(--atd-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--theme-color) 50%, var(--subdued-text));
+    user-select: none;
+    padding-right: 10px;
+    border-right: 1px solid var(--atd-rule);
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+/* ---------- Filename row: input + .tar.<ext> dropdown ---------- */
+
+.archive-transfer-dialog-filename {
+    display: grid;
+    grid-template-columns: 1fr max-content;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--background-color-fields);
+    border: 1px solid var(--border-color-fields);
+    transition: border-color 120ms ease, box-shadow 160ms ease;
+}
+
+.archive-transfer-dialog-filename:focus-within {
+    border-color: var(--theme-color);
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--theme-color) 22%, transparent),
+        inset 0 0 0 1px color-mix(in srgb, var(--theme-color) 35%, transparent);
+}
+
+/* Strip the inner textinput's own chrome — the parent provides the frame. */
+.archive-transfer-dialog-filename>.script-nui-textinput {
+    min-width: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.archive-transfer-dialog-filename>.script-nui-textinput:focus-within,
+.archive-transfer-dialog-filename>.script-nui-textinput input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Codec dropdown sits in column 2 of the filename grid, glued to the right.
+   It carries the readout treatment so the extension reads as a chip. */
+.archive-transfer-dialog-codec {
+    min-width: 130px;
+    display: grid;
+    align-items: stretch;
+    border-left: 1px solid var(--atd-rule);
+    background: var(--atd-readout-bg);
+}
+
+.archive-transfer-dialog-codec>.script-nui-select {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    font-family: var(--atd-mono);
+    font-size: 0.9rem;
+    color: var(--atd-readout-fg);
+    letter-spacing: 0.02em;
+}
+
+/* ---------- Compression-level row ---------- */
+
+.archive-transfer-dialog-level {
+    display: grid;
+    grid-template-columns: max-content 1fr max-content max-content;
+    align-items: center;
+    column-gap: 10px;
+    width: 100%;
+    min-width: 0;
+}
+
+.archive-transfer-dialog-level-hint {
+    font-family: var(--atd-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--subdued-text);
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* Tabular numeric readout — mirrors the codec chip treatment. */
+.archive-transfer-dialog-level-value {
+    font-family: var(--atd-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9rem;
+    font-weight: 600;
+    min-width: 2em;
+    padding: 2px 8px;
+    text-align: center;
+    color: var(--atd-readout-fg);
+    background: var(--atd-readout-bg);
+    border: 1px solid var(--atd-rule);
+    border-radius: 4px;
+    user-select: none;
+    line-height: 1.1;
+}
+
+.archive-transfer-dialog-level>.script-nui-slider {
+    width: 100%;
+    min-width: 0;
+}

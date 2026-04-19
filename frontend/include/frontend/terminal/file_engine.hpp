@@ -98,6 +98,39 @@ class FileEngine
         std::function<void(bool success, std::string const& info)> onBulkCreated
     );
 
+    /**
+     * @brief Archive-download: pack a list of remote files into a single local
+     *        tar[.ext] archive. @p compressionCodec is the raw integer value of
+     *        TarArchive::Compression (backend-side); the frontend stays codec
+     *        agnostic and the archive-transfer dialog produces the mapping.
+     *        @p compressionLevel is the user-facing 1..9 knob (re-scaled per
+     *        codec on the backend).
+     */
+    void addArchiveDownload(
+        std::vector<SharedData::DirectoryEntry> entries,
+        std::filesystem::path const& localArchivePath,
+        int compressionCodec,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode,
+        std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
+    );
+
+    /**
+     * @brief Archive-upload: pack a list of local files into a remote tar[.ext]
+     *        archive, streamed straight over SFTP. Same argument semantics as
+     *        addArchiveDownload with source/destination reversed.
+     */
+    void addArchiveUpload(
+        std::vector<std::filesystem::path> localPaths,
+        std::filesystem::path const& remoteArchivePath,
+        int compressionCodec,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode,
+        std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
+    );
+
     /** @brief Upload analogue of addBulkDownload — see its docs. */
     void addBulkUpload(
         std::vector<SharedData::BulkAddEntry> entries,

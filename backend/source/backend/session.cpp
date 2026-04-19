@@ -60,6 +60,8 @@ void Session::start()
             self->registerRpcSftpCreateFile();
             self->registerRpcSftpAddDownloadOperation();
             self->registerRpcSftpAddUploadOperation();
+            self->registerRpcSftpAddArchiveDownloadOperation();
+            self->registerRpcSftpAddArchiveUploadOperation();
             self->registerRpcSftpAddRenameOperation();
             self->registerRpcSftpAddBulkDownloadOperation();
             self->registerRpcSftpAddBulkUploadOperation();
@@ -764,6 +766,173 @@ void Session::registerRpcSftpAddDownloadOperation()
                             localPath
                         );
 
+                        self->resetQueueThrottle();
+                        reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpAddArchiveDownloadOperation()
+{
+    // One RPC to pack N remote files into a single local tar[.ext] archive.
+    // The entries list is trusted (no per-entry lstat) and the operation runs
+    // sequentially on the SFTP strand like a regular DownloadOperation.
+    on(fmt::format("Session::{}::sftp::addArchiveDownload", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::string const& newOperationIdString,
+                std::string const& entriesJson,
+                std::string const& localArchivePath,
+                int compressionCodec,
+                int compressionLevel,
+                bool mayOverwrite,
+                int mode
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                std::vector<SharedData::DirectoryEntry> entries;
+                try
+                {
+                    entries = nlohmann::json::parse(entriesJson)
+                        .get<std::vector<SharedData::DirectoryEntry>>();
+                }
+                catch (std::exception const& exc)
+                {
+                    Log::error("addArchiveDownload: failed to parse entries JSON: {}", exc.what());
+                    return reply({{"error", std::string{"Invalid entries payload: "} + exc.what()}});
+                }
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        newOperationIdString,
+                        entries = std::move(entries),
+                        localArchivePath,
+                        compressionCodec,
+                        compressionLevel,
+                        mayOverwrite,
+                        mode](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto codec = static_cast<TarArchive::Compression>(compressionCodec);
+
+                        const auto result = self->operationQueue_->addArchiveDownloadOperation(
+                            *channel,
+                            Ids::makeOperationId(newOperationIdString),
+                            std::move(entries),
+                            std::filesystem::path{localArchivePath},
+                            codec,
+                            compressionLevel,
+                            mayOverwrite,
+                            static_cast<SharedData::OperationMode>(mode)
+                        );
+
+                        if (!result.has_value())
+                        {
+                            Log::error(
+                                "Failed to add archive-download operation to '{}': {}",
+                                localArchivePath,
+                                result.error().toString()
+                            );
+                            return reply.error(
+                                "Failed to add archive-download operation: " + result.error().toString()
+                            );
+                        }
+
+                        Log::info(
+                            "Added archive-download operation '{}' → '{}' ({} entries)",
+                            newOperationIdString,
+                            localArchivePath,
+                            entries.size()
+                        );
+
+                        self->resetQueueThrottle();
+                        reply({{"success", true}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpAddArchiveUploadOperation()
+{
+    on(fmt::format("Session::{}::sftp::addArchiveUpload", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::string const& newOperationIdString,
+                std::vector<std::string> const& localPathStrings,
+                std::string const& remoteArchivePath,
+                int compressionCodec,
+                int compressionLevel,
+                bool mayOverwrite,
+                int mode
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply({{"error", "Session no longer exists"}});
+
+                std::vector<std::filesystem::path> localPaths;
+                localPaths.reserve(localPathStrings.size());
+                for (auto const& pathString : localPathStrings)
+                    localPaths.emplace_back(pathString);
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [weak = self->weak_from_this(),
+                        newOperationIdString,
+                        localPaths = std::move(localPaths),
+                        remoteArchivePath,
+                        compressionCodec,
+                        compressionLevel,
+                        mayOverwrite,
+                        mode](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                    {
+                        auto self = weak.lock();
+                        if (!self)
+                            return reply({{"error", "Session no longer exists"}});
+
+                        const auto codec = static_cast<TarArchive::Compression>(compressionCodec);
+                        const auto result = self->operationQueue_->addArchiveUploadOperation(
+                            *channel,
+                            Ids::makeOperationId(newOperationIdString),
+                            std::move(localPaths),
+                            std::filesystem::path{remoteArchivePath},
+                            codec,
+                            compressionLevel,
+                            mayOverwrite,
+                            static_cast<SharedData::OperationMode>(mode)
+                        );
+                        if (!result.has_value())
+                        {
+                            Log::error(
+                                "Failed to add archive-upload operation to '{}': {}",
+                                remoteArchivePath,
+                                result.error().toString()
+                            );
+                            return reply.error(
+                                "Failed to add archive-upload operation: " + result.error().toString()
+                            );
+                        }
+                        Log::info(
+                            "Added archive-upload operation '{}' → '{}'",
+                            newOperationIdString,
+                            remoteArchivePath
+                        );
                         self->resetQueueThrottle();
                         reply({{"success", true}});
                     },

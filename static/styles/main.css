@@ -17,6 +17,7 @@
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";
 @import "./dialog/input_dialog.css";
+@import "./dialog/archive_transfer_dialog.css";
 
 /* Dont forget to add in frontend CMakeLists.txt OBSERVED_BUNDLE_FILES and copy_styles_to_build_dir.cmake */
 @import "../../../styles/nui-file-explorer/file_grid.css";
@@ -91,6 +92,21 @@
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;
     --script-nui-components-switch-thumb-color: var(--color-fields);
+
+    /* Slider */
+    --script-nui-components-slider-track-fill-color: var(--theme-color);
+    --script-nui-components-slider-track-color: var(--background-color-fields);
+    --script-nui-components-slider-thumb-color: var(--color-fields);
+
+    /* Tabs */
+    --script-nui-components-tabs-primary-color: var(--theme-color);
+    --script-nui-components-tabs-color-tab-selected: var(--color);
+
+    /* Pagination */
+    --script-nui-components-pagination-primary-color: var(--theme-color);
+
+    /* Popup menu */
+    --script-nui-popup-menu-primary-color: var(--theme-color);
 
     /* Button */
     --script-nui-components-button-color: var(--color);
