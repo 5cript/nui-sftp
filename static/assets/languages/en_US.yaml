@@ -184,8 +184,9 @@ fileTracking:
   headerCleanupButton: "Clean Up Orphaned"
   headerCleanupRunning: "Cleaning…"
 settings:
-  settingsClosedHeader: "Most Settings Require Restart"
-  settingsClosedText: "At current implementation status, most settings changes require a restart to take effect.\nPlease restart the application to apply the changes.\nThis will be improved in the future."
+  settingsRestartRequiredHeader: "Restart Required"
+  settingsRestartRequiredText: "You have changed a setting that only takes effect after the application is restarted.\nPlease restart the application to apply the changes."
+  restartRequiredMessage: "A setting was changed that only takes effect after an application restart."
   loadingSettings: "Loading Settings UI"
   deleteSessionButton: "Delete Session"
   deleteSessionConfirmHeader: "Are you sure you want to delete this session?"

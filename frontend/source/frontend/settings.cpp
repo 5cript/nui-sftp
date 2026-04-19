@@ -100,8 +100,50 @@ struct Settings::Implementation
     Nui::Observed<bool> wasInitiallyLoaded{false};
     Nui::Observed<bool> initialLoadDone{false};
 
+    // Tracks whether the user has modified any setting that only takes effect
+    // after an app restart. The baseline is captured each time the settings
+    // dialog opens; listeners on the critical fields flip requiresRestart
+    // whenever the current value diverges from the baseline (and back to
+    // false if the user reverts).
+    struct RestartCriticalBaseline
+    {
+        std::string languageCode;
+        std::string logDirectory;
+        bool disableFileLogging{false};
+        std::optional<std::filesystem::path> temporaryDownloadsDirectory;
+        std::optional<int> concurrency;
+    };
+    Nui::Observed<bool> requiresRestart{false};
+    RestartCriticalBaseline restartBaseline{};
+
     Nui::ListenRemover<decltype(FrontendEvents::settingsOpen)> settingsOpenListener{};
     Nui::ListenRemover<decltype(FrontendEvents::requestedSettingScrollId)> requestedSettingScrollIdListener{};
+
+    void captureRestartBaseline()
+    {
+        restartBaseline = RestartCriticalBaseline{
+            .languageCode = generalSettings.localization.language.value(),
+            .logDirectory = generalSettings.logOptions.logDirectory.value(),
+            .disableFileLogging = generalSettings.logOptions.disableFileLogging.value(),
+            .temporaryDownloadsDirectory =
+                generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value(),
+            .concurrency = sftpOptions.concurrency.value(),
+        };
+        requiresRestart = false;
+    }
+
+    void recomputeRequiresRestart()
+    {
+        if (applyingToUi)
+            return;
+        requiresRestart =
+            generalSettings.localization.language.value() != restartBaseline.languageCode
+            || generalSettings.logOptions.logDirectory.value() != restartBaseline.logDirectory
+            || generalSettings.logOptions.disableFileLogging.value() != restartBaseline.disableFileLogging
+            || generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value()
+                != restartBaseline.temporaryDownloadsDirectory
+            || sftpOptions.concurrency.value() != restartBaseline.concurrency;
+    }
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -169,6 +211,7 @@ Settings::Settings(
                   return;
               if (impl_->throttledSave.valid())
                   impl_->throttledSave();
+              impl_->recomputeRequiresRestart();
           },
           [this]()
           {
@@ -479,6 +522,8 @@ void Settings::applySettingsToUi()
 
             reloadInheritance();
 
+            impl_->captureRestartBaseline();
+
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
@@ -707,6 +752,20 @@ Nui::ElementRenderer Settings::operator()()
             }(
                 header(),
                 div{
+                    class_ = "settings-restart-banner",
+                }(
+                    observe(impl_->requiresRestart),
+                    [](bool restartRequired) -> Nui::ElementRenderer
+                    {
+                        if (!restartRequired)
+                            return Nui::nil();
+                        return Snc::messageStrip({
+                            .text = language->getObserved("settings", "restartRequiredMessage"),
+                            .styleVariant = Snc::StyleVariant::Warning,
+                        });
+                    }
+                ),
+                div{
                     class_ = "settings-page-content",
                 }(
                     side(),
@@ -817,14 +876,16 @@ Nui::ElementRenderer Settings::header()
                 .icon = GeneratedSvgs::decline(),
                 .attributes = {
                     onClick = [this]() {
+                        const bool needsRestart = impl_->requiresRestart.value();
                         impl_->events->settingsOpen = false;
-                        // Warning that most settings currently require a restart:
+                        if (!needsRestart)
+                            return;
                         impl_->confirmDialog->open({
                             .styleVariant = Snc::StyleVariant::Danger,
-                            .headerText = language->get("settings", "settingsClosedHeader"),
-                            .text = language->get("settings", "settingsClosedText"),
+                            .headerText = language->get("settings", "settingsRestartRequiredHeader"),
+                            .text = language->get("settings", "settingsRestartRequiredText"),
                             .buttons = ConfirmDialog::Button::Ok,
-                            .neverShowAgainId = "settingsClosedWarning",
+                            .neverShowAgainId = "settingsRestartRequiredWarning",
                         });
                     }
                 },

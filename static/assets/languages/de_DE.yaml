@@ -185,8 +185,9 @@ fileTracking:
   headerCleanupButton: "Verwaiste bereinigen"
   headerCleanupRunning: "Bereinige…"
 settings:
-  settingsClosedHeader: "Die meisten Einstellungen erfordern einen Neustart"
-  settingsClosedText: "Im aktuellen Implementierungsstatus erfordern die meisten Einstellungsänderungen einen Neustart, um wirksam zu werden.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden.\nDies wird in Zukunft verbessert."
+  settingsRestartRequiredHeader: "Neustart erforderlich"
+  settingsRestartRequiredText: "Sie haben eine Einstellung geändert, die erst nach einem Neustart der Anwendung wirksam wird.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden."
+  restartRequiredMessage: "Eine Einstellung wurde geändert, die erst nach einem Neustart der Anwendung wirksam wird."
   loadingSettings: "Benutzeroberfläche für Einstellungen wird geladen"
   deleteSessionButton: "Sitzung löschen"
   deleteSessionConfirmHeader: "Sind Sie sicher, dass Sie diese Sitzung löschen möchten?"
