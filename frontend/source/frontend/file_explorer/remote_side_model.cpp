@@ -1199,8 +1199,16 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
 
     NuiFileExplorer::Item remoteItem = item;
     remoteItem.path = remotePath;
+    remoteItem.fullPath = remotePath;
     NuiFileExplorer::Item localItem = item;
     localItem.path = localPath;
+    // FileEngine::addDownload prefers `fullPath` over `path` when serializing
+    // the destination. Without overwriting it here, `localItem.fullPath` would
+    // still hold the source item's *remote* fullPath (carried over by the
+    // copy-construction above), and the backend would receive the remote path
+    // as both source and destination — making it try to write
+    // `<remotePath>.filepart` next to the remote file (permission denied).
+    localItem.fullPath = localPath;
 
     operationQueue_->enqueueDownload(
         remoteItem,
