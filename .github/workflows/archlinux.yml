@@ -41,7 +41,11 @@ jobs:
             aws-cli-v2 \
             github-cli \
             sdbus-cpp \
-            nlohmann-json
+            nlohmann-json \
+            zlib \
+            bzip2 \
+            zstd \
+            xz
 
       - uses: actions/checkout@v6
         with:

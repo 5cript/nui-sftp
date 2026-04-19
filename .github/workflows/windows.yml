@@ -46,6 +46,10 @@ jobs:
             mingw-w64-clang-x86_64-fmt
             mingw-w64-clang-x86_64-libssh
             mingw-w64-clang-x86_64-cppwinrt
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-bzip2
+            mingw-w64-clang-x86_64-zstd
+            mingw-w64-clang-x86_64-xz
 
       - name: Workspace Path Fixup
         run: |
