@@ -5,7 +5,7 @@ _build
 .idea
 out
 CMakeSettings.json
-dependencies
+/dependencies/
 node_modules
 todo.txt
 .clangd
