@@ -22,6 +22,7 @@ option(FETCH_RAPIDFUZZ "Fetch rapidfuzz" ON)
 option(FETCH_SPDLOG "Fetch spdlog" ON)
 option(FETCH_EFSW "Fetch efsw" ON)
 option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which includes a command line tool for checking language files" OFF)
+option(TAR_ARCHIVE_HAS_XZ "Enable xz (liblzma) compression in the tar-archive library" ON)
 
 if (OFFLINE_BUILD)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/offline_build.cmake")
@@ -107,6 +108,7 @@ else()
     endif()
 
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/tar-archive/source/tar_archive")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
 
     # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
@@ -133,6 +135,7 @@ else()
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
         add_subdirectory(shared_data/test/shared_data)
+        add_subdirectory(tar-archive/test/tar_archive)
     endif()
 
     if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)
