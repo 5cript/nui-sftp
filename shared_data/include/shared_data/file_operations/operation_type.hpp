@@ -17,6 +17,8 @@ namespace SharedData
         Rename,
         Delete,
         BulkDelete,
+        ArchiveDownload,
+        ArchiveUpload,
         CustomAction
     )
 }

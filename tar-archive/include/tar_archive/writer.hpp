@@ -51,6 +51,16 @@ namespace TarArchive
         /** @brief True once finalize() has been called successfully. */
         bool isFinalized() const noexcept;
 
+        /**
+         * @brief Wrap an externally-provided ByteSink in a Writer.
+         *
+         * Typically you'll use Archive::openWriter, which owns the sink. This
+         * factory exists for callers that need to plug into a sink they already
+         * control (e.g. a sink that writes to a foreign stream). Ownership of
+         * the sink transfers to the Writer.
+         */
+        static Writer makeFromSink(std::unique_ptr<ByteSink> sink);
+
       private:
         friend class Archive;
         friend class EntryWriter;
@@ -59,9 +69,6 @@ namespace TarArchive
         std::unique_ptr<Implementation> impl_;
 
         explicit Writer(std::unique_ptr<Implementation> implementation) noexcept;
-
-        /** @brief Factory used by Archive. Defined alongside the Implementation. */
-        static Writer makeFromSink(std::unique_ptr<ByteSink> sink);
 
         std::expected<void, TarError> writeEntryPayload(std::span<std::byte const> bytes);
         std::expected<void, TarError> closeActiveEntry(std::uint64_t declared, std::uint64_t written);

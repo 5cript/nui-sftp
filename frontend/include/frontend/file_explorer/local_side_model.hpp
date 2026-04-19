@@ -5,6 +5,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
+#include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
@@ -31,7 +32,8 @@ class LocalSideModel
         Persistence::UiOptions uiOptions,
         ConfirmDialog* confirmDialog,
         InputDialog* inputDialog,
-        FilePropertyDialog* filePropertyDialog
+        FilePropertyDialog* filePropertyDialog,
+        ArchiveTransferDialog* archiveTransferDialog
     );
 
     /**
@@ -68,6 +70,14 @@ class LocalSideModel
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
+
+    /**
+     * @brief "Transfer as Archive" entry point: opens the archive-transfer dialog
+     * and, on confirm, kicks off an upload of the selected items packed into a
+     * single tar archive on the remote side. Backend wiring is still pending; for
+     * now the onConfirm just logs the intent.
+     */
+    void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
     std::vector<NuiFileExplorer::ContextMenuItem>
     contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
     void onDropExternal(

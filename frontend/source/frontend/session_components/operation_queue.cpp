@@ -512,6 +512,26 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onArchiveDownloadProgress", impl_->sessionId.value()),
+            [this](SharedData::TransferProgress const& progress)
+            {
+                onArchiveDownloadProgress(progress);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onArchiveUploadProgress", impl_->sessionId.value()),
+            [this](SharedData::TransferProgress const& progress)
+            {
+                onArchiveUploadProgress(progress);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onBulkDownloadProgress", impl_->sessionId.value()),
             [this](SharedData::BulkProgress const& progress)
             {
@@ -813,6 +833,56 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 remoteRefresh
             );
         }
+        else if (added.type == SharedData::OperationType::ArchiveDownload)
+        {
+            if (!added.localPath)
+            {
+                Log::error(
+                    "Received OperationAdded for ArchiveDownload id: {} without localPath (archive destination)",
+                    added.operationId.value()
+                );
+                return {};
+            }
+            return std::make_unique<DisplayedTransferOperation>(
+                added.operationId,
+                SharedData::OperationType::ArchiveDownload,
+                *impl_->confirmDialog,
+                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
+                *added.localPath,
+                std::filesystem::path{},
+                [this](OperationCard<DisplayedTransferOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                localRefresh
+            );
+        }
+        else if (added.type == SharedData::OperationType::ArchiveUpload)
+        {
+            if (!added.remotePath)
+            {
+                Log::error(
+                    "Received OperationAdded for ArchiveUpload id: {} without remotePath (archive destination)",
+                    added.operationId.value()
+                );
+                return {};
+            }
+            return std::make_unique<DisplayedTransferOperation>(
+                added.operationId,
+                SharedData::OperationType::ArchiveUpload,
+                *impl_->confirmDialog,
+                added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
+                std::filesystem::path{},
+                *added.remotePath,
+                [this](OperationCard<DisplayedTransferOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                remoteRefresh
+            );
+        }
         else if (added.type == SharedData::OperationType::Rename)
         {
             if (!added.localPath || !added.remotePath)
@@ -1022,6 +1092,72 @@ void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progre
         return;
     }
     renderer->setProgress(progress);
+    {
+        const auto cbIt = impl_->transferProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->transferProgressCallbacks.end() && progress.max > progress.min)
+            cbIt->second(static_cast<double>(progress.current - progress.min) / (progress.max - progress.min));
+    }
+}
+
+void OperationQueue::onArchiveDownloadProgress(SharedData::TransferProgress const& progress)
+{
+    auto* operation = impl_->findOperation(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received archive download progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::ArchiveDownload)
+    {
+        Log::error(
+            "Received archive download progress for operation id: {} which is not an archive download",
+            progress.operationId.value()
+        );
+        return;
+    }
+    auto* card = operation->getCardSpecifically<DisplayedTransferOperation>();
+    if (!card)
+    {
+        Log::error(
+            "Received archive download progress for operation id: {} which has no transfer renderer",
+            progress.operationId.value()
+        );
+        return;
+    }
+    card->setProgress(progress);
+    {
+        const auto cbIt = impl_->transferProgressCallbacks.find(progress.operationId.value());
+        if (cbIt != impl_->transferProgressCallbacks.end() && progress.max > progress.min)
+            cbIt->second(static_cast<double>(progress.current - progress.min) / (progress.max - progress.min));
+    }
+}
+
+void OperationQueue::onArchiveUploadProgress(SharedData::TransferProgress const& progress)
+{
+    auto* operation = impl_->findOperation(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received archive upload progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::ArchiveUpload)
+    {
+        Log::error(
+            "Received archive upload progress for operation id: {} which is not an archive upload",
+            progress.operationId.value()
+        );
+        return;
+    }
+    auto* card = operation->getCardSpecifically<DisplayedTransferOperation>();
+    if (!card)
+    {
+        Log::error(
+            "Received archive upload progress for operation id: {} which has no transfer renderer",
+            progress.operationId.value()
+        );
+        return;
+    }
+    card->setProgress(progress);
     {
         const auto cbIt = impl_->transferProgressCallbacks.find(progress.operationId.value());
         if (cbIt != impl_->transferProgressCallbacks.end() && progress.max > progress.min)
@@ -1932,6 +2068,86 @@ void OperationQueue::enqueueUpload(
         remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
     );
 }
+void OperationQueue::enqueueArchiveDownload(
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::filesystem::path const& localArchivePath,
+    int compressionCodec,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode,
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue archive download");
+        onOperationCreated(std::nullopt, "No file engine set");
+        return;
+    }
+
+    Log::info(
+        "Frontend Operation Queue archive download: {} entries → {} (codec={}, level={})",
+        entries.size(),
+        localArchivePath.generic_string(),
+        compressionCodec,
+        compressionLevel
+    );
+    impl_->fileEngine->addArchiveDownload(
+        std::move(entries),
+        localArchivePath,
+        compressionCodec,
+        compressionLevel,
+        mayOverwrite,
+        mode,
+        [onOperationCreated = std::move(onOperationCreated)](
+            std::optional<Ids::OperationId> opId, std::string const& info
+        )
+        {
+            onOperationCreated(opId, info);
+        }
+    );
+}
+
+void OperationQueue::enqueueArchiveUpload(
+    std::vector<std::filesystem::path> localPaths,
+    std::filesystem::path const& remoteArchivePath,
+    int compressionCodec,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode,
+    std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
+)
+{
+    if (!impl_->fileEngine)
+    {
+        Log::error("No file engine set for operation queue, cannot enqueue archive upload");
+        onOperationCreated(std::nullopt, "No file engine set");
+        return;
+    }
+
+    Log::info(
+        "Frontend Operation Queue archive upload: {} paths → {} (codec={}, level={})",
+        localPaths.size(),
+        remoteArchivePath.generic_string(),
+        compressionCodec,
+        compressionLevel
+    );
+    impl_->fileEngine->addArchiveUpload(
+        std::move(localPaths),
+        remoteArchivePath,
+        compressionCodec,
+        compressionLevel,
+        mayOverwrite,
+        mode,
+        [onOperationCreated = std::move(onOperationCreated)](
+            std::optional<Ids::OperationId> opId, std::string const& info
+        )
+        {
+            onOperationCreated(opId, info);
+        }
+    );
+}
+
 void OperationQueue::enqueueRename(
     std::filesystem::path const& oldPath,
     std::filesystem::path const& newPath,

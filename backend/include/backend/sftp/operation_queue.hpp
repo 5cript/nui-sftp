@@ -98,6 +98,49 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /**
+     * @brief Enqueue an archive-download operation: pack a set of remote files
+     *        into a single tar[.gz|.bz2|.zst|.xz] file on the local side.
+     *
+     * @param sftp               SFTP session providing the strand + remote access.
+     * @param operationId        Pre-generated id so the frontend can register
+     *                           progress / completion callbacks before the RPC returns.
+     * @param entries            Metadata for each remote file to pack. Sizes are
+     *                           taken at face value (no per-entry lstat).
+     * @param localArchivePath   Destination archive path on the local filesystem.
+     * @param compression        Compression codec (or Auto to pick from extension).
+     * @param compressionLevel   User-facing 1..9 level (remapped to codec-native ranges).
+     * @param mayOverwrite       Allow replacing an existing local archive.
+     * @param mode               Standard queued / priority placement.
+     */
+    std::expected<void, Operation::Error> addArchiveDownloadOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        std::vector<SharedData::DirectoryEntry> entries,
+        std::filesystem::path const& localArchivePath,
+        TarArchive::Compression compression,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
+    /**
+     * @brief Dual of addArchiveDownloadOperation: pack local files into a
+     *        tar[.ext] archive streamed straight into a remote SFTP file.
+     *        Each localPath is lstat'd on the SFTP strand at operation start;
+     *        non-regular files are silently skipped.
+     */
+    std::expected<void, Operation::Error> addArchiveUploadOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        std::vector<std::filesystem::path> localPaths,
+        std::filesystem::path const& remoteArchivePath,
+        TarArchive::Compression compression,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
     std::expected<void, Operation::Error> addDeleteOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,

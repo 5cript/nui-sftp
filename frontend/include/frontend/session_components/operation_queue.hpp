@@ -120,6 +120,35 @@ class OperationQueue
         std::function<void(std::vector<Ids::OperationId> const& opIds)> onEnqueued = {}
     );
 
+    /**
+     * @brief Enqueue an archive-download: pack a list of remote files into one
+     *        local tar[.ext] archive. @p compressionCodec is the raw int value
+     *        of TarArchive::Compression (None=1, Gzip=2, Bzip2=3, Zstd=4, Xz=5
+     *        — see the archive_transfer_dialog.hpp local enum); the frontend
+     *        stays agnostic of codec specifics. @p compressionLevel is the
+     *        user-facing 1..9 slider value, remapped per-codec on the backend.
+     */
+    void enqueueArchiveDownload(
+        std::vector<SharedData::DirectoryEntry> entries,
+        std::filesystem::path const& localArchivePath,
+        int compressionCodec,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode,
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
+    );
+
+    /** @brief Upload analogue of enqueueArchiveDownload — see its docs. */
+    void enqueueArchiveUpload(
+        std::vector<std::filesystem::path> localPaths,
+        std::filesystem::path const& remoteArchivePath,
+        int compressionCodec,
+        int compressionLevel,
+        bool mayOverwrite,
+        SharedData::OperationMode mode,
+        std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
+    );
+
     /** @brief Upload analogue of enqueueBulkDownload — see its docs. */
     void enqueueBulkUpload(
         std::vector<SharedData::BulkAddEntry> entries,
@@ -247,6 +276,8 @@ class OperationQueue
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onDownloadProgress(SharedData::TransferProgress const& progress);
     void onUploadProgress(SharedData::TransferProgress const& progress);
+    void onArchiveDownloadProgress(SharedData::TransferProgress const& progress);
+    void onArchiveUploadProgress(SharedData::TransferProgress const& progress);
     void onBulkDownloadProgress(SharedData::BulkProgress const& progress);
     void onBulkUploadProgress(SharedData::BulkProgress const& progress);
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);

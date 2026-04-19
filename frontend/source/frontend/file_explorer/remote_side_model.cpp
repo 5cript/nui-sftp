@@ -57,9 +57,12 @@ RemoteSideModel::RemoteSideModel(
     std::vector<std::string> initialFavorites,
     ConfirmDialog* confirmDialog,
     InputDialog* inputDialog,
-    FilePropertyDialog* filePropertyDialog
+    FilePropertyDialog* filePropertyDialog,
+    ArchiveTransferDialog* archiveTransferDialog
 )
-    : SideModel{std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog}
+    : SideModel{
+          std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
+      }
     , pathSuggestionCache_{
           [this](
               std::filesystem::path const& dirPath,
@@ -198,6 +201,15 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
                 onTransfer(selectedItems, std::nullopt);
             },
             !hasItems
+        ),
+        Snc::PopupMenu::item(
+            "Download as Archive",
+            Ui5Icons::download(),
+            [this, selectedItems]()
+            {
+                onTransferAsArchive(selectedItems);
+            },
+            !hasItems || archiveTransferDialog_ == nullptr
         ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
@@ -1006,6 +1018,125 @@ void RemoteSideModel::onTransfer(
                 );
             }}
     );
+}
+
+namespace
+{
+    /**
+     * @brief Translate the frontend-local ArchiveCodec to the integer value the
+     *        backend expects (the raw int of TarArchive::Compression). The order
+     *        must match tar_archive/compression.hpp: Auto=0, None=1, Gzip=2,
+     *        Bzip2=3, Zstd=4, Xz=5.
+     */
+    int backendCompressionCode(ArchiveCodec codec)
+    {
+        switch (codec)
+        {
+            case ArchiveCodec::None:  return 1;
+            case ArchiveCodec::Gzip:  return 2;
+            case ArchiveCodec::Bzip2: return 3;
+            case ArchiveCodec::Zstd:  return 4;
+            case ArchiveCodec::Xz:    return 5;
+        }
+        return 2;
+    }
+}
+
+void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items)
+{
+    CHECK_COMPLETE();
+
+    if (items.empty())
+    {
+        Log::error("No items selected for archive download");
+        return;
+    }
+    if (archiveTransferDialog_ == nullptr)
+    {
+        Log::error("ArchiveTransferDialog is not wired; cannot open archive download dialog");
+        return;
+    }
+    if (!localModel_)
+    {
+        Log::error("Cannot download as archive: local model is not wired");
+        return;
+    }
+    if (!localModel_->currentPath().value().empty() == false)
+    {
+        Log::error("Local side has no active path; cannot pick a destination");
+        return;
+    }
+
+    // Root entries: files go straight in, directories are flattened on the
+    // backend via a recursive SFTP listDirectory in the archive op's
+    // prepareInStrand step. Symlinks and other non-regular / non-directory
+    // types are logged and dropped there too.
+    std::vector<SharedData::DirectoryEntry> rootEntries;
+    rootEntries.reserve(items.size());
+    for (auto const& item : items)
+    {
+        SharedData::DirectoryEntry entry = item;
+        entry.fullPath = currentPath_.value() / item.path;
+        rootEntries.push_back(std::move(entry));
+    }
+
+    if (rootEntries.empty())
+        return;
+
+    const auto defaultStem = items.size() == 1
+        ? items.front().path.filename().generic_string()
+        : std::string{"archive"};
+
+    archiveTransferDialog_->open({
+        .headerText = "Download as Archive",
+        .initialFileStem = defaultStem,
+        .initialCodec = ArchiveCodec::Gzip,
+        .initialCompressionLevel = 5,
+        .onConfirm = [this, entries = std::move(rootEntries)](
+                         std::optional<ArchiveTransferResult> const& result
+                     ) mutable
+        {
+            if (!result)
+            {
+                Log::info("Download as Archive: user cancelled");
+                return;
+            }
+            if (!localModel_)
+                return;
+
+            const std::string filename =
+                result->fileStem + ".tar" + archiveCodecExtension(result->codec);
+            const auto localPath = localModel_->currentPath().value() / filename;
+
+            operationQueue_->enqueueArchiveDownload(
+                std::move(entries),
+                localPath,
+                backendCompressionCode(result->codec),
+                result->compressionLevel,
+                /*mayOverwrite=*/false,
+                SharedData::OperationMode::Queued,
+                [this, localPath](std::optional<Ids::OperationId> const& opId, std::string const& info)
+                {
+                    if (!opId)
+                    {
+                        Log::error("Archive download failed to enqueue: {}", info);
+                        confirmDialog_->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = "Archive Download Failed",
+                            .text = info,
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                        return;
+                    }
+                    Log::info(
+                        "Archive download queued as {} (destination {})",
+                        opId->value(),
+                        localPath.generic_string()
+                    );
+                }
+            );
+        },
+    });
 }
 
 void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)

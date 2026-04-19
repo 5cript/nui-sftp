@@ -25,6 +25,8 @@ add_library(
         sftp/bulk_resume_registry.cpp
         sftp/delete_operation.cpp
         sftp/rename_operation.cpp
+        sftp/archive_download_operation.cpp
+        sftp/archive_upload_operation.cpp
         "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
 )
 
@@ -92,6 +94,7 @@ target_link_libraries(
         secure-shell
         ids
         events
+        tar-archive
 )
 
 target_link_libraries(

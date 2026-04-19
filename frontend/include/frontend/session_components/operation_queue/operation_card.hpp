@@ -22,7 +22,8 @@
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/refresh.hpp>
 #include <ui5-sap-icons/icons/edit.hpp>
-#include <ui5-sap-icons/icons/high-priority.hpp>
+#include <ui5-sap-icons/icons/drill-up.hpp>
+#include <ui5-sap-icons/icons/attachment-zip-file.hpp>
 
 #include <utility/language.hpp>
 #include <utility/convert_naming_convention.hpp>
@@ -151,7 +152,7 @@ class OperationCard : public OperationCardInterface
                         kickToTopHandler_();
                 },
                 Nui::Attributes::title = language->get("operationQueue", "kickToTopTitle"),
-            }(Ui5Icons::high_priority()),
+            }(Ui5Icons::drill_up()),
             // Icon
             div{}(
                 observe(state_),
@@ -160,6 +161,9 @@ class OperationCard : public OperationCardInterface
                         return Svgs::download();
                     else if (type_ == SharedData::OperationType::Upload || type_ == SharedData::OperationType::BulkUpload)
                         return Svgs::upload();
+                    else if (type_ == SharedData::OperationType::ArchiveDownload ||
+                        type_ == SharedData::OperationType::ArchiveUpload)
+                        return Ui5Icons::attachment_zip_file();
                     else if (type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan)
                     {
                         if (isCompletedState())

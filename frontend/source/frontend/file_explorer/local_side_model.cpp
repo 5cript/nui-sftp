@@ -52,9 +52,12 @@ LocalSideModel::LocalSideModel(
     Persistence::UiOptions uiOptions,
     ConfirmDialog* confirmDialog,
     InputDialog* inputDialog,
-    FilePropertyDialog* filePropertyDialog
+    FilePropertyDialog* filePropertyDialog,
+    ArchiveTransferDialog* archiveTransferDialog
 )
-    : SideModel{std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog}
+    : SideModel{
+          std::move(uiOptions), confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
+      }
     , pathSuggestionCache_{
           [this](
               std::filesystem::path const& dirPath,
@@ -1165,6 +1168,17 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
                 !hasItems
             )
         );
+        items.push_back(
+            Snc::PopupMenu::item(
+                "Upload as Archive",
+                Ui5Icons::upload(),
+                [this, selectedItems]()
+                {
+                    onTransferAsArchive(selectedItems);
+                },
+                !hasItems || archiveTransferDialog_ == nullptr
+            )
+        );
         items.push_back(Snc::PopupMenu::separator());
     }
 
@@ -1291,6 +1305,111 @@ void LocalSideModel::setRemoteModel(SideModel* model)
 bool LocalSideModel::isComplete() const
 {
     return SideModel::isComplete();
+}
+
+namespace
+{
+    /** @brief Same mapping as RemoteSideModel — frontend-local ArchiveCodec →
+     *         raw TarArchive::Compression int value used by the backend wire. */
+    int backendCompressionCode(ArchiveCodec codec)
+    {
+        switch (codec)
+        {
+            case ArchiveCodec::None:  return 1;
+            case ArchiveCodec::Gzip:  return 2;
+            case ArchiveCodec::Bzip2: return 3;
+            case ArchiveCodec::Zstd:  return 4;
+            case ArchiveCodec::Xz:    return 5;
+        }
+        return 2;
+    }
+}
+
+void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items)
+{
+    CHECK_COMPLETE();
+
+    if (items.empty())
+    {
+        Log::error("No items selected for archive upload");
+        return;
+    }
+    if (archiveTransferDialog_ == nullptr)
+    {
+        Log::error("ArchiveTransferDialog is not wired; cannot open archive upload dialog");
+        return;
+    }
+    if (!remoteModel_)
+    {
+        Log::error("Cannot upload as archive: remote model is not set");
+        return;
+    }
+
+    // Files go straight in; directories are flattened on the backend via
+    // std::filesystem::recursive_directory_iterator inside the upload op's
+    // prepareInStrand step.
+    std::vector<std::filesystem::path> localPaths;
+    localPaths.reserve(items.size());
+    for (auto const& item : items)
+        localPaths.push_back(currentPath_.value() / item.path);
+
+    if (localPaths.empty())
+        return;
+
+    const auto defaultStem = items.size() == 1
+        ? items.front().path.filename().generic_string()
+        : std::string{"archive"};
+
+    archiveTransferDialog_->open({
+        .headerText = "Upload as Archive",
+        .initialFileStem = defaultStem,
+        .initialCodec = ArchiveCodec::Gzip,
+        .initialCompressionLevel = 5,
+        .onConfirm = [this, paths = std::move(localPaths)](
+                         std::optional<ArchiveTransferResult> const& result
+                     ) mutable
+        {
+            if (!result)
+            {
+                Log::info("Upload as Archive: user cancelled");
+                return;
+            }
+            if (!remoteModel_)
+                return;
+
+            const std::string filename =
+                result->fileStem + ".tar" + archiveCodecExtension(result->codec);
+            const auto remotePath = remoteModel_->currentPath().value() / filename;
+
+            operationQueue_->enqueueArchiveUpload(
+                std::move(paths),
+                remotePath,
+                backendCompressionCode(result->codec),
+                result->compressionLevel,
+                /*mayOverwrite=*/false,
+                SharedData::OperationMode::Queued,
+                [this, remotePath](std::optional<Ids::OperationId> const& opId, std::string const& info)
+                {
+                    if (!opId)
+                    {
+                        Log::error("Archive upload failed to enqueue: {}", info);
+                        confirmDialog_->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = "Archive Upload Failed",
+                            .text = info,
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                        return;
+                    }
+                    Log::info(
+                        "Archive upload queued as {} (destination {})",
+                        opId->value(),
+                        remotePath.generic_string()
+                    );
+                }
+            );
+        },
+    });
 }
 
 void LocalSideModel::generatePathBoxSuggestions(

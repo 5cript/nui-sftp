@@ -305,6 +305,153 @@ void FileEngine::addDownload(
     );
 }
 
+void FileEngine::addArchiveDownload(
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::filesystem::path const& localArchivePath,
+    int compressionCodec,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode,
+    std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
+)
+{
+    Log::info(
+        "Requesting archive download: {} entries → {} (codec={}, level={})",
+        entries.size(),
+        localArchivePath.generic_string(),
+        compressionCodec,
+        compressionLevel
+    );
+
+    lazyOpen(
+        [this,
+            entries = std::move(entries),
+            localArchivePath,
+            compressionCodec,
+            compressionLevel,
+            mayOverwrite,
+            mode,
+            onOperationCreated = std::move(onOperationCreated)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add archive download, no channel");
+                onOperationCreated(std::nullopt, info);
+                return;
+            }
+
+            const auto operationId = Ids::generateOperationId();
+
+            // DirectoryEntry has to_json but no to_val; the RPC wire layer needs
+            // Nui::val conversion, so stringify here and parse on the backend.
+            nlohmann::json entriesJson = nlohmann::json::array();
+            for (auto const& entry : entries)
+                entriesJson.push_back(entry);
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format(
+                    "Session::{}::sftp::addArchiveDownload", impl_->engine->sshSessionId().value()
+                ),
+                [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error(
+                            "(Frontend) Failed to add archive download: {}",
+                            val["error"].as<std::string>()
+                        );
+                        onOperationCreated(std::nullopt, val["error"].as<std::string>());
+                        return;
+                    }
+                    onOperationCreated(operationId, "Success");
+                },
+                channelId.value().value(),
+                operationId.value(),
+                entriesJson.dump(),
+                localArchivePath.generic_string(),
+                compressionCodec,
+                compressionLevel,
+                mayOverwrite,
+                static_cast<int>(mode)
+            );
+        }
+    );
+}
+
+void FileEngine::addArchiveUpload(
+    std::vector<std::filesystem::path> localPaths,
+    std::filesystem::path const& remoteArchivePath,
+    int compressionCodec,
+    int compressionLevel,
+    bool mayOverwrite,
+    SharedData::OperationMode mode,
+    std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
+)
+{
+    Log::info(
+        "Requesting archive upload: {} paths → {} (codec={}, level={})",
+        localPaths.size(),
+        remoteArchivePath.generic_string(),
+        compressionCodec,
+        compressionLevel
+    );
+
+    lazyOpen(
+        [this,
+            localPaths = std::move(localPaths),
+            remoteArchivePath,
+            compressionCodec,
+            compressionLevel,
+            mayOverwrite,
+            mode,
+            onOperationCreated = std::move(onOperationCreated)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot add archive upload, no channel");
+                onOperationCreated(std::nullopt, info);
+                return;
+            }
+
+            const auto operationId = Ids::generateOperationId();
+
+            std::vector<std::string> localPathStrings;
+            localPathStrings.reserve(localPaths.size());
+            for (auto const& localPath : localPaths)
+                localPathStrings.push_back(localPath.generic_string());
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format(
+                    "Session::{}::sftp::addArchiveUpload", impl_->engine->sshSessionId().value()
+                ),
+                [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
+                {
+                    Nui::WebApi::Console::log(val);
+                    if (val.hasOwnProperty("error"))
+                    {
+                        Log::error(
+                            "(Frontend) Failed to add archive upload: {}",
+                            val["error"].as<std::string>()
+                        );
+                        onOperationCreated(std::nullopt, val["error"].as<std::string>());
+                        return;
+                    }
+                    onOperationCreated(operationId, "Success");
+                },
+                channelId.value().value(),
+                operationId.value(),
+                localPathStrings,
+                remoteArchivePath.generic_string(),
+                compressionCodec,
+                compressionLevel,
+                mayOverwrite,
+                static_cast<int>(mode)
+            );
+        }
+    );
+}
+
 void FileEngine::addBulkDownload(
     std::vector<SharedData::BulkAddEntry> entries,
     std::vector<Ids::OperationId> operationIds,

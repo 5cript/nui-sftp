@@ -182,6 +182,8 @@ class Session
 
     void registerRpcSftpAddDownloadOperation();
     void registerRpcSftpAddUploadOperation();
+    void registerRpcSftpAddArchiveDownloadOperation();
+    void registerRpcSftpAddArchiveUploadOperation();
     void registerRpcSftpAddRenameOperation();
     void registerRpcSftpAddBulkDownloadOperation();
     void registerRpcSftpAddBulkUploadOperation();

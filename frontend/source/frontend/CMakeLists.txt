@@ -29,6 +29,7 @@ target_sources(
         dialog/file_property_dialog.cpp
         dialog/direct_connect_dialog.cpp
         dialog/dialog_buttons_keyboard_support.cpp
+        dialog/archive_transfer_dialog.cpp
         settings/general_settings.cpp
         settings/addressable_setting.cpp
         settings/optional_converters.cpp
@@ -147,6 +148,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/direct_connect_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/confirm_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/input_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/dialog/archive_transfer_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/operation_queue.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"
