@@ -8,6 +8,8 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <utility>
 
 namespace TarArchive::Detail
@@ -20,8 +22,8 @@ namespace TarArchive::Detail
         class GzipSink final : public ByteSink
         {
           public:
-            explicit GzipSink(std::ofstream output)
-                : output_{std::move(output)}
+            explicit GzipSink(std::unique_ptr<ByteSink> downstream)
+                : output_{std::move(downstream)}
             {
                 stream_.zalloc = Z_NULL;
                 stream_.zfree = Z_NULL;
@@ -72,11 +74,7 @@ namespace TarArchive::Detail
                 if (!flushed)
                     return flushed;
                 finished_ = true;
-                output_.flush();
-                if (!output_)
-                    return std::unexpected(makeError(TarErrorCode::IoError, "flush failed", errno));
-                output_.close();
-                return {};
+                return output_->finish();
             }
 
           private:
@@ -96,14 +94,11 @@ namespace TarArchive::Detail
                     const std::size_t produced = scratch_.size() - stream_.avail_out;
                     if (produced > 0u)
                     {
-                        output_.write(
-                            reinterpret_cast<char const*>(scratch_.data()),
-                            static_cast<std::streamsize>(produced)
+                        auto downstreamResult = output_->write(
+                            std::span<std::byte const>{scratch_.data(), produced}
                         );
-                        if (!output_)
-                            return std::unexpected(makeError(
-                                TarErrorCode::IoError, "gzip output write failed", errno
-                            ));
+                        if (!downstreamResult)
+                            return std::unexpected(downstreamResult.error());
                     }
 
                     if (status == Z_STREAM_END)
@@ -115,7 +110,7 @@ namespace TarArchive::Detail
                 }
             }
 
-            std::ofstream output_;
+            std::unique_ptr<ByteSink> output_;
             z_stream stream_{};
             std::array<std::byte, scratchBufferSize> scratch_{};
             bool initialised_{false};
@@ -213,10 +208,10 @@ namespace TarArchive::Detail
     }
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeGzipSink(std::ofstream output, CompressionOptions const& options)
+    makeGzipSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options)
     {
         const int compressionLevel = options.gzipLevel.value_or(Z_DEFAULT_COMPRESSION);
-        auto sink = std::make_unique<GzipSink>(std::move(output));
+        auto sink = std::make_unique<GzipSink>(std::move(downstream));
         const auto initialised = sink->initialise(compressionLevel);
         if (!initialised)
             return std::unexpected(initialised.error());

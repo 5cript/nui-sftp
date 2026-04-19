@@ -379,9 +379,29 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
     }
     remoteStream_ = openResult.value();
 
-    writer_ = TarArchive::Writer::makeFromSink(
-        std::make_unique<SftpFileByteSink>(remoteStream_)
+    // Wrap the SFTP terminal sink in the requested codec. Auto means derive
+    // from the user-facing remote path so the bytes on the wire match the
+    // declared file extension.
+    const auto resolvedCodec =
+        options_.compression == TarArchive::Compression::Auto
+            ? TarArchive::compressionFromExtension(options_.remoteArchivePath)
+            : options_.compression;
+
+    auto wrappedSink = TarArchive::wrapSinkWithCodec(
+        std::make_unique<SftpFileByteSink>(remoteStream_),
+        resolvedCodec,
+        options_.compressionOptions
     );
+    if (!wrappedSink)
+    {
+        Log::error(
+            "ArchiveUploadOperation: cannot wrap remote sink with codec: {}",
+            wrappedSink.error().toString()
+        );
+        return std::unexpected(archiveErrorToOperationError(wrappedSink.error()));
+    }
+
+    writer_ = TarArchive::Writer::makeFromSink(std::move(*wrappedSink));
     return {};
 }
 

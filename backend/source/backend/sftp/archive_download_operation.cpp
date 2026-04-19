@@ -67,16 +67,25 @@ namespace
         std::ofstream output_{};
     };
 
+    /**
+     * @brief Open a sink for the actual on-disk file.
+     *
+     * @p archivePath is where the bytes are written (e.g. the .filepart temp).
+     * @p codecHintPath is the path consulted for codec auto-detection — must be
+     * the user-facing final path so the .filepart suffix doesn't fool extension
+     * parsing.
+     */
     std::expected<std::unique_ptr<TarArchive::ByteSink>, TarArchive::TarError>
     openArchiveSink(
         std::filesystem::path const& archivePath,
+        std::filesystem::path const& codecHintPath,
         TarArchive::Compression compression,
         TarArchive::CompressionOptions const& compressionOptions
     )
     {
         const TarArchive::Compression resolved =
             compression == TarArchive::Compression::Auto
-                ? TarArchive::compressionFromExtension(archivePath)
+                ? TarArchive::compressionFromExtension(codecHintPath)
                 : compression;
         return TarArchive::makeSink(archivePath, resolved, compressionOptions);
     }
@@ -254,8 +263,9 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
             .extraInfo = "no archivable entries under the selected roots",
         });
 
-    auto sinkOrError =
-        openArchiveSink(tempPath_, options_.compression, options_.compressionOptions);
+    auto sinkOrError = openArchiveSink(
+        tempPath_, options_.localArchivePath, options_.compression, options_.compressionOptions
+    );
     if (!sinkOrError.has_value())
     {
         Log::error(

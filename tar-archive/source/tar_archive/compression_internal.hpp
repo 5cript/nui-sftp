@@ -18,20 +18,20 @@ namespace TarArchive::Detail
     std::unique_ptr<ByteSource> makeRawSource(std::ifstream input);
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeGzipSink(std::ofstream output, CompressionOptions const& options);
+    makeGzipSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options);
     std::expected<std::unique_ptr<ByteSource>, TarError> makeGzipSource(std::ifstream input);
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeBzip2Sink(std::ofstream output, CompressionOptions const& options);
+    makeBzip2Sink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options);
     std::expected<std::unique_ptr<ByteSource>, TarError> makeBzip2Source(std::ifstream input);
 
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeZstdSink(std::ofstream output, CompressionOptions const& options);
+    makeZstdSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options);
     std::expected<std::unique_ptr<ByteSource>, TarError> makeZstdSource(std::ifstream input);
 
 #ifdef TAR_ARCHIVE_WITH_XZ
     std::expected<std::unique_ptr<ByteSink>, TarError>
-    makeXzSink(std::ofstream output, CompressionOptions const& options);
+    makeXzSink(std::unique_ptr<ByteSink> downstream, CompressionOptions const& options);
     std::expected<std::unique_ptr<ByteSource>, TarError> makeXzSource(std::ifstream input);
 #endif
 }
