@@ -80,8 +80,10 @@ class ListSetting : public Setting<Disengageable, ListTypeT<std::string>>
         // clang-format off
         return div{}(
             SettingBase::label(std::forward<decltype(labelText)>(labelText)),
-            (*table_)(
-                {observeEngagedToBool(disabled)}
+            div{class_ = "setting-table-container"}(
+                (*table_)(
+                    {observeEngagedToBool(disabled)}
+                )
             ),
             reset(),
             help()
