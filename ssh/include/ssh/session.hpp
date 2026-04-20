@@ -45,19 +45,6 @@ namespace SecureShell
          */
         void start();
 
-        /**
-         * @brief Stops processing but does not close the session and channels.
-         */
-        void stop();
-
-        /**
-         * @brief Returns true if the session is running and processing channels.
-         *
-         * @return true
-         * @return false
-         */
-        bool isRunning() const;
-
         struct PtyCreationOptions
         {
             std::optional<std::map<std::string, std::string>> environment = std::nullopt;

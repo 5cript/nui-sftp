@@ -102,16 +102,6 @@ namespace SecureShell
         );
     }
 
-    void Session::stop()
-    {
-        processingThread_.stop();
-    }
-
-    bool Session::isRunning() const
-    {
-        return processingThread_.isRunning();
-    }
-
     void Session::shutdown()
     {
         removeAllChannels();
