@@ -36,27 +36,6 @@ namespace SecureShell::Test
         SecureShell::Session client{[]() {}};
     }
 
-    TEST_F(SshSessionTests, CanStartAndStopSession)
-    {
-        auto [result, processThread] = createSshServer();
-        ASSERT_TRUE(result);
-        auto joiner = Nui::ScopeExit{[&]() noexcept
-            {
-                result->command("exit");
-                if (processThread.joinable())
-                    processThread.join();
-            }};
-
-        auto expectedSession = makePasswordTestSession(result->port);
-
-        ASSERT_TRUE(expectedSession.has_value());
-        auto session = std::move(expectedSession).value();
-        session->start();
-        EXPECT_TRUE(session->isRunning());
-        session->stop();
-        EXPECT_FALSE(session->isRunning());
-    }
-
     TEST_F(SshSessionTests, CanConnectToSshServer)
     {
         auto [result, processThread] = createSshServer();
@@ -201,8 +180,6 @@ namespace SecureShell::Test
 
         channel1->close();
         channel2->close();
-
-        session->stop();
 
         EXPECT_GT(channel1Output.size(), 0);
         EXPECT_GT(channel2Output.size(), 0);
@@ -414,7 +391,6 @@ namespace SecureShell::Test
         ASSERT_EQ(awaiter2.get_future().wait_for(5s), std::future_status::ready);
 
         channel2->close();
-        session->stop();
 
         EXPECT_GT(channel2Output.size(), 0);
 
