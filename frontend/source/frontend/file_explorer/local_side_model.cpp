@@ -955,7 +955,11 @@ void LocalSideModel::uploadItemsConfirmed(
         });
     };
 
-    auto flushAccepted = [this, &accepted, overwriteAlways]() {
+    // Every entry in `accepted` is either a non-existing destination or an
+    // item the user explicitly approved for overwrite (Yes / All); the "No"
+    // and "None" branches skip the push.  So allowOverwrite=true at flush
+    // time is semantically correct regardless of the overwriteAlways flag.
+    auto flushAccepted = [this, &accepted]() {
         if (accepted->empty())
             return;
         // Single-file fast path: a one-entry flush skips the bulk machinery
@@ -979,7 +983,7 @@ void LocalSideModel::uploadItemsConfirmed(
             enqueueSingleUpload(
                 NuiFileExplorer::Item{remoteEntry},
                 NuiFileExplorer::Item{localEntry},
-                /*allowOverwrite=*/overwriteAlways,
+                /*allowOverwrite=*/true,
                 /*insertRefresh=*/true
             );
             accepted->clear();
@@ -987,7 +991,7 @@ void LocalSideModel::uploadItemsConfirmed(
         }
         operationQueue_->enqueueBulkUpload(
             std::move(*accepted),
-            /*allowOverwrite*/ overwriteAlways,
+            /*allowOverwrite*/ true,
             /*insertRefresh*/ true,
             SharedData::OperationMode::Queued,
             /*onEachComplete*/ {},
