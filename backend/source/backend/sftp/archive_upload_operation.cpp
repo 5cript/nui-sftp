@@ -187,7 +187,13 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
                 if (currentEntryIndex_ >= resolvedEntries_.size())
                 {
                     state_ = Finalizing;
-                    options_.progressCallback(0u, totalPayloadBytes_, totalPayloadBytes_, 0);
+                    throughputMeter_->calculateBytesPerSecond();
+                    options_.progressCallback(
+                        0u,
+                        totalPayloadBytes_,
+                        totalPayloadBytes_,
+                        throughputMeter_->bytesPerSecond()
+                    );
                     [[fallthrough]];
                 }
                 else
@@ -234,7 +240,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-void ArchiveUploadOperation::flattenRoots()
+std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 {
     resolvedEntries_.clear();
     resolvedEntries_.reserve(options_.localPaths.size());
@@ -249,8 +255,7 @@ void ArchiveUploadOperation::flattenRoots()
 
         if (rootEntry->type == SharedData::FileType::Regular)
         {
-            if (rootEntry->type == SharedData::FileType::Regular)
-                totalPayloadBytes_ += rootEntry->size;
+            totalPayloadBytes_ += rootEntry->size;
             ResolvedEntry resolved{};
             resolved.tarMeta = std::move(*rootEntry);
             resolved.localFullPath = localRoot;
@@ -264,7 +269,25 @@ void ArchiveUploadOperation::flattenRoots()
             dirEntry.localFullPath.clear();
             resolvedEntries_.push_back(std::move(dirEntry));
 
-            recurseIntoDirectory(localRoot, basename);
+            // Directory roots are expanded exclusively from a preceding
+            // LocalScanOperation's results — the archive op no longer
+            // recurses itself, so the scan phase is always a visible card.
+            const auto it = prescannedRoots_.find(localRoot);
+            if (it == prescannedRoots_.end())
+            {
+                Log::error(
+                    "ArchiveUploadOperation: missing pre-scanned entries for directory root '{}'",
+                    localRoot.generic_string()
+                );
+                return std::unexpected(Error{
+                    .type = ErrorType::ImplementationError,
+                    .extraInfo = fmt::format(
+                        "no pre-scanned entries for directory root '{}'",
+                        localRoot.generic_string()
+                    ),
+                });
+            }
+            appendPrescannedFromScan(it->second.first, localRoot, basename);
         }
         else
         {
@@ -275,78 +298,62 @@ void ArchiveUploadOperation::flattenRoots()
             );
         }
     }
+    return {};
 }
 
-void ArchiveUploadOperation::recurseIntoDirectory(
-    std::filesystem::path const& localRoot, std::filesystem::path const& archivePrefix
+void ArchiveUploadOperation::appendPrescannedFromScan(
+    std::vector<SharedData::DirectoryEntry> const& entries,
+    std::filesystem::path const& localRootFullPath,
+    std::filesystem::path const& archivePrefix
 )
 {
-    std::error_code iterErr{};
-    std::filesystem::recursive_directory_iterator walker{
-        localRoot,
-        std::filesystem::directory_options::skip_permission_denied,
-        iterErr,
-    };
-    if (iterErr)
+    // Index 0 is the synthetic scan root (the directory itself); the caller
+    // emitted its tar header already, so we start at 1 and consume the
+    // walker's flat depth-first entry list — mirrors the download op's
+    // appendPrescannedInStrand.
+    for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
-        Log::warn(
-            "ArchiveUploadOperation: cannot enumerate '{}': {}",
-            localRoot.generic_string(),
-            iterErr.message()
-        );
-        return;
-    }
+        auto const& child = entries[idx];
+        const auto relPath = SharedData::fullPathRelative(entries, child);
+        const auto childArchivePath = archivePrefix / relPath;
+        const auto childLocalFull = localRootFullPath / relPath;
 
-    const std::filesystem::recursive_directory_iterator end{};
-    while (walker != end)
-    {
-        std::error_code advanceErr{};
-        auto const& dirEntry = *walker;
-
-        const auto relativePath =
-            std::filesystem::relative(dirEntry.path(), localRoot, advanceErr);
-        if (advanceErr)
+        if (child.type == SharedData::FileType::Regular)
         {
-            walker.increment(advanceErr);
-            continue;
+            ResolvedEntry resolved{};
+            resolved.tarMeta = child;
+            resolved.tarMeta.path = childArchivePath;
+            resolved.tarMeta.fullPath = childArchivePath;
+            resolved.localFullPath = childLocalFull;
+            totalPayloadBytes_ += resolved.tarMeta.size;
+            resolvedEntries_.push_back(std::move(resolved));
         }
-        const auto archivePath = archivePrefix / relativePath;
-
-        auto resolvedMeta = localPathToEntry(dirEntry.path(), archivePath);
-        if (resolvedMeta)
+        else if (child.type == SharedData::FileType::Directory)
         {
-            if (resolvedMeta->type == SharedData::FileType::Regular)
-            {
-                totalPayloadBytes_ += resolvedMeta->size;
-                ResolvedEntry resolved{};
-                resolved.tarMeta = std::move(*resolvedMeta);
-                resolved.localFullPath = dirEntry.path();
-                resolvedEntries_.push_back(std::move(resolved));
-            }
-            else if (resolvedMeta->type == SharedData::FileType::Directory)
-            {
-                resolvedMeta->size = 0u;
-                ResolvedEntry resolvedDir{};
-                resolvedDir.tarMeta = std::move(*resolvedMeta);
-                resolvedDir.localFullPath.clear();
-                resolvedEntries_.push_back(std::move(resolvedDir));
-            }
-            else
-            {
-                Log::warn(
-                    "ArchiveUploadOperation: skipping non-regular child '{}' (type={})",
-                    dirEntry.path().generic_string(),
-                    static_cast<int>(resolvedMeta->type)
-                );
-            }
+            ResolvedEntry dirEntry{};
+            dirEntry.tarMeta = child;
+            dirEntry.tarMeta.path = childArchivePath;
+            dirEntry.tarMeta.fullPath = childArchivePath;
+            dirEntry.tarMeta.size = 0u;
+            dirEntry.localFullPath.clear();
+            resolvedEntries_.push_back(std::move(dirEntry));
         }
-        walker.increment(advanceErr);
+        else
+        {
+            Log::warn(
+                "ArchiveUploadOperation: skipping non-regular pre-scanned child '{}' (type={})",
+                childLocalFull.generic_string(),
+                static_cast<int>(child.type)
+            );
+        }
     }
 }
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
 {
-    flattenRoots();
+    const auto flattenResult = flattenRoots();
+    if (!flattenResult.has_value())
+        return std::unexpected(flattenResult.error());
 
     if (resolvedEntries_.empty())
         return std::unexpected(Error{
@@ -515,7 +522,13 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
 
     currentEntryBytesRead_ += bytesRead;
     totalBytesTransferred_ += bytesRead;
-    options_.progressCallback(0u, totalPayloadBytes_, totalBytesTransferred_, 0);
+    throughputMeter_->addBytesTransferred(
+        static_cast<SecureShell::AsyncTransferContext::SignedSizeType>(bytesRead)
+    );
+    throughputMeter_->calculateBytesPerSecond();
+    options_.progressCallback(
+        0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()
+    );
 
     if (currentEntryBytesRead_ >= resolved.tarMeta.size)
     {
@@ -600,6 +613,17 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::cancel(bool adoptC
     }
     cleanup();
     return {};
+}
+
+void ArchiveUploadOperation::setScanResultForRoot(
+    std::filesystem::path const& localRootPath,
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::uint64_t totalBytes
+)
+{
+    prescannedRoots_.insert_or_assign(
+        localRootPath, std::make_pair(std::move(entries), totalBytes)
+    );
 }
 
 void ArchiveUploadOperation::cleanup()

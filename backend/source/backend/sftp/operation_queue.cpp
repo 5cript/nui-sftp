@@ -607,6 +607,19 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                 (item.queueIndex + 1 < queue.size()) ? queue[item.queueIndex + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {
+                // Walk past any additional queued scans to find the archive
+                // op that consumes multi-root scan batches — each per-root
+                // scan delivers its slice into the same ArchiveDownload.
+                Operation* nextNonScan = nullptr;
+                for (std::size_t lookahead = item.queueIndex + 1; lookahead < queue.size(); ++lookahead)
+                {
+                    auto* candidate = queue[lookahead].second.get();
+                    if (candidate->type() != SharedData::OperationType::Scan)
+                    {
+                        nextNonScan = candidate;
+                        break;
+                    }
+                }
                 if (next && next->type() == SharedData::OperationType::BulkDownload)
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
@@ -616,6 +629,13 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
                     static_cast<DeleteOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
+                }
+                else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveDownload)
+                {
+                    auto* scan = static_cast<ScanOperation*>(operation.get());
+                    static_cast<ArchiveDownloadOperation*>(nextNonScan)->setScanResultForRoot(
+                        scan->remotePath(), scan->ejectEntries(), scan->totalBytes()
+                    );
                 }
                 else
                 {
@@ -638,10 +658,29 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             }
             else if (operation->type() == SharedData::OperationType::LocalScan)
             {
+                // Mirror the remote-Scan branch: walk past other LocalScans so
+                // multi-root ArchiveUpload sits any number of slots ahead.
+                Operation* nextNonScan = nullptr;
+                for (std::size_t lookahead = item.queueIndex + 1; lookahead < queue.size(); ++lookahead)
+                {
+                    auto* candidate = queue[lookahead].second.get();
+                    if (candidate->type() != SharedData::OperationType::LocalScan)
+                    {
+                        nextNonScan = candidate;
+                        break;
+                    }
+                }
                 if (next && next->type() == SharedData::OperationType::BulkUpload)
                 {
                     auto* scan = static_cast<LocalScanOperation*>(operation.get());
                     static_cast<BulkUploadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
+                }
+                else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveUpload)
+                {
+                    auto* scan = static_cast<LocalScanOperation*>(operation.get());
+                    static_cast<ArchiveUploadOperation*>(nextNonScan)->setScanResultForRoot(
+                        scan->localPath(), scan->ejectEntries(), scan->totalBytes()
+                    );
                 }
                 else
                 {
@@ -806,19 +845,19 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     }
     else if (result->isDirectory())
     {
+        // operationId is assigned to BulkDownload so the frontend's completion callback
+        // (registered on operationId) fires only after all files are fully downloaded,
+        // not when the preceding scan finishes.
+        const auto scanId = Ids::generateOperationId();
         auto scan = std::make_unique<ScanOperation>(
             sftp,
             ScanOperation::ScanOperationOptions{
-                .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
+                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
                 .remotePath = remotePath,
                 .futureTimeout = std::chrono::seconds{5},
             }
         );
 
-        // operationId is assigned to BulkDownload so the frontend's completion callback
-        // (registered on operationId) fires only after all files are fully downloaded,
-        // not when the preceding scan finishes.
-        const auto scanId = Ids::generateOperationId();
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
@@ -944,6 +983,21 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         if (entry.type == SharedData::FileType::Regular)
             totalPayloadBytes += entry.size;
     }
+    const auto rootCount = entries.size();
+
+    // Collect each directory root's full remote path so we can enqueue a
+    // preceding ScanOperation per root. The archive operation consumes those
+    // scans' results via setScanResultForRoot and never recurses itself, so
+    // scan work is always visible as a separate queue card.
+    std::vector<std::filesystem::path> directoryRootPaths;
+    for (auto const& entry : entries)
+    {
+        if (entry.type == SharedData::FileType::Directory)
+        {
+            const auto rootFullPath = entry.fullPath.empty() ? entry.path : entry.fullPath;
+            directoryRootPaths.push_back(rootFullPath);
+        }
+    }
 
     ArchiveDownloadOperation::Options opts{};
     opts.entries = std::move(entries);
@@ -983,15 +1037,44 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
 
     auto& targetQueue =
         (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+
+    // Scans first so the dispatcher can hand each scan's results to the
+    // archive op sitting one-or-more slots ahead.  They share a single queue
+    // position (adjacency scan → ... → scan → archive), which the scan-
+    // completion handler in workQueue walks past to reach the archive op.
+    for (auto const& rootPath : directoryRootPaths)
+    {
+        const auto scanId = Ids::generateOperationId();
+        auto scan = std::make_unique<ScanOperation>(
+            sftp,
+            ScanOperation::ScanOperationOptions{
+                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
+                .remotePath = rootPath,
+                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+            }
+        );
+        targetQueue.emplace_back(scanId, std::move(scan));
+        hub_->callRemote(
+            rpcName("onOperationAdded"),
+            SharedData::OperationAdded{
+                .operationId = scanId,
+                .type = SharedData::OperationType::Scan,
+                .mode = mode,
+                .remotePath = rootPath,
+            }
+        );
+    }
+
     targetQueue.emplace_back(
         operationId, std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts))
     );
 
     Log::info(
-        "OperationQueue::{}::onOperationAdded (ArchiveDownload, {} entries, {} bytes)",
+        "OperationQueue::{}::onOperationAdded (ArchiveDownload, {} entries, {} bytes, {} pre-scans)",
         sessionId_.value(),
-        opts.entries.size(),
-        totalPayloadBytes
+        rootCount,
+        totalPayloadBytes,
+        directoryRootPaths.size()
     );
     hub_->callRemote(
         rpcName("onOperationAdded"),
@@ -999,7 +1082,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
             .operationId = operationId,
             .type = SharedData::OperationType::ArchiveDownload,
             .mode = mode,
-            .insertRefresh = false,
+            .insertRefresh = true,
             .totalBytes = totalPayloadBytes,
             .localPath = localArchivePath,
         }
@@ -1041,6 +1124,18 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
             estimatedTotalBytes += size;
     }
 
+    // Local directory roots get a visible LocalScanOperation each; the
+    // archive op itself never recurses and instead consumes each scan's
+    // output via setScanResultForRoot — keyed by the root's local path.
+    std::vector<std::filesystem::path> directoryRootPaths;
+    for (auto const& localPath : localPaths)
+    {
+        std::error_code isDirErr{};
+        if (std::filesystem::is_directory(localPath, isDirErr))
+            directoryRootPaths.push_back(localPath);
+    }
+    const auto rootCount = localPaths.size();
+
     ArchiveUploadOperation::Options opts{};
     opts.localPaths = std::move(localPaths);
     opts.remoteArchivePath = remoteArchivePath;
@@ -1078,15 +1173,41 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 
     auto& targetQueue =
         (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+
+    // Scans first: the scan-complete dispatcher walks past subsequent scans
+    // to reach this archive op and feeds each LocalScan's slice into its
+    // setScanResultForRoot.  Queue layout: [LocalScan...] ... [ArchiveUpload].
+    for (auto const& rootPath : directoryRootPaths)
+    {
+        const auto scanId = Ids::generateOperationId();
+        auto scan = std::make_unique<LocalScanOperation>(
+            LocalScanOperation::ScanOperationOptions{
+                .progressCallback = makeScanProgressCallback("onLocalScanProgress", scanId),
+                .localPath = rootPath,
+            }
+        );
+        targetQueue.emplace_back(scanId, std::move(scan));
+        hub_->callRemote(
+            rpcName("onOperationAdded"),
+            SharedData::OperationAdded{
+                .operationId = scanId,
+                .type = SharedData::OperationType::LocalScan,
+                .mode = mode,
+                .localPath = rootPath,
+            }
+        );
+    }
+
     targetQueue.emplace_back(
         operationId, std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts))
     );
 
     Log::info(
-        "OperationQueue::{}::onOperationAdded (ArchiveUpload, {} paths, ~{} bytes)",
+        "OperationQueue::{}::onOperationAdded (ArchiveUpload, {} paths, ~{} bytes, {} pre-scans)",
         sessionId_.value(),
-        opts.localPaths.size(),
-        estimatedTotalBytes
+        rootCount,
+        estimatedTotalBytes,
+        directoryRootPaths.size()
     );
     hub_->callRemote(
         rpcName("onOperationAdded"),
@@ -1094,7 +1215,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
             .operationId = operationId,
             .type = SharedData::OperationType::ArchiveUpload,
             .mode = mode,
-            .insertRefresh = false,
+            .insertRefresh = true,
             .totalBytes = estimatedTotalBytes,
             .remotePath = remoteArchivePath,
         }

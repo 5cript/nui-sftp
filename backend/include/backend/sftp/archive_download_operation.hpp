@@ -2,6 +2,7 @@
 
 #include <backend/sftp/operation.hpp>
 #include <ssh/async/buffer_provider.hpp>
+#include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <tar_archive/archive.hpp>
@@ -13,8 +14,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -117,6 +120,29 @@ class ArchiveDownloadOperation : public Operation
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
 
+    /**
+     * @brief Ingest a preceding ScanOperation's walk of @p remoteRootPath.
+     *        Called by OperationQueue's scan-complete dispatcher before this
+     *        operation runs; when prepareInStrand later flattens its roots it
+     *        consults the stored map and reuses these entries instead of
+     *        re-recursing, so the scan work is visible (as a separate card)
+     *        rather than silently buried inside prepare.
+     *
+     *        Safe to call multiple times — one call per directory root in
+     *        @ref Options::entries.  Matching is by @p remoteRootPath which
+     *        must equal the root entry's full remote path
+     *        (fullPath-or-fallback-to-path in the root @ref DirectoryEntry).
+     *
+     *        Threading: invoked on the queue's asio strand between SFTP-strand
+     *        work batches, so no extra synchronisation is required against
+     *        prepareInStrand (which runs on the SFTP strand).
+     */
+    void setScanResultForRoot(
+        std::filesystem::path const& remoteRootPath,
+        std::vector<SharedData::DirectoryEntry> entries,
+        std::uint64_t totalBytes
+    );
+
   private:
     /**
      * @brief Pairs an archive-relative metadata record (what goes into the tar
@@ -132,8 +158,17 @@ class ArchiveDownloadOperation : public Operation
 
     std::expected<void, Error> prepareInStrand();
     std::expected<void, Error> flattenRootsInStrand();
-    std::expected<void, Error> recurseIntoDirectoryInStrand(
-        std::filesystem::path const& remoteFullPath,
+    /**
+     * @brief Expand a preceding ScanOperation's flat entry vector into the
+     *        op's ResolvedEntry list, prefixing each entry's tar path with
+     *        @p archivePrefix and composing remote paths under
+     *        @p remoteRootFullPath. Index 0 (the synthetic scan root) is
+     *        skipped because the root directory entry is emitted separately
+     *        by flattenRootsInStrand.
+     */
+    void appendPrescannedInStrand(
+        std::vector<SharedData::DirectoryEntry> const& entries,
+        std::filesystem::path const& remoteRootFullPath,
         std::filesystem::path const& archivePrefix
     );
     std::expected<void, Error> openNextEntryInStrand();
@@ -157,4 +192,20 @@ class ArchiveDownloadOperation : public Operation
     std::uint64_t totalPayloadBytes_{0u};
     SecureShell::BufferLease buffer_;
     std::filesystem::path tempPath_{};
+    /**
+     * @brief Pre-scanned entry lists delivered by preceding ScanOperation(s),
+     *        keyed by the directory root's remote full path. flattenRoots
+     *        looks each directory root up here before falling back to a live
+     *        recurseIntoDirectoryInStrand listing.
+     */
+    std::map<std::filesystem::path, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
+        prescannedRoots_{};
+    /**
+     * @brief Reused purely for its bytes-transferred + B/s meter machinery;
+     *        the async pause/cancel side of the class is unused here because
+     *        archive download drives chunks via readSomeInStrand rather than
+     *        the FileStream async path that normally owns this context.
+     */
+    std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
+        std::make_shared<SecureShell::AsyncTransferContext>()};
 };

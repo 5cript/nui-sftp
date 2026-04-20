@@ -188,7 +188,13 @@ ArchiveDownloadOperation::workInStrand()
                 if (currentEntryIndex_ >= resolvedEntries_.size())
                 {
                     state_ = Finalizing;
-                    options_.progressCallback(0u, totalPayloadBytes_, totalPayloadBytes_, 0);
+                    throughputMeter_->calculateBytesPerSecond();
+                    options_.progressCallback(
+                        0u,
+                        totalPayloadBytes_,
+                        totalPayloadBytes_,
+                        throughputMeter_->bytesPerSecond()
+                    );
                     [[fallthrough]];
                 }
                 else
@@ -318,9 +324,26 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
             dirEntry.tarMeta.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
 
-            const auto recurseResult = recurseIntoDirectoryInStrand(rootFullPath, basename);
-            if (!recurseResult.has_value())
-                return std::unexpected(recurseResult.error());
+            // Directory roots are expanded exclusively from a preceding
+            // ScanOperation's results — there is no self-contained recurse
+            // fallback, so a visible scan card is always the source of truth
+            // for this op's entry list.
+            const auto it = prescannedRoots_.find(rootFullPath);
+            if (it == prescannedRoots_.end())
+            {
+                Log::error(
+                    "ArchiveDownloadOperation: missing pre-scanned entries for directory root '{}'",
+                    rootFullPath.generic_string()
+                );
+                return std::unexpected(Error{
+                    .type = ErrorType::ImplementationError,
+                    .extraInfo = fmt::format(
+                        "no pre-scanned entries for directory root '{}'",
+                        rootFullPath.generic_string()
+                    ),
+                });
+            }
+            appendPrescannedInStrand(it->second.first, rootFullPath, basename);
         }
         else
         {
@@ -334,33 +357,21 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
     return {};
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::recurseIntoDirectoryInStrand(
-    std::filesystem::path const& remoteFullPath, std::filesystem::path const& archivePrefix
+void ArchiveDownloadOperation::appendPrescannedInStrand(
+    std::vector<SharedData::DirectoryEntry> const& entries,
+    std::filesystem::path const& remoteRootFullPath,
+    std::filesystem::path const& archivePrefix
 )
 {
-    auto listResult = sftp_->listDirectoryInStrand(remoteFullPath);
-    if (!listResult.has_value())
+    // Index 0 is the synthetic scan root (the directory itself); the caller
+    // emitted its tar header already, so we start at 1 and consume the
+    // walker's flat depth-first entry list.
+    for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
-        Log::error(
-            "ArchiveDownloadOperation: listDirectory failed for '{}': {}",
-            remoteFullPath.generic_string(),
-            listResult.error().message
-        );
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = listResult.error(),
-            .extraInfo = fmt::format("listing remote directory '{}'", remoteFullPath.generic_string()),
-        });
-    }
-
-    for (auto const& child : listResult.value())
-    {
-        const std::string name = child.path.filename().generic_string();
-        if (name == "." || name == "..")
-            continue;
-
-        const auto childFullRemote = remoteFullPath / child.path;
-        const auto childArchivePath = archivePrefix / child.path;
+        auto const& child = entries[idx];
+        const auto relPath = SharedData::fullPathRelative(entries, child);
+        const auto childArchivePath = archivePrefix / relPath;
+        const auto childFullRemote = remoteRootFullPath / relPath;
 
         if (child.type == SharedData::FileType::Regular)
         {
@@ -380,22 +391,16 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::recurseIntoDirec
             dirEntry.tarMeta.fullPath = childArchivePath;
             dirEntry.tarMeta.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
-
-            const auto recurseResult =
-                recurseIntoDirectoryInStrand(childFullRemote, childArchivePath);
-            if (!recurseResult.has_value())
-                return std::unexpected(recurseResult.error());
         }
         else
         {
             Log::warn(
-                "ArchiveDownloadOperation: skipping non-regular child '{}' (type={})",
+                "ArchiveDownloadOperation: skipping non-regular pre-scanned child '{}' (type={})",
                 childFullRemote.generic_string(),
                 static_cast<int>(child.type)
             );
         }
     }
-    return {};
 }
 
 std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInStrand()
@@ -539,7 +544,13 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
 
     currentEntryBytesRead_ += static_cast<std::uint64_t>(bytesRead);
     totalBytesTransferred_ += static_cast<std::uint64_t>(bytesRead);
-    options_.progressCallback(0u, totalPayloadBytes_, totalBytesTransferred_, 0);
+    throughputMeter_->addBytesTransferred(
+        static_cast<SecureShell::AsyncTransferContext::SignedSizeType>(bytesRead)
+    );
+    throughputMeter_->calculateBytesPerSecond();
+    options_.progressCallback(
+        0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()
+    );
 
     if (currentEntryBytesRead_ >= resolved.tarMeta.size)
     {
@@ -636,6 +647,17 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::cancel(bool adop
     }
     cleanup();
     return {};
+}
+
+void ArchiveDownloadOperation::setScanResultForRoot(
+    std::filesystem::path const& remoteRootPath,
+    std::vector<SharedData::DirectoryEntry> entries,
+    std::uint64_t totalBytes
+)
+{
+    prescannedRoots_.insert_or_assign(
+        remoteRootPath, std::make_pair(std::move(entries), totalBytes)
+    );
 }
 
 void ArchiveDownloadOperation::cleanup()
