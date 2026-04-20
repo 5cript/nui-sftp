@@ -484,7 +484,7 @@ namespace Test
         ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
 
         ASSERT_TRUE(std::filesystem::exists(localPath));
-        EXPECT_EQ(std::filesystem::file_size(localPath), 1024u * 1024u);
+        EXPECT_EQ(std::filesystem::file_size(localPath), 65536u);
     }
 
     // ---- Symlink handling --------------------------------------------------

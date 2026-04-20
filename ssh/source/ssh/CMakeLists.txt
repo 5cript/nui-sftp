@@ -1,6 +1,7 @@
 add_library(
     secure-shell
     STATIC
+        async/buffer_provider.cpp
         async/processing_thread.cpp
         async/transfer_context.cpp
         session.cpp

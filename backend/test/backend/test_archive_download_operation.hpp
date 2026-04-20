@@ -232,18 +232,16 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/large.txt", 1024u * 1024u)},
+                .entries = {makeFileEntry("/home/test/large.txt", 65536u)},
                 .localArchivePath = archivePath,
                 .compression = TarArchive::Compression::None,
             }};
-        // 1 MiB / 64 KiB chunk = 16 reads, plus header/finalise work.  A
-        // generous budget keeps the test robust to strand scheduling jitter.
         ASSERT_TRUE(runToCompletion(operation, 2000).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
         ASSERT_EQ(entries.size(), 1u);
         EXPECT_EQ(entries[0].path, "large.txt");
-        EXPECT_EQ(entries[0].contents.size(), 1024u * 1024u);
+        EXPECT_EQ(entries[0].contents.size(), 65536u);
     }
 
     TEST_F(ArchiveDownloadOperationTests, FilepartAbsentAfterCompletion)

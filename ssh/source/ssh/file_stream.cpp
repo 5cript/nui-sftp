@@ -190,14 +190,14 @@ namespace SecureShell
         struct ReadState : public std::enable_shared_from_this<ReadState>
         {
             FileStream& stream;
-            std::string buffer;
+            BufferLease buffer;
             std::function<bool(std::string_view data)> callback;
             std::promise<std::expected<std::size_t, SftpError>> promise;
             std::size_t totalRead;
 
-            ReadState(FileStream& stream, std::size_t limit, std::function<bool(std::string_view data)> callback)
+            ReadState(FileStream& stream, BufferLease buffer, std::function<bool(std::string_view data)> callback)
                 : stream{stream}
-                , buffer(std::min(std::size_t{4096}, limit), '\0')
+                , buffer{std::move(buffer)}
                 , callback{std::move(callback)}
                 , promise{}
                 , totalRead{0}
@@ -253,7 +253,37 @@ namespace SecureShell
             }
         };
 
-        auto state = std::make_shared<ReadState>(*this, readLengthLimit(), std::move(onReadFunc));
+        auto sftp = sftp_.lock();
+        if (!sftp)
+        {
+            std::promise<std::expected<std::size_t, SftpError>> promise{};
+            promise.set_value(
+                std::unexpected(
+                    SftpError{
+                        .message = "Owner is null",
+                        .wrapperError = WrapperErrors::OwnerNull,
+                    }
+                )
+            );
+            return promise.get_future();
+        }
+
+        auto lease = sftp->bufferProvider().leaseForTransfer(readLengthLimit(), readLengthLimit());
+        if (lease.empty())
+        {
+            std::promise<std::expected<std::size_t, SftpError>> promise{};
+            promise.set_value(
+                std::unexpected(
+                    SftpError{
+                        .message = "No buffer available from pool",
+                        .wrapperError = WrapperErrors::BufferUnavailable,
+                    }
+                )
+            );
+            return promise.get_future();
+        }
+
+        auto state = std::make_shared<ReadState>(*this, std::move(lease), std::move(onReadFunc));
         state->doRead();
         return state->promise.get_future();
     }

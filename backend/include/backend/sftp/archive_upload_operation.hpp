@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <tar_archive/archive.hpp>
@@ -9,7 +10,6 @@
 #include <tar_archive/compression.hpp>
 #include <shared_data/directory_entry.hpp>
 
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -131,5 +131,5 @@ class ArchiveUploadOperation : public Operation
     std::uint64_t currentEntryBytesRead_{0u};
     std::uint64_t totalBytesTransferred_{0u};
     std::uint64_t totalPayloadBytes_{0u};
-    std::array<char, 64u * 1024u> buffer_{};
+    SecureShell::BufferLease buffer_;
 };

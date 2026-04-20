@@ -12,6 +12,7 @@ namespace SecureShell
         : owner_{owner}
         , strand_{std::move(strand)}
         , session_{session}
+        , bufferProvider_{DefaultBufferProvider::create()}
         , fileStreams_{}
     {}
     SftpSession::~SftpSession()
