@@ -102,14 +102,7 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.localPath,
-                currentIndex_,
-                entries_.size() - 1,
-                0,
-                0,
-                0,
-                totalBytes_,
-                bulkBytesPerSecond_
+                options_.localPath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, bulkBytesPerSecond_
             );
             return WorkStatus::MoreWork;
         }
@@ -127,8 +120,14 @@ std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> B
                 if (!prescannedPathOverride_.empty())
                 {
                     options_.overallProgressCallback(
-                        options_.localPath, currentIndex_, entries_.size(),
-                        0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+                        options_.localPath,
+                        currentIndex_,
+                        entries_.size(),
+                        0,
+                        0,
+                        currentBytes_,
+                        totalBytes_,
+                        bulkBytesPerSecond_
                     );
                 }
                 Log::info("BulkDownloadOperation: Bulk download completed.");
@@ -368,6 +367,12 @@ void BulkDownloadOperation::completeCurrentDownload()
     currentBytes_ += currentDownload_->totalSize();
     currentDownload_.reset();
     ++currentIndex_;
+    if (!prescannedPathOverride_.empty() && currentIndex_ == entries_.size())
+    {
+        options_.overallProgressCallback(
+            options_.localPath, currentIndex_, entries_.size(), 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+        );
+    }
 }
 
 std::expected<BulkDownloadOperation::WorkStatus, BulkDownloadOperation::Error> BulkDownloadOperation::workAsArchive()
