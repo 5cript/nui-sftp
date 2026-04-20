@@ -16,6 +16,7 @@ namespace SecureShell
         ShortWrite,
         FileNull,
         TaskPushFailed,
+        BufferUnavailable,
     };
 
     struct SftpError

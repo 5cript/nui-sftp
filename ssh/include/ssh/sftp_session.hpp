@@ -2,6 +2,7 @@
 
 #include <libssh/libsshpp.hpp>
 #include <libssh/sftp.h>
+#include <ssh/async/buffer_provider.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/async/processing_strand.hpp>
 #include <ssh/file_information.hpp>
@@ -293,6 +294,14 @@ namespace SecureShell
             return strand_.get();
         }
 
+        /**
+         * @brief Shared buffer pool for this session's file transfers.
+         */
+        IBufferProvider& bufferProvider() noexcept
+        {
+            return *bufferProvider_;
+        }
+
         struct DeepLinkResult
         {
             std::filesystem::path linkTarget;
@@ -325,6 +334,7 @@ namespace SecureShell
         Session* owner_;
         std::unique_ptr<ProcessingStrand> strand_;
         sftp_session session_;
+        std::shared_ptr<IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
     };
 

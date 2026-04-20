@@ -544,6 +544,19 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
     if (options_.entry->isSymlink())
         return {};
 
+    buffer_ = sftp_->bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
+    if (buffer_.empty())
+    {
+        Log::error("DownloadOperation: No transfer buffer available from pool.");
+        return std::unexpected(Error{
+            .type = ErrorType::SftpError,
+            .sftpError = SecureShell::SftpError{
+                .message = "No buffer available from pool",
+                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+            },
+        });
+    }
+
     if (options_.reserveSpace && options_.entry->size != 0)
     {
         const auto pos = localFile_.tellp();

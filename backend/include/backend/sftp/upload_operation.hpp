@@ -1,7 +1,9 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
+#include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <persistence/state/sftp_options.hpp>
 
@@ -134,6 +136,6 @@ class UploadOperation : public Operation
     bool isSymlink_{false};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
-    std::array<char, 16384> buffer_{};
+    SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
 };

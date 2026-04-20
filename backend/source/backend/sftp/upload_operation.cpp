@@ -617,7 +617,29 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
 std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
 {
-    return openOrAdoptFileInStrand();
+    if (auto result = openOrAdoptFileInStrand(); !result.has_value())
+        return std::unexpected(result.error());
+
+    auto stream = fileStream_.lock();
+    if (!stream)
+    {
+        Log::error("UploadOperation: File stream expired after open.");
+        return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
+    }
+
+    buffer_ = sftp_->bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
+    if (buffer_.empty())
+    {
+        Log::error("UploadOperation: No transfer buffer available from pool.");
+        return std::unexpected(Error{
+            .type = ErrorType::SftpError,
+            .sftpError = SecureShell::SftpError{
+                .message = "No buffer available from pool",
+                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+            },
+        });
+    }
+    return {};
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCancelState)
