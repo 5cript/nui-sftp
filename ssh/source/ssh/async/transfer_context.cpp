@@ -32,6 +32,11 @@ namespace SecureShell
         paused_.store(doPause);
     }
 
+    void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)
+    {
+        bytesTransferred_ += delta;
+    }
+
     void AsyncTransferContext::calculateBytesPerSecond()
     {
         using namespace std::chrono_literals;

@@ -25,6 +25,14 @@ namespace SecureShell
         bool hasEnded() const;
         void calculateBytesPerSecond();
 
+        /**
+         * @brief Add to the running bytes-transferred counter from outside the
+         *        async FileStream path (e.g. a sync read-loop driven by an
+         *        Operation that still wants the throughput-meter machinery).
+         *        Pair with periodic calls to @ref calculateBytesPerSecond.
+         */
+        void addBytesTransferred(SignedSizeType delta);
+
       private:
         std::atomic_bool ended_{false};
         std::atomic_bool paused_{false};

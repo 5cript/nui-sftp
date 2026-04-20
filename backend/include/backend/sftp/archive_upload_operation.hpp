@@ -2,6 +2,7 @@
 
 #include <backend/sftp/operation.hpp>
 #include <ssh/async/buffer_provider.hpp>
+#include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <tar_archive/archive.hpp>
@@ -14,8 +15,11 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -94,6 +98,24 @@ class ArchiveUploadOperation : public Operation
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
 
+    /**
+     * @brief Ingest a preceding LocalScanOperation's walk of @p localRootPath.
+     *        Mirrors ArchiveDownloadOperation::setScanResultForRoot — the
+     *        OperationQueue dispatcher calls this once per directory root
+     *        before prepareInStrand runs, and flattenRoots consumes the stored
+     *        entries instead of self-recursing so the scan work is visible as
+     *        a separate queue card.
+     *
+     *        Safe to call multiple times (one per directory root in
+     *        @ref Options::localPaths).  Matching is by the root's path as
+     *        passed in the options — prepareInStrand looks up the same key.
+     */
+    void setScanResultForRoot(
+        std::filesystem::path const& localRootPath,
+        std::vector<SharedData::DirectoryEntry> entries,
+        std::uint64_t totalBytes
+    );
+
   private:
     /**
      * @brief Archive-relative metadata paired with the full local source path.
@@ -107,9 +129,18 @@ class ArchiveUploadOperation : public Operation
     };
 
     std::expected<void, Error> prepareInStrand();
-    void flattenRoots();
-    void recurseIntoDirectory(
-        std::filesystem::path const& localRoot, std::filesystem::path const& archivePrefix
+    std::expected<void, Error> flattenRoots();
+    /**
+     * @brief Expand a preceding LocalScanOperation's flat entry vector into
+     *        this op's ResolvedEntry list, prefixing each entry's tar path
+     *        with @p archivePrefix and composing local full paths under
+     *        @p localRootFullPath. Index 0 (the synthetic walker root) is
+     *        skipped since its tar header is emitted by flattenRoots.
+     */
+    void appendPrescannedFromScan(
+        std::vector<SharedData::DirectoryEntry> const& entries,
+        std::filesystem::path const& localRootFullPath,
+        std::filesystem::path const& archivePrefix
     );
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
@@ -132,4 +163,20 @@ class ArchiveUploadOperation : public Operation
     std::uint64_t totalBytesTransferred_{0u};
     std::uint64_t totalPayloadBytes_{0u};
     SecureShell::BufferLease buffer_;
+    /**
+     * @brief Pre-scanned entry lists delivered by preceding
+     *        LocalScanOperation(s), keyed by the directory root's local full
+     *        path. flattenRoots looks each directory root up here and errors
+     *        out if none is present — there is no self-contained recurse.
+     */
+    std::map<std::filesystem::path, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
+        prescannedRoots_{};
+    /**
+     * @brief Reused purely for its bytes-transferred + B/s meter machinery;
+     *        the async pause/cancel side is unused because archive upload
+     *        drives writes via writeInStrand rather than the FileStream async
+     *        path that normally owns this context.
+     */
+    std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
+        std::make_shared<SecureShell::AsyncTransferContext>()};
 };
