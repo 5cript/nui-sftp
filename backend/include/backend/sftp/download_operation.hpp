@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
@@ -131,6 +132,6 @@ class DownloadOperation : public Operation
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     DownloadOperationOptions options_;
     std::ofstream localFile_;
-    std::array<char, 16384> buffer_;
+    SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
 };

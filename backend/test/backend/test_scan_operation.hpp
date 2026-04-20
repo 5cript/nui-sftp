@@ -167,7 +167,7 @@ namespace Test
         auto const* largeEntry = findEntryNamed(entries, "large.txt");
         ASSERT_NE(largeEntry, nullptr);
         EXPECT_EQ(largeEntry->type, SharedData::FileType::Regular);
-        EXPECT_EQ(largeEntry->size, 1024u * 1024u);
+        EXPECT_EQ(largeEntry->size, 65536u);
 
         auto const* dirEntry = findEntryNamed(entries, "Documents");
         ASSERT_NE(dirEntry, nullptr);

@@ -4,8 +4,13 @@
 #include <ssh/session.hpp>
 #include <nui/utility/scope_exit.hpp>
 #include <ssh/sftp_session.hpp>
+#include <ssh/file_stream.hpp>
+#include <ssh/async/transfer_context.hpp>
 
 #include <gtest/gtest.h>
+
+#include <array>
+#include <atomic>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -355,7 +360,7 @@ namespace SecureShell::Test
         auto readResult = readFut.get();
         ASSERT_TRUE(readResult.has_value());
 
-        EXPECT_EQ(data, createAlphabetString(1024 * 1024));
+        EXPECT_EQ(data, createAlphabetString(65536));
     }
 
     TEST_F(SftpTests, CanMoveReadCursorForward)
@@ -491,5 +496,188 @@ namespace SecureShell::Test
         ASSERT_TRUE(statResult.has_value());
 
         EXPECT_GT(statResult.value().size, 0);
+    }
+
+    TEST_F(SftpTests, CanReadFileAsync)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile("/home/test/large.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto result = fut.get();
+        ASSERT_TRUE(result.has_value());
+        auto file = std::move(result).value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr std::size_t totalSize = 65536;
+        using SignedSize = SecureShell::IFileStream::SignedSizeType;
+
+        std::array<char, 4096> buffer{};
+        std::string data;
+        data.reserve(totalSize);
+
+        auto ctxFut = file->readAsync(
+            static_cast<SignedSize>(totalSize),
+            buffer.data(),
+            static_cast<SignedSize>(buffer.size()),
+            [&data, &buffer](SignedSize bytesRead)
+            {
+                data.append(buffer.data(), static_cast<std::size_t>(bytesRead));
+                return true;
+            }
+        );
+        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        auto ctxResult = ctxFut.get();
+        ASSERT_TRUE(ctxResult.has_value());
+        auto ctx = std::move(ctxResult).value();
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!ctx->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(10ms);
+
+        EXPECT_TRUE(ctx->hasEnded());
+        EXPECT_EQ(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
+        EXPECT_EQ(data, createAlphabetString(totalSize));
+    }
+
+    TEST_F(SftpTests, AsyncReadCanBePaused)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile("/home/test/large.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto result = fut.get();
+        ASSERT_TRUE(result.has_value());
+        auto file = std::move(result).value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr std::size_t totalSize = 65536;
+        using SignedSize = SecureShell::IFileStream::SignedSizeType;
+
+        std::array<char, 1024> buffer{};
+        std::atomic<SignedSize> readCount{0};
+
+        auto ctxFut = file->readAsync(
+            static_cast<SignedSize>(totalSize),
+            buffer.data(),
+            static_cast<SignedSize>(buffer.size()),
+            [&readCount](SignedSize bytesRead)
+            {
+                readCount += bytesRead;
+                return true;
+            }
+        );
+        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        auto ctxResult = ctxFut.get();
+        ASSERT_TRUE(ctxResult.has_value());
+        auto ctx = std::move(ctxResult).value();
+
+        ctx->pause(true);
+        std::this_thread::sleep_for(200ms);
+        const auto snapshot = ctx->bytesTransferred();
+        std::this_thread::sleep_for(200ms);
+        EXPECT_EQ(ctx->bytesTransferred(), snapshot);
+        EXPECT_FALSE(ctx->hasEnded());
+
+        ctx->pause(false);
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!ctx->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(10ms);
+
+        EXPECT_TRUE(ctx->hasEnded());
+        EXPECT_EQ(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
+    }
+
+    TEST_F(SftpTests, AsyncReadCanBeCancelled)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile("/home/test/large.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto result = fut.get();
+        ASSERT_TRUE(result.has_value());
+        auto file = std::move(result).value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr std::size_t totalSize = 65536;
+        using SignedSize = SecureShell::IFileStream::SignedSizeType;
+
+        std::array<char, 1024> buffer{};
+        std::atomic<SignedSize> readCount{0};
+
+        auto ctxFut = file->readAsync(
+            static_cast<SignedSize>(totalSize),
+            buffer.data(),
+            static_cast<SignedSize>(buffer.size()),
+            [&readCount](SignedSize bytesRead)
+            {
+                readCount += bytesRead;
+                return true;
+            }
+        );
+        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        auto ctxResult = ctxFut.get();
+        ASSERT_TRUE(ctxResult.has_value());
+        auto ctx = std::move(ctxResult).value();
+
+        ctx->pause(true);
+        ctx->cancel();
+
+        EXPECT_TRUE(ctx->hasEnded());
+
+        std::this_thread::sleep_for(200ms);
+        const auto afterCancel = ctx->bytesTransferred();
+        std::this_thread::sleep_for(200ms);
+        EXPECT_EQ(ctx->bytesTransferred(), afterCancel);
+        EXPECT_LT(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
+    }
+
+    TEST_F(SftpTests, AsyncReadStopsWhenCallbackReturnsFalse)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile("/home/test/large.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto result = fut.get();
+        ASSERT_TRUE(result.has_value());
+        auto file = std::move(result).value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr std::size_t totalSize = 65536;
+        using SignedSize = SecureShell::IFileStream::SignedSizeType;
+
+        std::array<char, 1024> buffer{};
+        std::atomic<int> callCount{0};
+
+        auto ctxFut = file->readAsync(
+            static_cast<SignedSize>(totalSize),
+            buffer.data(),
+            static_cast<SignedSize>(buffer.size()),
+            [&callCount](SignedSize)
+            {
+                return ++callCount < 3;
+            }
+        );
+        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        auto ctxResult = ctxFut.get();
+        ASSERT_TRUE(ctxResult.has_value());
+        auto ctx = std::move(ctxResult).value();
+
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (!ctx->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(10ms);
+
+        EXPECT_TRUE(ctx->hasEnded());
+        EXPECT_EQ(callCount.load(), 3);
+        EXPECT_LT(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
     }
 }

@@ -275,6 +275,19 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
         return std::unexpected(archiveErrorToOperationError(sinkOrError.error()));
     }
     writer_ = TarArchive::Writer::makeFromSink(std::move(*sinkOrError));
+
+    buffer_ = sftp_->bufferProvider().lease(totalPayloadBytes_);
+    if (buffer_.empty())
+    {
+        Log::error("ArchiveDownloadOperation: No transfer buffer available from pool.");
+        return std::unexpected(Error{
+            .type = ErrorType::SftpError,
+            .sftpError = SecureShell::SftpError{
+                .message = "No buffer available from pool",
+                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+            },
+        });
+    }
     return {};
 }
 

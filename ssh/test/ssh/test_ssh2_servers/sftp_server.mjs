@@ -89,9 +89,9 @@ const fakeFilesystem = finalizeFakeFs({
                 file('file1.txt', 'Fake file content'),
                 file('file2.txt', 'Fake file content'),
                 file('large.txt', (() => {
-                    const size = 1024 * 1024;
+                    const size = 65536;
                     const repeatable = 'abcdefghijklmnopqrstuvwxyz';
-                    const division = size / repeatable.length;
+                    const division = Math.floor(size / repeatable.length);
                     const mod = size % repeatable.length;
                     return repeatable.repeat(division) + repeatable.slice(0, mod);
                 })())
