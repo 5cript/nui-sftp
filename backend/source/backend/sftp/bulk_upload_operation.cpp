@@ -92,14 +92,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             currentIndex_ = 1;
             enterState(Running);
             options_.overallProgressCallback(
-                options_.remotePath,
-                currentIndex_,
-                entries_.size() - 1,
-                0,
-                0,
-                0,
-                totalBytes_,
-                bulkBytesPerSecond_
+                options_.remotePath, currentIndex_, entries_.size() - 1, 0, 0, 0, totalBytes_, bulkBytesPerSecond_
             );
             return WorkStatus::MoreWork;
         }
@@ -120,8 +113,14 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 if (!prescannedPathOverride_.empty())
                 {
                     options_.overallProgressCallback(
-                        options_.remotePath, currentIndex_, entries_.size(),
-                        0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+                        options_.remotePath,
+                        currentIndex_,
+                        entries_.size(),
+                        0,
+                        0,
+                        currentBytes_,
+                        totalBytes_,
+                        bulkBytesPerSecond_
                     );
                 }
                 Log::info("BulkUploadOperation: Bulk upload completed.");
@@ -151,7 +150,14 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 // has no synthetic root, so every entry counts.
                 const std::uint64_t fileCount = entries_.size() - (prescannedPathOverride_.empty() ? 1 : 0);
                 options_.overallProgressCallback(
-                    fullRemotePath(entry), currentIndex_, fileCount, 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+                    fullRemotePath(entry),
+                    currentIndex_,
+                    fileCount,
+                    0,
+                    0,
+                    currentBytes_,
+                    totalBytes_,
+                    bulkBytesPerSecond_
                 );
             }
             else if (entry.isRegularFile() || entry.isSymlink())
@@ -365,6 +371,12 @@ void BulkUploadOperation::completeCurrentUpload()
     currentBytes_ += currentUpload_->totalSize();
     currentUpload_.reset();
     ++currentIndex_;
+    if (!prescannedPathOverride_.empty() && currentIndex_ == entries_.size())
+    {
+        options_.overallProgressCallback(
+            options_.remotePath, currentIndex_, entries_.size(), 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+        );
+    }
 }
 
 SharedData::OperationType BulkUploadOperation::type() const

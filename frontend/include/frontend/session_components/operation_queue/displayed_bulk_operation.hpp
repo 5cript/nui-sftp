@@ -113,9 +113,17 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                 span{
                     class_ = "opq-status-text opq-status-count"
                 }(
-                    observe(fileCurrentIndex, fileCount),
+                    observe(fileCurrentIndex, fileCount, state_),
                     [this](){
-                        return fmt::format("{}/{}", fileCurrentIndex.value(), fileCount.value());
+                        // On successful completion, pin the numerator to the
+                        // total so a dropped or late terminal progress tick
+                        // can't leave the card stuck at (N-1)/N.
+                        const auto finished = state_.value() == SharedData::OperationState::Completed ||
+                            state_.value() == SharedData::OperationState::PartialSuccess;
+                        const auto current = (finished && fileCount.value() > 0)
+                            ? fileCount.value()
+                            : fileCurrentIndex.value();
+                        return fmt::format("{}/{}", current, fileCount.value());
                     }
                 ),
                 span{
