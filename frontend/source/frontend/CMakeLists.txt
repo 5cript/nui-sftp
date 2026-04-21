@@ -45,6 +45,7 @@ target_sources(
         settings/subgroup.cpp
         settings/layout_setting.cpp
         settings/log_options.cpp
+        session/session_helpers.cpp
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
