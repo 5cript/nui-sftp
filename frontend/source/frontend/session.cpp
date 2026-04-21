@@ -14,6 +14,7 @@
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/file_tracking.hpp>
+#include <frontend/session_components/terminal_panel.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <nui-file-explorer/file_grid.hpp>
 #include <persistence/state_holder.hpp>
@@ -70,7 +71,6 @@ struct Session::Implementation
 
     // Session Options Tab
     Persistence::SessionOptions engineOptions;
-    Nui::Observed<Persistence::TerminalOptions> options;
 
     // Add Tab Context Menu
     ScriptNuiComponents::PopupMenu tabAddMenu{};
@@ -96,7 +96,9 @@ struct Session::Implementation
 
     // Channels & FrontendSessionManager Connection
     Nui::Observed<std::unique_ptr<FrontendSessionManager>> frontendSessionManager;
-    std::vector<std::shared_ptr<Nui::Dom::Element>> channelElements;
+
+    // Terminal panel (channels, toolbar, save/copy, locked-mode input)
+    std::unique_ptr<TerminalPanel> terminalPanel;
 
     // Session Options
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
@@ -116,7 +118,6 @@ struct Session::Implementation
     Nui::Observed<bool> inertEverything{false};
     Nui::Observed<bool> isInLostConnectionState{false};
     std::function<void()> onShutdownComplete{};
-    std::vector<std::string> savedTerminalContents{};
 
     std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle;
 
@@ -177,19 +178,6 @@ struct Session::Implementation
      */
     nlohmann::json pendingResumeLayout{};
 
-    // Local-shell tracking for captureSnapshot.  Populated when a local
-    // shell is spawned via makeLocalShellChannelElement; cmdline is kept
-    // up to date via the shell's onProcessChange callback.
-    struct LocalShellMeta
-    {
-        std::string shellConfigName;
-        std::string cmdline;
-        Persistence::TerminalOptions terminalOptions;
-        Persistence::Termios termios;
-        Persistence::ExecutingSessionOptions execOpts;
-    };
-    std::unordered_map<Ids::ChannelId, LocalShellMeta, Ids::IdHash> localShellMeta;
-
     /**
      * @brief Most recently retrieved remote username (from RpcSystem::getUsername
      *        during onOpenSession).  Preserved into the snapshot so the
@@ -219,7 +207,6 @@ struct Session::Implementation
         , tabId{params.tabId}
         , uiOptions{params.uiOptions}
         , engineOptions{std::move(params.sessionOptions)}
-        , options{this->engineOptions.terminalOptions.value()}
         , inputDialog{params.newItemAskDialog}
         , confirmDialog{params.confirmDialog}
         , fileGrid{[this, &params]() -> NuiFileExplorer::FileGrid {
@@ -281,7 +268,6 @@ struct Session::Implementation
         , layoutHost{}
         , layoutName{std::move(params.layoutName)}
         , frontendSessionManager{}
-        , channelElements{}
         , sessionOptionsElement{}
         , sessionOptions{params.stateHolder, params.events, this->initialName, this->sessionLayoutId, params.confirmDialog}
         , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
@@ -585,85 +571,7 @@ void Session::onDrop(
 
 auto Session::makeChannelElement() -> Nui::ElementRenderer
 {
-    using Nui::Elements::div; // because of the global div.
-
-    // clang-format off
-    return div{}(
-        observe(impl_->frontendSessionManager),
-        [this]() -> Nui::ElementRenderer {
-            const bool isLocalShellEngine =
-                std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine);
-            const std::string terminalBackgroundColor =
-                (impl_->options->theme && impl_->options->theme->background)
-                    ? *impl_->options->theme->background
-                    : std::string{};
-            // Shared cell that the toolbar closures read on click and that
-            // onOpenChannel fills once the channel is actually created.
-            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
-
-            return div{
-                style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
-            }(
-                renderTerminalToolbar(
-                    SessionInternal::resolveIdentityIcon(impl_->engineOptions.icon, isLocalShellEngine),
-                    channelIdCell,
-                    terminalBackgroundColor
-                ),
-                div{
-                    style = observe(impl_->options).generate([this](){
-                        return fmt::format(
-                            "flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};",
-                            impl_->options->theme && impl_->options->theme->background
-                                ? *impl_->options->theme->background
-                                : "#202020"
-                        );
-                    }),
-                    class_ = "terminal-channel",
-                    reference.onMaterialize([this, channelIdCell](Nui::val element) {
-                        Log::info("Channel terminal materialized");
-                        if (!impl_->frontendSessionManager.value())
-                            return;
-
-                        auto onCreated = [this, channelIdCell](
-                            std::optional<Ids::ChannelId> chId, std::string const& info
-                        ) {
-                            if (chId)
-                                *channelIdCell = chId;
-                            onOpenChannel(chId, info);
-                        };
-
-                        // Engine-specific per-call options: shell sessions spawn a process;
-                        // SSH sessions carry no per-call options (state lives in the engine).
-                        if (auto const* execOpts = std::get_if<Persistence::ExecutingSessionOptions>(&impl_->engineOptions.engine))
-                        {
-                            ExecutingChannelCreationOptions options;
-                            options.executingOptions = *execOpts;
-                            options.termios = impl_->engineOptions.termios.value();
-                            impl_->frontendSessionManager.value()->createChannel(
-                                element,
-                                *impl_->options,
-                                options,
-                                onCreated,
-                                std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
-                            );
-                        }
-                        else
-                        {
-                            ChannelCreationOptions options{};
-                            impl_->frontendSessionManager.value()->createChannel(
-                                element,
-                                *impl_->options,
-                                options,
-                                onCreated,
-                                std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
-                            );
-                        }
-                    })
-                }()
-            );
-        }
-    );
-    // clang-format on
+    return impl_->terminalPanel->makeChannelElement();
 }
 
 bool Session::supportsLocalShell() const
@@ -689,251 +597,12 @@ void Session::openLocalShellChannel(std::string const& shellName)
 
 auto Session::makeLocalShellChannelElement(std::string const& shellName) -> Nui::ElementRenderer
 {
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-    using Nui::Elements::button;
-
-    // Resolve the saved shell's settings up-front. fullyResolve() fills in
-    // Referenceable values (termios, terminalOptions, ...) from the top-level
-    // state maps; the raw stateCache() leaves them default-constructed (for
-    // termios that means every flag bit reads as cleared).
-    auto state = impl_->stateHolder->stateCache().fullyResolve();
-    auto iter = state.sessions.find(shellName);
-    const bool found = (iter != state.sessions.end())
-        && std::holds_alternative<Persistence::ExecutingSessionOptions>(iter->second.engine);
-    if (!found)
-    {
-        Log::error("No saved shell named '{}' (or not a shell-type session)", shellName);
-        // Emit a harmless placeholder — contentPanelManager will keep the tab
-        // frame but nothing spawns. The session itself is unaffected.
-        return div{}();
-    }
-
-    // Capture the shell's settings by value: background color for the outer
-    // wrapper, terminal options and termios for the channel itself. Non-reactive
-    // to future settings changes, but the tab is short-lived (one shell process)
-    // so a fresh open picks up any edits the user has made in between.
-    const auto terminalOptions = iter->second.terminalOptions.value();
-    const auto termios = iter->second.termios.value();
-    const auto execOpts = std::get<Persistence::ExecutingSessionOptions>(iter->second.engine);
-    const std::string backgroundColor =
-        (terminalOptions.theme && terminalOptions.theme->background)
-            ? *terminalOptions.theme->background
-            : std::string{"#202020"};
-    // The identity icon on the toolbar inherits the shell config's own icon
-    // (matches the one shown in the + tab menu).  Captured here at open time.
-    const std::string identityIconName = iter->second.icon;
-
-    // clang-format off
-    return div{}(
-        observe(impl_->frontendSessionManager),
-        [this, shellName, terminalOptions, termios, execOpts, backgroundColor, identityIconName]() -> Nui::ElementRenderer {
-            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
-            return div{
-                style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
-            }(
-                renderTerminalToolbar(
-                    SessionInternal::resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
-                    channelIdCell,
-                    backgroundColor
-                ),
-                div{
-                    style = fmt::format("flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};", backgroundColor),
-                    class_ = "terminal-channel",
-                    reference.onMaterialize([this, shellName, terminalOptions, termios, execOpts, channelIdCell](Nui::val element) {
-                        Log::info("Local-shell channel terminal materialized");
-                        if (!impl_->frontendSessionManager.value())
-                            return;
-
-                        // Keep the outer session tab title untouched — only the inner
-                        // Lumino tab reflects the local-shell process name.  Also refresh
-                        // the per-channel LocalShellMeta.cmdline so captureSnapshot picks
-                        // up the latest value without having to read xterm tab titles.
-                        auto onProcessChange = [this](Ids::ChannelId const& channelId, std::string const& cmdline)
-                        {
-                            if (auto metaIter = impl_->localShellMeta.find(channelId);
-                                metaIter != impl_->localShellMeta.end())
-                                metaIter->second.cmdline = cmdline;
-
-                            Nui::val::global("contentPanelManager")
-                                .call<void>("renameTerminalById", impl_->sessionLayoutId, channelId.value(), cmdline);
-                            Nui::globalEventContext.executeActiveEventsImmediately();
-                        };
-
-                        // Record the shell's metadata under the assigned ChannelId as
-                        // soon as we get it, so captureSnapshot can hand the adopting
-                        // engine a complete LocalShellAdoption record.  The stored
-                        // copies of terminalOptions / termios / execOpts are the ones
-                        // in effect at spawn time — which matches current "new tabs
-                        // pick up the latest settings" semantics.
-                        auto onCreated = [this, shellName, terminalOptions, termios, execOpts, channelIdCell](
-                                             std::optional<Ids::ChannelId> const& channelId,
-                                             std::string const& info)
-                        {
-                            if (channelId)
-                            {
-                                *channelIdCell = channelId;
-                                Implementation::LocalShellMeta meta{
-                                    .shellConfigName = shellName,
-                                    .cmdline = {},
-                                    .terminalOptions = terminalOptions,
-                                    .termios = termios,
-                                    .execOpts = execOpts,
-                                };
-                                impl_->localShellMeta.emplace(*channelId, std::move(meta));
-                            }
-                            onOpenChannel(channelId, info);
-                        };
-
-                        // Shell-specific terminalOptions — its colour theme, font,
-                        // cursor style etc. make each local-shell visibly distinguishable
-                        // from the SSH terminal it sits next to.
-                        impl_->frontendSessionManager.value()->createLocalShellChannel(
-                            element,
-                            terminalOptions,
-                            execOpts,
-                            termios,
-                            std::move(onProcessChange),
-                            std::move(onCreated),
-                            std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
-                        );
-                    })
-                }()
-            );
-        }
-    );
-    // clang-format on
+    return impl_->terminalPanel->makeLocalShellChannelElement(shellName);
 }
 
 auto Session::makeAdoptedLocalShellChannelElement(LocalShellAdoption adoption) -> Nui::ElementRenderer
 {
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-    using Nui::Elements::button;
-
-    const std::string backgroundColor =
-        (adoption.terminalOptions.theme && adoption.terminalOptions.theme->background)
-            ? *adoption.terminalOptions.theme->background
-            : std::string{"#202020"};
-    // Resolve the identity icon by looking up the shell config in persistence,
-    // so the adopted terminal shows the same glyph the user configured.
-    // Absent config (renamed / deleted since the snapshot was captured) is
-    // fine — resolveIdentityIcon falls back to a generic local-shell glyph.
-    std::string identityIconName;
-    {
-        auto state = impl_->stateHolder->stateCache().fullyResolve();
-        if (auto configIter = state.sessions.find(adoption.shellConfigName);
-            configIter != state.sessions.end())
-        {
-            identityIconName = configIter->second.icon;
-        }
-    }
-
-    // clang-format off
-    return div{}(
-        observe(impl_->frontendSessionManager),
-        [this, adoption = std::move(adoption), backgroundColor, identityIconName]() -> Nui::ElementRenderer {
-            // Process id is known up-front — seed the cell so toolbar clicks
-            // work the instant the element materializes.
-            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(adoption.processId);
-            return div{
-                style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
-            }(
-                renderTerminalToolbar(
-                    SessionInternal::resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
-                    channelIdCell,
-                    backgroundColor
-                ),
-                div{
-                    style = fmt::format("flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};", backgroundColor),
-                    class_ = "terminal-channel",
-                    reference.onMaterialize([this, adoption](Nui::val element) {
-                        Log::info("Adopted local-shell channel terminal materialized");
-                        if (!impl_->frontendSessionManager.value())
-                            return;
-
-                        auto onProcessChange = [this](Ids::ChannelId const& channelId, std::string const& cmdline)
-                        {
-                            if (auto metaIter = impl_->localShellMeta.find(channelId);
-                                metaIter != impl_->localShellMeta.end())
-                                metaIter->second.cmdline = cmdline;
-
-                            Nui::val::global("contentPanelManager")
-                                .call<void>("renameTerminalById", impl_->sessionLayoutId, channelId.value(), cmdline);
-                            Nui::globalEventContext.executeActiveEventsImmediately();
-                        };
-
-                        // Re-register the meta for this process id so captureSnapshot
-                        // works on a subsequent reconnect.  cmdline is carried over
-                        // from the snapshot; the process hasn't forked anything new
-                        // during the disconnect window.
-                        auto onCreated = [this, adoption](
-                                             std::optional<Ids::ChannelId> const& channelId,
-                                             std::string const& info)
-                        {
-                            if (channelId)
-                            {
-                                Implementation::LocalShellMeta meta{
-                                    .shellConfigName = adoption.shellConfigName,
-                                    .cmdline = adoption.cmdline,
-                                    .terminalOptions = adoption.terminalOptions,
-                                    .termios = adoption.termios,
-                                    .execOpts = adoption.execOpts,
-                                };
-                                impl_->localShellMeta.emplace(*channelId, std::move(meta));
-                            }
-                            onOpenChannel(channelId, info);
-                        };
-
-                        impl_->frontendSessionManager.value()->adoptLocalShellChannel(
-                            element,
-                            adoption,
-                            std::move(onProcessChange),
-                            std::move(onCreated),
-                            std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
-                        );
-                    })
-                }()
-            );
-        }
-    );
-    // clang-format on
-}
-
-void Session::onChannelLoss(Ids::ChannelId const& id)
-{
-    Log::warn("Channel loss detected for session '{}'", impl_->initialName);
-
-    // Local-shell channel death is a process exit, not a transport loss. Close
-    // the Lumino tab unconditionally — isInLostConnectionState is unrelated.
-    const bool isLocalShell = impl_->frontendSessionManager.value() &&
-        impl_->frontendSessionManager.value()->isLocalShellChannel(id);
-
-    // Forget the per-channel metadata — the process is gone.  Safe even if
-    // the channel was not a local-shell (the map lookup just misses).
-    impl_->localShellMeta.erase(id);
-
-    if (!isLocalShell && impl_->isInLostConnectionState.value())
-        return; // SSH transport loss already confirmed: keep tab open so the user can save contents.
-
-    // Race guard: on a connection drop, the Session::*::onDisconnect signal (which sets
-    // isInLostConnectionState) and sshTerminalOnExit_* both arrive from background threads.
-    // Depending on thread scheduling, onDisconnect may not yet have been processed when this
-    // callback fires. Defer the close decision by 100ms to let it arrive first.
-    // On a normal shell exit, onDisconnect never fires, so after the delay the flag is still
-    // false and the tab closes as expected.
-    const std::string sessionLayoutId = impl_->sessionLayoutId;
-    const std::string channelId = id.value();
-    Nui::val::global("setTimeout")(
-        Nui::bind(
-            [this, sessionLayoutId, channelId, isLocalShell]()
-            {
-                if (isLocalShell || !impl_->isInLostConnectionState.value())
-                    Nui::val::global("contentPanelManager").call<void>("closeTerminalById", sessionLayoutId, channelId);
-            }
-        ),
-        Nui::val{100}
-    );
+    return impl_->terminalPanel->makeAdoptedLocalShellChannelElement(std::move(adoption));
 }
 
 NuiFileExplorer::Side* Session::remoteFileGridSide()
@@ -1074,6 +743,23 @@ Session::Session(Params params)
         makeConnectionLostDialogBody()
     );
 
+    // Terminal panel owns terminal element factories, toolbar action handlers,
+    // locked-mode input handling, and per-local-shell metadata.  Must exist
+    // before the engine creators below so FSM callbacks can bind to it.
+    impl_->terminalPanel = std::make_unique<TerminalPanel>(TerminalPanel::Params{
+        .stateHolder = impl_->stateHolder,
+        .confirmDialog = impl_->confirmDialog,
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .engineOptions = &impl_->engineOptions,
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .isInLostConnectionState = [this]() { return impl_->isInLostConnectionState.value(); },
+        .onReconnectRequested = [this]() { reconnect(); },
+        .onCloseSelfRequested = [this]() { closeSelf(); },
+        .onChannelOpened = [this](std::optional<Ids::ChannelId> channelId, std::string const& info) {
+            onOpenChannel(channelId, info);
+        },
+    });
+
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
     {
         createExecutingEngine();
@@ -1116,6 +802,22 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         makeConnectionLostDialogBody()
     );
 
+    // Same construction as the fresh ctor — build the terminal panel before
+    // the FSM's locked-user-input handler rebind below binds into it.
+    impl_->terminalPanel = std::make_unique<TerminalPanel>(TerminalPanel::Params{
+        .stateHolder = impl_->stateHolder,
+        .confirmDialog = impl_->confirmDialog,
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .engineOptions = &impl_->engineOptions,
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .isInLostConnectionState = [this]() { return impl_->isInLostConnectionState.value(); },
+        .onReconnectRequested = [this]() { reconnect(); },
+        .onCloseSelfRequested = [this]() { closeSelf(); },
+        .onChannelOpened = [this](std::optional<Ids::ChannelId> channelId, std::string const& info) {
+            onOpenChannel(channelId, info);
+        },
+    });
+
     // Extract the Lumino layout out of the snapshot before onOpenSession
     // resets it; initializeLayout reads from pendingResumeLayout first so
     // the DOM-attach-triggered restore still finds the saved panels.
@@ -1127,7 +829,7 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
     impl_->frontendSessionManager = proto->takeFrontendSessionManager();
     impl_->frontendSessionManager.value()->setLockedUserInputHandler(
         [this](Ids::ChannelId channelId, std::string const& input) {
-            onLockedModeUserInput(channelId, input);
+            impl_->terminalPanel->onLockedModeUserInput(channelId, input);
         }
     );
     if (impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
@@ -1243,222 +945,6 @@ void Session::setupFileGrid()
         remoteFileGridSide()->setOnSynchronize(onSync);
 }
 
-void Session::saveChannelToFile(Ids::ChannelId const& channelId)
-{
-    if (!impl_->frontendSessionManager.value())
-        return;
-
-    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
-    if (!channel)
-    {
-        Log::warn("saveChannelToFile: no channel '{}'", channelId.value());
-        return;
-    }
-
-    // Capture the dump synchronously — the dialog is async and by the time the
-    // user picks a path the xterm may have scrolled further, which is fine but
-    // we want the save to reflect what was on screen at click time.
-    auto dump = channel->getAllTextContent();
-
-    Nui::FileDialog::showSaveDialog(
-        Nui::FileDialog::SaveDialogOptions{
-            .title = "Save terminal contents",
-            .defaultPath = "%userprofile%",
-            .filters = {},
-            .forcePath = false,
-            .forceOverwrite = false,
-        },
-        [dump = std::move(dump)](std::optional<std::filesystem::path> const& result) mutable
-        {
-            if (!result.has_value())
-            {
-                Log::info("User cancelled save-terminal dialog");
-                return;
-            }
-            SessionInternal::writeChannelContentToFile(*result, dump);
-        }
-    );
-}
-
-void Session::copyChannelToClipboard(Ids::ChannelId const& channelId)
-{
-    if (!impl_->frontendSessionManager.value())
-        return;
-
-    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
-    if (!channel)
-    {
-        Log::warn("copyChannelToClipboard: no channel '{}'", channelId.value());
-        return;
-    }
-
-    const auto dump = channel->getAllTextContent();
-    // See static/source/index.js — the shim wraps navigator.clipboard.writeText
-    // and logs its own errors on the JS side.  Fire-and-forget here.
-    Nui::val::global("writeTerminalDumpToClipboard")
-        .call<void>("call", Nui::val::global("globalThis"), dump);
-}
-
-void Session::copyChannelToClipboardPlain(Ids::ChannelId const& channelId)
-{
-    if (!impl_->frontendSessionManager.value())
-        return;
-
-    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
-    if (!channel)
-    {
-        Log::warn("copyChannelToClipboardPlain: no channel '{}'", channelId.value());
-        return;
-    }
-
-    // Strip ANSI/control bytes on the JS side — it already has fast string
-    // primitives and the regex is easier to audit there than in C++.
-    const auto dump = channel->getAllTextContent();
-    Nui::val::global("writeTerminalPlainToClipboard")
-        .call<void>("call", Nui::val::global("globalThis"), dump);
-}
-
-Nui::ElementRenderer Session::renderTerminalToolbar(
-    Nui::ElementRenderer identityIcon,
-    std::shared_ptr<std::optional<Ids::ChannelId>> channelIdCell,
-    std::string const& terminalBackgroundColor
-)
-{
-    namespace Snc = ScriptNuiComponents;
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-
-    // Derive a bar colour that reads as a distinct strip above the xterm.
-    // `color-mix(... 82% ..., black 18%)` darkens the terminal background
-    // without needing to know whether the theme is light or dark.  Falls back
-    // to a neutral dark when the theme omits `background`.
-    const std::string barBg = terminalBackgroundColor.empty()
-        ? std::string{"#1a1a1a"}
-        : fmt::format("color-mix(in srgb, {} 82%, black 18%)", terminalBackgroundColor);
-
-    return div{
-        class_ = "terminal-toolbar",
-        style = fmt::format("background-color: {};", barBg),
-    }(
-        span{class_ = "terminal-toolbar__identity"}(std::move(identityIcon)),
-        span{class_ = "terminal-toolbar__spacer"}(),
-        span{class_ = "terminal-toolbar__actions"}(
-            Snc::button({
-                .icon = Ui5Icons::save(),
-                .attributes = {
-                    Nui::Attributes::title = std::string{"Save terminal to file"},
-                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
-                        e.stopPropagation();
-                        if (channelIdCell && *channelIdCell)
-                            saveChannelToFile(**channelIdCell);
-                    },
-                },
-                .styleVariant = Snc::StyleVariant::Transparent,
-            }),
-            Snc::button({
-                .icon = Ui5Icons::copy(),
-                .attributes = {
-                    Nui::Attributes::title = std::string{"Copy terminal to clipboard (with formatting)"},
-                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
-                        e.stopPropagation();
-                        if (channelIdCell && *channelIdCell)
-                            copyChannelToClipboard(**channelIdCell);
-                    },
-                },
-                .styleVariant = Snc::StyleVariant::Transparent,
-            }),
-            Snc::button({
-                .icon = Ui5Icons::document_text(),
-                .attributes = {
-                    Nui::Attributes::title = std::string{"Copy terminal as plain text (strip ANSI/control codes)"},
-                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
-                        e.stopPropagation();
-                        if (channelIdCell && *channelIdCell)
-                            copyChannelToClipboardPlain(**channelIdCell);
-                    },
-                },
-                .styleVariant = Snc::StyleVariant::Transparent,
-            })
-        )
-    );
-}
-
-void Session::saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents)
-{
-    // Save channels to file(s):
-    int indexIncrement = 0;
-    const auto basePath = file.parent_path();
-    const auto extension = file.extension().string();
-    const auto baseName = file.stem().string();
-    for (auto const& textContent : contents)
-    {
-        const auto filePath = basePath / fmt::format("{}_{}{}", baseName, indexIncrement++, extension);
-        Nui::RpcClient::callWithBackChannel(
-            "RpcFilesystem::writeFile",
-            [filePath](Nui::val response)
-            {
-                if (!response.hasOwnProperty("success"))
-                {
-                    Log::error(
-                        "Invalid response from RpcFilesystem::writeFile for file '{}'", filePath.generic_string()
-                    );
-                    return;
-                }
-
-                const auto success = response["success"].as<bool>();
-                if (!success)
-                {
-                    const auto error = response["error"].as<std::string>();
-                    Log::error("Failed to write file '{}': {}", filePath.generic_string(), error);
-                    return;
-                }
-
-                Log::info("Successfully wrote file '{}'", filePath.generic_string());
-            },
-            filePath,
-            textContent
-        );
-    }
-}
-
-void Session::onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input)
-{
-    Log::info("Received user input by channel '{}' in locked mode: {}", channelId.id(), input);
-    if (input == "\r" || input == "\n")
-        return closeSelf();
-
-    if (input == "r" || input == "R")
-        return reconnect();
-
-    if (input == "s" || input == "S")
-    {
-        if (!impl_->frontendSessionManager.value())
-            return;
-
-        Nui::FileDialog::showSaveDialog(
-            Nui::FileDialog::SaveDialogOptions{
-                // all are optional
-                .title = "Pick directory / file",
-                .defaultPath = "%userprofile%",
-                .filters = {},
-                .forcePath = false,
-                .forceOverwrite = false,
-            },
-            [this](std::optional<std::filesystem::path> const& result)
-            {
-                if (!result.has_value())
-                {
-                    Log::info("User cancelled save dialog in locked mode");
-                    return;
-                }
-
-                saveTerminalContents(result.value(), impl_->savedTerminalContents);
-            }
-        );
-        return;
-    }
-}
-
 void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");
@@ -1472,7 +958,9 @@ void Session::createSshEngine()
             .sessionOptions = impl_->engineOptions,
             .onConnectionLoss = std::bind(&Session::onTerminalConnectionLoss, this),
         }),
-        std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2),
+        [this](Ids::ChannelId channelId, std::string const& input) {
+            impl_->terminalPanel->onLockedModeUserInput(channelId, input);
+        },
         /*eagerAuxEngine=*/true
     );
 
@@ -1496,7 +984,9 @@ void Session::createExecutingEngine()
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
         }),
-        std::bind(&Session::onLockedModeUserInput, this, std::placeholders::_1, std::placeholders::_2)
+        [this](Ids::ChannelId channelId, std::string const& input) {
+            impl_->terminalPanel->onLockedModeUserInput(channelId, input);
+        }
     );
 
     impl_->frontendSessionManager.value()->open(
@@ -1723,22 +1213,7 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
 {
     if (!channelId)
     {
-        Log::error("Failed to open channel: {}", info);
-
-        if (!impl_->channelElements.empty())
-        {
-            Nui::val::global("contentPanelManager")
-                .call<void>("closeTerminalByNode", impl_->sessionLayoutId, impl_->channelElements.back()->val());
-            impl_->channelElements.pop_back();
-        }
-
-        impl_->confirmDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = language->get("sessionFrontend", "channelCreationFailedHeader"),
-            .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "channelCreationFailedText")), info),
-            .buttons = ConfirmDialog::Button::Ok,
-            .neverShowAgainId = "channelCreationFailed",
-        });
+        impl_->terminalPanel->onChannelCreationFailed(info);
         return;
     }
 
@@ -1800,15 +1275,7 @@ void Session::onConnectionLoss()
     impl_->frontendSessionManager.value()->connectionLossMode(
         true, FrontendSessionManager::EngineFilter::PrimaryOnly
     );
-    impl_->frontendSessionManager.value()->forEachChannel(
-        FrontendSessionManager::EngineFilter::PrimaryOnly,
-        [this](Ids::ChannelId const&, TerminalChannel& channel) -> bool
-        {
-            const auto content = channel.getAllTextContent();
-            impl_->savedTerminalContents.push_back(content);
-            return true;
-        }
-    );
+    impl_->terminalPanel->captureChannelContentsForLockedMode();
     impl_->frontendSessionManager.value()->broadcast(
         language->get("sessionFrontend", "connectionLostTerminalMessage"),
         FrontendSessionManager::EngineFilter::PrimaryOnly
@@ -1988,8 +1455,8 @@ std::vector<LocalShellAdoption> Session::ejectLocalShellsForHandoff()
     out.reserve(ejected.size());
     for (auto const& entry : ejected)
     {
-        auto metaIter = impl_->localShellMeta.find(entry.processId);
-        if (metaIter == impl_->localShellMeta.end())
+        auto const* meta = impl_->terminalPanel->findLocalShellMeta(entry.processId);
+        if (!meta)
         {
             Log::warn(
                 "Ejected local-shell '{}' has no tracked metadata — dropping",
@@ -2005,11 +1472,11 @@ std::vector<LocalShellAdoption> Session::ejectLocalShellsForHandoff()
         out.push_back(
             LocalShellAdoption{
                 .processId = entry.processId,
-                .shellConfigName = metaIter->second.shellConfigName,
-                .cmdline = metaIter->second.cmdline,
-                .terminalOptions = metaIter->second.terminalOptions,
-                .termios = metaIter->second.termios,
-                .execOpts = metaIter->second.execOpts,
+                .shellConfigName = meta->shellConfigName,
+                .cmdline = meta->cmdline,
+                .terminalOptions = meta->terminalOptions,
+                .termios = meta->termios,
+                .execOpts = meta->execOpts,
                 .savedScrollback = std::move(scrollback),
                 .stdoutReceptacle = entry.stdoutReceptacle,
                 .stderrReceptacle = entry.stderrReceptacle,
@@ -2018,7 +1485,7 @@ std::vector<LocalShellAdoption> Session::ejectLocalShellsForHandoff()
     }
     // After ejection the engine's channel map is empty; clear our own
     // tracking to match.  Any remaining entries would be stale.
-    impl_->localShellMeta.clear();
+    impl_->terminalPanel->clearLocalShellMeta();
     return out;
 }
 
@@ -2249,27 +1716,7 @@ auto Session::makeFileTrackingElement() -> Nui::ElementRenderer
 
 void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
 {
-    using namespace std::string_literals;
-
-    // Removing element from vector:
-    std::erase_if(
-        impl_->channelElements,
-        [channelId](auto elem) -> bool
-        {
-            const auto outerVal = elem->val();
-            const auto channelEl = outerVal.template call<Nui::val>("querySelector", ".terminal-channel"s);
-            if (channelEl.isNull() || channelEl.isUndefined())
-                return false;
-            if (!channelEl.template call<bool>("hasAttribute", "data-channelid"s))
-                return false;
-            return channelEl.template call<std::string>("getAttribute", "data-channelid"s) == channelId.value();
-        }
-    );
-
-    // Removing channel in frontend:
-    using namespace std::string_literals;
-    impl_->frontendSessionManager.value()->closeChannel(channelId);
-    impl_->localShellMeta.erase(channelId);
+    impl_->terminalPanel->onChannelClosedByUser(channelId);
 }
 
 void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
@@ -2366,7 +1813,7 @@ void Session::initializeLayout()
             {
                 Nui::WebApi::Console::log("Channel factory content panel manager");
                 auto elem = Nui::Dom::makeStandaloneElement(makeChannelElement());
-                impl_->channelElements.push_back(elem);
+                impl_->terminalPanel->channelElements().push_back(elem);
                 return elem->val();
             }
         )
@@ -2569,7 +2016,7 @@ void Session::initializeLayout()
                         auto elem = Nui::Dom::makeStandaloneElement(
                             makeAdoptedLocalShellChannelElement(std::move(adoption))
                         );
-                        impl_->channelElements.push_back(elem);
+                        impl_->terminalPanel->channelElements().push_back(elem);
                         return elem->val();
                     }
                 }
@@ -2589,7 +2036,7 @@ void Session::initializeLayout()
 
                 Log::info("localShellFactory: spawning local shell '{}'", shellName);
                 auto elem = Nui::Dom::makeStandaloneElement(makeLocalShellChannelElement(shellName));
-                impl_->channelElements.push_back(elem);
+                impl_->terminalPanel->channelElements().push_back(elem);
                 return elem->val();
             },
             std::placeholders::_1

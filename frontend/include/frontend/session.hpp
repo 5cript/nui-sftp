@@ -272,39 +272,6 @@ class Session
     void loadLayoutExtras(nlohmann::json const& layoutExtra);
 
     void onConnectionLoss();
-    void onChannelLoss(Ids::ChannelId const& id);
-    void onLockedModeUserInput(Ids::ChannelId channelId, std::string const& input);
-    void saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents);
-
-    /** @brief On-demand "save the scrollback of @p channelId to a file the user picks". */
-    void saveChannelToFile(Ids::ChannelId const& channelId);
-    /** @brief On-demand "copy the raw xterm dump of @p channelId to the system clipboard". */
-    void copyChannelToClipboard(Ids::ChannelId const& channelId);
-    /**
-     * @brief On-demand "copy @p channelId's scrollback as plain text" — ANSI
-     *        escapes and non-whitespace control characters are stripped on the
-     *        JS side before the clipboard write.  Useful for pasting into
-     *        editors or tickets where formatting bytes would be noise.
-     */
-    void copyChannelToClipboardPlain(Ids::ChannelId const& channelId);
-
-    /**
-     * @brief The thin per-terminal row rendered directly above each xterm.
-     *        Shows an identity glyph on the left (SSH vs local-shell flavour)
-     *        and action buttons on the right (save, copy, copy-plain) wired to
-     *        the channel whose id resolves out of @p channelIdCell.  Cell-based
-     *        so that SSH and new-local-shell paths can pass a shared handle
-     *        that fills in once onCreated fires; adopted local-shells seed the
-     *        cell with the known process id.
-     *        @p terminalBackgroundColor is the xterm theme's own background —
-     *        the toolbar darkens it slightly for a distinct strip above the
-     *        xterm so the bar is visually separated rather than blending in.
-     */
-    Nui::ElementRenderer renderTerminalToolbar(
-        Nui::ElementRenderer identityIcon,
-        std::shared_ptr<std::optional<Ids::ChannelId>> channelIdCell,
-        std::string const& terminalBackgroundColor
-    );
 
     /**
      * @brief Body renderer for the Session's lost-connection dialog.
