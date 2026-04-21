@@ -25,7 +25,7 @@ namespace NuiFileExplorer
 {
     class FileGrid;
 }
-class FrontendEvents;
+struct FrontendEvents;
 class ConfirmDialog;
 class InputDialog;
 class FilePropertyDialog;

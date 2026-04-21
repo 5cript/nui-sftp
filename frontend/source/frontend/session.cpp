@@ -16,6 +16,7 @@
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/terminal_panel.hpp>
 #include <frontend/session_components/file_explorer_panel.hpp>
+#include <frontend/session_components/connection_loss_overlay.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <nui-file-explorer/file_grid.hpp>
 #include <persistence/state_holder.hpp>
@@ -133,15 +134,9 @@ struct Session::Implementation
     std::function<void(Session const*)> onReconnectNow;
     std::optional<SessionSnapshot> pendingResumeSnapshot;
 
-    // In-session reconnect UI state (drives the lost-connection overlay).
-    Nui::Observed<bool> reconnectCycleActive{false};
-    Nui::Observed<int> reconnectAttempt{1};
-    Nui::Observed<int> reconnectCountdown{0};
-    /// Non-modal, draggable dialog that hosts the reconnect UI.  Opened on
-    /// connection loss, closed on Session disposal.  The draggability lets
-    /// the user move it out of the way to keep working with local-shell
-    /// panels while the SSH transport tries to reconnect.
-    std::unique_ptr<ScriptNuiComponents::Dialog> connectionLostDialog;
+    // Lost-connection overlay: idle [Reconnect] button + in-progress cycle UI.
+    // Built in the Session constructor body (see Session::Session).
+    std::unique_ptr<ConnectionLossOverlay> connectionLossOverlay;
     /**
      * @brief Bulk OperationIds whose backend resume backups this Session is
      *        responsible for cleaning up.  Populated from the snapshot's
@@ -516,100 +511,6 @@ NuiFileExplorer::Side& Session::localFileGridSide()
     return impl_->fileExplorerPanel.localFileGridSide();
 }
 
-Nui::ElementRenderer Session::makeConnectionLostDialogBody()
-{
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    using Nui::Elements::span;
-    namespace Snc = ScriptNuiComponents;
-
-    // clang-format off
-    return div{class_ = "session-reconnect-panel-body"}(
-            observe(impl_->reconnectCycleActive),
-            [this]() -> Nui::ElementRenderer {
-                using Nui::Elements::div;
-                using Nui::Elements::span;
-                using namespace Nui::Attributes;
-                namespace Snc = ScriptNuiComponents;
-
-                if (!impl_->reconnectCycleActive.value())
-                {
-                    return Snc::button({
-                        .text = language->getObserved("sessionFrontend", "reconnectButton"),
-                        .attributes = {onClick = [this]() { reconnect(); }},
-                        .styleVariant = Snc::StyleVariant::Primary,
-                    });
-                }
-
-                // Cycle UI: spinner + attempt + countdown + [Now] + [Cancel].
-                // Wired to Params::onReconnectNow / onReconnectCancel — the
-                // retry timers and the candidate ProtoSession live in
-                // SessionArea, so this widget's only job is to hand user
-                // intent upward.
-                return div{class_ = "session-reconnect-cycle"}(
-                    div{class_ = "session-reconnect-cycle-row"}(
-                        Snc::spinner({.size = "22px", .thickness = "3px", .color = std::nullopt}),
-                        span{}(
-                            observe(impl_->reconnectAttempt),
-                            [this]() {
-                                return fmt::format(
-                                    fmt::runtime(language->get("reconnectDialog", "attempt")),
-                                    impl_->reconnectAttempt.value()
-                                );
-                            }
-                        )
-                    ),
-                    div{class_ = "session-reconnect-cycle-row"}(
-                        observe(impl_->reconnectCountdown),
-                        [this]() -> Nui::ElementRenderer {
-                            if (impl_->reconnectCountdown.value() <= 0)
-                                return span{}(language->getObserved("reconnectDialog", "restoringState"));
-                            return span{}(
-                                fmt::format(
-                                    fmt::runtime(language->get("reconnectDialog", "retryIn")),
-                                    impl_->reconnectCountdown.value()
-                                )
-                            );
-                        }
-                    ),
-                    div{class_ = "session-reconnect-cycle-buttons"}(
-                        observe(impl_->reconnectCountdown),
-                        [this]() -> Nui::ElementRenderer {
-                            using Nui::Elements::div;
-                            using namespace Nui::Attributes;
-                            namespace Snc = ScriptNuiComponents;
-                            // Hide [Now] while the retry is already firing
-                            // (countdown == 0 → "Restoring..." state) — the
-                            // click would be a no-op there.
-                            auto nowButton = (impl_->reconnectCountdown.value() > 0)
-                                ? Snc::button({
-                                      .text = language->getObserved("reconnectDialog", "now"),
-                                      .attributes = {onClick = [this]() {
-                                          if (impl_->onReconnectNow)
-                                              impl_->onReconnectNow(this);
-                                      }},
-                                      .styleVariant = Snc::StyleVariant::Primary,
-                                  })
-                                : Nui::ElementRenderer{Nui::nil()};
-                            return div{class_ = "session-reconnect-cycle-buttons-inner"}(
-                                std::move(nowButton),
-                                Snc::button({
-                                    .text = language->getObserved("reconnectDialog", "cancel"),
-                                    .attributes = {onClick = [this]() {
-                                        if (impl_->onReconnectCancel)
-                                            impl_->onReconnectCancel(this);
-                                    }},
-                                    .styleVariant = Snc::StyleVariant::Regular,
-                                })
-                            );
-                        }
-                    )
-                );
-            }
-        );
-    // clang-format on
-}
-
 auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 {
     return impl_->fileExplorerPanel.makeFileExplorerElement();
@@ -618,12 +519,20 @@ auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 Session::Session(Params params)
     : impl_{std::make_unique<Implementation>(std::move(params))}
 {
-    // Build the per-session reconnect dialog before any connection-loss
-    // handlers fire so onConnectionLoss can safely call open() on it.
-    impl_->connectionLostDialog = std::make_unique<ScriptNuiComponents::Dialog>(
-        impl_->sessionLayoutId + "-reconnect-dialog",
-        makeConnectionLostDialogBody()
-    );
+    // Build the per-session reconnect overlay before any connection-loss
+    // handlers fire so onConnectionLoss can safely call show() on it.
+    impl_->connectionLossOverlay = std::make_unique<ConnectionLossOverlay>(ConnectionLossOverlay::Params{
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .onReconnectClicked = [this]() { reconnect(); },
+        .onReconnectNowClicked = [this]() {
+            if (impl_->onReconnectNow)
+                impl_->onReconnectNow(this);
+        },
+        .onReconnectCancelClicked = [this]() {
+            if (impl_->onReconnectCancel)
+                impl_->onReconnectCancel(this);
+        },
+    });
 
     // Terminal panel owns terminal element factories, toolbar action handlers,
     // locked-mode input handling, and per-local-shell metadata.  Must exist
@@ -676,13 +585,21 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
 
     impl_ = std::make_unique<Implementation>(std::move(params));
 
-    // Same lifecycle as the fresh ctor — build the reconnect dialog before
+    // Same lifecycle as the fresh ctor — build the reconnect overlay before
     // onOpenSession-adoption side effects reach any handler that might
-    // call open() on it.
-    impl_->connectionLostDialog = std::make_unique<ScriptNuiComponents::Dialog>(
-        impl_->sessionLayoutId + "-reconnect-dialog",
-        makeConnectionLostDialogBody()
-    );
+    // call show() on it.
+    impl_->connectionLossOverlay = std::make_unique<ConnectionLossOverlay>(ConnectionLossOverlay::Params{
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .onReconnectClicked = [this]() { reconnect(); },
+        .onReconnectNowClicked = [this]() {
+            if (impl_->onReconnectNow)
+                impl_->onReconnectNow(this);
+        },
+        .onReconnectCancelClicked = [this]() {
+            if (impl_->onReconnectCancel)
+                impl_->onReconnectCancel(this);
+        },
+    });
 
     // Same construction as the fresh ctor — build the terminal panel before
     // the FSM's locked-user-input handler rebind below binds into it.
@@ -1122,22 +1039,8 @@ void Session::onConnectionLoss()
         FrontendSessionManager::EngineFilter::PrimaryOnly
     );
 
-    // Show the per-session reconnect dialog.  Non-modal so local-shell
-    // panels (and other tabs) keep working; draggable so the user can
-    // move it out of the way.  The dialog's lifetime is bound to the
-    // Session — we never explicitly close it since the Session replace
-    // tears its DOM down when the reconnect succeeds.
-    if (impl_->connectionLostDialog)
-    {
-        impl_->connectionLostDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = language->get("sessionFrontend", "connectionLost"),
-            .buttons = ScriptNuiComponents::Dialog::Button::Unknown,
-            .modal = false,
-            .mayCloseWithoutButton = true,
-            .draggable = true,
-        });
-    }
+    if (impl_->connectionLossOverlay)
+        impl_->connectionLossOverlay->show();
 }
 
 void Session::shutdown(std::function<void()> onShutdown)
@@ -1433,7 +1336,7 @@ void Session::reconnect()
         Log::warn("Session::reconnect called outside the lost-connection state — ignoring");
         return;
     }
-    if (impl_->reconnectCycleActive.value())
+    if (impl_->connectionLossOverlay && impl_->connectionLossOverlay->isReconnectCycleActive())
     {
         Log::warn("Session::reconnect called while a reconnect cycle is already active — ignoring");
         return;
@@ -1456,30 +1359,26 @@ void Session::reconnect()
 
 void Session::startReconnectUi()
 {
-    impl_->reconnectCycleActive = true;
-    impl_->reconnectAttempt = 1;
-    impl_->reconnectCountdown = 0;
-    Nui::globalEventContext.executeActiveEventsImmediately();
+    if (impl_->connectionLossOverlay)
+        impl_->connectionLossOverlay->startReconnectUi();
 }
 
 void Session::stopReconnectUi()
 {
-    impl_->reconnectCycleActive = false;
-    impl_->reconnectAttempt = 1;
-    impl_->reconnectCountdown = 0;
-    Nui::globalEventContext.executeActiveEventsImmediately();
+    if (impl_->connectionLossOverlay)
+        impl_->connectionLossOverlay->stopReconnectUi();
 }
 
 void Session::setReconnectUiAttempt(int attempt)
 {
-    impl_->reconnectAttempt = attempt;
-    Nui::globalEventContext.executeActiveEventsImmediately();
+    if (impl_->connectionLossOverlay)
+        impl_->connectionLossOverlay->setReconnectUiAttempt(attempt);
 }
 
 void Session::setReconnectUiCountdown(int seconds)
 {
-    impl_->reconnectCountdown = seconds;
-    Nui::globalEventContext.executeActiveEventsImmediately();
+    if (impl_->connectionLossOverlay)
+        impl_->connectionLossOverlay->setReconnectUiCountdown(seconds);
 }
 
 std::optional<SessionSnapshot> Session::takePendingSnapshot()
@@ -1989,7 +1888,7 @@ Nui::ElementRenderer Session::operator()()
         // view blockers themselves live inside the individual SFTP-bound
         // panel renderers (file explorer, operation queue, file tracking)
         // so terminal panels stay fully usable during a reconnect cycle.
-        (*impl_->connectionLostDialog)()
+        (*impl_->connectionLossOverlay)()
     );
     // clang-format on
 }
