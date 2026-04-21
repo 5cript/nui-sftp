@@ -240,7 +240,6 @@ class Session
      */
     void applySnapshot(SessionSnapshot const& snapshot);
 
-    void onFileExplorerConnectionClose();
     void onTerminalConnectionLoss();
     /**
      * @brief Open the SFTP subsystem for this session.
