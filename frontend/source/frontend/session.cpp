@@ -15,6 +15,7 @@
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/terminal_panel.hpp>
+#include <frontend/session_components/file_explorer_panel.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <nui-file-explorer/file_grid.hpp>
 #include <persistence/state_holder.hpp>
@@ -79,10 +80,14 @@ struct Session::Implementation
     InputDialog* inputDialog;
     ConfirmDialog* confirmDialog;
 
-    // File Explorer Things:
-    NuiFileExplorer::FileGrid fileGrid;
-    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileExplorerElement;
-    Nui::ListenRemover<decltype(fileExplorerElement)> fileExplorerListener{};
+    // Shared reactive flag: true while the SSH transport is considered lost.
+    // Declared here (ahead of the widgets that observe it) so downstream
+    // members can take a stable pointer during their own construction.
+    Nui::Observed<bool> isInLostConnectionState{false};
+
+    // File Explorer panel (grid + per-panel view blocker)
+    FileExplorerPanel fileExplorerPanel;
+    Nui::ListenRemover<Nui::Observed<std::shared_ptr<Nui::Dom::Element>>> fileExplorerListener{};
 
     // Operation Queue for File Explorer
     OperationQueue operationQueue;
@@ -116,7 +121,6 @@ struct Session::Implementation
 
     // Shutdown & Connection Status:
     Nui::Observed<bool> inertEverything{false};
-    Nui::Observed<bool> isInLostConnectionState{false};
     std::function<void()> onShutdownComplete{};
 
     std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle;
@@ -209,61 +213,19 @@ struct Session::Implementation
         , engineOptions{std::move(params.sessionOptions)}
         , inputDialog{params.newItemAskDialog}
         , confirmDialog{params.confirmDialog}
-        , fileGrid{[this, &params]() -> NuiFileExplorer::FileGrid {
-            auto* filePropertyDialog = params.filePropertyDialog;
-            auto* confirmDialog = params.confirmDialog;
-            auto* inputDialog = params.newItemAskDialog;
-            auto* archiveTransferDialog = params.archiveTransferDialog;
-            auto const& uiOptions = params.uiOptions;
-            if (std::holds_alternative<Persistence::SshSessionOptions>(params.sessionOptions.engine))
-            {
-                return {{
-                    .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-                    .showHiddenFiles = uiOptions.showHiddenFilesLocally,
-                    .onShowHiddenFilesChanged = [this](bool value) {
-                        this->stateHolder->loadModifySave([value](Persistence::State& state) {
-                            state.uiOptions.showHiddenFilesLocally = value;
-                        });
-                    },
-                    .pageSize = uiOptions.fileGridPageSize,
-                }, {
-                        .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-                        .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
-                        .onShowHiddenFilesChanged = [this](bool value) {
-                            this->stateHolder->loadModifySave([value](Persistence::State& state) {
-                                state.uiOptions.showHiddenFilesRemotely = value;
-                            });
-                        },
-                        .pageSize = uiOptions.fileGridPageSize,
-                },
-                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog),
-                    std::make_unique<RemoteSideModel>(
-                        this->uiOptions,
-                        std::get<Persistence::SshSessionOptions>(this->engineOptions.engine).remoteFavorites,
-                        confirmDialog,
-                        inputDialog,
-                        filePropertyDialog,
-                        archiveTransferDialog
-                    ),
-                };
-            } else {
-                // Local only
-                return {{
-                    .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
-                    .showHiddenFiles = uiOptions.showHiddenFilesLocally,
-                    .onShowHiddenFilesChanged = [this](bool value) {
-                        this->stateHolder->loadModifySave([value](Persistence::State& state) {
-                            state.uiOptions.showHiddenFilesLocally = value;
-                        });
-                    },
-                    .pageSize = uiOptions.fileGridPageSize,
-                },
-                    std::make_unique<LocalSideModel>(this->uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog)
-                };
-            }
-        }()}
-        , fileExplorerElement{}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, static_cast<LocalSideModel*>(&fileGrid.leftModel()), static_cast<RemoteSideModel*>(fileGrid.rightModel())}
+        , fileExplorerPanel{FileExplorerPanel::Params{
+            .stateHolder = params.stateHolder,
+            .events = params.events,
+            .confirmDialog = params.confirmDialog,
+            .inputDialog = params.newItemAskDialog,
+            .filePropertyDialog = params.filePropertyDialog,
+            .archiveTransferDialog = params.archiveTransferDialog,
+            .sessionName = this->initialName,
+            .uiOptions = this->uiOptions,
+            .engineOptions = this->engineOptions,
+            .isInLostConnectionState = &this->isInLostConnectionState,
+          }}
+        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , operationQueueElement{}
         , layoutHost{}
         , layoutName{std::move(params.layoutName)}
@@ -310,41 +272,7 @@ struct Session::Implementation
             }
         );
 
-        fileGrid.leftModel().dropMetadata(sessionLayoutId);
-        if (fileGrid.rightModel())
-            fileGrid.rightModel()->dropMetadata(sessionLayoutId);
-
-        static_cast<LocalSideModel*>(&fileGrid.leftModel())
-            ->setOnFavoritesChanged(
-                [stateHolder = this->stateHolder](std::vector<std::string> favs)
-                {
-                    stateHolder->loadModifySave(
-                        [favs = std::move(favs)](Persistence::State& state)
-                        {
-                            state.uiOptions.localFavorites = favs;
-                        }
-                    );
-                }
-            );
-        if (auto* remote = static_cast<RemoteSideModel*>(fileGrid.rightModel()); remote)
-        {
-            remote->setOnFavoritesChanged(
-                [stateHolder = this->stateHolder, sessionName = this->initialName](
-                    std::vector<std::string> favs)
-                {
-                    stateHolder->loadModifySave(
-                        [favs = std::move(favs), sessionName](Persistence::State& state)
-                        {
-                            const auto iter = state.sessions.find(sessionName);
-                            if (iter == state.sessions.end())
-                                return;
-                            if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&iter->second.engine))
-                                ssh->remoteFavorites = favs;
-                        }
-                    );
-                }
-            );
-        }
+        fileExplorerPanel.dropLayoutMetadata(sessionLayoutId);
 
         using namespace ScriptNuiComponents;
         using namespace std::string_literals;
@@ -366,7 +294,7 @@ struct Session::Implementation
             }
         );
         fileExplorerListener = Nui::smartListen(
-            fileExplorerElement,
+            fileExplorerPanel.elementObservable(),
             [this](std::shared_ptr<Nui::Dom::Element> const& elem)
             {
                 Nui::WebApi::Console::log("fileExplorerElement changed.");
@@ -444,11 +372,11 @@ void Session::Implementation::rebuildTabAddMenu()
         [this]()
         {
             tabAddMenu.close();
-            if (fileExplorerElement.value())
+            if (fileExplorerPanel.elementObservable().value())
                 return;
             Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-explorer"s);
         },
-        fileExplorerElement.value() != nullptr
+        fileExplorerPanel.elementObservable().value() != nullptr
     ));
 
     if (isSsh)
@@ -540,33 +468,7 @@ void Session::onDrop(
     std::optional<std::string> const& subdir
 )
 {
-    if (isLocalSide)
-    {
-        // confirm dialog: not implemented
-        Log::warn("Dropping files on local side is not implemented.");
-        impl_->confirmDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = language->get("sessionFrontend", "dropNotImplementedTitle"),
-            .text = language->get("sessionFrontend", "dropNotImplementedText"),
-            .buttons = ConfirmDialog::Button::Ok,
-            .neverShowAgainId = "dropNotImplemented",
-        });
-        return;
-    }
-
-    std::vector<NuiFileExplorer::Item> items;
-    items.reserve(entries.size());
-    std::transform(
-        std::make_move_iterator(begin(entries)),
-        std::make_move_iterator(end(entries)),
-        std::back_inserter(items),
-        [](SharedData::DirectoryEntry const& entry)
-        {
-            return NuiFileExplorer::Item{entry};
-        }
-    );
-
-    localSideModel().onTransfer(items, subdir);
+    impl_->fileExplorerPanel.onDrop(isLocalSide, std::move(entries), subdir);
 }
 
 auto Session::makeChannelElement() -> Nui::ElementRenderer
@@ -607,11 +509,11 @@ auto Session::makeAdoptedLocalShellChannelElement(LocalShellAdoption adoption) -
 
 NuiFileExplorer::Side* Session::remoteFileGridSide()
 {
-    return impl_->fileGrid.rightSide();
+    return impl_->fileExplorerPanel.remoteFileGridSide();
 }
 NuiFileExplorer::Side& Session::localFileGridSide()
 {
-    return impl_->fileGrid.leftSide();
+    return impl_->fileExplorerPanel.localFileGridSide();
 }
 
 Nui::ElementRenderer Session::makeConnectionLostDialogBody()
@@ -710,27 +612,7 @@ Nui::ElementRenderer Session::makeConnectionLostDialogBody()
 
 auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 {
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    namespace Snc = ScriptNuiComponents;
-
-    // clang-format off
-    // Per-panel view blocker — SFTP-bound widgets dim themselves during a
-    // reconnect cycle so the user can't act on stale remote state.
-    // Terminal panels are deliberately not blocked (local shells keep
-    // working; primary SSH terminals are locked at the engine level).
-    return div{
-        style = "width: 100%; height: 100%; position: relative; display: block",
-    }(
-        impl_->fileGrid(),
-        div{
-            style = observe(impl_->isInLostConnectionState).generate([this](){
-                return fmt::format("display: {};", impl_->isInLostConnectionState.value() ? "block" : "none");
-            }),
-            class_ = "session-panel-blocker",
-        }()
-    );
-    // clang-format on
+    return impl_->fileExplorerPanel.makeFileExplorerElement();
 }
 
 Session::Session(Params params)
@@ -871,15 +753,15 @@ std::optional<nlohmann::json> Session::getLayout() const
             {
                 "leftSide",
                 {
-                    {"flavor", fileGridFlavorToString(impl_->fileGrid.leftSide().flavor())},
+                    {"flavor", fileGridFlavorToString(impl_->fileExplorerPanel.localFileGridSide().flavor())},
                 },
             },
         },
     }};
-    if (impl_->fileGrid.rightSide())
+    if (impl_->fileExplorerPanel.remoteFileGridSide())
     {
         layoutObject["__extra"]["fileGrid"]["rightSide"] = {
-            {"flavor", fileGridFlavorToString(impl_->fileGrid.rightSide()->flavor())},
+            {"flavor", fileGridFlavorToString(impl_->fileExplorerPanel.remoteFileGridSide()->flavor())},
         };
     }
     return layoutObject;
@@ -887,62 +769,28 @@ std::optional<nlohmann::json> Session::getLayout() const
 
 void Session::setupFileGrid()
 {
-    impl_->fileGrid.onError(
-        [this](auto const& message)
+    impl_->fileExplorerPanel.setup();
+
+    // The sync dialog + progress dialog stay on Session; wire them in through
+    // the panel's setter so the grid's synchronize callback opens them.
+    impl_->fileExplorerPanel.setOnSynchronize(
+        [this](std::filesystem::path loc, std::filesystem::path rem)
         {
-            Log::error("File grid error: {}", message);
-            impl_->confirmDialog->open({
-                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                .headerText = "File Grid Error",
-                .text = message,
-                .buttons = ConfirmDialog::Button::Ok,
-                .neverShowAgainId = "fileGridError",
-            });
+            impl_->syncProgressDialog.open(
+                loc,
+                rem,
+                true,
+                true,
+                false,
+                [this, loc, rem](auto localEntries, auto remoteEntries)
+                {
+                    impl_->syncDialog.open(loc, rem, std::move(localEntries), std::move(remoteEntries));
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
+            Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
-
-    if (remoteSideModel())
-    {
-        remoteSideModel()->setItemUpdateFunction(
-            [this](bool sorted, bool reapplySelection)
-            {
-                if (remoteFileGridSide())
-                    remoteFileGridSide()->updateItems(sorted, reapplySelection);
-            }
-        );
-    }
-    localSideModel().setItemUpdateFunction(
-        [this](bool sorted, bool reapplySelection)
-        {
-            localFileGridSide().updateItems(sorted, reapplySelection);
-        }
-    );
-    if (remoteSideModel())
-    {
-        remoteSideModel()->setLocalModel(&localSideModel());
-        localSideModel().setRemoteModel(remoteSideModel());
-    }
-    else
-        localSideModel().setRemoteModel(nullptr);
-
-    auto onSync = [this](std::filesystem::path loc, std::filesystem::path rem) {
-        impl_->syncProgressDialog.open(
-            loc,
-            rem,
-            true,
-            true,
-            false,
-            [this, loc, rem](auto localEntries, auto remoteEntries)
-            {
-                impl_->syncDialog.open(loc, rem, std::move(localEntries), std::move(remoteEntries));
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            }
-        );
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    };
-    localFileGridSide().setOnSynchronize(onSync);
-    if (remoteFileGridSide())
-        remoteFileGridSide()->setOnSynchronize(onSync);
 }
 
 void Session::createSshEngine()
@@ -1245,13 +1093,6 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
 void Session::onTerminalConnectionLoss()
 {
     Log::debug("onTerminalConnectionLoss");
-    if (!impl_->isInLostConnectionState.value())
-        onConnectionLoss();
-}
-
-void Session::onFileExplorerConnectionClose()
-{
-    Log::debug("onFileExplorerConnectionClose");
     if (!impl_->isInLostConnectionState.value())
         onConnectionLoss();
 }
@@ -1726,14 +1567,14 @@ void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
         auto fileGridExtra = layoutExtra["fileGrid"];
         if (fileGridExtra.contains("leftSide") && fileGridExtra["leftSide"].contains("flavor"))
         {
-            impl_->fileGrid.leftSide().flavor(
+            impl_->fileExplorerPanel.localFileGridSide().flavor(
                 NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["leftSide"]["flavor"].get<std::string>())
             );
         }
         if (fileGridExtra.contains("rightSide") && fileGridExtra["rightSide"].contains("flavor") &&
-            impl_->fileGrid.rightSide())
+            impl_->fileExplorerPanel.remoteFileGridSide())
         {
-            impl_->fileGrid.rightSide()->flavor(
+            impl_->fileExplorerPanel.remoteFileGridSide()->flavor(
                 NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["rightSide"]["flavor"].get<std::string>())
             );
         }
@@ -1857,14 +1698,15 @@ void Session::initializeLayout()
             [this]() -> Nui::val
             {
                 // OpenFileExplorer
-                if (impl_->fileExplorerElement.value())
+                auto& fileExplorerElement = impl_->fileExplorerPanel.elementObservable();
+                if (fileExplorerElement.value())
                 {
                     Log::warn("There is already a file explorer, cannot open another one");
                     return Nui::val::undefined();
                 }
-                impl_->fileExplorerElement = Nui::Dom::makeStandaloneElement(makeFileExplorerElement());
+                fileExplorerElement = Nui::Dom::makeStandaloneElement(makeFileExplorerElement());
                 Nui::globalEventContext.executeActiveEventsImmediately();
-                return impl_->fileExplorerElement.value()->val();
+                return fileExplorerElement.value()->val();
             }
         )
     );
@@ -1874,14 +1716,15 @@ void Session::initializeLayout()
             [this]() -> Nui::val
             {
                 // Remove FileExplorer
-                if (!impl_->fileExplorerElement.value())
+                auto& fileExplorerElement = impl_->fileExplorerPanel.elementObservable();
+                if (!fileExplorerElement.value())
                 {
                     Log::warn("There is no file explorer to remove");
                     return Nui::val::undefined();
                 }
                 Nui::WebApi::Console::log("Removing file explorer element");
-                impl_->fileExplorerElement.value().reset();
-                impl_->fileExplorerElement.modifyNow();
+                fileExplorerElement.value().reset();
+                fileExplorerElement.modifyNow();
                 return Nui::val::undefined();
             }
         )
@@ -2153,11 +1996,9 @@ Nui::ElementRenderer Session::operator()()
 
 RemoteSideModel* Session::remoteSideModel()
 {
-    if (!remoteFileGridSide())
-        return nullptr;
-    return static_cast<RemoteSideModel*>(&remoteFileGridSide()->model());
+    return impl_->fileExplorerPanel.remoteSideModel();
 }
 LocalSideModel& Session::localSideModel()
 {
-    return static_cast<LocalSideModel&>(localFileGridSide().model());
+    return impl_->fileExplorerPanel.localSideModel();
 }

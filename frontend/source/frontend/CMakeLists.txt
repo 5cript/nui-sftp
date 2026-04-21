@@ -50,6 +50,7 @@ target_sources(
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         session_components/terminal_panel.cpp
+        session_components/file_explorer_panel.cpp
         sync_dialog/sync_dialog.cpp
         sync_dialog/sync_progress_dialog.cpp
         terminal/terminal_channel.cpp
