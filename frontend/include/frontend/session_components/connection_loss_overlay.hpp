@@ -26,7 +26,7 @@ class ConnectionLossOverlay
      */
     struct Params
     {
-        /** @brief Lumino dialog id prefix — the overlay appends its own suffix. */
+        /** @brief Lumino dialog id prefix the overlay appends its own suffix. */
         std::string sessionLayoutId;
 
         /** @brief User clicked the idle [Reconnect] button. */
@@ -45,7 +45,7 @@ class ConnectionLossOverlay
     /** @brief Produces the dialog + reactive body renderer. */
     Nui::ElementRenderer operator()();
 
-    /** @brief Opens the dialog — called by Session::onConnectionLoss. */
+    /** @brief Opens the dialog called by Session::onConnectionLoss. */
     void show();
 
     /**

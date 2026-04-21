@@ -44,20 +44,30 @@ namespace
                 {
                     .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
                     .showHiddenFiles = uiOptions.showHiddenFilesLocally,
-                    .onShowHiddenFilesChanged = [stateHolder](bool value) {
-                        stateHolder->loadModifySave([value](Persistence::State& state) {
-                            state.uiOptions.showHiddenFilesLocally = value;
-                        });
+                    .onShowHiddenFilesChanged =
+                        [stateHolder](bool value)
+                    {
+                        stateHolder->loadModifySave(
+                            [value](Persistence::State& state)
+                            {
+                                state.uiOptions.showHiddenFilesLocally = value;
+                            }
+                        );
                     },
                     .pageSize = uiOptions.fileGridPageSize,
                 },
                 {
                     .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
                     .showHiddenFiles = uiOptions.showHiddenFilesRemotely,
-                    .onShowHiddenFilesChanged = [stateHolder](bool value) {
-                        stateHolder->loadModifySave([value](Persistence::State& state) {
-                            state.uiOptions.showHiddenFilesRemotely = value;
-                        });
+                    .onShowHiddenFilesChanged =
+                        [stateHolder](bool value)
+                    {
+                        stateHolder->loadModifySave(
+                            [value](Persistence::State& state)
+                            {
+                                state.uiOptions.showHiddenFilesRemotely = value;
+                            }
+                        );
                     },
                     .pageSize = uiOptions.fileGridPageSize,
                 },
@@ -80,10 +90,15 @@ namespace
             {
                 .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
                 .showHiddenFiles = uiOptions.showHiddenFilesLocally,
-                .onShowHiddenFilesChanged = [stateHolder](bool value) {
-                    stateHolder->loadModifySave([value](Persistence::State& state) {
-                        state.uiOptions.showHiddenFilesLocally = value;
-                    });
+                .onShowHiddenFilesChanged =
+                    [stateHolder](bool value)
+                {
+                    stateHolder->loadModifySave(
+                        [value](Persistence::State& state)
+                        {
+                            state.uiOptions.showHiddenFilesLocally = value;
+                        }
+                    );
                 },
                 .pageSize = uiOptions.fileGridPageSize,
             },
@@ -153,8 +168,7 @@ void FileExplorerPanel::setup()
     if (auto* remote = static_cast<RemoteSideModel*>(impl_->fileGrid.rightModel()); remote)
     {
         remote->setOnFavoritesChanged(
-            [stateHolder = impl_->stateHolder, sessionName = impl_->sessionName](
-                std::vector<std::string> favs)
+            [stateHolder = impl_->stateHolder, sessionName = impl_->sessionName](std::vector<std::string> favs)
             {
                 stateHolder->loadModifySave(
                     [favs = std::move(favs), sessionName](Persistence::State& state)
@@ -211,9 +225,7 @@ void FileExplorerPanel::setup()
     }
 }
 
-void FileExplorerPanel::setOnSynchronize(
-    std::function<void(std::filesystem::path, std::filesystem::path)> onSync
-)
+void FileExplorerPanel::setOnSynchronize(std::function<void(std::filesystem::path, std::filesystem::path)> onSync)
 {
     localFileGridSide().setOnSynchronize(onSync);
     if (auto* remote = remoteFileGridSide(); remote)
@@ -226,7 +238,7 @@ Nui::ElementRenderer FileExplorerPanel::makeFileExplorerElement()
     using Nui::Elements::div;
 
     // clang-format off
-    // Per-panel view blocker — SFTP-bound widgets dim themselves during a
+    // Per-panel view blocker SFTP-bound widgets dim themselves during a
     // reconnect cycle so the user can't act on stale remote state.
     // Terminal panels are deliberately not blocked (local shells keep
     // working; primary SSH terminals are locked at the engine level).
@@ -313,8 +325,7 @@ RemoteSideModel* FileExplorerPanel::remoteSideModel()
     return static_cast<RemoteSideModel*>(&remoteFileGridSide()->model());
 }
 
-Nui::Observed<std::shared_ptr<Nui::Dom::Element>>&
-FileExplorerPanel::elementObservable()
+Nui::Observed<std::shared_ptr<Nui::Dom::Element>>& FileExplorerPanel::elementObservable()
 {
     return impl_->fileExplorerElement;
 }
