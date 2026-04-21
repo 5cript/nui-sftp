@@ -272,16 +272,6 @@ class Session
 
     void onConnectionLoss();
 
-    /**
-     * @brief Body renderer for the Session's lost-connection dialog.
-     *        Swaps between the idle [Reconnect] affordance and the
-     *        in-progress reconnect-cycle UI (attempt counter, countdown,
-     *        [Now], [Cancel]) based on the Session's reconnectCycleActive
-     *        observable.  The enclosing dialog provides its own header;
-     *        this produces only the body content.
-     */
-    Nui::ElementRenderer makeConnectionLostDialogBody();
-
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
