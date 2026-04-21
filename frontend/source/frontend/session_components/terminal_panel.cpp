@@ -85,10 +85,8 @@ namespace
         using Nui::Elements::div;
         using Nui::Elements::span;
 
-        // Derive a bar colour that reads as a distinct strip above the xterm.
-        // `color-mix(... 82% ..., black 18%)` darkens the terminal background
-        // without needing to know whether the theme is light or dark.  Falls
-        // back to a neutral dark when the theme omits `background`.
+        // Darken the xterm background 18% for a distinct toolbar strip that
+        // works on light and dark themes.
         const std::string barBg = terminalBackgroundColor.empty()
             ? std::string{"#1a1a1a"}
             : fmt::format("color-mix(in srgb, {} 82%, black 18%)", terminalBackgroundColor);
@@ -269,7 +267,7 @@ Nui::ElementRenderer TerminalPanel::makeLocalShellChannelElement(std::string con
     if (!found)
     {
         Log::error("No saved shell named '{}' (or not a shell-type session)", shellName);
-        // Emit a harmless placeholder — contentPanelManager will keep the tab
+        // Emit a harmless placeholder contentPanelManager will keep the tab
         // frame but nothing spawns. The session itself is unaffected.
         return div{}();
     }
@@ -311,10 +309,8 @@ Nui::ElementRenderer TerminalPanel::makeLocalShellChannelElement(std::string con
                         if (!impl_->frontendSessionManager->value())
                             return;
 
-                        // Keep the outer session tab title untouched — only the inner
-                        // Lumino tab reflects the local-shell process name.  Also refresh
-                        // the per-channel LocalShellMeta.cmdline so captureSnapshot picks
-                        // up the latest value without having to read xterm tab titles.
+                        // Rename only the Lumino tab (not the outer session title)
+                        // and keep LocalShellMeta.cmdline fresh for captureSnapshot.
                         auto onProcessChange = [this](Ids::ChannelId const& channelId, std::string const& cmdline)
                         {
                             if (auto metaIter = impl_->localShellMeta.find(channelId);
@@ -326,12 +322,9 @@ Nui::ElementRenderer TerminalPanel::makeLocalShellChannelElement(std::string con
                             Nui::globalEventContext.executeActiveEventsImmediately();
                         };
 
-                        // Record the shell's metadata under the assigned ChannelId as
-                        // soon as we get it, so captureSnapshot can hand the adopting
-                        // engine a complete LocalShellAdoption record.  The stored
-                        // copies of terminalOptions / termios / execOpts are the ones
-                        // in effect at spawn time — which matches current "new tabs
-                        // pick up the latest settings" semantics.
+                        // Record shell metadata under the assigned ChannelId so
+                        // captureSnapshot can build a LocalShellAdoption.  The
+                        // captured settings snapshot the spawn-time values.
                         auto onCreated = [this, shellName, terminalOptions, termios, execOpts, channelIdCell](
                                              std::optional<Ids::ChannelId> const& channelId,
                                              std::string const& info)
@@ -352,7 +345,7 @@ Nui::ElementRenderer TerminalPanel::makeLocalShellChannelElement(std::string con
                                 impl_->onChannelOpened(channelId, info);
                         };
 
-                        // Shell-specific terminalOptions — its colour theme, font,
+                        // Shell-specific terminalOptions its colour theme, font,
                         // cursor style etc. make each local-shell visibly distinguishable
                         // from the SSH terminal it sits next to.
                         impl_->frontendSessionManager->value()->createLocalShellChannel(
@@ -383,7 +376,7 @@ Nui::ElementRenderer TerminalPanel::makeAdoptedLocalShellChannelElement(LocalShe
     // Resolve the identity icon by looking up the shell config in persistence,
     // so the adopted terminal shows the same glyph the user configured.
     // Absent config (renamed / deleted since the snapshot was captured) is
-    // fine — resolveIdentityIcon falls back to a generic local-shell glyph.
+    // fine resolveIdentityIcon falls back to a generic local-shell glyph.
     std::string identityIconName;
     {
         auto state = impl_->stateHolder->stateCache().fullyResolve();
@@ -398,7 +391,7 @@ Nui::ElementRenderer TerminalPanel::makeAdoptedLocalShellChannelElement(LocalShe
     return div{}(
         observe(*impl_->frontendSessionManager),
         [this, adoption = std::move(adoption), backgroundColor, identityIconName]() -> Nui::ElementRenderer {
-            // Process id is known up-front — seed the cell so toolbar clicks
+            // Process id is known up-front seed the cell so toolbar clicks
             // work the instant the element materializes.
             auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(adoption.processId);
             return div{
@@ -479,7 +472,7 @@ void TerminalPanel::saveChannelToFile(Ids::ChannelId const& channelId)
         return;
     }
 
-    // Capture the dump synchronously — the dialog is async and by the time the
+    // Capture the dump synchronously the dialog is async and by the time the
     // user picks a path the xterm may have scrolled further, which is fine but
     // we want the save to reflect what was on screen at click time.
     auto dump = channel->getAllTextContent();
@@ -517,7 +510,7 @@ void TerminalPanel::copyChannelToClipboard(Ids::ChannelId const& channelId)
     }
 
     const auto dump = channel->getAllTextContent();
-    // See static/source/index.js — the shim wraps navigator.clipboard.writeText
+    // See static/source/index.js the shim wraps navigator.clipboard.writeText
     // and logs its own errors on the JS side.  Fire-and-forget here.
     Nui::val::global("writeTerminalDumpToClipboard")
         .call<void>("call", Nui::val::global("globalThis"), dump);
@@ -535,8 +528,7 @@ void TerminalPanel::copyChannelToClipboardPlain(Ids::ChannelId const& channelId)
         return;
     }
 
-    // Strip ANSI/control bytes on the JS side — it already has fast string
-    // primitives and the regex is easier to audit there than in C++.
+    // ANSI/control-byte stripping happens on the JS side.
     const auto dump = channel->getAllTextContent();
     Nui::val::global("writeTerminalPlainToClipboard")
         .call<void>("call", Nui::val::global("globalThis"), dump);
@@ -627,25 +619,19 @@ void TerminalPanel::onChannelLoss(Ids::ChannelId const& id)
 {
     Log::warn("Channel loss detected for channel '{}'", id.value());
 
-    // Local-shell channel death is a process exit, not a transport loss. Close
-    // the Lumino tab unconditionally — isInLostConnectionState is unrelated.
+    // Local-shell death is a process exit, not transport loss: close
+    // unconditionally.  For SSH channels, isInLostConnectionState gates it.
     const bool isLocalShell = impl_->frontendSessionManager->value() &&
         impl_->frontendSessionManager->value()->isLocalShellChannel(id);
 
-    // Forget the per-channel metadata — the process is gone.  Safe even if
-    // the channel was not a local-shell (the map lookup just misses).
     impl_->localShellMeta.erase(id);
 
     const bool inLostConnection = impl_->isInLostConnectionState && impl_->isInLostConnectionState();
     if (!isLocalShell && inLostConnection)
-        return; // SSH transport loss already confirmed: keep tab open so the user can save contents.
+        return; // SSH transport already lost; keep tab open for save.
 
-    // Race guard: on a connection drop, the Session::*::onDisconnect signal (which sets
-    // isInLostConnectionState) and sshTerminalOnExit_* both arrive from background threads.
-    // Depending on thread scheduling, onDisconnect may not yet have been processed when this
-    // callback fires. Defer the close decision by 100ms to let it arrive first.
-    // On a normal shell exit, onDisconnect never fires, so after the delay the flag is still
-    // false and the tab closes as expected.
+    // 100ms debounce: onDisconnect and sshTerminalOnExit race across threads;
+    // letting onDisconnect land first lets the above guard fire correctly.
     const std::string sessionLayoutId = impl_->sessionLayoutId;
     const std::string channelId = id.value();
     Nui::val::global("setTimeout")(

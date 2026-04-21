@@ -52,6 +52,8 @@ target_sources(
         session_components/terminal_panel.cpp
         session_components/file_explorer_panel.cpp
         session_components/connection_loss_overlay.cpp
+        session_components/session_layout_initializer.cpp
+        session_components/session_snapshot_manager.cpp
         sync_dialog/sync_dialog.cpp
         sync_dialog/sync_progress_dialog.cpp
         terminal/terminal_channel.cpp

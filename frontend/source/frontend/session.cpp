@@ -1,5 +1,5 @@
-#include <persistence/state/session_options.hpp>
 #include <frontend/session.hpp>
+#include <frontend/classes.hpp>
 #include <frontend/proto_session.hpp>
 #include <frontend/sync_dialog/sync_dialog.hpp>
 #include <frontend/sync_dialog/sync_progress_dialog.hpp>
@@ -7,49 +7,29 @@
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
 #include <frontend/terminal/file_engine.hpp>
-#include <frontend/session/session_helpers.hpp>
-#include <frontend/icon_from_name.hpp>
-#include <frontend/classes.hpp>
-#include <frontend/dialog/input_dialog.hpp>
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/terminal_panel.hpp>
 #include <frontend/session_components/file_explorer_panel.hpp>
 #include <frontend/session_components/connection_loss_overlay.hpp>
+#include <frontend/session_components/session_layout_initializer.hpp>
+#include <frontend/session_components/session_snapshot_manager.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
-#include <nui-file-explorer/file_grid.hpp>
-#include <persistence/state_holder.hpp>
-#include <constants/layouts.hpp>
+#include <persistence/state/session_options.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
-
-#include <script-nui-components/popup_menu.hpp>
-#include <script-nui-components/button.hpp>
-#include <script-nui-components/dialog.hpp>
-#include <script-nui-components/anchored_panel.hpp>
-#include <script-nui-components/spinner.hpp>
-
-#include <ui5-sap-icons/icons/save.hpp>
-#include <ui5-sap-icons/icons/copy.hpp>
-#include <ui5-sap-icons/icons/document-text.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
 #include <nui/event_system/event_context.hpp>
+#include <nui/frontend/rpc_client.hpp>
 #include <nui/frontend/element_renderer.hpp>
-#include <nui/event_system/listen.hpp>
-#include <nui/frontend/api/console.hpp>
-#include <nui/frontend/utility/delocalized.hpp>
 #include <nui/frontend/elements.hpp>
+#include <nui/frontend/elements/nil.hpp>
 #include <nui/frontend/attributes.hpp>
-#include <nui/frontend/filesystem/file_dialog.hpp>
 
-#include <algorithm>
-#include <deque>
-#include <ranges>
-#include <unordered_map>
 #include <vector>
 
 using namespace Nui;
@@ -58,11 +38,12 @@ using namespace Nui::Attributes;
 
 struct Session::Implementation
 {
-    // Prop Drill:
+    // Prop-drill
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
+    ConfirmDialog* confirmDialog;
 
-    // Session Ui Tab related:
+    // Tab identity
     std::string initialName;
     std::shared_ptr<Nui::Observed<std::string>> tabTitle;
     std::string sessionLayoutId;
@@ -71,133 +52,46 @@ struct Session::Implementation
     int tabId;
     Persistence::UiOptions uiOptions;
 
-    // Session Options Tab
+    // Engine config
     Persistence::SessionOptions engineOptions;
+    std::optional<std::string> layoutName;
 
-    // Add Tab Context Menu
-    ScriptNuiComponents::PopupMenu tabAddMenu{};
-
-    // Dialogs:
-    InputDialog* inputDialog;
-    ConfirmDialog* confirmDialog;
-
-    // Shared reactive flag: true while the SSH transport is considered lost.
-    // Declared here (ahead of the widgets that observe it) so downstream
-    // members can take a stable pointer during their own construction.
+    /**
+     * @brief True while the SSH transport is considered lost.  Declared ahead
+     *        of the widgets that observe it so they can take a stable pointer
+     *        during their own construction.
+     */
     Nui::Observed<bool> isInLostConnectionState{false};
 
-    // File Explorer panel (grid + per-panel view blocker)
+    // Widgets
     FileExplorerPanel fileExplorerPanel;
-    Nui::ListenRemover<Nui::Observed<std::shared_ptr<Nui::Dom::Element>>> fileExplorerListener{};
-
-    // Operation Queue for File Explorer
     OperationQueue operationQueue;
-    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> operationQueueElement;
-    Nui::ListenRemover<decltype(operationQueueElement)> operationQueueListener{};
-
-    // Layout Engine Related
-    std::weak_ptr<Nui::Dom::BasicElement> layoutHost;
-    std::optional<std::string> layoutName;
-    bool waitingForLayoutHost{false};
-
-    // Channels & FrontendSessionManager Connection
     Nui::Observed<std::unique_ptr<FrontendSessionManager>> frontendSessionManager;
-
-    // Terminal panel (channels, toolbar, save/copy, locked-mode input)
     std::unique_ptr<TerminalPanel> terminalPanel;
-
-    // Session Options
-    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
-    Nui::ListenRemover<decltype(sessionOptionsElement)> sessionOptionsListener{};
     SessionOptions sessionOptions;
-
-    // File Tracking
     FileTrackingPanel fileTrackingPanel;
-    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
-    Nui::ListenRemover<decltype(fileTrackingElement)> fileTrackingListener{};
-
-    // Sync Dialog
+    std::unique_ptr<SessionLayoutInitializer> layoutInitializer;
     SyncDialog syncDialog;
     SyncProgressDialog syncProgressDialog;
+    std::unique_ptr<ConnectionLossOverlay> connectionLossOverlay;
+    std::unique_ptr<SessionSnapshotManager> snapshotManager;
 
-    // Shutdown & Connection Status:
+    // Shutdown
     Nui::Observed<bool> inertEverything{false};
     std::function<void()> onShutdownComplete{};
 
+    // Reconnect plumbing (forwarded up to SessionArea)
     std::function<std::string(Session const* ptr, std::string const&)> disambiguateTitle;
-
-    // Reconnect plumbing:
     std::function<void(Session const*, SessionSnapshot)> requestReconnect;
     std::function<void(Session const*)> onReconnectFailed;
     std::function<void(Session const*)> onReconnectSucceeded;
     std::function<void(Session const*)> onReconnectCancel;
     std::function<void(Session const*)> onReconnectNow;
-    std::optional<SessionSnapshot> pendingResumeSnapshot;
-
-    // Lost-connection overlay: idle [Reconnect] button + in-progress cycle UI.
-    // Built in the Session constructor body (see Session::Session).
-    std::unique_ptr<ConnectionLossOverlay> connectionLossOverlay;
-    /**
-     * @brief Bulk OperationIds whose backend resume backups this Session is
-     *        responsible for cleaning up.  Populated from the snapshot's
-     *        bulk ResumableOps in applySnapshot — the destructor fires
-     *        SessionManager::discardBulkResume for each, so abandoned
-     *        backups don't sit in the registry until TTL eviction.  Adopt
-     *        already removes consumed entries server-side, so the discard
-     *        is a no-op in the happy path.
-     */
-    std::vector<Ids::OperationId> trackedBulkResumes;
-    /**
-     * @brief Populated from pendingResumeSnapshot.ejectedLocalShells just
-     *        before initializeLayout runs.  Each Lumino localShellFactory
-     *        invocation consumes the first entry whose shellConfigName
-     *        matches, adopting its backend process instead of spawning a
-     *        fresh one.  Unmatched entries at the end of layout restore are
-     *        dropped (the saved layout didn't have tabs for them).
-     */
-    std::vector<LocalShellAdoption> pendingLocalShellAdoptions;
-
-    /**
-     * @brief Scrollback dumps waiting to be replayed into the next opened
-     *        primary channel(s).  applySnapshot seeds this from the snapshot
-     *        because the channels don't yet exist at snapshot-apply time
-     *        (initializeLayout builds them later via the terminalFactory,
-     *        and each channel only gets a live xterm id inside its own
-     *        onMaterialize).  onOpenChannel pops the front entry and feeds
-     *        it to TerminalChannel::replayContent.
-     */
-    std::deque<std::string> pendingScrollbackReplay;
-
-    /**
-     * @brief Lumino layout waiting to be applied by initializeLayout.  Split
-     *        out of pendingResumeSnapshot so the adoption path (which runs
-     *        onOpenSession synchronously in the constructor, before the DOM
-     *        attaches) can still drive initializeLayout after the snapshot
-     *        has been consumed and reset.
-     */
-    nlohmann::json pendingResumeLayout{};
-
-    /**
-     * @brief Most recently retrieved remote username (from RpcSystem::getUsername
-     *        during onOpenSession).  Preserved into the snapshot so the
-     *        reconnect path can skip re-fetching + re-render the tab title
-     *        with the same user before async resolution finishes.
-     */
-    std::string remoteUsername;
-    bool sftpIsOpen{false};
-
-    /**
-     * @brief Rebuilds the "+" dock context menu's entries.
-     *
-     * Called from the constructor (initial build) and each time the user opens
-     * the menu (so the Local Shell list reflects the current set of saved shell
-     * sessions and the disabled state of single-instance panels is correct).
-     */
-    void rebuildTabAddMenu();
 
     explicit Implementation(Session::Params params)
         : stateHolder{params.stateHolder}
         , events{params.events}
+        , confirmDialog{params.confirmDialog}
         , initialName{std::move(params.initialName)}
         , tabTitle{std::make_shared<Nui::Observed<std::string>>(this->initialName)}
         , sessionLayoutId{Nui::val::global("generateId")().as<std::string>()}
@@ -206,8 +100,7 @@ struct Session::Implementation
         , tabId{params.tabId}
         , uiOptions{params.uiOptions}
         , engineOptions{std::move(params.sessionOptions)}
-        , inputDialog{params.newItemAskDialog}
-        , confirmDialog{params.confirmDialog}
+        , layoutName{std::move(params.layoutName)}
         , fileExplorerPanel{FileExplorerPanel::Params{
             .stateHolder = params.stateHolder,
             .events = params.events,
@@ -221,14 +114,9 @@ struct Session::Implementation
             .isInLostConnectionState = &this->isInLostConnectionState,
           }}
         , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
-        , operationQueueElement{}
-        , layoutHost{}
-        , layoutName{std::move(params.layoutName)}
         , frontendSessionManager{}
-        , sessionOptionsElement{}
         , sessionOptions{params.stateHolder, params.events, this->initialName, this->sessionLayoutId, params.confirmDialog}
         , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
-        , fileTrackingElement{}
         , syncDialog{params.confirmDialog, &this->operationQueue}
         , syncProgressDialog{&this->operationQueue}
         , disambiguateTitle{std::move(params.disambiguateTitle)}
@@ -237,16 +125,7 @@ struct Session::Implementation
         , onReconnectSucceeded{std::move(params.onReconnectSucceeded)}
         , onReconnectCancel{std::move(params.onReconnectCancel)}
         , onReconnectNow{std::move(params.onReconnectNow)}
-        , pendingResumeSnapshot{std::move(params.resumeFromSnapshot)}
     {
-        // Seed local-shell adoptions from the snapshot up front: the Lumino
-        // layout restore (kicked off by initializeLayout once the DOM host
-        // attaches) can race ahead of onOpenSession's applySnapshot, and if
-        // pendingLocalShellAdoptions is still empty when localShellFactory
-        // fires, every saved shell tab respawns as a fresh process instead
-        // of adopting its ejected backend process.
-        if (pendingResumeSnapshot.has_value())
-            pendingLocalShellAdoptions = pendingResumeSnapshot->ejectedLocalShells;
         syncDialog.setOnRecompare(
             [this](
                 std::filesystem::path loc,
@@ -268,184 +147,8 @@ struct Session::Implementation
         );
 
         fileExplorerPanel.dropLayoutMetadata(sessionLayoutId);
-
-        using namespace ScriptNuiComponents;
-        using namespace std::string_literals;
-
-        rebuildTabAddMenu();
-
-        sessionOptionsListener = Nui::smartListen(
-            sessionOptionsElement,
-            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
-            {
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "sessionOptions"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                    {
-                        if (mi)
-                            mi->disabled = dis;
-                    }
-                );
-            }
-        );
-        fileExplorerListener = Nui::smartListen(
-            fileExplorerPanel.elementObservable(),
-            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
-            {
-                Nui::WebApi::Console::log("fileExplorerElement changed.");
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "fileExplorer"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                    {
-                        if (mi)
-                        {
-                            Nui::WebApi::Console::log("Menu item found, modifying disabled to " + std::to_string(dis));
-                            mi->disabled = dis;
-                        }
-                    }
-                );
-            }
-        );
-        operationQueueListener = Nui::smartListen(
-            operationQueueElement,
-            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
-            {
-                Nui::WebApi::Console::log("operationQueueElement changed.");
-
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "operationQueue"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                    {
-                        if (mi)
-                            mi->disabled = dis;
-                    }
-                );
-            }
-        );
-        fileTrackingListener = Nui::smartListen(
-            fileTrackingElement,
-            [this](std::shared_ptr<Nui::Dom::Element> const& elem)
-            {
-                tabAddMenu.modifyItemByLabel(
-                    language->get("sessionFrontend", "fileTracking"),
-                    [dis = elem != nullptr](ScriptNuiComponents::PopupMenu::MenuItem* mi)
-                    {
-                        if (mi)
-                            mi->disabled = dis;
-                    }
-                );
-            }
-        );
     }
 };
-
-void Session::Implementation::rebuildTabAddMenu()
-{
-    using namespace ScriptNuiComponents;
-    using namespace std::string_literals;
-
-    const bool isSsh = std::holds_alternative<Persistence::SshSessionOptions>(engineOptions.engine);
-
-    std::vector<PopupMenu::Entry> items;
-    items.reserve(8);
-
-    items.push_back(PopupMenu::sectionHeader(language->get("sessionFrontend", "newTab")));
-
-    items.push_back(PopupMenu::item(
-        language->get("sessionFrontend", "terminal"),
-        std::string{},
-        [this]()
-        {
-            Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "terminal"s);
-            tabAddMenu.close();
-        }
-    ));
-
-    items.push_back(PopupMenu::item(
-        language->get("sessionFrontend", "fileExplorer"),
-        std::string{},
-        [this]()
-        {
-            tabAddMenu.close();
-            if (fileExplorerPanel.elementObservable().value())
-                return;
-            Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-explorer"s);
-        },
-        fileExplorerPanel.elementObservable().value() != nullptr
-    ));
-
-    if (isSsh)
-    {
-        items.push_back(PopupMenu::item(
-            language->get("sessionFrontend", "operationQueue"),
-            std::string{},
-            [this]()
-            {
-                tabAddMenu.close();
-                if (operationQueueElement.value())
-                    return;
-                Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "operation-queue"s);
-            },
-            operationQueueElement.value() != nullptr
-        ));
-        items.push_back(PopupMenu::item(
-            language->get("sessionFrontend", "fileTracking"),
-            std::string{},
-            [this]()
-            {
-                tabAddMenu.close();
-                if (fileTrackingElement.value())
-                    return;
-                Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-tracking"s);
-            },
-            fileTrackingElement.value() != nullptr
-        ));
-
-        // Dynamic Local Shell section: one entry per saved shell-type SessionOptions.
-        std::vector<std::pair<std::string, std::string>> shells; // (name, icon)
-        for (auto const& [name, sess] : stateHolder->stateCache().sessions)
-        {
-            if (sess.type == Persistence::TerminalEngineType::shell &&
-                std::holds_alternative<Persistence::ExecutingSessionOptions>(sess.engine))
-            {
-                shells.emplace_back(name, sess.icon);
-            }
-        }
-
-        items.push_back(PopupMenu::separator());
-        items.push_back(PopupMenu::sectionHeader(language->get("sessionFrontend", "localShell")));
-
-        if (shells.empty())
-        {
-            items.push_back(PopupMenu::item(
-                language->get("sessionFrontend", "noLocalShellsConfigured"),
-                std::string{},
-                []() {},
-                /*disabled=*/true,
-                std::string{},
-                language->get("sessionFrontend", "noLocalShellsTooltip")
-            ));
-        }
-        else
-        {
-            for (auto const& [name, icon] : shells)
-            {
-                items.push_back(PopupMenu::item(
-                    name,
-                    icon.empty() ? Nui::nil() : iconFromName(icon),
-                    [this, name]()
-                    {
-                        tabAddMenu.close();
-                        Nui::val::global("contentPanelManager")
-                            .call<void>("fullfillLastAddRequest", "local-shell:"s + name);
-                    }
-                ));
-            }
-        }
-    }
-
-    tabAddMenu.setItems(std::move(items));
-}
 
 int Session::tabId() const
 {
@@ -478,18 +181,13 @@ bool Session::supportsLocalShell() const
 
 void Session::openLocalShellChannel(std::string const& shellName)
 {
-    using namespace std::string_literals;
-
     if (!supportsLocalShell())
     {
-        Log::warn("openLocalShellChannel called on non-SSH session — ignored");
+        Log::warn("openLocalShellChannel called on non-SSH session, ignored");
         return;
     }
-
-    // The layout id carries the shell name so saved layouts round-trip and
-    // content_panel_manager can route factory calls to the right shell config.
-    Nui::val::global("contentPanelManager")
-        .call<void>("fullfillLastAddRequest", "local-shell:"s + shellName);
+    if (impl_->layoutInitializer)
+        impl_->layoutInitializer->openLocalShellChannel(shellName);
 }
 
 auto Session::makeLocalShellChannelElement(std::string const& shellName) -> Nui::ElementRenderer
@@ -517,10 +215,13 @@ auto Session::makeFileExplorerElement() -> Nui::ElementRenderer
 }
 
 Session::Session(Params params)
-    : impl_{std::make_unique<Implementation>(std::move(params))}
+    : impl_{nullptr}
 {
-    // Build the per-session reconnect overlay before any connection-loss
-    // handlers fire so onConnectionLoss can safely call show() on it.
+    // Pull the resume snapshot out of Params before Implementation consumes
+    // the rest; it seeds the SessionSnapshotManager built below.
+    auto initialResume = std::move(params.resumeFromSnapshot);
+    impl_ = std::make_unique<Implementation>(std::move(params));
+
     impl_->connectionLossOverlay = std::make_unique<ConnectionLossOverlay>(ConnectionLossOverlay::Params{
         .sessionLayoutId = impl_->sessionLayoutId,
         .onReconnectClicked = [this]() { reconnect(); },
@@ -534,9 +235,8 @@ Session::Session(Params params)
         },
     });
 
-    // Terminal panel owns terminal element factories, toolbar action handlers,
-    // locked-mode input handling, and per-local-shell metadata.  Must exist
-    // before the engine creators below so FSM callbacks can bind to it.
+    // TerminalPanel must exist before the engine creators below so FSM
+    // callbacks can bind to it.
     impl_->terminalPanel = std::make_unique<TerminalPanel>(TerminalPanel::Params{
         .stateHolder = impl_->stateHolder,
         .confirmDialog = impl_->confirmDialog,
@@ -549,6 +249,37 @@ Session::Session(Params params)
         .onChannelOpened = [this](std::optional<Ids::ChannelId> channelId, std::string const& info) {
             onOpenChannel(channelId, info);
         },
+    });
+
+    // Snapshot manager before layout initializer: the initializer consults it
+    // for the pending layout and the local-shell adoption queue.
+    impl_->snapshotManager = std::make_unique<SessionSnapshotManager>(SessionSnapshotManager::Params{
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .terminalPanel = impl_->terminalPanel.get(),
+        .fileExplorerPanel = &impl_->fileExplorerPanel,
+        .operationQueue = &impl_->operationQueue,
+        .layoutInitializer = nullptr,
+        .initialPending = std::move(initialResume),
+    });
+
+    impl_->layoutInitializer = std::make_unique<SessionLayoutInitializer>(SessionLayoutInitializer::Params{
+        .stateHolder = impl_->stateHolder,
+        .confirmDialog = impl_->confirmDialog,
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .layoutName = impl_->layoutName,
+        .engineOptions = &impl_->engineOptions,
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .isInLostConnectionState = &impl_->isInLostConnectionState,
+        .terminalPanel = impl_->terminalPanel.get(),
+        .fileExplorerPanel = &impl_->fileExplorerPanel,
+        .operationQueue = &impl_->operationQueue,
+        .fileTrackingPanel = &impl_->fileTrackingPanel,
+        .sessionOptions = &impl_->sessionOptions,
+        .pendingLocalShellAdoptions = impl_->snapshotManager->pendingLocalShellAdoptionsPtr(),
+        .takeResumeLayout = [this]() -> std::optional<nlohmann::json> {
+            return impl_->snapshotManager->takeResumeLayout();
+        },
+        .onLayoutCreationFailed = [this]() { closeSelf(); },
     });
 
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
@@ -571,23 +302,17 @@ Session::Session(Params params)
 Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
     : impl_{nullptr}
 {
-    // Engine + UI options always come from the proto — that's the whole
-    // reason the proto exists.  The resume snapshot, however, is only
-    // pulled from the proto when the caller didn't already supply one:
-    // SessionArea's ProtoSession flow captures a non-destructive snapshot
-    // at Reconnect click, enriches it with ejected local-shell adoptions
-    // at swap time, and hands it through Params.  Using the proto's copy
-    // would skip the enrichment step.
+    // Engine + UI options come from the proto; the caller's snapshot (already
+    // enriched with ejected local-shell adoptions) takes precedence over the
+    // proto's, so we only fall back to the proto when Params has none.
     params.sessionOptions = proto->takeSessionOptions();
     params.uiOptions = proto->takeUiOptions();
     if (!params.resumeFromSnapshot.has_value())
         params.resumeFromSnapshot = proto->takeResumeSnapshot();
 
+    auto initialResume = std::move(params.resumeFromSnapshot);
     impl_ = std::make_unique<Implementation>(std::move(params));
 
-    // Same lifecycle as the fresh ctor — build the reconnect overlay before
-    // onOpenSession-adoption side effects reach any handler that might
-    // call show() on it.
     impl_->connectionLossOverlay = std::make_unique<ConnectionLossOverlay>(ConnectionLossOverlay::Params{
         .sessionLayoutId = impl_->sessionLayoutId,
         .onReconnectClicked = [this]() { reconnect(); },
@@ -601,8 +326,6 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         },
     });
 
-    // Same construction as the fresh ctor — build the terminal panel before
-    // the FSM's locked-user-input handler rebind below binds into it.
     impl_->terminalPanel = std::make_unique<TerminalPanel>(TerminalPanel::Params{
         .stateHolder = impl_->stateHolder,
         .confirmDialog = impl_->confirmDialog,
@@ -617,11 +340,44 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         },
     });
 
-    // Extract the Lumino layout out of the snapshot before onOpenSession
-    // resets it; initializeLayout reads from pendingResumeLayout first so
-    // the DOM-attach-triggered restore still finds the saved panels.
-    if (impl_->pendingResumeSnapshot && !impl_->pendingResumeSnapshot->luminoLayout.is_null())
-        impl_->pendingResumeLayout = impl_->pendingResumeSnapshot->luminoLayout;
+    impl_->snapshotManager = std::make_unique<SessionSnapshotManager>(SessionSnapshotManager::Params{
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .terminalPanel = impl_->terminalPanel.get(),
+        .fileExplorerPanel = &impl_->fileExplorerPanel,
+        .operationQueue = &impl_->operationQueue,
+        .layoutInitializer = nullptr,
+        .initialPending = std::move(initialResume),
+    });
+
+    impl_->layoutInitializer = std::make_unique<SessionLayoutInitializer>(SessionLayoutInitializer::Params{
+        .stateHolder = impl_->stateHolder,
+        .confirmDialog = impl_->confirmDialog,
+        .sessionLayoutId = impl_->sessionLayoutId,
+        .layoutName = impl_->layoutName,
+        .engineOptions = &impl_->engineOptions,
+        .frontendSessionManager = &impl_->frontendSessionManager,
+        .isInLostConnectionState = &impl_->isInLostConnectionState,
+        .terminalPanel = impl_->terminalPanel.get(),
+        .fileExplorerPanel = &impl_->fileExplorerPanel,
+        .operationQueue = &impl_->operationQueue,
+        .fileTrackingPanel = &impl_->fileTrackingPanel,
+        .sessionOptions = &impl_->sessionOptions,
+        .pendingLocalShellAdoptions = impl_->snapshotManager->pendingLocalShellAdoptionsPtr(),
+        .takeResumeLayout = [this]() -> std::optional<nlohmann::json> {
+            return impl_->snapshotManager->takeResumeLayout();
+        },
+        .onLayoutCreationFailed = [this]() { closeSelf(); },
+    });
+
+    // Copy the pending Lumino layout out of the snapshot before onOpenSession
+    // resets it, so the DOM-attach-triggered restore still finds the panels.
+    if (impl_->snapshotManager->hasPending() &&
+        !impl_->snapshotManager->pending().luminoLayout.is_null())
+    {
+        impl_->snapshotManager->seedPendingResumeLayout(
+            impl_->snapshotManager->pending().luminoLayout
+        );
+    }
 
     // Move the already-opened FSM out of the proto and rebind its host-level
     // callbacks from the proto's no-ops onto this Session's handlers.
@@ -638,58 +394,28 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         sshEngine->setOnConnectionLoss([this]() { onTerminalConnectionLoss(); });
     }
 
-    // SSH is the only path that goes through ProtoSession today; local shells
-    // still use the fresh constructor.  We still build the file grid so the
-    // remote side is ready when the snapshot's file-explorer state is applied.
+    // SSH is the only path through ProtoSession today, but build the file
+    // grid regardless so the remote side is ready for snapshot application.
     setupFileGrid();
 
-    // Drive the post-open success branch synchronously.  The transport is
-    // already up, so simulating onOpenSession(true, …) here is the shortest
-    // path to re-establishing the file grid, SFTP channel, scrollback replay
-    // queue, and tab title — everything the fresh path gets via the open()
-    // callback.  onOpenSession clears pendingResumeSnapshot as part of its
-    // work; pendingResumeLayout (saved above) takes over for the later
-    // DOM-attach-triggered initializeLayout.
+    // Transport is already up: drive the post-open success branch synchronously
+    // rather than waiting on an open() callback.
     onOpenSession(true, "adopted from proto-session");
-
-    // `proto` goes out of scope here and is destroyed — it's now an empty
-    // shell with no FSM, no snapshot, nothing useful.
 }
 
 std::optional<nlohmann::json> Session::getLayout() const
 {
-    // session layout id is not the name in the setting, but the id for the lumino datastructure in the
-    // contentPanelManager where this session lives in.
-    auto layout = Nui::val::global("contentPanelManager").call<Nui::val>("getPanelLayout", impl_->sessionLayoutId);
-    if (layout.isUndefined())
+    if (!impl_->layoutInitializer)
         return std::nullopt;
-    auto layoutObject = nlohmann::json::parse(Nui::JSON::stringify(layout));
-    layoutObject["__extra"] = {{
-        "fileGrid",
-        {
-            {
-                "leftSide",
-                {
-                    {"flavor", fileGridFlavorToString(impl_->fileExplorerPanel.localFileGridSide().flavor())},
-                },
-            },
-        },
-    }};
-    if (impl_->fileExplorerPanel.remoteFileGridSide())
-    {
-        layoutObject["__extra"]["fileGrid"]["rightSide"] = {
-            {"flavor", fileGridFlavorToString(impl_->fileExplorerPanel.remoteFileGridSide()->flavor())},
-        };
-    }
-    return layoutObject;
+    return impl_->layoutInitializer->getLayout();
 }
 
 void Session::setupFileGrid()
 {
     impl_->fileExplorerPanel.setup();
 
-    // The sync dialog + progress dialog stay on Session; wire them in through
-    // the panel's setter so the grid's synchronize callback opens them.
+    // Sync dialog + progress dialog stay on Session; wire them through the
+    // panel's synchronize callback.
     impl_->fileExplorerPanel.setOnSynchronize(
         [this](std::filesystem::path loc, std::filesystem::path rem)
         {
@@ -714,10 +440,9 @@ void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");
 
-    // Eager-construct the aux ExecutingTerminalEngine so Session::applySnapshot
-    // can adopt ejected local-shell channels on a reconnect even before the
-    // user opens an interactive local-shell tab.  Cheap — open() returns
-    // immediately.
+    // Eager-construct the aux ExecutingTerminalEngine so applySnapshot can
+    // adopt ejected local-shell channels on a reconnect even before the user
+    // opens an interactive local-shell tab.
     impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
         std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
             .sessionOptions = impl_->engineOptions,
@@ -761,37 +486,10 @@ void Session::createExecutingEngine()
     openLocalFilesystem();
 }
 
-Session::~Session()
-{
-    // Discard any backend resume backups this session is responsible for.
-    // Adopt already removes consumed entries server-side, so this is a
-    // no-op in the happy path; it matters when the user closes the tab
-    // without ever reaching applySnapshot, or when applySnapshot ran but
-    // adoptBulkResume failed and left entries in the registry.
-    if (!impl_->trackedBulkResumes.empty())
-    {
-        Nui::val opIds = Nui::val::array();
-        std::size_t idx = 0;
-        for (auto const& opId : impl_->trackedBulkResumes)
-            opIds.set(idx++, opId.value());
-        Nui::val args = Nui::val::object();
-        args.set("operationIds", opIds);
-        Nui::RpcClient::callWithBackChannel(
-            "SessionManager::discardBulkResume",
-            [count = impl_->trackedBulkResumes.size()](Nui::val val) {
-                if (val.hasOwnProperty("error"))
-                    Log::warn("discardBulkResume failed for {} id(s): {}", count, val["error"].as<std::string>());
-            },
-            args
-        );
-    }
-}
-
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(Session);
+ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Session);
 
 void Session::openLocalFilesystem()
 {
-    // initial navigate to default path:
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::getHome",
         [this](Nui::val response)
@@ -837,7 +535,7 @@ void Session::openSftp(std::string const& username, bool forceOpen)
         if (forceOpen || opts.openSftpByDefault)
         {
             Log::info("Opening SFTP by default");
-            impl_->sftpIsOpen = true;
+            impl_->snapshotManager->setSftpIsOpen(true);
             auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
             auto fileEngine = std::make_shared<FileEngine>(sshTerminalEngine);
 
@@ -891,10 +589,9 @@ void Session::onOpenSession(bool success, std::string const& info)
 {
     if (!success)
     {
-        // Reconnect path: don't show a dialog or close the tab — signal
-        // SessionArea to schedule the next retry.  SessionArea keeps the
-        // snapshot, so we don't need to preserve anything locally.
-        if (impl_->pendingResumeSnapshot.has_value() && impl_->onReconnectFailed)
+        // Reconnect path: let SessionArea schedule the next retry.  It keeps
+        // the snapshot, so no local preservation needed.
+        if (impl_->snapshotManager && impl_->snapshotManager->hasPending() && impl_->onReconnectFailed)
         {
             Log::warn("Reconnect attempt failed: {}", info);
             impl_->onReconnectFailed(this);
@@ -919,28 +616,28 @@ void Session::onOpenSession(bool success, std::string const& info)
         {
             const auto& sshSessionOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
 
-            // Reconnect shortcut: the old Session already resolved the username.
-            // Rewriting the tab title + opening SFTP synchronously avoids a
-            // visible "errorName" flash during the RpcSystem::getUsername round
-            // trip.  We still fire the RPC on fresh opens.
-            if (impl_->pendingResumeSnapshot.has_value())
+            // Reconnect shortcut: reuse the username from the old Session to
+            // avoid an "errorName" flash during RpcSystem::getUsername.
+            if (impl_->snapshotManager && impl_->snapshotManager->hasPending())
             {
-                const auto& snapshot = *impl_->pendingResumeSnapshot;
+                const auto& snapshot = impl_->snapshotManager->pending();
                 const auto& user = snapshot.remoteUsername;
                 auto host = sshSessionOptions.host;
                 const auto port = sshSessionOptions.port.value_or(22);
                 if (host.find(":") != std::string::npos)
                     host = "[" + host + "]";
                 *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
-                impl_->remoteUsername = user;
-                if (snapshot.sftpWasOpen)
+                impl_->snapshotManager->setRemoteUsername(user);
+                const bool sftpWasOpen = snapshot.sftpWasOpen;
+                if (sftpWasOpen)
                     openSftp(user, /*forceOpen=*/true);
                 applySnapshot(snapshot);
                 if (impl_->onReconnectSucceeded)
                     impl_->onReconnectSucceeded(this);
-                impl_->pendingResumeSnapshot.reset();
+                impl_->snapshotManager->resetPending();
                 impl_->frontendSessionManager.value()->focusFirst();
-                initializeLayout();
+                if (impl_->layoutInitializer)
+                    impl_->layoutInitializer->initialize();
                 return;
             }
 
@@ -962,7 +659,7 @@ void Session::onOpenSession(bool success, std::string const& info)
                     if (host.find(":") != std::string::npos)
                         host = "[" + host + "]";
                     *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
-                    impl_->remoteUsername = user;
+                    impl_->snapshotManager->setRemoteUsername(user);
 
                     openSftp(user);
                 }
@@ -970,7 +667,8 @@ void Session::onOpenSession(bool success, std::string const& info)
         }
 
         impl_->frontendSessionManager.value()->focusFirst();
-        initializeLayout();
+        if (impl_->layoutInitializer)
+            impl_->layoutInitializer->initialize();
     }
 }
 
@@ -985,22 +683,16 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
     Log::info("Channel opened successfully: {}", channelId->value());
 
     // Reconnect path: drain one scrollback dump into this channel iff it is
-    // a primary (SSH) channel.  applySnapshot populates the queue before the
-    // layout restore builds any channels, so we can't replay at snapshot-apply
-    // time.  The queue is consumed in the same order primary channels finish
-    // opening, which matches the FSM iteration order captureSnapshot used.
-    // Local-shell adoption has its own replay path (FrontendSessionManager::
-    // adoptChannel handles savedScrollback directly), so we must not pop on
-    // their onOpenChannel or a primary's dump would get sent to a shell.
-    if (!impl_->pendingScrollbackReplay.empty() && impl_->frontendSessionManager.value())
+    // a primary (SSH) channel.  Local-shell adoption has its own replay path
+    // (FrontendSessionManager::adoptChannel handles savedScrollback directly).
+    if (impl_->snapshotManager && impl_->frontendSessionManager.value())
     {
         impl_->frontendSessionManager.value()->forEachChannel(
             FrontendSessionManager::EngineFilter::PrimaryOnly,
             [&channelId, this](Ids::ChannelId const& cid, TerminalChannel& channel) {
                 if (cid != *channelId)
                     return true;
-                channel.replayContent(impl_->pendingScrollbackReplay.front());
-                impl_->pendingScrollbackReplay.pop_front();
+                impl_->snapshotManager->replayScrollbackFor(cid, channel);
                 return false;
             }
         );
@@ -1028,8 +720,8 @@ void Session::onConnectionLoss()
         return;
     }
 
-    // Only lock and snapshot the primary (SSH) channels — local-shell channels
-    // are independent of the transport and must keep functioning.
+    // Only lock the primary (SSH) channels; local-shell channels are
+    // transport-independent and must keep functioning.
     impl_->frontendSessionManager.value()->connectionLossMode(
         true, FrontendSessionManager::EngineFilter::PrimaryOnly
     );
@@ -1072,17 +764,10 @@ void Session::closeSelf()
             impl_->closeSelf(this);
     };
 
-    // Always dispose the FrontendSessionManager first, for BOTH engine types.
-    // Skipping this path (the previous behaviour for ExecutingSessionOptions)
-    // let widget detach during removePanel start an async channel-dispose chain
-    // (via the deleter → onChannelClosedByUser → FSM::closeChannel → engine →
-    // ProcessStore::exit RPC) whose completion callback captured `this` through
-    // ExecutingTerminalEngine::Implementation — when the RPC response arrived
-    // after Session destruction it read freed memory as `impl_->termId`,
-    // producing the "Failed to get terminal with id to dispose it: <garbage>"
-    // UAF crash. Disposing the FSM first drains every channel's RPC while the
-    // Session is still alive; subsequent deleter-triggered closeChannel calls
-    // hit the `guardDisposal` short-circuit and do nothing.
+    // Dispose the FSM before removePanel for both engine types.  Otherwise
+    // the deleter-triggered async channel-close chain can outlive the Session
+    // and read freed memory in its RPC completion (UAF when the response for
+    // ProcessStore::exit arrives after ~Session).
     if (impl_->frontendSessionManager.value())
     {
         Log::info("Session shutdown started.");
@@ -1117,228 +802,29 @@ bool Session::isInLostConnectionState() const
 
 SessionSnapshot Session::captureSnapshot(bool withEjection)
 {
-    SessionSnapshot out;
-
-    // Primary SSH channel scrollback, in FSM iteration order.  Must be read
-    // BEFORE the FSM is disposed — getAllTextContent goes through the xterm
-    // serializeAddon, which lives inside the terminal DOM element.
-    if (impl_->frontendSessionManager.value())
-    {
-        impl_->frontendSessionManager.value()->forEachChannel(
-            FrontendSessionManager::EngineFilter::PrimaryOnly,
-            [&out](Ids::ChannelId const&, TerminalChannel& channel) {
-                out.primaryChannelScrollback.push_back(channel.getAllTextContent());
-                return true;
-            }
-        );
-    }
-
-    // File-explorer side state
-    auto captureSide = [](NuiFileExplorer::Side& side) {
-        FileExplorerSideSnapshot snap;
-        snap.currentPath = side.path();
-        snap.flavor = side.flavor();
-        snap.showHiddenFiles = side.showHiddenFiles();
-        snap.iconSize = side.iconSize();
-        snap.iconSpacing = side.iconSpacing();
-        snap.sort = side.sort();
-        snap.placesOpen = side.placesOpen();
-        snap.placesWide = side.placesWide();
-        return snap;
-    };
-    out.local = captureSide(localFileGridSide());
-    if (auto* remote = remoteFileGridSide(); remote)
-        out.remote = captureSide(*remote);
-
-    out.remoteUsername = impl_->remoteUsername;
-    out.sftpWasOpen = impl_->sftpIsOpen;
-    out.inFlightOps = impl_->operationQueue.snapshotInFlight();
-    Log::info("captureSnapshot: captured {} in-flight operation(s)", out.inFlightOps.size());
-
-    // Local-shell channels: optionally evict them from the aux engine so the
-    // adopting Session can pick them up at the backend level.  We skip this
-    // when captureSnapshot is used non-destructively (ProtoSession flow —
-    // the real eject happens later via ejectLocalShellsForHandoff at the
-    // moment of swap, so the preserved old Session keeps working local
-    // shells if the user cancels the cycle).
-    if (withEjection)
-        out.ejectedLocalShells = ejectLocalShellsForHandoff();
-
-    // Lumino layout — reuses the same serialisation getLayout() produces for
-    // layout persistence, so the reconnect restore is byte-compatible.
-    if (auto layout = getLayout(); layout)
-        out.luminoLayout = std::move(*layout);
-
-    return out;
+    return impl_->snapshotManager->capture(withEjection);
 }
 
 std::vector<LocalShellAdoption> Session::ejectLocalShellsForHandoff()
 {
-    std::vector<LocalShellAdoption> out;
-    if (!impl_->frontendSessionManager.value())
-        return out;
-
-    // Dump scrollback while the frontend wrappers still exist, THEN eject.
-    // Ejection destroys the frontend ExecutingChannel (unregistering its
-    // receivers) but leaves the backend process alive, ready to be adopted
-    // by the new Session's aux engine.
-    std::unordered_map<Ids::ChannelId, std::string, Ids::IdHash> auxScrollback;
-    impl_->frontendSessionManager.value()->forEachChannel(
-        FrontendSessionManager::EngineFilter::LocalShellOnly,
-        [&auxScrollback](Ids::ChannelId const& channelId, TerminalChannel& channel) {
-            auxScrollback.emplace(channelId, channel.getAllTextContent());
-            return true;
-        }
-    );
-
-    auto* auxEngine = impl_->frontendSessionManager.value()->auxiliaryLocalShellEngine();
-    if (!auxEngine)
-        return out;
-
-    auto ejected = auxEngine->ejectAllChannels();
-    out.reserve(ejected.size());
-    for (auto const& entry : ejected)
-    {
-        auto const* meta = impl_->terminalPanel->findLocalShellMeta(entry.processId);
-        if (!meta)
-        {
-            Log::warn(
-                "Ejected local-shell '{}' has no tracked metadata — dropping",
-                entry.processId.value()
-            );
-            continue;
-        }
-
-        std::string scrollback;
-        if (auto sbIter = auxScrollback.find(entry.processId); sbIter != auxScrollback.end())
-            scrollback = std::move(sbIter->second);
-
-        out.push_back(
-            LocalShellAdoption{
-                .processId = entry.processId,
-                .shellConfigName = meta->shellConfigName,
-                .cmdline = meta->cmdline,
-                .terminalOptions = meta->terminalOptions,
-                .termios = meta->termios,
-                .execOpts = meta->execOpts,
-                .savedScrollback = std::move(scrollback),
-                .stdoutReceptacle = entry.stdoutReceptacle,
-                .stderrReceptacle = entry.stderrReceptacle,
-            }
-        );
-    }
-    // After ejection the engine's channel map is empty; clear our own
-    // tracking to match.  Any remaining entries would be stale.
-    impl_->terminalPanel->clearLocalShellMeta();
-    return out;
+    return impl_->snapshotManager->ejectLocalShellsForHandoff();
 }
 
 void Session::applySnapshot(SessionSnapshot const& snapshot)
 {
-    // File-explorer side prefs — apply before navigation so the first listing
-    // renders with the correct flavor / hidden-file visibility.
-    auto applySide = [](NuiFileExplorer::Side& side, FileExplorerSideSnapshot const& snap) {
-        side.flavor(snap.flavor);
-        side.iconSize(snap.iconSize);
-        side.iconSpacing(snap.iconSpacing);
-        side.showHiddenFiles(snap.showHiddenFiles);
-        side.sort(snap.sort);
-        side.placesOpen(snap.placesOpen);
-        side.path(snap.currentPath);
-    };
-    applySide(localFileGridSide(), snapshot.local);
-    if (auto* remote = remoteFileGridSide(); remote)
-        applySide(*remote, snapshot.remote);
-
-    // Queue scrollback for replay into primary channels as they open.  On
-    // the reconnect path applySnapshot fires before initializeLayout has
-    // built the channels (and even after that, each xterm only gets a live
-    // termId inside its own onMaterialize), so iterating frontend channels
-    // here would find none.  onOpenChannel drains the front entry per
-    // successfully-opened primary channel.  Captured order matches the FSM
-    // iteration order used in captureSnapshot.
-    impl_->pendingScrollbackReplay.clear();
-    for (auto const& dump : snapshot.primaryChannelScrollback)
-        impl_->pendingScrollbackReplay.push_back(dump);
-
-    // Re-enqueue interrupted operations.  Single-file kinds go through
-    // OperationQueue::enqueueResumable directly; bulk kinds are adopted
-    // server-side via SessionManager::adoptBulkResume so the backend's
-    // saved entry list never crosses the IPC boundary.  Their OperationIds
-    // are also remembered for destructor-time cleanup.
-    Log::info(
-        "applySnapshot: replaying {} in-flight operation(s) from snapshot",
-        snapshot.inFlightOps.size()
-    );
-    std::vector<std::string> bulkResumeIds;
-    for (auto const& op : snapshot.inFlightOps)
-    {
-        switch (op.kind)
-        {
-            case ResumableOp::Kind::Download:
-            case ResumableOp::Kind::Upload:
-            case ResumableOp::Kind::Delete:
-            case ResumableOp::Kind::Rename:
-                impl_->operationQueue.enqueueResumable(op);
-                break;
-            case ResumableOp::Kind::BulkDownload:
-            case ResumableOp::Kind::BulkUpload:
-            case ResumableOp::Kind::BulkDelete:
-                if (op.operationId.isValid())
-                {
-                    bulkResumeIds.push_back(op.operationId.value());
-                    impl_->trackedBulkResumes.push_back(op.operationId);
-                }
-                break;
-        }
-    }
-    if (!bulkResumeIds.empty() && impl_->frontendSessionManager.value() &&
-        impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
-    {
-        auto* sshTerminalEngine =
-            static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
-        Nui::val args = Nui::val::object();
-        args.set("sessionId", sshTerminalEngine->sshSessionId().value());
-        Nui::val opIds = Nui::val::array();
-        for (std::size_t idx = 0; idx < bulkResumeIds.size(); ++idx)
-            opIds.set(idx, bulkResumeIds[idx]);
-        args.set("operationIds", opIds);
-        Nui::RpcClient::callWithBackChannel(
-            "SessionManager::adoptBulkResume",
-            [count = bulkResumeIds.size()](Nui::val val) {
-                if (val.hasOwnProperty("error"))
-                {
-                    Log::error(
-                        "adoptBulkResume failed for {} bulk(s): {}",
-                        count,
-                        val["error"].as<std::string>()
-                    );
-                }
-                else
-                {
-                    Log::info("adoptBulkResume queued {} bulk operation(s)", count);
-                }
-            },
-            args
-        );
-    }
-
-    // pendingLocalShellAdoptions is seeded in the Implementation constructor
-    // from pendingResumeSnapshot — by the time applySnapshot runs, Lumino
-    // layout restore may already have consumed entries from it, so we must
-    // not overwrite what's left with the raw snapshot list.
+    impl_->snapshotManager->apply(snapshot);
 }
 
 void Session::reconnect()
 {
     if (!impl_->isInLostConnectionState.value())
     {
-        Log::warn("Session::reconnect called outside the lost-connection state — ignoring");
+        Log::warn("Session::reconnect called outside the lost-connection state, ignoring");
         return;
     }
     if (impl_->connectionLossOverlay && impl_->connectionLossOverlay->isReconnectCycleActive())
     {
-        Log::warn("Session::reconnect called while a reconnect cycle is already active — ignoring");
+        Log::warn("Session::reconnect called while a reconnect cycle is already active, ignoring");
         return;
     }
     if (!impl_->requestReconnect)
@@ -1348,11 +834,9 @@ void Session::reconnect()
     }
 
     Log::info("Session::reconnect: capturing snapshot and handing off to SessionArea");
-    // Non-destructive capture: the old Session stays alive (user sees its
-    // lost-connection overlay with the reconnect cycle UI on top) while a
-    // ProtoSession probes the transport.  SessionArea calls back to
-    // ejectLocalShellsForHandoff on this Session only at the moment of
-    // swap, so cancelling mid-cycle leaves local shells working.
+    // Non-destructive capture: the old Session stays alive while a ProtoSession
+    // probes the transport.  Local-shell ejection happens at the swap moment
+    // via ejectLocalShellsForHandoff, so cancelling keeps shells working.
     auto snapshot = captureSnapshot(/*withEjection=*/false);
     impl_->requestReconnect(this, std::move(snapshot));
 }
@@ -1383,11 +867,9 @@ void Session::setReconnectUiCountdown(int seconds)
 
 std::optional<SessionSnapshot> Session::takePendingSnapshot()
 {
-    if (!impl_->pendingResumeSnapshot)
+    if (!impl_->snapshotManager)
         return std::nullopt;
-    auto out = std::move(*impl_->pendingResumeSnapshot);
-    impl_->pendingResumeSnapshot.reset();
-    return out;
+    return impl_->snapshotManager->takePendingSnapshot();
 }
 
 std::string Session::name() const
@@ -1413,445 +895,15 @@ void Session::visible(bool value)
         impl_->frontendSessionManager.value()->focusFirst();
 }
 
-auto Session::makeOperationQueueElement() -> Nui::ElementRenderer
-{
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-    namespace Snc = ScriptNuiComponents;
-
-    // clang-format off
-    return div{
-        style = "width: 100%; height: 100%; position: relative; display: block",
-    }(
-        impl_->operationQueue(),
-        div{
-            style = observe(impl_->isInLostConnectionState).generate([this](){
-                return fmt::format("display: {};", impl_->isInLostConnectionState.value() ? "block" : "none");
-            }),
-            class_ = "session-panel-blocker",
-        }()
-    );
-    // clang-format on
-}
-
-auto Session::makeFileTrackingElement() -> Nui::ElementRenderer
-{
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-
-    // clang-format off
-    return div{
-        style = "width: 100%; height: 100%; position: relative; display: block",
-    }(
-        impl_->fileTrackingPanel(),
-        div{
-            style = observe(impl_->isInLostConnectionState).generate([this](){
-                return fmt::format("display: {};", impl_->isInLostConnectionState.value() ? "block" : "none");
-            }),
-            class_ = "session-panel-blocker",
-        }()
-    );
-    // clang-format on
-}
-
 void Session::onChannelClosedByUser(Ids::ChannelId const& channelId)
 {
     impl_->terminalPanel->onChannelClosedByUser(channelId);
 }
 
-void Session::loadLayoutExtras(nlohmann::json const& layoutExtra)
-{
-    if (layoutExtra.contains("fileGrid"))
-    {
-        auto fileGridExtra = layoutExtra["fileGrid"];
-        if (fileGridExtra.contains("leftSide") && fileGridExtra["leftSide"].contains("flavor"))
-        {
-            impl_->fileExplorerPanel.localFileGridSide().flavor(
-                NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["leftSide"]["flavor"].get<std::string>())
-            );
-        }
-        if (fileGridExtra.contains("rightSide") && fileGridExtra["rightSide"].contains("flavor") &&
-            impl_->fileExplorerPanel.remoteFileGridSide())
-        {
-            impl_->fileExplorerPanel.remoteFileGridSide()->flavor(
-                NuiFileExplorer::fileGridFlavorFromString(fileGridExtra["rightSide"]["flavor"].get<std::string>())
-            );
-        }
-    }
-}
-
-void Session::initializeLayout()
-{
-    Log::info("Trying to initialize session layout...");
-
-    Nui::val element;
-    if (auto host = impl_->layoutHost.lock(); host)
-    {
-        Log::info("Layout host found, initializing layout");
-        element = host->val();
-    }
-    else
-    {
-        Log::info("Waiting for layout host");
-        impl_->waitingForLayoutHost = true;
-        return;
-    }
-
-    std::optional<nlohmann::json> layout = std::nullopt;
-
-    // Reconnect path: prefer the snapshot's layout over the named saved one.
-    // This round-trips the exact set of panels (terminals, file explorer,
-    // local-shell tabs) the user had open at the moment of disconnection.
-    // Adoption routes through pendingResumeLayout because its onOpenSession
-    // resets the snapshot before the DOM-triggered initializeLayout runs;
-    // fresh-reconnect still has the snapshot around the first time through.
-    if (!impl_->pendingResumeLayout.is_null())
-    {
-        Log::info("Initializing layout from pending resume layout");
-        layout = impl_->pendingResumeLayout;
-        impl_->pendingResumeLayout = nlohmann::json{};
-    }
-    else if (impl_->pendingResumeSnapshot && !impl_->pendingResumeSnapshot->luminoLayout.is_null())
-    {
-        Log::info("Initializing layout from resume snapshot");
-        layout = impl_->pendingResumeSnapshot->luminoLayout;
-    }
-    else if (impl_->layoutName != Constants::defaultLayoutName)
-    {
-        if (impl_->engineOptions.layouts && impl_->layoutName)
-        {
-            if (auto iter = impl_->engineOptions.layouts->find(*impl_->layoutName);
-                iter != impl_->engineOptions.layouts->end())
-            {
-                layout = iter->second;
-            }
-            else
-            {
-                Log::warn("Layout name not found: {}", *impl_->layoutName);
-            }
-        }
-    }
-
-    Log::info(
-        "Initializing layout with name '{}': {}",
-        impl_->layoutName.value_or("(none)"),
-        layout ? layout->dump() : "(none)"
-    );
-
-    if (layout && layout->contains("__extra"))
-        loadLayoutExtras((*layout)["__extra"]);
-
-    auto addPanelArgument = Nui::val::object();
-    addPanelArgument.set("host", element);
-    addPanelArgument.set("id", impl_->sessionLayoutId);
-    addPanelArgument.set("engineType", impl_->frontendSessionManager.value()->engine().engineName());
-    addPanelArgument.set("layoutString", layout ? Nui::val(layout->dump()) : Nui::val::undefined());
-    addPanelArgument.set(
-        "terminalFactory",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                Nui::WebApi::Console::log("Channel factory content panel manager");
-                auto elem = Nui::Dom::makeStandaloneElement(makeChannelElement());
-                impl_->terminalPanel->channelElements().push_back(elem);
-                return elem->val();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "terminalDelete",
-        Nui::bind(
-            [this](Nui::val channelIdVal) -> Nui::val
-            {
-                Nui::WebApi::Console::log(channelIdVal);
-
-                if (channelIdVal.isUndefined())
-                {
-                    Log::critical("Channel id is undefined");
-                    return Nui::val::undefined();
-                }
-
-                if (channelIdVal.isString())
-                {
-                    Ids::ChannelId channelId = Ids::makeChannelId(channelIdVal.as<std::string>());
-                    if (!channelId.isValid())
-                    {
-                        Log::critical("Channel id is not valid");
-                        return Nui::val::undefined();
-                    }
-
-                    onChannelClosedByUser(channelId);
-                }
-                else
-                {
-                    Log::critical("Channel id is not a string");
-                }
-                return Nui::val::undefined();
-            },
-            std::placeholders::_1
-        )
-    );
-    addPanelArgument.set(
-        "fileExplorerFactory",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                // OpenFileExplorer
-                auto& fileExplorerElement = impl_->fileExplorerPanel.elementObservable();
-                if (fileExplorerElement.value())
-                {
-                    Log::warn("There is already a file explorer, cannot open another one");
-                    return Nui::val::undefined();
-                }
-                fileExplorerElement = Nui::Dom::makeStandaloneElement(makeFileExplorerElement());
-                Nui::globalEventContext.executeActiveEventsImmediately();
-                return fileExplorerElement.value()->val();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "fileExplorerDelete",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                // Remove FileExplorer
-                auto& fileExplorerElement = impl_->fileExplorerPanel.elementObservable();
-                if (!fileExplorerElement.value())
-                {
-                    Log::warn("There is no file explorer to remove");
-                    return Nui::val::undefined();
-                }
-                Nui::WebApi::Console::log("Removing file explorer element");
-                fileExplorerElement.value().reset();
-                fileExplorerElement.modifyNow();
-                return Nui::val::undefined();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "operationQueueFactory",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (impl_->operationQueueElement.value())
-                {
-                    Log::warn("There is already an operation queue, cannot open another one");
-                    return Nui::val::undefined();
-                }
-                impl_->operationQueueElement = Nui::Dom::makeStandaloneElement(makeOperationQueueElement());
-                Nui::globalEventContext.executeActiveEventsImmediately();
-                return impl_->operationQueueElement.value()->val();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "operationQueueDelete",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (!impl_->operationQueueElement.value())
-                {
-                    Log::warn("There is no operation queue to remove");
-                    return Nui::val::undefined();
-                }
-                impl_->operationQueueElement.value().reset();
-                impl_->operationQueueElement.modifyNow();
-                return Nui::val::undefined();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "sessionOptionsFactory",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (impl_->sessionOptionsElement.value())
-                {
-                    Log::warn("There are already session options, cannot open another one");
-                    return Nui::val::undefined();
-                }
-                impl_->sessionOptionsElement = Nui::Dom::makeStandaloneElement(impl_->sessionOptions());
-                Nui::globalEventContext.executeActiveEventsImmediately();
-                return impl_->sessionOptionsElement.value()->val();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "sessionOptionsDelete",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (!impl_->sessionOptionsElement.value())
-                {
-                    Log::warn("There are no session options to remove");
-                    return Nui::val::undefined();
-                }
-                impl_->sessionOptionsElement.value().reset();
-                impl_->sessionOptionsElement.modifyNow();
-                return Nui::val::undefined();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "fileTrackingFactory",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (impl_->fileTrackingElement.value())
-                {
-                    Log::warn("There is already a file tracking panel, cannot open another one");
-                    return Nui::val::undefined();
-                }
-                impl_->fileTrackingElement = Nui::Dom::makeStandaloneElement(makeFileTrackingElement());
-                Nui::globalEventContext.executeActiveEventsImmediately();
-                return impl_->fileTrackingElement.value()->val();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "fileTrackingDelete",
-        Nui::bind(
-            [this]() -> Nui::val
-            {
-                if (!impl_->fileTrackingElement.value())
-                {
-                    Log::warn("There is no file tracking panel to remove");
-                    return Nui::val::undefined();
-                }
-                impl_->fileTrackingElement.value().reset();
-                impl_->fileTrackingElement.modifyNow();
-                return Nui::val::undefined();
-            }
-        )
-    );
-    addPanelArgument.set(
-        "localShellFactory",
-        Nui::bind(
-            [this](Nui::val shellNameVal) -> Nui::val
-            {
-                if (!shellNameVal.isString())
-                {
-                    Log::error("localShellFactory called without shell name string");
-                    return Nui::val::undefined();
-                }
-                const std::string shellName = shellNameVal.as<std::string>();
-
-                // Reconnect path: if there's a pending adoption for this shell
-                // name, adopt it rather than spawning a fresh process.  Ordered
-                // consumption — the first adoption with a matching shellConfigName
-                // wins — so multi-tab restoration maps adoptions to tabs in the
-                // order Lumino materializes them (which matches the order they
-                // were captured).
-                if (!impl_->pendingLocalShellAdoptions.empty())
-                {
-                    auto match = std::ranges::find_if(
-                        impl_->pendingLocalShellAdoptions,
-                        [&shellName](LocalShellAdoption const& adoption) {
-                            return adoption.shellConfigName == shellName;
-                        }
-                    );
-                    if (match != impl_->pendingLocalShellAdoptions.end())
-                    {
-                        Log::info("localShellFactory: adopting local shell '{}'", shellName);
-                        LocalShellAdoption adoption = std::move(*match);
-                        impl_->pendingLocalShellAdoptions.erase(match);
-                        auto elem = Nui::Dom::makeStandaloneElement(
-                            makeAdoptedLocalShellChannelElement(std::move(adoption))
-                        );
-                        impl_->terminalPanel->channelElements().push_back(elem);
-                        return elem->val();
-                    }
-                }
-
-                // Probe state before building the element. A saved layout may
-                // reference a shell config the user has since removed — in that
-                // case return undefined so the TS side drops the widget rather
-                // than showing a dead/blank tab.
-                auto const& sessions = impl_->stateHolder->stateCache().sessions;
-                auto iter = sessions.find(shellName);
-                if (iter == sessions.end() ||
-                    !std::holds_alternative<Persistence::ExecutingSessionOptions>(iter->second.engine))
-                {
-                    Log::warn("localShellFactory: shell '{}' no longer in settings — dropping widget", shellName);
-                    return Nui::val::undefined();
-                }
-
-                Log::info("localShellFactory: spawning local shell '{}'", shellName);
-                auto elem = Nui::Dom::makeStandaloneElement(makeLocalShellChannelElement(shellName));
-                impl_->terminalPanel->channelElements().push_back(elem);
-                return elem->val();
-            },
-            std::placeholders::_1
-        )
-    );
-    addPanelArgument.set(
-        "localShellDelete",
-        Nui::bind(
-            [this](Nui::val channelIdVal) -> Nui::val
-            {
-                if (channelIdVal.isUndefined())
-                {
-                    Log::warn("localShellDelete: channel id undefined (never spawned)");
-                    return Nui::val::undefined();
-                }
-                if (!channelIdVal.isString())
-                {
-                    Log::error("localShellDelete: channel id is not a string");
-                    return Nui::val::undefined();
-                }
-                Ids::ChannelId channelId = Ids::makeChannelId(channelIdVal.as<std::string>());
-                if (!channelId.isValid())
-                {
-                    Log::error("localShellDelete: channel id is invalid");
-                    return Nui::val::undefined();
-                }
-                onChannelClosedByUser(channelId);
-                return Nui::val::undefined();
-            },
-            std::placeholders::_1
-        )
-    );
-    addPanelArgument.set(
-        "openAddContextMenu",
-        Nui::bind(
-            [this](Nui::val val)
-            {
-                Log::info("openAddContextMenu called");
-                if (!val.isString())
-                {
-                    Log::error("openAddContextMenu needs to be called with a string argument");
-                }
-                // Refresh entries so the Local Shell list reflects current saved
-                // shell sessions and single-instance panel state is accurate.
-                impl_->rebuildTabAddMenu();
-                Nui::globalEventContext.executeActiveEventsImmediately();
-                impl_->tabAddMenu.openNextTo(val.as<std::string>());
-            },
-            std::placeholders::_1
-        )
-    );
-
-    Log::info("Adding panel to content panel manager with layout id '{}'", impl_->sessionLayoutId);
-    const auto addPanelResult = Nui::val::global("contentPanelManager").call<bool>("addPanel", addPanelArgument);
-    if (!addPanelResult)
-    {
-        Log::error("Failed to add panel to content panel manager");
-        impl_->confirmDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = language->get("sessionFrontend", "layoutCreationFailedHeader"),
-            .text = language->get("sessionFrontend", "layoutCreationFailedText"),
-            .buttons = ConfirmDialog::Button::Ok,
-            .neverShowAgainId = "layoutCreationFailed",
-        });
-        closeSelf();
-    }
-    Log::info("Panel added to content panel manager successfully");
-}
 
 Nui::ElementRenderer Session::operator()()
 {
-    using Nui::Elements::div; // because of the global div.
-    using Nui::Elements::span;
+    using Nui::Elements::div; // shadow the global div.
     using namespace Nui::Attributes;
     Log::info("Session::operator()");
 
@@ -1863,15 +915,9 @@ Nui::ElementRenderer Session::operator()()
         !(reference = [this](
             std::weak_ptr<Nui::Dom::BasicElement>&& elem
         ){
-            impl_->layoutHost = elem.lock();
             try {
-                if (impl_->waitingForLayoutHost) {
-                    impl_->waitingForLayoutHost = false;
-                    Nui::globalEventContext.delayToAfterProcessing([this](){
-                        Log::info("Layout host attached to DOM, initializing layout");
-                        initializeLayout();
-                    });
-                }
+                if (impl_->layoutInitializer)
+                    impl_->layoutInitializer->attachLayoutHost(std::move(elem));
             } catch (const std::exception& e) {
                 Log::error("Error while initializing layout in layout host: {}", e.what());
             }
@@ -1880,14 +926,9 @@ Nui::ElementRenderer Session::operator()()
             return impl_->inertEverything.value() ? "true"s : std::optional<std::string>{std::nullopt};
         })
     }(
-        impl_->tabAddMenu(),
+        impl_->layoutInitializer ? impl_->layoutInitializer->tabAddMenuRenderer() : Nui::nil(),
         impl_->syncDialog(),
         impl_->syncProgressDialog(),
-        // Per-session reconnect dialog — non-modal and draggable.  Opened
-        // in onConnectionLoss; torn down with the Session on swap.  The
-        // view blockers themselves live inside the individual SFTP-bound
-        // panel renderers (file explorer, operation queue, file tracking)
-        // so terminal panels stay fully usable during a reconnect cycle.
         (*impl_->connectionLossOverlay)()
     );
     // clang-format on

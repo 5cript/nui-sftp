@@ -75,7 +75,7 @@ Nui::ElementRenderer ConnectionLossOverlay::makeBody(Implementation& impl)
                 }
 
                 // Cycle UI: spinner + attempt + countdown + [Now] + [Cancel].
-                // Wired to Params::onReconnectNow / onReconnectCancel — the
+                // Wired to Params::onReconnectNow / onReconnectCancel the
                 // retry timers and the candidate ProtoSession live in
                 // SessionArea, so this widget's only job is to hand user
                 // intent upward.
@@ -111,7 +111,7 @@ Nui::ElementRenderer ConnectionLossOverlay::makeBody(Implementation& impl)
                             using Nui::Elements::div;
                             namespace Snc = ScriptNuiComponents;
                             // Hide [Now] while the retry is already firing
-                            // (countdown == 0 → "Restoring..." state) — the
+                            // (countdown == 0 → "Restoring..." state) the
                             // click would be a no-op there.
                             auto nowButton = (impl.reconnectCountdown.value() > 0)
                                 ? Snc::button({
@@ -169,7 +169,7 @@ void ConnectionLossOverlay::show()
     // Show the per-session reconnect dialog.  Non-modal so local-shell
     // panels (and other tabs) keep working; draggable so the user can
     // move it out of the way.  The dialog's lifetime is bound to the
-    // Session — we never explicitly close it since the Session replace
+    // Session we never explicitly close it since the Session replace
     // tears its DOM down when the reconnect succeeds.
     impl_->dialog->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,

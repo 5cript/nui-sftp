@@ -54,7 +54,7 @@ class FileExplorerPanel
         FilePropertyDialog* filePropertyDialog = nullptr;
         ArchiveTransferDialog* archiveTransferDialog = nullptr;
 
-        /** @brief Session name — used to scope favorites persistence on the remote side. */
+        /** @brief Session name used to scope favorites persistence on the remote side. */
         std::string sessionName;
 
         /** @brief UI options captured at construction (favorites, hidden-files, etc.). */
@@ -69,7 +69,7 @@ class FileExplorerPanel
 
         /**
          * @brief Non-owning pointer to the Session's reactive lost-connection
-         *        flag.  Drives the SFTP-bound view blocker's visibility — the
+         *        flag.  Drives the SFTP-bound view blocker's visibility the
          *        grid dims whenever the owning Session is reconnecting.
          */
         Nui::Observed<bool>* isInLostConnectionState = nullptr;
@@ -79,7 +79,7 @@ class FileExplorerPanel
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileExplorerPanel);
 
     /**
-     * @brief Late-phase wiring — sets up the grid error handler, item-update
+     * @brief Late-phase wiring sets up the grid error handler, item-update
      *        functions, local/remote cross-linking, and the favorites
      *        persistence callbacks.  Called once, from Session's constructor
      *        body, after the FileExplorerPanel exists.
