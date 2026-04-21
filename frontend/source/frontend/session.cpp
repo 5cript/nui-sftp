@@ -26,6 +26,12 @@
 #include <script-nui-components/anchored_panel.hpp>
 #include <script-nui-components/spinner.hpp>
 
+#include <ui5-sap-icons/icons/save.hpp>
+#include <ui5-sap-icons/icons/copy.hpp>
+#include <ui5-sap-icons/icons/document-text.hpp>
+#include <ui5-sap-icons/icons/it-host.hpp>
+#include <ui5-sap-icons/icons/machine.hpp>
+
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
@@ -578,6 +584,51 @@ void Session::onDrop(
     localSideModel().onTransfer(items, subdir);
 }
 
+namespace
+{
+    /**
+     * @brief Resolves the glyph that represents a terminal's flavour in the
+     *        per-terminal toolbar.  Named icon wins when supplied; otherwise a
+     *        flavour-appropriate fallback is used.
+     */
+    Nui::ElementRenderer resolveIdentityIcon(std::string const& iconName, bool isLocalShell)
+    {
+        if (!iconName.empty())
+            return iconFromName(iconName);
+        return isLocalShell ? Ui5Icons::machine() : Ui5Icons::it_host();
+    }
+
+    /**
+     * @brief Fires the RPC that writes @p content to @p filePath, with
+     *        user-facing logging consistent with the multi-channel save path.
+     */
+    void writeChannelContentToFile(std::filesystem::path const& filePath, std::string const& content)
+    {
+        Nui::RpcClient::callWithBackChannel(
+            "RpcFilesystem::writeFile",
+            [filePath](Nui::val response)
+            {
+                if (!response.hasOwnProperty("success"))
+                {
+                    Log::error(
+                        "Invalid response from RpcFilesystem::writeFile for file '{}'", filePath.generic_string()
+                    );
+                    return;
+                }
+                if (!response["success"].as<bool>())
+                {
+                    const auto error = response["error"].as<std::string>();
+                    Log::error("Failed to write file '{}': {}", filePath.generic_string(), error);
+                    return;
+                }
+                Log::info("Successfully wrote file '{}'", filePath.generic_string());
+            },
+            filePath,
+            content
+        );
+    }
+} // namespace
+
 auto Session::makeChannelElement() -> Nui::ElementRenderer
 {
     using Nui::Elements::div; // because of the global div.
@@ -586,44 +637,76 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
     return div{}(
         observe(impl_->frontendSessionManager),
         [this]() -> Nui::ElementRenderer {
-            return div{
-                style = observe(impl_->options).generate([this](){
-                    return fmt::format("height: 100%; width: 100%; background-color: {};", impl_->options->theme && impl_->options->theme->background ? *impl_->options->theme->background : "#202020");
-                }),
-                class_ = "terminal-channel",
-                reference.onMaterialize([this](Nui::val element) {
-                    Log::info("Channel terminal materialized");
-                    if (!impl_->frontendSessionManager.value())
-                        return;
+            const bool isLocalShellEngine =
+                std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine);
+            const std::string terminalBackgroundColor =
+                (impl_->options->theme && impl_->options->theme->background)
+                    ? *impl_->options->theme->background
+                    : std::string{};
+            // Shared cell that the toolbar closures read on click and that
+            // onOpenChannel fills once the channel is actually created.
+            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
 
-                    // Engine-specific per-call options: shell sessions spawn a process;
-                    // SSH sessions carry no per-call options (state lives in the engine).
-                    if (auto const* execOpts = std::get_if<Persistence::ExecutingSessionOptions>(&impl_->engineOptions.engine))
-                    {
-                        ExecutingChannelCreationOptions options;
-                        options.executingOptions = *execOpts;
-                        options.termios = impl_->engineOptions.termios.value();
-                        impl_->frontendSessionManager.value()->createChannel(
-                            element,
-                            *impl_->options,
-                            options,
-                            std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2),
-                            std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
+            return div{
+                style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
+            }(
+                renderTerminalToolbar(
+                    resolveIdentityIcon(impl_->engineOptions.icon, isLocalShellEngine),
+                    channelIdCell,
+                    terminalBackgroundColor
+                ),
+                div{
+                    style = observe(impl_->options).generate([this](){
+                        return fmt::format(
+                            "flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};",
+                            impl_->options->theme && impl_->options->theme->background
+                                ? *impl_->options->theme->background
+                                : "#202020"
                         );
-                    }
-                    else
-                    {
-                        ChannelCreationOptions options{};
-                        impl_->frontendSessionManager.value()->createChannel(
-                            element,
-                            *impl_->options,
-                            options,
-                            std::bind(&Session::onOpenChannel, this, std::placeholders::_1, std::placeholders::_2),
-                            std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
-                        );
-                    }
-                })
-            }();
+                    }),
+                    class_ = "terminal-channel",
+                    reference.onMaterialize([this, channelIdCell](Nui::val element) {
+                        Log::info("Channel terminal materialized");
+                        if (!impl_->frontendSessionManager.value())
+                            return;
+
+                        auto onCreated = [this, channelIdCell](
+                            std::optional<Ids::ChannelId> chId, std::string const& info
+                        ) {
+                            if (chId)
+                                *channelIdCell = chId;
+                            onOpenChannel(chId, info);
+                        };
+
+                        // Engine-specific per-call options: shell sessions spawn a process;
+                        // SSH sessions carry no per-call options (state lives in the engine).
+                        if (auto const* execOpts = std::get_if<Persistence::ExecutingSessionOptions>(&impl_->engineOptions.engine))
+                        {
+                            ExecutingChannelCreationOptions options;
+                            options.executingOptions = *execOpts;
+                            options.termios = impl_->engineOptions.termios.value();
+                            impl_->frontendSessionManager.value()->createChannel(
+                                element,
+                                *impl_->options,
+                                options,
+                                onCreated,
+                                std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
+                            );
+                        }
+                        else
+                        {
+                            ChannelCreationOptions options{};
+                            impl_->frontendSessionManager.value()->createChannel(
+                                element,
+                                *impl_->options,
+                                options,
+                                onCreated,
+                                std::bind(&Session::onChannelLoss, this, std::placeholders::_1)
+                            );
+                        }
+                    })
+                }()
+            );
         }
     );
     // clang-format on
@@ -683,36 +766,27 @@ auto Session::makeLocalShellChannelElement(std::string const& shellName) -> Nui:
         (terminalOptions.theme && terminalOptions.theme->background)
             ? *terminalOptions.theme->background
             : std::string{"#202020"};
-    // Banner visibility is captured at open time: toggling the setting applies
-    // to subsequently opened shells, not in-flight ones.
-    const bool showBanner = impl_->uiOptions.showLocalShellWarning;
+    // The identity icon on the toolbar inherits the shell config's own icon
+    // (matches the one shown in the + tab menu).  Captured here at open time.
+    const std::string identityIconName = iter->second.icon;
 
     // clang-format off
     return div{}(
         observe(impl_->frontendSessionManager),
-        [this, shellName, terminalOptions, termios, execOpts, backgroundColor, showBanner]() -> Nui::ElementRenderer {
+        [this, shellName, terminalOptions, termios, execOpts, backgroundColor, identityIconName]() -> Nui::ElementRenderer {
+            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
             return div{
                 style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
             }(
-                showBanner
-                    ? Nui::ElementRenderer{div{class_ = "local-shell-banner"}(
-                          span{class_ = "local-shell-banner-text"}(
-                              language->getObserved("sessionFrontend", "localShellBanner")
-                          ),
-                          button{
-                              class_ = "local-shell-banner-settings",
-                              type = "button",
-                              alt = language->getObserved("sessionFrontend", "localShellBannerSettingsTooltip"),
-                              onClick = [this]() {
-                                  impl_->events->requestOpenSettingsAtId("general-showLocalShellWarning");
-                              },
-                          }(language->getObserved("sessionFrontend", "localShellBannerSettings"))
-                      )}
-                    : Nui::ElementRenderer{Nui::nil()},
+                renderTerminalToolbar(
+                    resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
+                    channelIdCell,
+                    backgroundColor
+                ),
                 div{
                     style = fmt::format("flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};", backgroundColor),
                     class_ = "terminal-channel",
-                    reference.onMaterialize([this, shellName, terminalOptions, termios, execOpts](Nui::val element) {
+                    reference.onMaterialize([this, shellName, terminalOptions, termios, execOpts, channelIdCell](Nui::val element) {
                         Log::info("Local-shell channel terminal materialized");
                         if (!impl_->frontendSessionManager.value())
                             return;
@@ -738,12 +812,13 @@ auto Session::makeLocalShellChannelElement(std::string const& shellName) -> Nui:
                         // copies of terminalOptions / termios / execOpts are the ones
                         // in effect at spawn time — which matches current "new tabs
                         // pick up the latest settings" semantics.
-                        auto onCreated = [this, shellName, terminalOptions, termios, execOpts](
+                        auto onCreated = [this, shellName, terminalOptions, termios, execOpts, channelIdCell](
                                              std::optional<Ids::ChannelId> const& channelId,
                                              std::string const& info)
                         {
                             if (channelId)
                             {
+                                *channelIdCell = channelId;
                                 Implementation::LocalShellMeta meta{
                                     .shellConfigName = shellName,
                                     .cmdline = {},
@@ -786,30 +861,35 @@ auto Session::makeAdoptedLocalShellChannelElement(LocalShellAdoption adoption) -
         (adoption.terminalOptions.theme && adoption.terminalOptions.theme->background)
             ? *adoption.terminalOptions.theme->background
             : std::string{"#202020"};
-    const bool showBanner = impl_->uiOptions.showLocalShellWarning;
+    // Resolve the identity icon by looking up the shell config in persistence,
+    // so the adopted terminal shows the same glyph the user configured.
+    // Absent config (renamed / deleted since the snapshot was captured) is
+    // fine — resolveIdentityIcon falls back to a generic local-shell glyph.
+    std::string identityIconName;
+    {
+        auto state = impl_->stateHolder->stateCache().fullyResolve();
+        if (auto configIter = state.sessions.find(adoption.shellConfigName);
+            configIter != state.sessions.end())
+        {
+            identityIconName = configIter->second.icon;
+        }
+    }
 
     // clang-format off
     return div{}(
         observe(impl_->frontendSessionManager),
-        [this, adoption = std::move(adoption), backgroundColor, showBanner]() -> Nui::ElementRenderer {
+        [this, adoption = std::move(adoption), backgroundColor, identityIconName]() -> Nui::ElementRenderer {
+            // Process id is known up-front — seed the cell so toolbar clicks
+            // work the instant the element materializes.
+            auto channelIdCell = std::make_shared<std::optional<Ids::ChannelId>>(adoption.processId);
             return div{
                 style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
             }(
-                showBanner
-                    ? Nui::ElementRenderer{div{class_ = "local-shell-banner"}(
-                          span{class_ = "local-shell-banner-text"}(
-                              language->getObserved("sessionFrontend", "localShellBanner")
-                          ),
-                          button{
-                              class_ = "local-shell-banner-settings",
-                              type = "button",
-                              alt = language->getObserved("sessionFrontend", "localShellBannerSettingsTooltip"),
-                              onClick = [this]() {
-                                  impl_->events->requestOpenSettingsAtId("general-showLocalShellWarning");
-                              },
-                          }(language->getObserved("sessionFrontend", "localShellBannerSettings"))
-                      )}
-                    : Nui::ElementRenderer{Nui::nil()},
+                renderTerminalToolbar(
+                    resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
+                    channelIdCell,
+                    backgroundColor
+                ),
                 div{
                     style = fmt::format("flex: 1 1 auto; min-height: 0; width: 100%; background-color: {};", backgroundColor),
                     class_ = "terminal-channel",
@@ -1207,6 +1287,146 @@ void Session::setupFileGrid()
     localFileGridSide().setOnSynchronize(onSync);
     if (remoteFileGridSide())
         remoteFileGridSide()->setOnSynchronize(onSync);
+}
+
+void Session::saveChannelToFile(Ids::ChannelId const& channelId)
+{
+    if (!impl_->frontendSessionManager.value())
+        return;
+
+    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
+    if (!channel)
+    {
+        Log::warn("saveChannelToFile: no channel '{}'", channelId.value());
+        return;
+    }
+
+    // Capture the dump synchronously — the dialog is async and by the time the
+    // user picks a path the xterm may have scrolled further, which is fine but
+    // we want the save to reflect what was on screen at click time.
+    auto dump = channel->getAllTextContent();
+
+    Nui::FileDialog::showSaveDialog(
+        Nui::FileDialog::SaveDialogOptions{
+            .title = "Save terminal contents",
+            .defaultPath = "%userprofile%",
+            .filters = {},
+            .forcePath = false,
+            .forceOverwrite = false,
+        },
+        [dump = std::move(dump)](std::optional<std::filesystem::path> const& result) mutable
+        {
+            if (!result.has_value())
+            {
+                Log::info("User cancelled save-terminal dialog");
+                return;
+            }
+            writeChannelContentToFile(*result, dump);
+        }
+    );
+}
+
+void Session::copyChannelToClipboard(Ids::ChannelId const& channelId)
+{
+    if (!impl_->frontendSessionManager.value())
+        return;
+
+    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
+    if (!channel)
+    {
+        Log::warn("copyChannelToClipboard: no channel '{}'", channelId.value());
+        return;
+    }
+
+    const auto dump = channel->getAllTextContent();
+    // See static/source/index.js — the shim wraps navigator.clipboard.writeText
+    // and logs its own errors on the JS side.  Fire-and-forget here.
+    Nui::val::global("writeTerminalDumpToClipboard")
+        .call<void>("call", Nui::val::global("globalThis"), dump);
+}
+
+void Session::copyChannelToClipboardPlain(Ids::ChannelId const& channelId)
+{
+    if (!impl_->frontendSessionManager.value())
+        return;
+
+    auto* channel = impl_->frontendSessionManager.value()->channel(channelId);
+    if (!channel)
+    {
+        Log::warn("copyChannelToClipboardPlain: no channel '{}'", channelId.value());
+        return;
+    }
+
+    // Strip ANSI/control bytes on the JS side — it already has fast string
+    // primitives and the regex is easier to audit there than in C++.
+    const auto dump = channel->getAllTextContent();
+    Nui::val::global("writeTerminalPlainToClipboard")
+        .call<void>("call", Nui::val::global("globalThis"), dump);
+}
+
+Nui::ElementRenderer Session::renderTerminalToolbar(
+    Nui::ElementRenderer identityIcon,
+    std::shared_ptr<std::optional<Ids::ChannelId>> channelIdCell,
+    std::string const& terminalBackgroundColor
+)
+{
+    namespace Snc = ScriptNuiComponents;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    // Derive a bar colour that reads as a distinct strip above the xterm.
+    // `color-mix(... 82% ..., black 18%)` darkens the terminal background
+    // without needing to know whether the theme is light or dark.  Falls back
+    // to a neutral dark when the theme omits `background`.
+    const std::string barBg = terminalBackgroundColor.empty()
+        ? std::string{"#1a1a1a"}
+        : fmt::format("color-mix(in srgb, {} 82%, black 18%)", terminalBackgroundColor);
+
+    return div{
+        class_ = "terminal-toolbar",
+        style = fmt::format("background-color: {};", barBg),
+    }(
+        span{class_ = "terminal-toolbar__identity"}(std::move(identityIcon)),
+        span{class_ = "terminal-toolbar__spacer"}(),
+        span{class_ = "terminal-toolbar__actions"}(
+            Snc::button({
+                .icon = Ui5Icons::save(),
+                .attributes = {
+                    Nui::Attributes::title = std::string{"Save terminal to file"},
+                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
+                        e.stopPropagation();
+                        if (channelIdCell && *channelIdCell)
+                            saveChannelToFile(**channelIdCell);
+                    },
+                },
+                .styleVariant = Snc::StyleVariant::Transparent,
+            }),
+            Snc::button({
+                .icon = Ui5Icons::copy(),
+                .attributes = {
+                    Nui::Attributes::title = std::string{"Copy terminal to clipboard (with formatting)"},
+                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
+                        e.stopPropagation();
+                        if (channelIdCell && *channelIdCell)
+                            copyChannelToClipboard(**channelIdCell);
+                    },
+                },
+                .styleVariant = Snc::StyleVariant::Transparent,
+            }),
+            Snc::button({
+                .icon = Ui5Icons::document_text(),
+                .attributes = {
+                    Nui::Attributes::title = std::string{"Copy terminal as plain text (strip ANSI/control codes)"},
+                    onClick = [this, channelIdCell](Nui::WebApi::MouseEvent e) {
+                        e.stopPropagation();
+                        if (channelIdCell && *channelIdCell)
+                            copyChannelToClipboardPlain(**channelIdCell);
+                    },
+                },
+                .styleVariant = Snc::StyleVariant::Transparent,
+            })
+        )
+    );
 }
 
 void Session::saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> const& contents)

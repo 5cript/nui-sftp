@@ -12,8 +12,8 @@
  * Use at the call site in a settings section's render tree:
  *
  * @code
- *     addressableSetting("general-showLocalShellWarning",
- *         userInterface.showLocalShellWarning(language->getObserved(...))
+ *     addressableSetting("general-fileGridPathBarOnTop",
+ *         userInterface.fileGridPathBarOnTop(language->getObserved(...))
  *     )
  * @endcode
  *

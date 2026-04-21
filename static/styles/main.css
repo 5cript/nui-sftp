@@ -10,6 +10,7 @@
 @import "./settings.css";
 @import "./file_tracking_panel.css";
 @import "./local_shell_tab.css";
+@import "./terminal_toolbar.css";
 @import "./sync_dialog.css";
 @import "./dialog/new_session_dialog.css";
 @import "./dialog/direct_connect_dialog.css";

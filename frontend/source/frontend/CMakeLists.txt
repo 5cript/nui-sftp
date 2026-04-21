@@ -158,6 +158,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/local_shell_tab.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/terminal_toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"

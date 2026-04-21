@@ -125,17 +125,6 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 onChange();
             },
         },
-        .showLocalShellWarning = BoolSetting<>{
-            language->getObserved("settings", "general", "userInterface", "showLocalShellWarningHelpText"),
-            onChange,
-            [this, onChange]()
-            {
-                userInterface.showLocalShellWarning.value(
-                    Persistence::UiOptions{}.showLocalShellWarning
-                );
-                onChange();
-            },
-        },
         .fileGridPageSize = NumberSetting<int, true>{
             language->getObserved("settings", "general", "userInterface", "fileGridPageSizeHelpText"),
             onChange,
@@ -329,7 +318,6 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.uiOptions.showHiddenFilesLocally = userInterface.showHiddenFilesLocally.value();
     state.uiOptions.showHiddenFilesRemotely = userInterface.showHiddenFilesRemotely.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
-    state.uiOptions.showLocalShellWarning = userInterface.showLocalShellWarning.value();
     if (userInterface.fileGridPageSize.valueIsValid())
         state.uiOptions.fileGridPageSize = userInterface.fileGridPageSize.value().value_or(
             Persistence::UiOptions{}.fileGridPageSize
@@ -366,7 +354,6 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     userInterface.showHiddenFilesLocally.value(state.uiOptions.showHiddenFilesLocally);
     userInterface.showHiddenFilesRemotely.value(state.uiOptions.showHiddenFilesRemotely);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
-    userInterface.showLocalShellWarning.value(state.uiOptions.showLocalShellWarning);
     userInterface.fileGridPageSize.value(state.uiOptions.fileGridPageSize);
     userInterface.fileGridExtensionIcons.value(state.uiOptions.fileGridExtensionIcons);
     userInterface.neverShowAgainDialogs.value(state.uiOptions.neverShowAgainDialogs);
@@ -431,12 +418,6 @@ Nui::ElementRenderer GeneralSettings::render(
             userInterface.showHiddenFilesRemotely(language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotely")),
             userInterface.fileGridPathBarOnTop(
                 language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
-            ),
-            addressableSetting(
-                "general-showLocalShellWarning",
-                userInterface.showLocalShellWarning(
-                    language->getObserved("settings", "general", "userInterface", "showLocalShellWarning")
-                )
             ),
             userInterface.fileGridPageSize(
                 language->getObserved("settings", "general", "userInterface", "fileGridPageSize")
