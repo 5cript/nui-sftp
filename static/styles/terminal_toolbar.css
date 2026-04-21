@@ -1,0 +1,86 @@
+/*
+ * Per-terminal chrome rendered immediately above each xterm element.
+ *
+ * Left:  identity icon tinted with the terminal theme's foreground colour,
+ *        expressing whether the terminal is remote (SSH) or local (shell).
+ * Right: icon-button cluster (save to file, copy to clipboard) using the
+ *        Snc::button transparent variant so they read as terminal chrome
+ *        rather than a separate toolbar slab.
+ *
+ * The outer .terminal-channel hosts xterm and gets the remaining height via
+ * flex: 1 1 auto;  min-height: 0; inside the per-terminal flex column.
+ */
+
+.terminal-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px 3px 10px;
+    min-height: 26px;
+    user-select: none;
+    /*
+     * The inline `background-color` set in C++ darkens the per-terminal theme
+     * background so the toolbar reads as a distinct strip above the xterm.
+     * Divider inherits the terminal foreground for theme-coherent contrast.
+     */
+    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+    color: color-mix(in srgb, var(--theme-color) 70%, #d0d0d0);
+}
+
+.terminal-toolbar__identity {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    color: var(--theme-color);
+    opacity: 0.9;
+}
+
+.terminal-toolbar__identity > svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.terminal-toolbar__spacer {
+    flex: 1 1 auto;
+}
+
+.terminal-toolbar__actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/*
+ * Shrink the Snc::button footprint down to toolbar scale and let hover bleed
+ * through a translucent tint of currentColor — the brightness(0.9) default is
+ * invisible on a transparent background.
+ */
+.terminal-toolbar .script-nui-button[data-variant="transparent"] {
+    padding: 2px 5px;
+    min-height: 0;
+    color: inherit;
+    opacity: 0.7;
+    transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.terminal-toolbar .script-nui-button[data-variant="transparent"] > svg {
+    width: 15px;
+    height: 15px;
+}
+
+.terminal-toolbar .script-nui-button[data-variant="transparent"]:not(:disabled):hover {
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
+    opacity: 1;
+    filter: none;
+}
+
+.terminal-toolbar .script-nui-button[data-variant="transparent"]:not(:disabled):active {
+    background-color: color-mix(in srgb, currentColor 20%, transparent);
+    filter: none;
+}
