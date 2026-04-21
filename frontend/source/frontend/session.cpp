@@ -7,6 +7,7 @@
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
 #include <frontend/terminal/file_engine.hpp>
+#include <frontend/session/session_helpers.hpp>
 #include <frontend/icon_from_name.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/dialog/input_dialog.hpp>
@@ -29,8 +30,6 @@
 #include <ui5-sap-icons/icons/save.hpp>
 #include <ui5-sap-icons/icons/copy.hpp>
 #include <ui5-sap-icons/icons/document-text.hpp>
-#include <ui5-sap-icons/icons/it-host.hpp>
-#include <ui5-sap-icons/icons/machine.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -584,51 +583,6 @@ void Session::onDrop(
     localSideModel().onTransfer(items, subdir);
 }
 
-namespace
-{
-    /**
-     * @brief Resolves the glyph that represents a terminal's flavour in the
-     *        per-terminal toolbar.  Named icon wins when supplied; otherwise a
-     *        flavour-appropriate fallback is used.
-     */
-    Nui::ElementRenderer resolveIdentityIcon(std::string const& iconName, bool isLocalShell)
-    {
-        if (!iconName.empty())
-            return iconFromName(iconName);
-        return isLocalShell ? Ui5Icons::machine() : Ui5Icons::it_host();
-    }
-
-    /**
-     * @brief Fires the RPC that writes @p content to @p filePath, with
-     *        user-facing logging consistent with the multi-channel save path.
-     */
-    void writeChannelContentToFile(std::filesystem::path const& filePath, std::string const& content)
-    {
-        Nui::RpcClient::callWithBackChannel(
-            "RpcFilesystem::writeFile",
-            [filePath](Nui::val response)
-            {
-                if (!response.hasOwnProperty("success"))
-                {
-                    Log::error(
-                        "Invalid response from RpcFilesystem::writeFile for file '{}'", filePath.generic_string()
-                    );
-                    return;
-                }
-                if (!response["success"].as<bool>())
-                {
-                    const auto error = response["error"].as<std::string>();
-                    Log::error("Failed to write file '{}': {}", filePath.generic_string(), error);
-                    return;
-                }
-                Log::info("Successfully wrote file '{}'", filePath.generic_string());
-            },
-            filePath,
-            content
-        );
-    }
-} // namespace
-
 auto Session::makeChannelElement() -> Nui::ElementRenderer
 {
     using Nui::Elements::div; // because of the global div.
@@ -651,7 +605,7 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
                 style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
             }(
                 renderTerminalToolbar(
-                    resolveIdentityIcon(impl_->engineOptions.icon, isLocalShellEngine),
+                    SessionInternal::resolveIdentityIcon(impl_->engineOptions.icon, isLocalShellEngine),
                     channelIdCell,
                     terminalBackgroundColor
                 ),
@@ -779,7 +733,7 @@ auto Session::makeLocalShellChannelElement(std::string const& shellName) -> Nui:
                 style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
             }(
                 renderTerminalToolbar(
-                    resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
+                    SessionInternal::resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
                     channelIdCell,
                     backgroundColor
                 ),
@@ -886,7 +840,7 @@ auto Session::makeAdoptedLocalShellChannelElement(LocalShellAdoption adoption) -
                 style = "height: 100%; width: 100%; display: flex; flex-direction: column;",
             }(
                 renderTerminalToolbar(
-                    resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
+                    SessionInternal::resolveIdentityIcon(identityIconName, /*isLocalShell=*/true),
                     channelIdCell,
                     backgroundColor
                 ),
@@ -1321,7 +1275,7 @@ void Session::saveChannelToFile(Ids::ChannelId const& channelId)
                 Log::info("User cancelled save-terminal dialog");
                 return;
             }
-            writeChannelContentToFile(*result, dump);
+            SessionInternal::writeChannelContentToFile(*result, dump);
         }
     );
 }
