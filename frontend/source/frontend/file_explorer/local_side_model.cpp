@@ -653,10 +653,13 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
         .whatFor = "Rename",
         .prompt = "Enter the new name for " + item.path.filename().string(),
         .headerText = "Rename " + item.path.filename().string(),
+        .initialValue = item.path.filename().string(),
         .isPassword = false,
-        .onConfirm = [doRename](std::optional<std::string> const& name)
+        .onConfirm = [doRename, item](std::optional<std::string> const& name)
         {
-            if (!name)
+            if (!name || name->empty())
+                return;
+            if (*name == item.path.filename().string())
                 return;
 
             Log::info("Renaming item to: {}", *name);

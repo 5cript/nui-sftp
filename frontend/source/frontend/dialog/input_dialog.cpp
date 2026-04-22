@@ -64,15 +64,20 @@ Nui::ElementRenderer InputDialog::dialogBody()
                         if (!impl_->isPassword.value()) return std::string{"Text"};
                         return impl_->showPassword.value() ? std::string{"Text"} : std::string{"Password"};
                     }),
+                    "input"_event = [this](Nui::WebApi::Event event){
+                        impl_->inputText = event.target()["value"].as<std::string>();
+                    },
                     "keydown"_event = [this](Nui::WebApi::KeyboardEvent event){
                         dialogButtonContainerKeydown(event);
                         if (event.key() == "Enter") {
                             event.preventDefault();
+                            impl_->inputText = event.target()["value"].as<std::string>();
                             impl_->confirmOnClose = true;
                             impl_->dialog->close();
                         }
                     }
-                }
+                },
+                .dontUpdateValue = true,
             }),
             div{class_ = "input-dialog-toggle-btn-wrapper"}(
                 observe(impl_->isPassword, impl_->showPassword),
@@ -106,7 +111,7 @@ void InputDialog::open(OpenOptions const& options)
     impl_->showPassword = false;
     impl_->confirmOnClose = false;
     impl_->whatFor = options.whatFor;
-    impl_->inputText.clear();
+    impl_->inputText = options.initialValue;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
     impl_->dialog->open({

@@ -1156,11 +1156,19 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
         .headerText = fmt::format(
             fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()
         ),
+        .initialValue = item.path.filename().string(),
         .isPassword = false,
         .onConfirm = [this, item](std::optional<std::string> const& name)
         {
-            if (!name)
+            if (!name || name->empty())
                 return;
+            if (*name == item.path.filename().string())
+                return;
+            if (name->find('/') != std::string::npos)
+            {
+                Log::error("Invalid name (cannot contain slashes): {}", *name);
+                return;
+            }
 
             Log::info("Renaming item to: {}", *name);
 

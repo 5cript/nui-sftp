@@ -18,6 +18,7 @@ class InputDialog
         std::string whatFor{};
         std::string prompt{};
         std::string headerText{};
+        std::string initialValue{};
         bool isPassword{false};
         std::function<void(std::optional<std::string> const&)> onConfirm;
     };
