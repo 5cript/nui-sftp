@@ -227,9 +227,25 @@ struct Opener::Implementation
     explicit Implementation(void* nativeWindow)
         : parentWindow{extractParentWindowHandle(nativeWindow)}
     {
+        // Prefer connecting via an explicit DBUS_SESSION_BUS_ADDRESS over sd_bus_open_user().
+        // Inside flatpak the session bus is reached through xdg-dbus-proxy at /run/flatpak/bus,
+        // and some proxy versions reject the extra negotiation (fd-passing, credentials, trusted
+        // flag) that sd_bus_open_user() performs -- handshake fails with ENOTCONN ("Transport
+        // endpoint is not connected"). createSessionBusConnectionWithAddress(addr) uses a thinner
+        // sd_bus_set_address+sd_bus_start path that the proxy reliably accepts. Falls through
+        // to the default open if the env var isn't set (non-flatpak / unusual launch).
         try
         {
-            connection = sdbus::createSessionBusConnection();
+            if (const char* address = std::getenv("DBUS_SESSION_BUS_ADDRESS"))
+            {
+                Log::info("Opener: connecting to session bus at '{}' via explicit address.", address);
+                connection = sdbus::createSessionBusConnectionWithAddress(address);
+            }
+            else
+            {
+                Log::info("Opener: DBUS_SESSION_BUS_ADDRESS unset, falling back to sd_bus_open_user.");
+                connection = sdbus::createSessionBusConnection();
+            }
             openUriProxy = sdbus::createProxy(
                 *connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath});
         }
