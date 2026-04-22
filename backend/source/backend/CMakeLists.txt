@@ -51,10 +51,16 @@ else()
             linux/opener_linux.cpp
             process/fork_pool.cpp
     )
+    # GLib's GDBus replaces sd-bus for portal calls: Ubuntu 24.04's xdg-dbus-proxy
+    # mangles sd-bus's one-shot AUTH EXTERNAL handshake but accepts GDBus's multi-step
+    # negotiation, so the app can talk to portals without --socket=session-bus.
+    # gio-unix-2.0 brings in GUnixFDList for file-descriptor passing.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(gio REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
     target_link_libraries(
         backend
         PRIVATE
-            SDBusCpp::sdbus-c++
+            PkgConfig::gio
     )
 endif()
 

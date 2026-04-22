@@ -1,6 +1,10 @@
 #include <backend/opener.hpp>
 
-#include <sdbus-c++/sdbus-c++.h>
+#include <utility/fd_guard.hpp>
+#include <utility/glib_raii.hpp>
+
+#include <gio/gio.h>
+#include <gio/gunixfdlist.h>
 #include <log/log.hpp>
 
 #include <gtk/gtk.h>
@@ -218,50 +222,146 @@ namespace
     }
 }
 
+namespace
+{
+    /**
+     *  @brief Invoke a fd-taking portal method (OpenURI.OpenFile / OpenURI.OpenDirectory).
+     *         Takes ownership of @p fd -- the FdGuard closes it on every path. Pass
+     *         @p withAsk = false when the method takes no "ask" option (OpenDirectory).
+     */
+    std::expected<void, std::string> callPortalFdMethod(
+        GDBusConnection* connection,
+        char const* method,
+        std::string const& parentWindow,
+        Utility::FdGuard fd,
+        bool withAsk,
+        bool askValue)
+    {
+        Utility::GObjectPtr<GUnixFDList> fdList{g_unix_fd_list_new()};
+        GError* rawErr = nullptr;
+        const gint fdHandle = g_unix_fd_list_append(fdList.get(), fd.get(), &rawErr);
+        // GUnixFDList dup'd the fd on append; our copy is closed by FdGuard at scope exit.
+        if (fdHandle < 0)
+            return std::unexpected{Utility::consumeGError(rawErr, "g_unix_fd_list_append failed")};
+
+        GVariantBuilder optsBuilder;
+        g_variant_builder_init(&optsBuilder, G_VARIANT_TYPE("a{sv}"));
+        if (withAsk)
+            g_variant_builder_add(&optsBuilder, "{sv}", "ask", g_variant_new_boolean(askValue));
+
+        GVariant* const params = g_variant_new(
+            "(sh@a{sv})", parentWindow.c_str(), fdHandle, g_variant_builder_end(&optsBuilder));
+
+        rawErr = nullptr;
+        Utility::GVariantPtr result{g_dbus_connection_call_with_unix_fd_list_sync(
+            connection,
+            portalService,
+            portalObjectPath,
+            openUriInterface,
+            method,
+            params, // floating; sunk by the call
+            G_VARIANT_TYPE("(o)"),
+            G_DBUS_CALL_FLAGS_NONE,
+            /*timeout_msec*/ 30000,
+            fdList.get(),
+            /*out_fd_list*/ nullptr,
+            /*cancellable*/ nullptr,
+            &rawErr)};
+
+        if (!result)
+            return std::unexpected{Utility::consumeGError(rawErr, "portal call failed")};
+
+        gchar const* handlePath = nullptr;
+        g_variant_get(result.get(), "(&o)", &handlePath);
+        Log::info("Opener: portal.{} succeeded, request handle='{}'", method, handlePath ? handlePath : "?");
+        return {};
+    }
+
+    /**
+     *  @brief Fetch a uint32 property from a portal interface via org.freedesktop.DBus.Properties.
+     *         Returns 0 when the property is unreachable (interface absent, service not running,
+     *         call error) -- capabilities() treats 0 as "not present".
+     */
+    std::uint32_t
+    probePortalVersion(GDBusConnection* connection, char const* service, char const* objectPath, char const* iface)
+    {
+        if (!connection)
+            return 0;
+
+        GError* rawErr = nullptr;
+        Utility::GVariantPtr result{g_dbus_connection_call_sync(
+            connection,
+            service,
+            objectPath,
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            g_variant_new("(ss)", iface, "version"),
+            G_VARIANT_TYPE("(v)"),
+            G_DBUS_CALL_FLAGS_NONE,
+            /*timeout_msec*/ 2000,
+            /*cancellable*/ nullptr,
+            &rawErr)};
+
+        if (!result)
+        {
+            Log::warn(
+                "Opener::capabilities: {} version probe failed: {}",
+                iface,
+                Utility::consumeGError(rawErr, "(no error object)"));
+            return 0;
+        }
+
+        GVariant* innerRaw = nullptr;
+        g_variant_get(result.get(), "(v)", &innerRaw);
+        Utility::GVariantPtr inner{innerRaw};
+        if (inner && g_variant_is_of_type(inner.get(), G_VARIANT_TYPE_UINT32))
+            return g_variant_get_uint32(inner.get());
+        return 0;
+    }
+
+    /**
+     *  @brief Ask the system's default handler (via the shared MIME DB / GAppInfo) to open
+     *         @p path. Used for directories in openInFileManager, where the portal's
+     *         OpenDirectory method is spec'd to open the fd's *parent* -- not useful when
+     *         the user already picked the directory itself.
+     */
+    std::expected<void, std::string> launchDefaultForPath(std::filesystem::path const& path)
+    {
+        GError* uriErrRaw = nullptr;
+        Utility::GcharPtr uri{g_filename_to_uri(path.c_str(), nullptr, &uriErrRaw)};
+        if (!uri)
+            return std::unexpected{Utility::consumeGError(uriErrRaw, "g_filename_to_uri failed")};
+
+        GError* launchErrRaw = nullptr;
+        const gboolean launched = g_app_info_launch_default_for_uri(uri.get(), nullptr, &launchErrRaw);
+        Log::info("Opener: launching file manager for URI '{}'", uri.get());
+        if (!launched)
+            return std::unexpected{Utility::consumeGError(launchErrRaw, "launch failed")};
+        return {};
+    }
+}
+
 struct Opener::Implementation
 {
     std::string parentWindow; // "wayland:HANDLE" | "x11:XID" | ""
-    std::unique_ptr<sdbus::IConnection> connection;
-    std::unique_ptr<sdbus::IProxy> openUriProxy;
+    Utility::GObjectPtr<GDBusConnection> connection;
 
     explicit Implementation(void* nativeWindow)
         : parentWindow{extractParentWindowHandle(nativeWindow)}
     {
-        // Prefer connecting via an explicit DBUS_SESSION_BUS_ADDRESS over sd_bus_open_user().
-        // Inside flatpak the session bus is reached through xdg-dbus-proxy at /run/flatpak/bus,
-        // and some proxy versions reject the extra negotiation (fd-passing, credentials, trusted
-        // flag) that sd_bus_open_user() performs -- handshake fails with ENOTCONN ("Transport
-        // endpoint is not connected"). createSessionBusConnectionWithAddress(addr) uses a thinner
-        // sd_bus_set_address+sd_bus_start path that the proxy reliably accepts. Falls through
-        // to the default open if the env var isn't set (non-flatpak / unusual launch).
-        try
-        {
-            if (const char* address = std::getenv("DBUS_SESSION_BUS_ADDRESS"))
-            {
-                Log::info("Opener: connecting to session bus at '{}' via explicit address.", address);
-                connection = sdbus::createSessionBusConnectionWithAddress(address);
-            }
-            else
-            {
-                Log::info("Opener: DBUS_SESSION_BUS_ADDRESS unset, falling back to sd_bus_open_user.");
-                connection = sdbus::createSessionBusConnection();
-            }
-            openUriProxy = sdbus::createProxy(
-                *connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath});
-        }
-        catch (sdbus::Error const& err)
+        // Use GLib's GDBus rather than sd-bus: Ubuntu 24.04's xdg-dbus-proxy mangles the AUTH
+        // handshake that sd-bus's sd_bus_open_user() performs (one-shot "AUTH EXTERNAL <uid>"),
+        // but accepts GDBus's multi-step flow unchanged. The shared session-bus connection
+        // returned by g_bus_get_sync() is the same one GTK/WebKit are already using, so this
+        // doesn't open a second socket.
+        GError* rawErr = nullptr;
+        connection.reset(g_bus_get_sync(G_BUS_TYPE_SESSION, /*cancellable*/ nullptr, &rawErr));
+        if (!connection)
         {
             Log::warn(
                 "Opener: could not connect to session bus ({}). "
                 "Opening files via xdg-desktop-portal will be unavailable.",
-                err.getMessage());
-        }
-        catch (std::exception const& err)
-        {
-            Log::warn(
-                "Opener: unexpected error connecting to session bus ({}). "
-                "Opening files via xdg-desktop-portal will be unavailable.",
-                err.what());
+                Utility::consumeGError(rawErr, "(no error object)"));
         }
         Log::info("Opener: initialized with parentWindow='{}'", parentWindow);
     }
@@ -281,7 +381,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
 {
     Log::info("Opener: openFile path='{}' openWith={} parentWindow='{}'", path.string(), openWith, impl_->parentWindow);
 
-    if (!impl_->openUriProxy)
+    if (!impl_->connection)
     {
         constexpr auto const* msg =
             "Session bus is unavailable; cannot open files via xdg-desktop-portal. "
@@ -290,32 +390,18 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
         return std::unexpected{std::string{msg}};
     }
 
-    int const fd = ::open(path.c_str(), O_RDONLY);
-    if (fd == -1)
+    Utility::FdGuard fd{::open(path.c_str(), O_RDONLY)};
+    if (!fd.valid())
     {
         Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
         return std::unexpected{std::string{"Failed to open file: "} + std::strerror(errno)};
     }
 
-    std::map<std::string, sdbus::Variant> options;
-    options.emplace("ask", sdbus::Variant{openWith});
-
-    try
-    {
-        sdbus::ObjectPath handle;
-        impl_->openUriProxy->callMethod("OpenFile")
-            .onInterface(openUriInterface)
-            .withArguments(impl_->parentWindow, sdbus::UnixFd{fd}, options)
-            .storeResultsTo(handle);
-        Log::info("Opener: OpenURI.OpenFile portal call succeeded, request handle='{}'", static_cast<std::string>(handle));
-    }
-    catch (sdbus::Error const& err)
-    {
-        Log::error("Opener: OpenURI.OpenFile portal call failed: {}", err.getMessage());
-        return std::unexpected{err.getMessage()};
-    }
-
-    return {};
+    auto result = callPortalFdMethod(
+        impl_->connection.get(), "OpenFile", impl_->parentWindow, std::move(fd), /*withAsk*/ true, openWith);
+    if (!result)
+        Log::error("Opener: OpenURI.OpenFile portal call failed: {}", result.error());
+    return result;
 }
 
 SharedData::OpenerCapabilities Opener::capabilities() const
@@ -330,28 +416,11 @@ SharedData::OpenerCapabilities Opener::capabilities() const
         return caps;
     }
 
-    // 1) OpenURI interface must exist on xdg-desktop-portal. Query its `version` property --
-    //    if the interface isn't implemented the getter throws.
-    bool openUriPresent = false;
-    try
-    {
-        auto probeProxy = sdbus::createProxy(
-            *impl_->connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath});
-        sdbus::Variant version = probeProxy->getProperty("version").onInterface(openUriInterface);
-        const auto v = version.get<uint32_t>();
-        openUriPresent = (v > 0);
-        Log::info("Opener::capabilities: OpenURI version={}", v);
-    }
-    catch (sdbus::Error const& err)
-    {
-        Log::warn("Opener::capabilities: OpenURI probe failed: {}", err.getMessage());
-    }
-    catch (std::exception const& err)
-    {
-        Log::warn("Opener::capabilities: OpenURI probe unexpected error: {}", err.what());
-    }
-
-    if (!openUriPresent)
+    // 1) OpenURI interface must exist on xdg-desktop-portal.
+    const std::uint32_t openUriVersion = probePortalVersion(
+        impl_->connection.get(), portalService, portalObjectPath, openUriInterface);
+    Log::info("Opener::capabilities: OpenURI version={}", openUriVersion);
+    if (openUriVersion == 0)
     {
         caps.canOpenFile = false;
         caps.canOpenInFileManager = false;
@@ -364,28 +433,10 @@ SharedData::OpenerCapabilities Opener::capabilities() const
     //    the fd directly, so skip the probe.
     if (runningInFlatpak())
     {
-        bool documentsPresent = false;
-        try
-        {
-            auto docsProxy = sdbus::createProxy(
-                *impl_->connection,
-                sdbus::ServiceName{documentsService},
-                sdbus::ObjectPath{documentsObjectPath});
-            sdbus::Variant version = docsProxy->getProperty("version").onInterface(documentsInterface);
-            const auto v = version.get<uint32_t>();
-            documentsPresent = (v > 0);
-            Log::info("Opener::capabilities: Documents portal version={}", v);
-        }
-        catch (sdbus::Error const& err)
-        {
-            Log::warn("Opener::capabilities: Documents portal probe failed: {}", err.getMessage());
-        }
-        catch (std::exception const& err)
-        {
-            Log::warn("Opener::capabilities: Documents portal probe unexpected error: {}", err.what());
-        }
-
-        if (!documentsPresent)
+        const std::uint32_t documentsVersion = probePortalVersion(
+            impl_->connection.get(), documentsService, documentsObjectPath, documentsInterface);
+        Log::info("Opener::capabilities: Documents portal version={}", documentsVersion);
+        if (documentsVersion == 0)
         {
             caps.canOpenFile = false;
             caps.reason = "xdg-document-portal is unavailable; "
@@ -403,7 +454,7 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
     Log::info(
         "Opener: openInFileManager path='{}' parentWindow='{}'", path.string(), impl_->parentWindow);
 
-    if (!impl_->openUriProxy)
+    if (!impl_->connection)
     {
         constexpr auto const* msg =
             "Session bus is unavailable; cannot open file manager via xdg-desktop-portal. "
@@ -417,65 +468,25 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
 
     if (isDirectory)
     {
-        // Directories: bypass the portal. The portal's OpenURI method is unreliable for
-        // file:// URIs (some backends reject it, others silently drop it), and OpenDirectory
-        // is spec'd to open the *parent* of its fd — not useful when the user picked a dir.
-        // g_app_info_launch_default_for_uri talks directly to the user's preferred file
-        // manager via the shared MIME DB, which is exactly what we want here.
-        GError* uriError = nullptr;
-        gchar* const uri = g_filename_to_uri(path.c_str(), nullptr, &uriError);
-        if (!uri)
-        {
-            const std::string msg = uriError ? uriError->message : "g_filename_to_uri failed";
-            Log::error("Opener: failed to build file URI for '{}': {}", path.string(), msg);
-            if (uriError)
-                g_error_free(uriError);
-            return std::unexpected{msg};
-        }
-
-        GError* launchError = nullptr;
-        const gboolean launched = g_app_info_launch_default_for_uri(uri, nullptr, &launchError);
-        Log::info("Opener: launching file manager for URI '{}'", uri);
-        g_free(uri);
-        if (!launched)
-        {
-            const std::string msg = launchError ? launchError->message : "launch failed";
-            Log::error("Opener: g_app_info_launch_default_for_uri failed: {}", msg);
-            if (launchError)
-                g_error_free(launchError);
-            return std::unexpected{msg};
-        }
-
-        return {};
+        auto result = launchDefaultForPath(path);
+        if (!result)
+            Log::error("Opener: g_app_info_launch_default_for_uri failed for '{}': {}", path.string(), result.error());
+        return result;
     }
 
     // File (or nonexistent — portal will reject that): OpenDirectory opens the
     // file's parent directory in the file manager. Most file managers highlight
     // the file, which is the common "reveal in file manager" behavior.
-    int const fd = ::open(path.c_str(), O_RDONLY);
-    if (fd == -1)
+    Utility::FdGuard fd{::open(path.c_str(), O_RDONLY)};
+    if (!fd.valid())
     {
         Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
         return std::unexpected{std::string{"Failed to open file: "} + std::strerror(errno)};
     }
 
-    const std::map<std::string, sdbus::Variant> options;
-    try
-    {
-        sdbus::ObjectPath handle;
-        impl_->openUriProxy->callMethod("OpenDirectory")
-            .onInterface(openUriInterface)
-            .withArguments(impl_->parentWindow, sdbus::UnixFd{fd}, options)
-            .storeResultsTo(handle);
-        Log::info(
-            "Opener: OpenURI.OpenDirectory portal call succeeded, request handle='{}'",
-            static_cast<std::string>(handle));
-    }
-    catch (sdbus::Error const& err)
-    {
-        Log::error("Opener: OpenURI.OpenDirectory portal call failed: {}", err.getMessage());
-        return std::unexpected{err.getMessage()};
-    }
-
-    return {};
+    auto result = callPortalFdMethod(
+        impl_->connection.get(), "OpenDirectory", impl_->parentWindow, std::move(fd), /*withAsk*/ false, false);
+    if (!result)
+        Log::error("Opener: OpenURI.OpenDirectory portal call failed: {}", result.error());
+    return result;
 }
