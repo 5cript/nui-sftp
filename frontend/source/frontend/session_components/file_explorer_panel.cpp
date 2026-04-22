@@ -29,7 +29,8 @@ using namespace Nui::Attributes;
 
 namespace
 {
-    NuiFileExplorer::FileGrid buildFileGrid(FileExplorerPanel::Params& params)
+    NuiFileExplorer::FileGrid
+    buildFileGrid(FileExplorerPanel::Params& params, Persistence::SessionOptions const& engineOptions)
     {
         auto* filePropertyDialog = params.filePropertyDialog;
         auto* confirmDialog = params.confirmDialog;
@@ -38,7 +39,7 @@ namespace
         auto const& uiOptions = params.uiOptions;
         auto* stateHolder = params.stateHolder;
 
-        if (std::holds_alternative<Persistence::SshSessionOptions>(params.engineOptions.engine))
+        if (std::holds_alternative<Persistence::SshSessionOptions>(engineOptions.engine))
         {
             return {
                 {
@@ -76,7 +77,7 @@ namespace
                 ),
                 std::make_unique<RemoteSideModel>(
                     uiOptions,
-                    std::get<Persistence::SshSessionOptions>(params.engineOptions.engine).remoteFavorites,
+                    std::get<Persistence::SshSessionOptions>(engineOptions.engine).remoteFavorites,
                     confirmDialog,
                     inputDialog,
                     filePropertyDialog,
@@ -136,7 +137,7 @@ struct FileExplorerPanel::Implementation
         , uiOptions{params.uiOptions}
         , engineOptions{std::move(params.engineOptions)}
         , isInLostConnectionState{params.isInLostConnectionState}
-        , fileGrid{buildFileGrid(params)}
+        , fileGrid{buildFileGrid(params, engineOptions)}
     {}
 };
 
