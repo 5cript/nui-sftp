@@ -80,6 +80,8 @@ localSideModel:
   createItemFailedTitle: "Erstellung fehlgeschlagen"
   failedToOpenFile: "Datei konnte nicht geöffnet werden."
   openInFileManagerFailed: "Im Dateimanager öffnen fehlgeschlagen"
+  portalUnavailableHeader: "Externes Öffnen nicht verfügbar"
+  portalUnavailableText: "Das Desktop-Portal zum Öffnen von Dateien in anderen Anwendungen ist nicht verfügbar. \"Öffnen\", \"Öffnen mit\" und \"Im Dateimanager öffnen\" wurden deaktiviert.\n\n{}"
   watchAndDownloadHeader: "Beobachten & Herunterladen?"
   watchAndDownloadSingle: "'{}' in ein temporäres Verzeichnis herunterladen und auf Änderungen beobachten?"
   watchAndDownloadMultiple: "{} Elemente in ein temporäres Verzeichnis herunterladen und auf Änderungen beobachten?"

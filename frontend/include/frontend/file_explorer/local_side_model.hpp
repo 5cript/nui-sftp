@@ -2,6 +2,7 @@
 
 #include <frontend/file_explorer/side_model.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/opener_capabilities.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
@@ -100,6 +101,10 @@ class LocalSideModel
     {
         return true;
     }
+    SharedData::OpenerCapabilities openerCapabilities() const override
+    {
+        return openerCaps_;
+    }
     void setRemoteModel(SideModel* model);
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
@@ -131,8 +136,17 @@ class LocalSideModel
     );
 
   private:
+    /**
+     *  @brief Ask the backend once which external-open operations the platform can perform
+     *         (xdg-desktop-portal probe on Linux). The result is stashed in @ref openerCaps_
+     *         and drives the context menu's disabled-state. On failure a one-shot warning
+     *         dialog is opened via @ref confirmDialog_.
+     */
+    void probeOpenerCapabilities();
+
     SideModel* remoteModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
     std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
     std::function<void(std::vector<std::string>)> onFavoritesChanged_;
+    SharedData::OpenerCapabilities openerCaps_{};
 };

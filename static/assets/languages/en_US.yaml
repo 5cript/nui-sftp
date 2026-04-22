@@ -136,6 +136,8 @@ localSideModel:
   createDirectoryFailedTitle: "Create Directory Failed"
   failedToOpenFile: "Failed to open file."
   openInFileManagerFailed: "Failed to Open in File Manager"
+  portalUnavailableHeader: "External Open Unavailable"
+  portalUnavailableText: "The desktop portal used to open files in other applications is not available. \"Open\", \"Open With\", and \"Open in File Manager\" have been disabled.\n\n{}"
   watchAndDownloadHeader: "Watch & Download?"
   watchAndDownloadSingle: "Download '{}' to a temporary directory and watch it for changes?"
   watchAndDownloadMultiple: "Download {} items to a temporary directory and watch them for changes?"

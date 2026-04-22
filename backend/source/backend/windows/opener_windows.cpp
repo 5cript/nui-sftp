@@ -113,6 +113,13 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     return {};
 }
 
+SharedData::OpenerCapabilities Opener::capabilities() const
+{
+    // ShellExecuteW / SHOpenFolderAndSelectItems are always available on any supported Windows;
+    // there's no probe short of trying the call with a real file, so report success.
+    return SharedData::OpenerCapabilities{};
+}
+
 std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
 {
     const auto pathStrU16 = path.native();

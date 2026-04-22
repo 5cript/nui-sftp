@@ -138,6 +138,7 @@ RpcFilesystem::RpcFilesystem(
     registerWriteFile();
     registerOpen();
     registerOpenInFileManager();
+    registerOpenerCapabilities();
 }
 
 void RpcFilesystem::registerRemove()
@@ -660,6 +661,23 @@ void RpcFilesystem::registerOpen()
                 }
 
                 reply({{"success", true}});
+            }
+        );
+}
+
+void RpcFilesystem::registerOpenerCapabilities()
+{
+    on("RpcFilesystem::openerCapabilities")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                const auto caps = opener_->capabilities();
+                Log::info(
+                    "RpcFilesystem::openerCapabilities: canOpenFile={}, canOpenInFileManager={}, reason='{}'",
+                    caps.canOpenFile,
+                    caps.canOpenInFileManager,
+                    caps.reason);
+                reply({{"success", true}, {"capabilities", nlohmann::json(caps)}});
             }
         );
 }

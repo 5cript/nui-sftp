@@ -33,6 +33,20 @@ namespace
     constexpr char const* portalService = "org.freedesktop.portal.Desktop";
     constexpr char const* portalObjectPath = "/org/freedesktop/portal/desktop";
     constexpr char const* openUriInterface = "org.freedesktop.portal.OpenURI";
+    constexpr char const* documentsService = "org.freedesktop.portal.Documents";
+    constexpr char const* documentsObjectPath = "/org/freedesktop/portal/documents";
+    constexpr char const* documentsInterface = "org.freedesktop.portal.Documents";
+
+    /**
+     *  @brief True when running inside a flatpak sandbox. xdg-desktop-portal routes fd-based
+     *         OpenFile calls through the Documents portal only in this case, so we include the
+     *         Documents portal probe in the capability decision only for sandboxed runs.
+     */
+    bool runningInFlatpak()
+    {
+        std::error_code ec;
+        return std::filesystem::exists("/.flatpak-info", ec) && !ec;
+    }
 
     //---------------------------------------------------------------------------------------------------------------------
     // Extract the XDG portal parent_window identifier from the GtkWidget* native window.
@@ -286,6 +300,86 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     }
 
     return {};
+}
+
+SharedData::OpenerCapabilities Opener::capabilities() const
+{
+    SharedData::OpenerCapabilities caps;
+
+    if (!impl_->connection)
+    {
+        caps.canOpenFile = false;
+        caps.canOpenInFileManager = false;
+        caps.reason = "D-Bus session bus is unavailable.";
+        return caps;
+    }
+
+    // 1) OpenURI interface must exist on xdg-desktop-portal. Query its `version` property --
+    //    if the interface isn't implemented the getter throws.
+    bool openUriPresent = false;
+    try
+    {
+        auto probeProxy = sdbus::createProxy(
+            *impl_->connection, sdbus::ServiceName{portalService}, sdbus::ObjectPath{portalObjectPath});
+        sdbus::Variant version = probeProxy->getProperty("version").onInterface(openUriInterface);
+        const auto v = version.get<uint32_t>();
+        openUriPresent = (v > 0);
+        Log::info("Opener::capabilities: OpenURI version={}", v);
+    }
+    catch (sdbus::Error const& err)
+    {
+        Log::warn("Opener::capabilities: OpenURI probe failed: {}", err.getMessage());
+    }
+    catch (std::exception const& err)
+    {
+        Log::warn("Opener::capabilities: OpenURI probe unexpected error: {}", err.what());
+    }
+
+    if (!openUriPresent)
+    {
+        caps.canOpenFile = false;
+        caps.canOpenInFileManager = false;
+        caps.reason = "xdg-desktop-portal OpenURI interface is unavailable.";
+        return caps;
+    }
+
+    // 2) Inside flatpak, OpenFile(fd) goes through the Documents portal; if it's not reachable
+    //    the call will fail even though OpenURI is present. Outside flatpak the portal can open
+    //    the fd directly, so skip the probe.
+    if (runningInFlatpak())
+    {
+        bool documentsPresent = false;
+        try
+        {
+            auto docsProxy = sdbus::createProxy(
+                *impl_->connection,
+                sdbus::ServiceName{documentsService},
+                sdbus::ObjectPath{documentsObjectPath});
+            sdbus::Variant version = docsProxy->getProperty("version").onInterface(documentsInterface);
+            const auto v = version.get<uint32_t>();
+            documentsPresent = (v > 0);
+            Log::info("Opener::capabilities: Documents portal version={}", v);
+        }
+        catch (sdbus::Error const& err)
+        {
+            Log::warn("Opener::capabilities: Documents portal probe failed: {}", err.getMessage());
+        }
+        catch (std::exception const& err)
+        {
+            Log::warn("Opener::capabilities: Documents portal probe unexpected error: {}", err.what());
+        }
+
+        if (!documentsPresent)
+        {
+            caps.canOpenFile = false;
+            caps.reason = "xdg-document-portal is unavailable; "
+                          "file-descriptor-based opening is not possible in this flatpak.";
+            // openInFileManager for directories uses g_app_info_launch_default_for_uri, which
+            // does not require the Documents portal, so leave canOpenInFileManager untouched.
+        }
+    }
+
+    return caps;
 }
 
 std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
