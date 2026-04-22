@@ -1,0 +1,36 @@
+[submodule "dependencies/Nui"]
+	path = dependencies/Nui
+	url = https://github.com/NuiCpp/Nui.git
+[submodule "dependencies/roar"]
+	path = dependencies/roar
+	url = https://github.com/5cript/roar.git
+[submodule "dependencies/gimo"]
+	path = dependencies/gimo
+	url = https://github.com/DNKpp/gimo.git
+[submodule "dependencies/traits"]
+	path = dependencies/traits
+	url = https://github.com/NuiCpp/traits.git
+[submodule "dependencies/5cript-nui-components"]
+	path = dependencies/5cript-nui-components
+	url = https://github.com/5cript/5cript-nui-components.git
+[submodule "dependencies/portable-file-dialogs"]
+	path = dependencies/portable-file-dialogs
+	url = https://github.com/5cript/portable-file-dialogs.git
+[submodule "dependencies/webview"]
+	path = dependencies/webview
+	url = https://github.com/5cript/webview.git
+[submodule "dependencies/yaml-cpp"]
+	path = dependencies/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "dependencies/rapidfuzz"]
+	path = dependencies/rapidfuzz
+	url = https://github.com/rapidfuzz/rapidfuzz-cpp.git
+[submodule "dependencies/spdlog"]
+	path = dependencies/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "dependencies/efsw"]
+	path = dependencies/efsw
+	url = https://github.com/SpartanJ/efsw.git
+[submodule "dependencies/promise-cpp"]
+	path = dependencies/promise-cpp
+	url = https://github.com/5cript/promise-cpp.git
