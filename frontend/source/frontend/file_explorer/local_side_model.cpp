@@ -23,6 +23,7 @@
 #include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <nui/frontend/api/console.hpp>
+#include <nui/frontend/utility/val_conversion.hpp>
 #include <nui/rpc.hpp>
 
 #include <algorithm>
@@ -121,7 +122,56 @@ LocalSideModel::LocalSideModel(
               return paths;
           }()
       )}
-{}
+{
+    probeOpenerCapabilities();
+}
+
+void LocalSideModel::probeOpenerCapabilities()
+{
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::openerCapabilities",
+        [this](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+            {
+                Log::warn("RpcFilesystem::openerCapabilities failed or unavailable; assuming capable.");
+                return;
+            }
+
+            SharedData::OpenerCapabilities caps{};
+            try
+            {
+                Nui::convertFromVal(val["capabilities"], caps);
+            }
+            catch (std::exception const& e)
+            {
+                Log::warn("Failed to parse openerCapabilities response: {}", e.what());
+                return;
+            }
+
+            openerCaps_ = caps;
+            Log::info(
+                "Opener capabilities: canOpenFile={}, canOpenInFileManager={}, reason='{}'",
+                caps.canOpenFile,
+                caps.canOpenInFileManager,
+                caps.reason
+            );
+
+            if (!caps.canOpenFile || !caps.canOpenInFileManager)
+            {
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                    .headerText = language->get("localSideModel", "portalUnavailableHeader"),
+                    .text = fmt::format(
+                        fmt::runtime(language->get("localSideModel", "portalUnavailableText")), caps.reason
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                    .neverShowAgainId = "localSideModel.portalUnavailable",
+                });
+            }
+        }
+    );
+}
 
 void LocalSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
 {
@@ -1219,7 +1269,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             {
                 onOpen(selectedItems.front(), false);
             },
-            !singleItem
+            !singleItem || !openerCaps_.canOpenFile
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWith"),
@@ -1228,7 +1278,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             {
                 onOpen(selectedItems.front(), true);
             },
-            !singleItem
+            !singleItem || !openerCaps_.canOpenFile
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openInFileManager"),
@@ -1237,7 +1287,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
             {
                 onOpenInFileManager(selectedItems.front());
             },
-            !singleItem
+            !singleItem || !openerCaps_.canOpenInFileManager
         ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(

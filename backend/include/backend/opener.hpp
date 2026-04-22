@@ -1,5 +1,7 @@
 #pragma once
 
+#include <shared_data/opener_capabilities.hpp>
+
 #include <expected>
 #include <filesystem>
 #include <memory>
@@ -23,6 +25,13 @@ class Opener
      *           parent directory and asks the file manager to highlight the file.
      */
     std::expected<void, std::string> openInFileManager(std::filesystem::path const& path);
+
+    /**
+     *  @brief Probe the platform's external-open facilities and report which calls are expected
+     *         to succeed. Called once at startup by the frontend via RPC so it can gray out
+     *         "Open" / "Open With" / "Open in File Manager" menu entries and warn the user.
+     */
+    SharedData::OpenerCapabilities capabilities() const;
 
   private:
     struct Implementation;

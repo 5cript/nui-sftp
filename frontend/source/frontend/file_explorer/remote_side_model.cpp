@@ -192,6 +192,11 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         items.push_back(Snc::PopupMenu::separator());
     }
 
+    // "Open" variants on the remote side ultimately route the downloaded file through the
+    // local Opener (xdg-desktop-portal / ShellExecute), so gate them on the same capability
+    // the LocalSideModel probes at startup.
+    const bool canOpen = localModel_ ? localModel_->openerCapabilities().canOpenFile : true;
+
     const std::vector<NuiFileExplorer::ContextMenuItem> baseItems = {
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "download"),
@@ -219,7 +224,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onDownloadAndOpen(selectedItems.front(), false);
             },
-            !singleItem || fileTracking_ == nullptr
+            !singleItem || fileTracking_ == nullptr || !canOpen
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWith"),
@@ -228,7 +233,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onDownloadAndOpen(selectedItems.front(), true);
             },
-            !singleItem || fileTracking_ == nullptr
+            !singleItem || fileTracking_ == nullptr || !canOpen
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openAndWatch"),
@@ -237,7 +242,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onWatchDownloadAndOpen(selectedItems.front(), false);
             },
-            !singleItem || fileTracking_ == nullptr
+            !singleItem || fileTracking_ == nullptr || !canOpen
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWithAndWatch"),
@@ -246,7 +251,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onWatchDownloadAndOpen(selectedItems.front(), true);
             },
-            !singleItem || fileTracking_ == nullptr
+            !singleItem || fileTracking_ == nullptr || !canOpen
         ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(

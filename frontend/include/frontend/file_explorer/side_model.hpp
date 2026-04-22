@@ -7,6 +7,7 @@
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <persistence/state_holder.hpp>
+#include <shared_data/opener_capabilities.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
 
@@ -93,6 +94,17 @@ class SideModel : public NuiFileExplorer::ISideModel
     void dropMetadata(std::string const& value) override
     {
         dropMetadata_ = value;
+    }
+
+    /**
+     *  @brief Current snapshot of the platform opener probe result. Defaults to all-capable;
+     *         LocalSideModel overrides this once the backend probe completes. RemoteSideModel
+     *         reads it through its localModel_ pointer so remote "Open" / "Open With" / watch
+     *         variants can be grayed out in lockstep.
+     */
+    virtual SharedData::OpenerCapabilities openerCapabilities() const
+    {
+        return {};
     }
 
   protected:
