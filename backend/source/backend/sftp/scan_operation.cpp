@@ -15,6 +15,7 @@ ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOption
     , respectIgnoreFiles_{options.respectIgnoreFiles}
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
+    , buildTree_{options.buildTree}
 {}
 
 ScanOperation::~ScanOperation() = default;
@@ -142,27 +143,31 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
         }
         case (Running):
         {
-            return withWalkerDo(
+            // Shared step logic — generic over both walker shapes since
+            // BaseDirectoryWalker and the concrete walkers expose the same surface.
+            auto stepWalker =
                 [this](auto& walker) -> std::expected<ScanOperation::WorkStatus, ScanOperation::Error>
+            {
+                if (walker.completed())
                 {
-                    if (walker.completed())
-                    {
-                        Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
-                        state_ = Completed;
-                        return WorkStatus::Complete;
-                    }
-
-                    auto result = walker.walk();
-                    if (!result.has_value())
-                    {
-                        Log::error("ScanOperation: Failed to scan directory: {}", result.error().toString());
-                        return enterErrorState<WorkStatus>(result.error());
-                    }
-                    // -1, because the walker includes the base/root dir of the search:
-                    progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
-                    return WorkStatus::MoreWork;
+                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
+                    state_ = Completed;
+                    return WorkStatus::Complete;
                 }
-            );
+
+                auto result = walker.walk();
+                if (!result.has_value())
+                {
+                    Log::error("ScanOperation: Failed to scan directory: {}", result.error().toString());
+                    return enterErrorState<WorkStatus>(result.error());
+                }
+                // -1, because the walker includes the base/root dir of the search:
+                progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
+                return WorkStatus::MoreWork;
+            };
+            if (buildTree_)
+                return withTreeWalkerDo(stepWalker);
+            return withWalkerDo(stepWalker);
         }
         case (Prepared):
         case (Preparing):

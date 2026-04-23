@@ -67,7 +67,12 @@ void Session::start()
             self->registerRpcSftpAddBulkUploadOperation();
             self->registerRpcSftpAddBulkDeleteOperation();
             self->registerRpcSftpExistsBatch();
-            self->registerRpcSftpAddSyncScanOperation();
+            self->registerRpcSftpOpenSyncSession();
+            self->registerRpcSftpRecomputeSyncDiff();
+            self->registerRpcSftpLoadSyncDiffChildren();
+            self->registerRpcSftpBuildSyncEnqueuePlan();
+            self->registerRpcSftpCancelSyncDiff();
+            self->registerRpcSftpCloseSyncSession();
             self->registerOperationQueuePauseUnpause();
             self->registerRpcSftpDeleteFiles();
             self->registerRpcSftpRename();
@@ -1213,13 +1218,14 @@ void Session::registerOperationQueuePauseUnpause()
             }
         );
 }
-void Session::registerRpcSftpAddSyncScanOperation()
+void Session::registerRpcSftpOpenSyncSession()
 {
-    on(fmt::format("Session::{}::sftp::addSyncScan", id_.value()))
+    on(fmt::format("Session::{}::sftp::openSyncSession", id_.value()))
         .perform(
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
+                std::string const& syncSessionIdString,
                 std::string const& remoteScanIdString,
                 std::string const& localScanIdString,
                 std::string const& remotePath,
@@ -1236,6 +1242,7 @@ void Session::registerRpcSftpAddSyncScanOperation()
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
+                        syncSessionIdString,
                         remoteScanIdString,
                         localScanIdString,
                         remotePath,
@@ -1250,6 +1257,7 @@ void Session::registerRpcSftpAddSyncScanOperation()
 
                         self->operationQueue_->addSyncScanOperation(
                             *channel,
+                            Ids::makeSyncSessionId(syncSessionIdString),
                             Ids::makeOperationId(remoteScanIdString),
                             Ids::makeOperationId(localScanIdString),
                             remotePath,
@@ -1264,6 +1272,197 @@ void Session::registerRpcSftpAddSyncScanOperation()
                     },
                     std::move(reply)
                 );
+            }
+        );
+}
+
+void Session::registerRpcSftpRecomputeSyncDiff()
+{
+    on(fmt::format("Session::{}::sftp::recomputeSyncDiff", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& syncSessionIdString,
+                SharedData::Sync::DiffOptions const& options
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply({{"error", "Session no longer exists"}});
+
+                const auto syncSessionId = Ids::makeSyncSessionId(syncSessionIdString);
+                auto session = self->operationQueue_->syncSession(syncSessionId);
+                if (!session)
+                    return reply({{"error", "Sync session not found"}});
+
+                auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
+                boost::asio::post(
+                    session->strand(),
+                    [weak, session, options, syncSessionId, replyShared]() mutable
+                    {
+                        auto parent = weak.lock();
+                        const auto summary = session->recomputeDiffInStrand(
+                            options,
+                            [weakParent = weak, syncSessionId](std::uint64_t compared)
+                            {
+                                auto parent = weakParent.lock();
+                                if (!parent)
+                                    return;
+                                // Hop back to the window/JS thread before emitting the RPC.
+                                parent->wnd_->runInJavascriptThread(
+                                    [parent, syncSessionId, compared]()
+                                    {
+                                        // Matches the OperationQueue::rpcName scheme
+                                        // the frontend OperationQueue listens on.
+                                        parent->hub_->callRemote(
+                                            fmt::format(
+                                                "OperationQueue::{}::onSyncDiffProgress",
+                                                parent->id_.value()
+                                            ),
+                                            syncSessionId,
+                                            std::to_string(compared)
+                                        );
+                                    }
+                                );
+                            }
+                        );
+
+                        nlohmann::json payload;
+                        SharedData::to_json(payload, summary);
+                        (*replyShared)(std::move(payload));
+                    }
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpLoadSyncDiffChildren()
+{
+    on(fmt::format("Session::{}::sftp::loadSyncDiffChildren", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& syncSessionIdString,
+                SharedData::Sync::DiffSection section,
+                std::string const& parentRelKey,
+                std::string const& expectedGenerationString
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply({{"error", "Session no longer exists"}});
+
+                const auto syncSessionId = Ids::makeSyncSessionId(syncSessionIdString);
+                auto session = self->operationQueue_->syncSession(syncSessionId);
+                if (!session)
+                    return reply({{"error", "Sync session not found"}});
+
+                const std::uint64_t expectedGeneration = std::stoull(expectedGenerationString);
+
+                auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
+                boost::asio::post(
+                    session->strand(),
+                    [session, section, parentRelKey, expectedGeneration, replyShared]()
+                    {
+                        if (session->generation() != expectedGeneration)
+                        {
+                            replyShared->error("stale generation");
+                            return;
+                        }
+                        const auto children = session->loadChildrenInStrand(section, parentRelKey);
+                        nlohmann::json payload = nlohmann::json::array();
+                        for (auto const& node : children)
+                        {
+                            nlohmann::json entry;
+                            SharedData::to_json(entry, node);
+                            payload.push_back(std::move(entry));
+                        }
+                        (*replyShared)(std::move(payload));
+                    }
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpBuildSyncEnqueuePlan()
+{
+    on(fmt::format("Session::{}::sftp::buildSyncEnqueuePlan", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply,
+                std::string const& syncSessionIdString,
+                SharedData::Sync::DiffSection section,
+                std::vector<std::string> const& selectedRelKeys,
+                std::string const& expectedGenerationString
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply({{"error", "Session no longer exists"}});
+
+                const auto syncSessionId = Ids::makeSyncSessionId(syncSessionIdString);
+                auto session = self->operationQueue_->syncSession(syncSessionId);
+                if (!session)
+                    return reply({{"error", "Sync session not found"}});
+
+                const std::uint64_t expectedGeneration = std::stoull(expectedGenerationString);
+                auto selected = std::unordered_set<std::string>{selectedRelKeys.begin(), selectedRelKeys.end()};
+
+                auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
+                boost::asio::post(
+                    session->strand(),
+                    [session, section, selected = std::move(selected), expectedGeneration, replyShared]()
+                    {
+                        if (session->generation() != expectedGeneration)
+                        {
+                            replyShared->error("stale generation");
+                            return;
+                        }
+                        const auto plan = session->buildEnqueuePlanInStrand(section, selected);
+                        nlohmann::json payload = nlohmann::json::array();
+                        for (auto const& entry : plan)
+                        {
+                            nlohmann::json j;
+                            SharedData::to_json(j, entry);
+                            payload.push_back(std::move(j));
+                        }
+                        (*replyShared)(std::move(payload));
+                    }
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpCancelSyncDiff()
+{
+    on(fmt::format("Session::{}::sftp::cancelSyncDiff", id_.value()))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, std::string const& syncSessionIdString)
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply({{"error", "Session no longer exists"}});
+
+                const auto syncSessionId = Ids::makeSyncSessionId(syncSessionIdString);
+                if (auto session = self->operationQueue_->syncSession(syncSessionId); session)
+                    session->cancel();
+                reply({{"success", true}});
+            }
+        );
+}
+
+void Session::registerRpcSftpCloseSyncSession()
+{
+    on(fmt::format("Session::{}::sftp::closeSyncSession", id_.value()))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, std::string const& syncSessionIdString)
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply({{"error", "Session no longer exists"}});
+
+                self->operationQueue_->closeSyncSession(Ids::makeSyncSessionId(syncSessionIdString));
+                reply({{"success", true}});
             }
         );
 }

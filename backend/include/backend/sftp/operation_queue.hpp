@@ -2,6 +2,7 @@
 
 #include <backend/sftp/all_operations.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sync/sync_session.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/rpc.hpp>
@@ -11,6 +12,10 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_summary.hpp>
+#include <shared_data/sync/diff_tree_node.hpp>
+#include <shared_data/sync/scan_node.hpp>
 
 #include <deque>
 #include <filesystem>
@@ -224,8 +229,14 @@ class OperationQueue
      * @param remotePath    Remote directory root to scan.
      * @param localPath     Local directory root to scan.
      */
+    /**
+     * @brief Opens a @ref SyncSession and kicks off both scans. The scans build
+     *        ScanNode trees directly and feed them into the session on completion.
+     *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
+     */
     void addSyncScanOperation(
         SecureShell::SftpSession& sftp,
+        Ids::SyncSessionId syncSessionId,
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
         std::filesystem::path const& remotePath,
@@ -234,6 +245,20 @@ class OperationQueue
         bool recursive,
         bool ignoreHidden
     );
+
+    /**
+     * @brief Returns the session with the given id, or nullptr when it has been
+     *        closed / is unknown.  Callers must post onto @ref SyncSession::strand()
+     *        before touching mutable state.
+     */
+    std::shared_ptr<SyncSession> syncSession(Ids::SyncSessionId const& sessionId) const;
+
+    /**
+     * @brief Removes the session from the registry.  Flips its cancel flag first so
+     *        any in-flight walk exits at its next checkpoint.  The destructor runs
+     *        once the last @c shared_ptr reference (captured tasks + this map) drops.
+     */
+    void closeSyncSession(Ids::SyncSessionId const& sessionId);
 
     void registerRpc();
 
@@ -295,9 +320,15 @@ class OperationQueue
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
     int parallelism_{1};
-    // Keyed by operationId.value(). Called when a sync-only scan completes and ejects its results.
-    std::map<std::string, std::function<void(std::vector<SharedData::DirectoryEntry>, std::uint64_t)>>
-        syncScanCallbacks_{};
+    // Keyed by operationId.value(). Called when a sync-only scan completes and
+    // hands off its ScanNode tree. The scan is known to be build-tree mode so
+    // @ref ScanOperation::ejectScanTree() has the payload.
+    std::map<std::string, std::function<void(SharedData::Sync::ScanNode)>> syncScanCallbacks_{};
+
+    // SyncSessions active on this channel.  Keyed by SyncSessionId.value() because
+    // Ids::IdHash isn't specialized on the strongly-typed id; the existing
+    // bulkResumeStash_ does the specialization — we stay string-keyed for simplicity.
+    std::map<std::string, std::shared_ptr<SyncSession>> syncSessions_{};
 
     // Per-bulk backup snapshot, populated when a bulk-add path enqueues an
     // op and erased once the op completes (success or failure).  Keyed by

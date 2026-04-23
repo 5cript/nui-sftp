@@ -189,7 +189,12 @@ class Session
     void registerRpcSftpAddBulkUploadOperation();
     void registerRpcSftpAddBulkDeleteOperation();
     void registerRpcSftpExistsBatch();
-    void registerRpcSftpAddSyncScanOperation();
+    void registerRpcSftpOpenSyncSession();
+    void registerRpcSftpRecomputeSyncDiff();
+    void registerRpcSftpLoadSyncDiffChildren();
+    void registerRpcSftpBuildSyncEnqueuePlan();
+    void registerRpcSftpCancelSyncDiff();
+    void registerRpcSftpCloseSyncSession();
     void registerOperationQueuePauseUnpause();
 
     void removeChannel(Ids::ChannelId channelId);

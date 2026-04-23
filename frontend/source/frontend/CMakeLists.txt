@@ -56,6 +56,7 @@ target_sources(
         session_components/session_snapshot_manager.cpp
         sync_dialog/sync_dialog.cpp
         sync_dialog/sync_progress_dialog.cpp
+        sync_dialog/backend_sync_provider.cpp
         terminal/terminal_channel.cpp
         terminal/frontend_session_manager.cpp
         terminal/executing_engine.cpp

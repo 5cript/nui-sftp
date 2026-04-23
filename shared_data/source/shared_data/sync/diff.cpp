@@ -1,205 +1,335 @@
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_tree_node.hpp>
 
-#include <map>
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace SharedData::Sync
 {
     namespace
     {
-        std::map<std::string, DirectoryEntry>
-        buildEntryMap(std::filesystem::path const& root, std::vector<DirectoryEntry> const& entries)
+        constexpr std::uint64_t progressCheckpointInterval = 512;
+
+        bool isHidden(std::string const& name)
         {
-            std::map<std::string, DirectoryEntry> result;
-            for (std::size_t idx = 1; idx < entries.size(); ++idx)
+            return !name.empty() && name.front() == '.';
+        }
+
+        std::string joinRel(std::string const& parentRelKey, std::string const& name)
+        {
+            if (parentRelKey.empty())
+                return name;
+            std::string out;
+            out.reserve(parentRelKey.size() + 1 + name.size());
+            out.append(parentRelKey);
+            out.push_back('/');
+            out.append(name);
+            return out;
+        }
+
+        /**
+         * @brief Resolve how a one-sided local entry should be emitted.
+         *        Returns std::nullopt when the entry should be skipped.
+         */
+        std::optional<Action> chooseLocalOnlyAction(ScanNode const& node, DiffOptions const& options)
+        {
+            if (options.direction == Direction::Download)
             {
-                auto const& entry = entries[idx];
-                std::filesystem::path relPath;
-                if (entry.fullPath.has_relative_path())
-                {
-                    relPath = std::filesystem::path{entry.fullPath.generic_string()}.lexically_relative(
-                        std::filesystem::path{root.generic_string()}
-                    );
-                }
-                else
-                {
-                    relPath = entry.path;
-                }
-                if (!relPath.empty())
-                    result.emplace(relPath.generic_string(), entry);
+                if (!options.actionDelete)
+                    return std::nullopt;
+                // Non-recursive mode: if we never descended into this directory we cannot
+                // safely delete it — the user hasn't seen its contents.
+                if (node.type == FileType::Directory && !node.childrenKnown)
+                    return std::nullopt;
+                return Action::DeleteLocal;
             }
-            return result;
+            if (!options.actionUpload)
+                return std::nullopt;
+            return Action::Upload;
         }
 
-        bool hasHiddenSegment(std::string const& relKey)
+        /**
+         * @brief Mirror of @ref chooseLocalOnlyAction for a one-sided remote entry.
+         */
+        std::optional<Action> chooseRemoteOnlyAction(ScanNode const& node, DiffOptions const& options)
         {
-            std::size_t pos = 0;
-            while (pos < relKey.size())
+            if (options.direction == Direction::Upload)
             {
-                if (relKey[pos] == '.')
-                    return true;
-                pos = relKey.find('/', pos);
-                if (pos == std::string::npos)
-                    break;
-                ++pos;
+                if (!options.actionDelete)
+                    return std::nullopt;
+                if (node.type == FileType::Directory && !node.childrenKnown)
+                    return std::nullopt;
+                return Action::DeleteRemote;
             }
-            return false;
+            if (!options.actionDownload)
+                return std::nullopt;
+            return Action::Download;
         }
 
-        bool isNested(std::string const& relKey)
+        DiffTreeNode makeLocalOnlyRow(ScanNode const& node, std::string const& relKey, Action action)
         {
-            return relKey.find('/') != std::string::npos;
-        }
-    }
-
-    bool entriesDiffer(DirectoryEntry const& localEntry, DirectoryEntry const& remoteEntry)
-    {
-        if (localEntry.type != remoteEntry.type)
-            return true;
-        if (localEntry.type == FileType::Symlink)
-        {
-            if (localEntry.linkTarget && remoteEntry.linkTarget)
-                return *localEntry.linkTarget != *remoteEntry.linkTarget;
-            return false;
-        }
-        if (localEntry.size != remoteEntry.size)
-            return true;
-        if (localEntry.mtime != remoteEntry.mtime)
-            return true;
-        return false;
-    }
-
-    DiffResult computeSyncDiff(
-        std::filesystem::path const& localRoot,
-        std::filesystem::path const& remoteRoot,
-        std::vector<DirectoryEntry> const& localEntries,
-        std::vector<DirectoryEntry> const& remoteEntries,
-        DiffOptions const& options
-    )
-    {
-        DiffResult result;
-
-        if (localEntries.empty() && remoteEntries.empty())
-            return result;
-
-        auto localMap = buildEntryMap(localRoot, localEntries);
-        auto remoteMap = buildEntryMap(remoteRoot, remoteEntries);
-
-        if (options.ignoreHidden)
-        {
-            for (auto mapIter = localMap.begin(); mapIter != localMap.end();)
-                mapIter = hasHiddenSegment(mapIter->first) ? localMap.erase(mapIter) : std::next(mapIter);
-            for (auto mapIter = remoteMap.begin(); mapIter != remoteMap.end();)
-                mapIter = hasHiddenSegment(mapIter->first) ? remoteMap.erase(mapIter) : std::next(mapIter);
+            const bool isDir = node.type == FileType::Directory;
+            return DiffTreeNode{
+                .relKey = relKey,
+                .name = node.name,
+                .action = action,
+                .isDirectory = isDir,
+                .hasLocalSide = true,
+                .hasRemoteSide = false,
+                .localSize = node.size,
+                .remoteSize = 0,
+                .localMtime = node.mtime,
+                .remoteMtime = 0,
+                .directChildCount = isDir ? static_cast<std::uint32_t>(node.children.size()) : 0u,
+                .descendantItemCount = isDir ? node.subtreeFileCount : 1ull,
+                .descendantByteTotal = isDir ? node.subtreeByteTotal : node.size,
+            };
         }
 
-        if (!options.recursive)
+        DiffTreeNode makeRemoteOnlyRow(ScanNode const& node, std::string const& relKey, Action action)
         {
-            for (auto mapIter = localMap.begin(); mapIter != localMap.end();)
-                mapIter = isNested(mapIter->first) ? localMap.erase(mapIter) : std::next(mapIter);
-            for (auto mapIter = remoteMap.begin(); mapIter != remoteMap.end();)
-                mapIter = isNested(mapIter->first) ? remoteMap.erase(mapIter) : std::next(mapIter);
+            const bool isDir = node.type == FileType::Directory;
+            return DiffTreeNode{
+                .relKey = relKey,
+                .name = node.name,
+                .action = action,
+                .isDirectory = isDir,
+                .hasLocalSide = false,
+                .hasRemoteSide = true,
+                .localSize = 0,
+                .remoteSize = node.size,
+                .localMtime = 0,
+                .remoteMtime = node.mtime,
+                .directChildCount = isDir ? static_cast<std::uint32_t>(node.children.size()) : 0u,
+                .descendantItemCount = isDir ? node.subtreeFileCount : 1ull,
+                .descendantByteTotal = isDir ? node.subtreeByteTotal : node.size,
+            };
         }
 
-        // ---- Entries that exist locally ----------------------------------
-        for (auto const& [relKey, localEntry] : localMap)
+        DiffTreeNode makeFileDifferRow(
+            ScanNode const& localNode,
+            ScanNode const& remoteNode,
+            std::string const& relKey,
+            Action action
+        )
         {
-            auto remoteIter = remoteMap.find(relKey);
-            if (remoteIter == remoteMap.end())
+            return DiffTreeNode{
+                .relKey = relKey,
+                .name = localNode.name,
+                .action = action,
+                .isDirectory = false,
+                .hasLocalSide = true,
+                .hasRemoteSide = true,
+                .localSize = localNode.size,
+                .remoteSize = remoteNode.size,
+                .localMtime = localNode.mtime,
+                .remoteMtime = remoteNode.mtime,
+                .directChildCount = 0,
+                .descendantItemCount = 1,
+                .descendantByteTotal = action == Action::Upload ? localNode.size : remoteNode.size,
+            };
+        }
+
+        void emitOneSided(
+            DiffTreeNode row,
+            Action action,
+            std::string const& parentRelKey,
+            DiffSink& sink
+        )
+        {
+            switch (action)
             {
-                if (options.actionUpload && options.direction != Direction::Download)
-                {
-                    result.uploads.push_back(DiffEntry{
-                        .relKey = relKey,
-                        .action = Action::Upload,
-                        .local = localEntry,
-                        .remote = std::nullopt,
-                    });
-                }
-                else if (options.actionDelete && options.direction == Direction::Download)
-                {
-                    // In non-recursive mode the children of this directory weren't scanned,
-                    // so deleting it could remove items the user never saw — hide it.
-                    const bool skipDir = !options.recursive && localEntry.type == FileType::Directory;
-                    if (!skipDir)
-                    {
-                        result.deletes.push_back(DiffEntry{
-                            .relKey = relKey,
-                            .action = Action::DeleteLocal,
-                            .local = localEntry,
-                            .remote = std::nullopt,
-                        });
-                    }
-                }
-                continue;
+                case Action::Upload:
+                    sink.emitUpload(std::move(row), parentRelKey);
+                    return;
+                case Action::Download:
+                    sink.emitDownload(std::move(row), parentRelKey);
+                    return;
+                case Action::DeleteLocal:
+                case Action::DeleteRemote:
+                    sink.emitDelete(std::move(row), parentRelKey);
+                    return;
+            }
+        }
+
+        /**
+         * @brief Forward declaration — recursion point for directory pairs.
+         */
+        void mergeChildren(
+            std::vector<ScanNode> const& localChildren,
+            std::vector<ScanNode> const& remoteChildren,
+            std::string const& parentRelKey,
+            DiffOptions const& options,
+            DiffSink& sink,
+            std::uint64_t& comparedCounter
+        );
+
+        void handleBothPresent(
+            ScanNode const& localChild,
+            ScanNode const& remoteChild,
+            std::string const& relKey,
+            std::string const& parentRelKey,
+            DiffOptions const& options,
+            DiffSink& sink,
+            std::uint64_t& comparedCounter
+        )
+        {
+            const bool sameDir =
+                localChild.type == FileType::Directory && remoteChild.type == FileType::Directory;
+            if (sameDir)
+            {
+                if (options.recursive)
+                    mergeChildren(localChild.children, remoteChild.children, relKey, options, sink, comparedCounter);
+                return;
             }
 
-            auto const& remoteEntry = remoteIter->second;
+            if (!entriesDiffer(localChild, remoteChild))
+                return;
 
-            if (localEntry.type == FileType::Directory)
-                continue;
-            if (!entriesDiffer(localEntry, remoteEntry))
-                continue;
-
-            const bool localNewer = localEntry.mtime >= remoteEntry.mtime;
-
-            if (options.direction == Direction::Upload ||
-                (options.direction == Direction::Both && localNewer))
+            // Direction routing: Upload-only → Upload; Download-only → Download;
+            // Both → mtime-newer wins (local >= remote favors Upload).
+            if (options.direction == Direction::Upload)
             {
                 if (options.actionUpload)
-                {
-                    result.uploads.push_back(DiffEntry{
-                        .relKey = relKey,
-                        .action = Action::Upload,
-                        .local = localEntry,
-                        .remote = remoteEntry,
-                    });
-                }
+                    sink.emitUpload(makeFileDifferRow(localChild, remoteChild, relKey, Action::Upload), parentRelKey);
+                return;
+            }
+            if (options.direction == Direction::Download)
+            {
+                if (options.actionDownload)
+                    sink.emitDownload(
+                        makeFileDifferRow(localChild, remoteChild, relKey, Action::Download), parentRelKey
+                    );
+                return;
+            }
+            // Both direction.
+            const bool localNewer = localChild.mtime >= remoteChild.mtime;
+            if (localNewer)
+            {
+                if (options.actionUpload)
+                    sink.emitUpload(makeFileDifferRow(localChild, remoteChild, relKey, Action::Upload), parentRelKey);
             }
             else
             {
                 if (options.actionDownload)
-                {
-                    result.downloads.push_back(DiffEntry{
-                        .relKey = relKey,
-                        .action = Action::Download,
-                        .local = localEntry,
-                        .remote = remoteEntry,
-                    });
-                }
+                    sink.emitDownload(
+                        makeFileDifferRow(localChild, remoteChild, relKey, Action::Download), parentRelKey
+                    );
             }
         }
 
-        // ---- Entries that exist only remotely ----------------------------
-        for (auto const& [relKey, remoteEntry] : remoteMap)
+        void mergeChildren(
+            std::vector<ScanNode> const& localChildren,
+            std::vector<ScanNode> const& remoteChildren,
+            std::string const& parentRelKey,
+            DiffOptions const& options,
+            DiffSink& sink,
+            std::uint64_t& comparedCounter
+        )
         {
-            if (localMap.count(relKey))
-                continue;
+            std::size_t li = 0;
+            std::size_t ri = 0;
 
-            if (options.actionDownload && options.direction != Direction::Upload)
+            const auto bumpAndCheckpoint = [&]() {
+                ++comparedCounter;
+                if (comparedCounter % progressCheckpointInterval == 0)
+                    sink.onProgress(comparedCounter);
+            };
+
+            while (li < localChildren.size() || ri < remoteChildren.size())
             {
-                result.downloads.push_back(DiffEntry{
-                    .relKey = relKey,
-                    .action = Action::Download,
-                    .local = std::nullopt,
-                    .remote = remoteEntry,
-                });
-            }
-            else if (options.actionDelete && options.direction == Direction::Upload)
-            {
-                const bool skipDir = !options.recursive && remoteEntry.type == FileType::Directory;
-                if (!skipDir)
+                if (sink.cancelled())
+                    return;
+
+                const bool hasL = li < localChildren.size();
+                const bool hasR = ri < remoteChildren.size();
+
+                // Pick the smaller name (or the only side available).
+                const bool takeBoth = hasL && hasR && localChildren[li].name == remoteChildren[ri].name;
+                const bool takeLeft = hasL && (!hasR || localChildren[li].name < remoteChildren[ri].name);
+                const bool takeRight = hasR && (!hasL || remoteChildren[ri].name < localChildren[li].name);
+
+                if (takeBoth)
                 {
-                    result.deletes.push_back(DiffEntry{
-                        .relKey = relKey,
-                        .action = Action::DeleteRemote,
-                        .local = std::nullopt,
-                        .remote = remoteEntry,
-                    });
+                    auto const& lc = localChildren[li];
+                    auto const& rc = remoteChildren[ri];
+                    if (!options.ignoreHidden || !isHidden(lc.name))
+                    {
+                        const auto relKey = joinRel(parentRelKey, lc.name);
+                        handleBothPresent(lc, rc, relKey, parentRelKey, options, sink, comparedCounter);
+                    }
+                    ++li;
+                    ++ri;
+                    bumpAndCheckpoint();
+                }
+                else if (takeLeft)
+                {
+                    auto const& lc = localChildren[li];
+                    if (!options.ignoreHidden || !isHidden(lc.name))
+                    {
+                        if (auto action = chooseLocalOnlyAction(lc, options); action)
+                        {
+                            const auto relKey = joinRel(parentRelKey, lc.name);
+                            emitOneSided(makeLocalOnlyRow(lc, relKey, *action), *action, parentRelKey, sink);
+                        }
+                    }
+                    ++li;
+                    bumpAndCheckpoint();
+                }
+                else if (takeRight)
+                {
+                    auto const& rc = remoteChildren[ri];
+                    if (!options.ignoreHidden || !isHidden(rc.name))
+                    {
+                        if (auto action = chooseRemoteOnlyAction(rc, options); action)
+                        {
+                            const auto relKey = joinRel(parentRelKey, rc.name);
+                            emitOneSided(makeRemoteOnlyRow(rc, relKey, *action), *action, parentRelKey, sink);
+                        }
+                    }
+                    ++ri;
+                    bumpAndCheckpoint();
+                }
+                else
+                {
+                    // Both exhausted — loop will exit.
+                    break;
                 }
             }
         }
+    }
 
-        return result;
+    bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode)
+    {
+        if (localNode.type != remoteNode.type)
+            return true;
+        if (localNode.type == FileType::Symlink)
+        {
+            if (localNode.linkTarget && remoteNode.linkTarget)
+                return *localNode.linkTarget != *remoteNode.linkTarget;
+            return false;
+        }
+        if (localNode.size != remoteNode.size)
+            return true;
+        if (localNode.mtime != remoteNode.mtime)
+            return true;
+        return false;
+    }
+
+    void diffScanTrees(
+        ScanNode const& local,
+        ScanNode const& remote,
+        DiffOptions const& options,
+        DiffSink& sink
+    )
+    {
+        std::uint64_t compared = 0;
+        mergeChildren(local.children, remote.children, std::string{}, options, sink, compared);
+        // Final heartbeat so observers see the completed count even if it didn't
+        // land on a checkpoint boundary.
+        sink.onProgress(compared);
     }
 }

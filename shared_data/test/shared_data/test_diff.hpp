@@ -1,6 +1,8 @@
 #pragma once
 
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_tree_node.hpp>
+#include <shared_data/sync/scan_node.hpp>
 
 #include <gtest/gtest.h>
 
@@ -10,330 +12,432 @@
 
 namespace SharedData::Sync::Test
 {
-    inline DirectoryEntry
-    makeEntry(std::string const& relPath, FileType type, std::uint64_t size = 0, std::uint64_t mtime = 0,
-              std::filesystem::path const& root = {})
+    /**
+     * @brief Test-only sink that captures emissions into flat vectors.  Mirrors the
+     *        backend-side DiffTreeStore closely enough to make assertions easy.
+     */
+    struct CollectingSink : DiffSink
     {
-        DirectoryEntry entry{};
-        entry.path = relPath;
-        if (!root.empty())
-            entry.fullPath = root / relPath;
-        entry.type = type;
-        entry.size = size;
-        entry.mtime = mtime;
-        return entry;
-    }
-
-    inline std::vector<DirectoryEntry>
-    makeScan(std::filesystem::path const& root, std::vector<DirectoryEntry> children)
-    {
-        std::vector<DirectoryEntry> entries;
-        entries.reserve(children.size() + 1);
-        // Index 0 is the scan root (excluded from buildEntryMap).
-        DirectoryEntry rootEntry{};
-        rootEntry.path = root;
-        rootEntry.type = FileType::Directory;
-        entries.push_back(std::move(rootEntry));
-        for (auto& child : children)
+        struct Record
         {
-            if (child.fullPath.empty())
-                child.fullPath = root / child.path;
-            entries.push_back(std::move(child));
+            DiffTreeNode node;
+            std::string parentRelKey;
+        };
+
+        std::vector<Record> uploads;
+        std::vector<Record> downloads;
+        std::vector<Record> deletes;
+        std::uint64_t lastProgress{0};
+
+        void emitUpload(DiffTreeNode node, std::string const& parentRelKey) override
+        {
+            uploads.push_back(Record{.node = std::move(node), .parentRelKey = parentRelKey});
         }
-        return entries;
+        void emitDownload(DiffTreeNode node, std::string const& parentRelKey) override
+        {
+            downloads.push_back(Record{.node = std::move(node), .parentRelKey = parentRelKey});
+        }
+        void emitDelete(DiffTreeNode node, std::string const& parentRelKey) override
+        {
+            deletes.push_back(Record{.node = std::move(node), .parentRelKey = parentRelKey});
+        }
+        void onProgress(std::uint64_t entriesCompared) override
+        {
+            lastProgress = entriesCompared;
+        }
+    };
+
+    inline bool hasRelKey(std::vector<CollectingSink::Record> const& records, std::string const& relKey)
+    {
+        return std::any_of(records.begin(), records.end(), [&](CollectingSink::Record const& record) {
+            return record.node.relKey == relKey;
+        });
     }
 
-    inline bool hasRelKey(std::vector<DiffEntry> const& entries, std::string const& relKey)
+    inline CollectingSink::Record const*
+    findRelKey(std::vector<CollectingSink::Record> const& records, std::string const& relKey)
     {
-        return std::any_of(entries.begin(), entries.end(),
-            [&](DiffEntry const& entry) { return entry.relKey == relKey; });
+        auto iter = std::find_if(records.begin(), records.end(), [&](CollectingSink::Record const& record) {
+            return record.node.relKey == relKey;
+        });
+        return iter == records.end() ? nullptr : &*iter;
     }
 
-    inline DiffEntry const* findRelKey(std::vector<DiffEntry> const& entries, std::string const& relKey)
+    /**
+     * @brief Builds a leaf file node.
+     */
+    inline ScanNode makeFile(std::string const& name, std::uint64_t size, std::uint64_t mtime)
     {
-        auto iter = std::find_if(entries.begin(), entries.end(),
-            [&](DiffEntry const& entry) { return entry.relKey == relKey; });
-        return iter == entries.end() ? nullptr : &*iter;
+        return ScanNode{
+            .name = name,
+            .type = FileType::Regular,
+            .size = size,
+            .mtime = mtime,
+        };
     }
 
-    TEST(SyncDiffTests, EmptyInputsProduceNoDiff)
+    /**
+     * @brief Builds a symlink node with a given raw link target.
+     */
+    inline ScanNode makeSymlink(std::string const& name, std::filesystem::path const& target, std::uint64_t mtime = 0)
     {
-        const auto result = computeSyncDiff("/local", "/remote", {}, {}, {});
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
-        EXPECT_TRUE(result.deletes.empty());
+        return ScanNode{
+            .name = name,
+            .type = FileType::Symlink,
+            .size = 0,
+            .mtime = mtime,
+            .linkTarget = target,
+        };
     }
 
-    TEST(SyncDiffTests, IdenticalTreesProduceNoDiff)
+    /**
+     * @brief Builds a directory with the given children, sorts by name, and accumulates
+     *        subtreeFileCount / subtreeByteTotal post-order (mirrors what
+     *        @ref Utility::TreeDirectoryWalker does at scan time).
+     */
+    inline ScanNode makeDir(std::string const& name, std::vector<ScanNode> children, bool childrenKnown = true)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
+        std::sort(children.begin(), children.end(), [](ScanNode const& lhs, ScanNode const& rhs) {
+            return lhs.name < rhs.name;
+        });
 
-        auto local = makeScan(localRoot, {makeEntry("file.txt", FileType::Regular, 17, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("file.txt", FileType::Regular, 17, 100, remoteRoot)});
+        ScanNode node{
+            .name = name,
+            .type = FileType::Directory,
+            .children = std::move(children),
+            .childrenKnown = childrenKnown,
+        };
 
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
-        EXPECT_TRUE(result.deletes.empty());
+        for (auto const& child : node.children)
+        {
+            if (child.type == FileType::Directory)
+            {
+                node.subtreeFileCount += child.subtreeFileCount;
+                node.subtreeByteTotal += child.subtreeByteTotal;
+            }
+            else
+            {
+                node.subtreeFileCount += 1;
+                node.subtreeByteTotal += child.size;
+            }
+        }
+        return node;
     }
 
-    TEST(SyncDiffTests, LocalOnlyEntryBecomesUploadInBothDirection)
+    TEST(SyncDiffTests, EmptyTreesProduceNoEmits)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("only_local.txt", FileType::Regular, 5, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        ASSERT_EQ(result.uploads.size(), 1u);
-        EXPECT_EQ(result.uploads.front().relKey, "only_local.txt");
-        EXPECT_EQ(result.uploads.front().action, Action::Upload);
-        EXPECT_TRUE(result.uploads.front().local.has_value());
-        EXPECT_FALSE(result.uploads.front().remote.has_value());
-        EXPECT_TRUE(result.downloads.empty());
-        EXPECT_TRUE(result.deletes.empty());
+        CollectingSink sink;
+        diffScanTrees(makeDir("", {}), makeDir("", {}), {}, sink);
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
     }
 
-    TEST(SyncDiffTests, RemoteOnlyEntryBecomesDownloadInBothDirection)
+    TEST(SyncDiffTests, IdenticalTreesProduceNoEmits)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {});
-        auto remote = makeScan(remoteRoot, {makeEntry("only_remote.txt", FileType::Regular, 5, 100, remoteRoot)});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        ASSERT_EQ(result.downloads.size(), 1u);
-        EXPECT_EQ(result.downloads.front().relKey, "only_remote.txt");
-        EXPECT_EQ(result.downloads.front().action, Action::Download);
-    }
-
-    TEST(SyncDiffTests, NewerLocalEntryWinsInBothDirection)
-    {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("file.txt", FileType::Regular, 5, 200, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("file.txt", FileType::Regular, 5, 100, remoteRoot)});
-        // Force a difference in size so the entries are considered to differ; the
-        // direction is then chosen by mtime.
-        local[1].size = 6;
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_EQ(result.uploads.size(), 1u);
-        EXPECT_TRUE(result.downloads.empty());
-    }
-
-    TEST(SyncDiffTests, NewerRemoteEntryWinsInBothDirection)
-    {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("file.txt", FileType::Regular, 6, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("file.txt", FileType::Regular, 5, 200, remoteRoot)});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_EQ(result.downloads.size(), 1u);
-    }
-
-    TEST(SyncDiffTests, UploadDirectionForcesUploadOnDifferingEntry)
-    {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        // Remote has a newer mtime, but Direction::Upload must override.
-        auto local = makeScan(localRoot, {makeEntry("file.txt", FileType::Regular, 6, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("file.txt", FileType::Regular, 5, 200, remoteRoot)});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote, {.direction = Direction::Upload}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 17, 100)}),
+            makeDir("", {makeFile("file.txt", 17, 100)}),
+            {},
+            sink
         );
-        EXPECT_EQ(result.uploads.size(), 1u);
-        EXPECT_TRUE(result.downloads.empty());
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
+    }
+
+    TEST(SyncDiffTests, LocalOnlyFileBecomesUploadInBothDirection)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("only_local.txt", 5, 100)}),
+            makeDir("", {}),
+            {},
+            sink
+        );
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "only_local.txt");
+        EXPECT_EQ(sink.uploads.front().node.action, Action::Upload);
+        EXPECT_TRUE(sink.uploads.front().node.hasLocalSide);
+        EXPECT_FALSE(sink.uploads.front().node.hasRemoteSide);
+        EXPECT_EQ(sink.uploads.front().parentRelKey, "");
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
+    }
+
+    TEST(SyncDiffTests, RemoteOnlyFileBecomesDownloadInBothDirection)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {}),
+            makeDir("", {makeFile("only_remote.txt", 5, 100)}),
+            {},
+            sink
+        );
+        ASSERT_EQ(sink.downloads.size(), 1u);
+        EXPECT_EQ(sink.downloads.front().node.relKey, "only_remote.txt");
+        EXPECT_EQ(sink.downloads.front().node.action, Action::Download);
+    }
+
+    TEST(SyncDiffTests, NewerLocalFileWinsInBothDirection)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 6, 200)}),
+            makeDir("", {makeFile("file.txt", 5, 100)}),
+            {},
+            sink
+        );
+        EXPECT_EQ(sink.uploads.size(), 1u);
+        EXPECT_TRUE(sink.downloads.empty());
+    }
+
+    TEST(SyncDiffTests, NewerRemoteFileWinsInBothDirection)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 6, 100)}),
+            makeDir("", {makeFile("file.txt", 5, 200)}),
+            {},
+            sink
+        );
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_EQ(sink.downloads.size(), 1u);
+    }
+
+    TEST(SyncDiffTests, UploadDirectionForcesUploadOnDifferingFile)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 6, 100)}),
+            makeDir("", {makeFile("file.txt", 5, 200)}),
+            {.direction = Direction::Upload},
+            sink
+        );
+        EXPECT_EQ(sink.uploads.size(), 1u);
+        EXPECT_TRUE(sink.downloads.empty());
     }
 
     TEST(SyncDiffTests, DownloadDirectionSuppressesUploads)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("only_local.txt", FileType::Regular, 5, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote, {.direction = Direction::Download}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("only_local.txt", 5, 100)}),
+            makeDir("", {}),
+            {.direction = Direction::Download},
+            sink
         );
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
-        EXPECT_TRUE(result.deletes.empty());
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
     }
 
-    TEST(SyncDiffTests, DownloadDirectionWithDeleteRemovesLocalOnlyEntry)
+    TEST(SyncDiffTests, DownloadDirectionWithDeleteRemovesLocalOnlyFile)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("only_local.txt", FileType::Regular, 5, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote,
-            {.direction = Direction::Download, .actionDelete = true}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("only_local.txt", 5, 100)}),
+            makeDir("", {}),
+            {.direction = Direction::Download, .actionDelete = true},
+            sink
         );
-        ASSERT_EQ(result.deletes.size(), 1u);
-        EXPECT_EQ(result.deletes.front().action, Action::DeleteLocal);
+        ASSERT_EQ(sink.deletes.size(), 1u);
+        EXPECT_EQ(sink.deletes.front().node.action, Action::DeleteLocal);
     }
 
-    TEST(SyncDiffTests, UploadDirectionWithDeleteRemovesRemoteOnlyEntry)
+    TEST(SyncDiffTests, UploadDirectionWithDeleteRemovesRemoteOnlyFile)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {});
-        auto remote = makeScan(remoteRoot, {makeEntry("only_remote.txt", FileType::Regular, 5, 100, remoteRoot)});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote,
-            {.direction = Direction::Upload, .actionDelete = true}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {}),
+            makeDir("", {makeFile("only_remote.txt", 5, 100)}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
         );
-        ASSERT_EQ(result.deletes.size(), 1u);
-        EXPECT_EQ(result.deletes.front().action, Action::DeleteRemote);
+        ASSERT_EQ(sink.deletes.size(), 1u);
+        EXPECT_EQ(sink.deletes.front().node.action, Action::DeleteRemote);
     }
 
-    TEST(SyncDiffTests, DirectoriesPresentOnBothSidesDoNotProduceDiff)
+    TEST(SyncDiffTests, SameDirectoryOnBothSidesDoesNotEmitAnything)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("subdir", FileType::Directory, 0, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("subdir", FileType::Directory, 0, 200, remoteRoot)});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeDir("subdir", {})}),
+            makeDir("", {makeDir("subdir", {})}),
+            {},
+            sink
+        );
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
     }
 
-    TEST(SyncDiffTests, NonRecursiveDropsNestedEntries)
+    TEST(SyncDiffTests, OneSidedDirectoryEmitsSingleRowWithSubtreeCounts)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {
-            makeEntry("top.txt", FileType::Regular, 5, 100, localRoot),
-            makeEntry("subdir/nested.txt", FileType::Regular, 5, 100, localRoot),
+        // Local has a directory tree with 3 files; remote is empty. A one-sided
+        // directory should emit exactly one row with directChildCount/descendant counts
+        // from the cached ScanNode metrics — no recursion during diff.
+        auto subtree = makeDir("dir", {
+            makeFile("a.txt", 10, 100),
+            makeFile("b.txt", 20, 100),
+            makeDir("inner", {makeFile("c.txt", 5, 100)}),
         });
-        auto remote = makeScan(remoteRoot, {});
 
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote, {.recursive = false}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {std::move(subtree)}),
+            makeDir("", {}),
+            {},
+            sink
         );
-        ASSERT_EQ(result.uploads.size(), 1u);
-        EXPECT_EQ(result.uploads.front().relKey, "top.txt");
+
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        auto const& row = sink.uploads.front().node;
+        EXPECT_EQ(row.relKey, "dir");
+        EXPECT_TRUE(row.isDirectory);
+        EXPECT_EQ(row.descendantItemCount, 3u);
+        EXPECT_EQ(row.descendantByteTotal, 10u + 20u + 5u);
+        EXPECT_EQ(row.directChildCount, 3u);
     }
 
-    TEST(SyncDiffTests, NonRecursiveDeleteHidesDirectoryEntries)
+    TEST(SyncDiffTests, RecursiveWalkEmitsEachDifferingChild)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        // Local-only directory + Direction::Download + actionDelete; without recursive
-        // mode the directory is hidden to avoid a recursive delete the user can't audit.
-        auto local = makeScan(localRoot, {makeEntry("orphan_dir", FileType::Directory, 0, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote,
-            {.direction = Direction::Download, .actionDelete = true, .recursive = false}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {
+                makeDir("sub", {
+                    makeFile("a.txt", 10, 100),
+                    makeFile("b.txt", 20, 100),
+                }),
+            }),
+            makeDir("", {
+                makeDir("sub", {}),
+            }),
+            {},
+            sink
         );
-        EXPECT_TRUE(result.deletes.empty());
+        ASSERT_EQ(sink.uploads.size(), 2u);
+        EXPECT_TRUE(hasRelKey(sink.uploads, "sub/a.txt"));
+        EXPECT_TRUE(hasRelKey(sink.uploads, "sub/b.txt"));
+        EXPECT_EQ(findRelKey(sink.uploads, "sub/a.txt")->parentRelKey, "sub");
     }
 
-    TEST(SyncDiffTests, IgnoreHiddenDropsDotEntriesAndTrees)
+    TEST(SyncDiffTests, NonRecursiveSkipsDescendIntoSameNameDirectory)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {
-            makeEntry("normal.txt", FileType::Regular, 5, 100, localRoot),
-            makeEntry(".hidden", FileType::Regular, 5, 100, localRoot),
-            makeEntry(".git/config", FileType::Regular, 5, 100, localRoot),
-        });
-        auto remote = makeScan(remoteRoot, {});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote, {.ignoreHidden = true}
+        // top.txt differs → upload. subdir exists on both sides but in non-recursive
+        // mode the walk must NOT descend into it.
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {
+                makeFile("top.txt", 5, 100),
+                makeDir("subdir", {makeFile("nested.txt", 5, 100)}),
+            }),
+            makeDir("", {
+                makeDir("subdir", {}),
+            }),
+            {.recursive = false},
+            sink
         );
-        ASSERT_EQ(result.uploads.size(), 1u);
-        EXPECT_EQ(result.uploads.front().relKey, "normal.txt");
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "top.txt");
+    }
+
+    TEST(SyncDiffTests, NonRecursiveDeleteHidesUnknownChildrenDirectory)
+    {
+        // Local has a directory that the scanner didn't descend into
+        // (childrenKnown=false). With Direction::Download + actionDelete, we must
+        // suppress the delete — deleting a subtree the user can't audit is unsafe.
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeDir("orphan_dir", {}, /*childrenKnown=*/false)}),
+            makeDir("", {}),
+            {.direction = Direction::Download, .actionDelete = true, .recursive = false},
+            sink
+        );
+        EXPECT_TRUE(sink.deletes.empty());
+    }
+
+    TEST(SyncDiffTests, IgnoreHiddenDropsDotEntriesAtEveryLevel)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {
+                makeFile("normal.txt", 5, 100),
+                makeFile(".hidden", 5, 100),
+                makeDir(".git", {makeFile("config", 5, 100)}),
+            }),
+            makeDir("", {}),
+            {.ignoreHidden = true},
+            sink
+        );
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "normal.txt");
     }
 
     TEST(SyncDiffTests, SymlinksWithSameTargetDoNotDiffer)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto localLink = makeEntry("link", FileType::Symlink, 0, 100, localRoot);
-        localLink.linkTarget = std::filesystem::path{"/some/target"};
-        auto remoteLink = makeEntry("link", FileType::Symlink, 99, 200, remoteRoot);
-        remoteLink.linkTarget = std::filesystem::path{"/some/target"};
-
-        auto local = makeScan(localRoot, {localLink});
-        auto remote = makeScan(remoteRoot, {remoteLink});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeSymlink("link", "/some/target", 100)}),
+            makeDir("", {makeSymlink("link", "/some/target", 200)}),
+            {},
+            sink
+        );
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
     }
 
     TEST(SyncDiffTests, SymlinksWithDifferentTargetsProduceDiff)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto localLink = makeEntry("link", FileType::Symlink, 0, 200, localRoot);
-        localLink.linkTarget = std::filesystem::path{"/local/target"};
-        auto remoteLink = makeEntry("link", FileType::Symlink, 0, 100, remoteRoot);
-        remoteLink.linkTarget = std::filesystem::path{"/remote/target"};
-
-        auto local = makeScan(localRoot, {localLink});
-        auto remote = makeScan(remoteRoot, {remoteLink});
-
-        const auto result = computeSyncDiff(localRoot, remoteRoot, local, remote, {});
-        EXPECT_EQ(result.uploads.size() + result.downloads.size(), 1u);
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeSymlink("link", "/local/target", 200)}),
+            makeDir("", {makeSymlink("link", "/remote/target", 100)}),
+            {},
+            sink
+        );
+        EXPECT_EQ(sink.uploads.size() + sink.downloads.size(), 1u);
     }
 
-    TEST(SyncDiffTests, TypeMismatchAlwaysCountsAsDifference)
+    TEST(SyncDiffTests, TypeMismatchCountsAsDifference)
     {
-        DirectoryEntry localEntry{};
-        localEntry.type = FileType::Regular;
-        localEntry.size = 5;
-        localEntry.mtime = 100;
-
-        DirectoryEntry remoteEntry{};
-        remoteEntry.type = FileType::Symlink;
-        remoteEntry.size = 5;
-        remoteEntry.mtime = 100;
-
-        EXPECT_TRUE(entriesDiffer(localEntry, remoteEntry));
+        auto localNode = makeFile("same_name", 5, 100);
+        auto remoteNode = makeSymlink("same_name", "/elsewhere", 100);
+        EXPECT_TRUE(entriesDiffer(localNode, remoteNode));
     }
 
     TEST(SyncDiffTests, ActionTogglesSuppressMatchingLists)
     {
-        const std::filesystem::path localRoot = "/local";
-        const std::filesystem::path remoteRoot = "/remote";
-
-        auto local = makeScan(localRoot, {makeEntry("only_local.txt", FileType::Regular, 5, 100, localRoot)});
-        auto remote = makeScan(remoteRoot, {makeEntry("only_remote.txt", FileType::Regular, 5, 100, remoteRoot)});
-
-        const auto result = computeSyncDiff(
-            localRoot, remoteRoot, local, remote,
-            {.actionUpload = false, .actionDownload = false, .actionDelete = false}
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("only_local.txt", 5, 100)}),
+            makeDir("", {makeFile("only_remote.txt", 5, 100)}),
+            {.actionUpload = false, .actionDownload = false, .actionDelete = false},
+            sink
         );
-        EXPECT_TRUE(result.uploads.empty());
-        EXPECT_TRUE(result.downloads.empty());
-        EXPECT_TRUE(result.deletes.empty());
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_TRUE(sink.deletes.empty());
+    }
+
+    TEST(SyncDiffTests, OneSidedFullVsEmptyIsCheaperThanEqualWalk)
+    {
+        // Sanity check on the algorithm's "prune one-sided subtrees" promise:
+        // 1 local child with 100 deep descendants vs empty remote should visit
+        // exactly one top-level compare, not 100.
+        std::vector<ScanNode> deepChildren;
+        deepChildren.reserve(100);
+        for (int idx = 0; idx < 100; ++idx)
+            deepChildren.push_back(makeFile("f" + std::to_string(idx), 1, 100));
+        auto localTree = makeDir("", {makeDir("deep", std::move(deepChildren))});
+
+        CollectingSink sink;
+        diffScanTrees(localTree, makeDir("", {}), {}, sink);
+
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "deep");
+        // Only the one top-level compare happened.
+        EXPECT_EQ(sink.lastProgress, 1u);
     }
 }

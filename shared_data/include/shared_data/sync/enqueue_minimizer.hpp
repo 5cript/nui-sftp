@@ -24,14 +24,29 @@ namespace SharedData::Sync
     };
 
     /**
-     * @brief Computes the minimal set of indices to enqueue from @p items.
+     * @brief Computes the minimal set of indices to enqueue from @p items given a
+     *        SPARSE selection set.
      *
-     * Bulk-directory items collapse fully-selected subtrees into a single emission.
-     * Partially-selected subtrees fall through to per-leaf emission. Non-leaf items
-     * that are not bulk-directories are never emitted on their own (their leaves are).
+     * Semantics of the sparse set @p sparseSet:
+     *  - An entry X means "X and every descendant of X is selected" (ancestor
+     *    implication).
+     *  - Callers normally keep the set in its sparsest form by collapsing
+     *    fully-selected sibling groups into the shared parent and filling out
+     *    when a deeper descendant is unchecked.  The minimizer tolerates
+     *    non-minimal input (redundant ancestors + descendants) — it just walks
+     *    ancestor-in-set during processing.
+     *
+     * Emission rules:
+     *  - Bulk-dir (one-sided directory or delete-dir) effectively selected →
+     *    emit once and cover the whole subtree.
+     *  - Plain file leaf effectively selected → emit.
+     *  - Structural two-sided directory effectively selected → no own emission;
+     *    descendants iterate next and inherit the selection.
+     *
+     * "Effectively selected" = in the set OR any ancestor is in the set.
      */
     std::vector<std::size_t> minimizeEnqueueIndices(
         std::vector<MinimizerItemView> const& items,
-        std::unordered_set<std::string> const& selectedLeafRelKeys
+        std::unordered_set<std::string> const& sparseSet
     );
 }

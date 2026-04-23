@@ -3,6 +3,7 @@
 #include <frontend/proto_session.hpp>
 #include <frontend/sync_dialog/sync_dialog.hpp>
 #include <frontend/sync_dialog/sync_progress_dialog.hpp>
+#include <frontend/sync_dialog/backend_sync_provider.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
@@ -73,6 +74,14 @@ struct Session::Implementation
     std::unique_ptr<SessionLayoutInitializer> layoutInitializer;
     SyncDialog syncDialog;
     SyncProgressDialog syncProgressDialog;
+    // Holds the active BackendSyncProvider between progress-dialog open and
+    // sync-dialog close.  Destroyed (→ provider.close() → backend session
+    // released) when replaced or explicitly reset.
+    std::unique_ptr<BackendSyncProvider> syncProvider_;
+    // Last local+remote paths given to startSyncFlow; used by the dialog's
+    // Recompare path to re-issue the flow without asking the user again.
+    std::filesystem::path lastSyncLocalPath_{};
+    std::filesystem::path lastSyncRemotePath_{};
     std::unique_ptr<ConnectionLossOverlay> connectionLossOverlay;
     std::unique_ptr<SessionSnapshotManager> snapshotManager;
 
@@ -126,27 +135,71 @@ struct Session::Implementation
         , onReconnectCancel{std::move(params.onReconnectCancel)}
         , onReconnectNow{std::move(params.onReconnectNow)}
     {
-        syncDialog.setOnRecompare(
-            [this](
-                std::filesystem::path loc,
-                std::filesystem::path rem,
-                bool respectIgnoreFiles,
-                bool recursive,
-                bool ignoreHidden,
-                std::function<void(
-                    std::vector<SharedData::DirectoryEntry>,
-                    std::vector<SharedData::DirectoryEntry>
-                )> onResult
-            )
+        // Recompare: rerun the whole scan-and-diff flow with the dialog's current
+        // settings, reusing the cached local+remote roots.  The old provider is
+        // replaced by a fresh one; the backend session it held is closed on
+        // destruction.
+        syncDialog.setOnRecompareRequested(
+            [this](SyncDialog::RecompareRequest req)
             {
-                syncProgressDialog.open(
-                    std::move(loc), std::move(rem), respectIgnoreFiles, recursive, ignoreHidden, std::move(onResult)
+                if (lastSyncLocalPath_.empty() || lastSyncRemotePath_.empty())
+                    return;
+                startSyncFlowImpl(
+                    lastSyncLocalPath_,
+                    lastSyncRemotePath_,
+                    req.respectIgnoreFiles,
+                    req.recursive,
+                    req.ignoreHidden,
+                    req.diffOptions
                 );
-                Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
 
         fileExplorerPanel.dropLayoutMetadata(sessionLayoutId);
+    }
+
+    /**
+     * @brief Runs one scan-and-diff flow: replaces any existing provider, drives
+     *        the progress dialog through Listing → Comparing, then opens the
+     *        sync dialog with the resulting summary.
+     *
+     *        Callers:
+     *         - file-explorer "synchronize" click (initial open), and
+     *         - sync-dialog "recompare" click (uses the cached paths).
+     */
+    void startSyncFlowImpl(
+        std::filesystem::path localPath,
+        std::filesystem::path remotePath,
+        bool respectIgnoreFiles,
+        bool recursive,
+        bool ignoreHidden,
+        SharedData::Sync::DiffOptions initialDiffOptions
+    )
+    {
+        lastSyncLocalPath_ = localPath;
+        lastSyncRemotePath_ = remotePath;
+
+        // Replace the old provider before opening the progress dialog so its
+        // backend session (if any) is closed before the new one opens.
+        syncProvider_ = std::make_unique<BackendSyncProvider>(&operationQueue);
+
+        syncProgressDialog.open(
+            syncProvider_.get(),
+            localPath,
+            remotePath,
+            respectIgnoreFiles,
+            recursive,
+            ignoreHidden,
+            initialDiffOptions,
+            [this, localPath, remotePath](SharedData::Sync::DiffSummary summary)
+            {
+                syncDialog.open(
+                    syncProvider_.get(), std::move(summary), localPath, remotePath
+                );
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        );
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 };
 
@@ -415,23 +468,20 @@ void Session::setupFileGrid()
     impl_->fileExplorerPanel.setup();
 
     // Sync dialog + progress dialog stay on Session; wire them through the
-    // panel's synchronize callback.
+    // panel's synchronize callback.  Initial flow uses default scan + diff
+    // settings; the sync dialog's own settings drive subsequent recomputes and
+    // recompares.
     impl_->fileExplorerPanel.setOnSynchronize(
         [this](std::filesystem::path loc, std::filesystem::path rem)
         {
-            impl_->syncProgressDialog.open(
-                loc,
-                rem,
-                true,
-                true,
-                false,
-                [this, loc, rem](auto localEntries, auto remoteEntries)
-                {
-                    impl_->syncDialog.open(loc, rem, std::move(localEntries), std::move(remoteEntries));
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
+            impl_->startSyncFlowImpl(
+                std::move(loc),
+                std::move(rem),
+                /*respectIgnoreFiles=*/true,
+                /*recursive=*/true,
+                /*ignoreHidden=*/false,
+                SharedData::Sync::DiffOptions{}
             );
-            Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
 }
