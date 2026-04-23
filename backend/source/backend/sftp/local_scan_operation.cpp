@@ -31,6 +31,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     , respectIgnoreFiles_{options.respectIgnoreFiles}
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
+    , buildTree_{options.buildTree}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
@@ -198,27 +199,29 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
         }
         case (Running):
         {
-            return withWalkerDo(
+            auto stepWalker =
                 [this](auto& walker) -> std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error>
+            {
+                if (walker.completed())
                 {
-                    if (walker.completed())
-                    {
-                        Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.generic_string());
-                        state_ = Completed;
-                        return WorkStatus::Complete;
-                    }
-
-                    auto result = walker.walk();
-                    if (!result.has_value())
-                    {
-                        Log::error("LocalScanOperation: Failed to scan directory: {}", result.error().toString());
-                        return enterErrorState<WorkStatus>(result.error());
-                    }
-                    // -1, because the walker includes the base/root dir of the search:
-                    progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
-                    return WorkStatus::MoreWork;
+                    Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.generic_string());
+                    state_ = Completed;
+                    return WorkStatus::Complete;
                 }
-            );
+
+                auto result = walker.walk();
+                if (!result.has_value())
+                {
+                    Log::error("LocalScanOperation: Failed to scan directory: {}", result.error().toString());
+                    return enterErrorState<WorkStatus>(result.error());
+                }
+                // -1, because the walker includes the base/root dir of the search:
+                progressCallback_(walker.totalBytes(), walker.currentIndex(), walker.totalEntries() - 1);
+                return WorkStatus::MoreWork;
+            };
+            if (buildTree_)
+                return withTreeWalkerDo(stepWalker);
+            return withWalkerDo(stepWalker);
         }
         case (Prepared):
         case (Preparing):

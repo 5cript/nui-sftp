@@ -1,29 +1,21 @@
 #pragma once
 
-#include <shared_data/directory_entry.hpp>
+#include <shared_data/shared_data.hpp>
+#include <shared_data/sync/scan_node.hpp>
+
+#include <utility/describe.hpp>
+#include <utility/enum_string_convert.hpp>
 
 #include <cstdint>
-#include <filesystem>
-#include <optional>
 #include <string>
-#include <vector>
 
 namespace SharedData::Sync
 {
-    enum class Direction : std::uint8_t
-    {
-        Both,
-        Upload,
-        Download
-    };
+    struct DiffTreeNode;
 
-    enum class Action : std::uint8_t
-    {
-        Upload,
-        Download,
-        DeleteLocal,
-        DeleteRemote
-    };
+    BOOST_DEFINE_ENUM_CLASS(Direction, Both, Upload, Download)
+
+    BOOST_DEFINE_ENUM_CLASS(Action, Upload, Download, DeleteLocal, DeleteRemote)
 
     /**
      * @brief Inputs that govern which differences become actionable items.
@@ -39,44 +31,126 @@ namespace SharedData::Sync
         /// When true, entries with any path segment starting with '.' are dropped.
         bool ignoreHidden{false};
     };
+    BOOST_DESCRIBE_STRUCT(
+        DiffOptions,
+        (),
+        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden)
+    )
 
     /**
-     * @brief One actionable difference between the local and remote scan results.
+     * @brief Sink that receives diff-tree emissions during @ref diffScanTrees.
      *
-     * The relKey is a posix-style path relative to the corresponding scan root and
-     * doubles as a stable identifier across recompares.
+     * The implementation owns the destination storage and pagination layout.
+     * Progress heartbeats are fired every @p checkpointInterval compares;
+     * implementations can also ask the walk to exit early via @ref cancelled().
      */
-    struct DiffEntry
+    class DiffSink
     {
-        std::string relKey;
-        Action action;
-        std::optional<DirectoryEntry> local;
-        std::optional<DirectoryEntry> remote;
+      public:
+        virtual ~DiffSink() = default;
+
+        virtual void emitUpload(DiffTreeNode node, std::string const& parentRelKey) = 0;
+        virtual void emitDownload(DiffTreeNode node, std::string const& parentRelKey) = 0;
+        virtual void emitDelete(DiffTreeNode node, std::string const& parentRelKey) = 0;
+
+        /**
+         * @brief Called periodically with the running compare count. Implementations
+         *        typically translate this into a remote-progress RPC.
+         */
+        virtual void onProgress(std::uint64_t entriesCompared) = 0;
+
+        /**
+         * @brief Lets the walk bail out early. Default never-cancels implementation
+         *        is provided so tests don't need to implement it.
+         */
+        virtual bool cancelled() const
+        {
+            return false;
+        }
     };
 
-    struct DiffResult
-    {
-        std::vector<DiffEntry> uploads;
-        std::vector<DiffEntry> downloads;
-        std::vector<DiffEntry> deletes;
-    };
-
     /**
-     * @brief Returns true when two entries should be treated as differing.
+     * @brief True when two scan nodes should count as a difference.
      *
-     * Symlinks compare by raw link target (size/mtime of the link itself are
-     * meaningless). Type mismatches always count as a difference.
+     * Type mismatches always count. Symlinks compare by raw @ref ScanNode::linkTarget
+     * (size/mtime of the link metadata itself is meaningless). Files compare by
+     * (size, mtime). Directories alone never "differ" — differences among their
+     * children are the diff's job, handled by the merge walk.
      */
-    bool entriesDiffer(DirectoryEntry const& localEntry, DirectoryEntry const& remoteEntry);
+    bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode);
 
     /**
-     * @brief Computes the upload / download / delete diff lists from two scan results.
+     * @brief Parallel merge walk of two sorted scan trees.
+     *
+     * Assumes both @p local and @p remote have children sorted ascending by name
+     * (as produced by @ref TreeDirectoryWalker). Emits to @p sink, respecting
+     * @p options:
+     *
+     *  - one-sided subtrees emit exactly one node (no recursion),
+     *  - `!options.recursive` suppresses both recursion and one-sided deletes
+     *    whose @ref ScanNode::childrenKnown is false,
+     *  - `options.ignoreHidden` filters per-name at every level.
+     *
+     * @see DiffSink::onProgress heartbeats fire every 512 compares.
      */
-    DiffResult computeSyncDiff(
-        std::filesystem::path const& localRoot,
-        std::filesystem::path const& remoteRoot,
-        std::vector<DirectoryEntry> const& localEntries,
-        std::vector<DirectoryEntry> const& remoteEntries,
-        DiffOptions const& options
+    void diffScanTrees(
+        ScanNode const& local,
+        ScanNode const& remote,
+        DiffOptions const& options,
+        DiffSink& sink
     );
+
+    inline void to_json(nlohmann::json& j, DiffOptions const& s)
+    {
+        SharedData::to_json(j, s);
+    }
+    inline void from_json(nlohmann::json const& j, DiffOptions& s)
+    {
+        SharedData::from_json(j, s);
+    }
+
+    // Enum ADL bridges — see the matching comment in diff_tree_node.hpp for
+    // why these are needed even though SharedData::to_json<EnumT> exists.
+    inline void to_json(nlohmann::json& j, Direction const& e)
+    {
+        SharedData::to_json(j, e);
+    }
+    inline void from_json(nlohmann::json const& j, Direction& e)
+    {
+        SharedData::from_json(j, e);
+    }
+    inline void to_json(nlohmann::json& j, Action const& e)
+    {
+        SharedData::to_json(j, e);
+    }
+    inline void from_json(nlohmann::json const& j, Action& e)
+    {
+        SharedData::from_json(j, e);
+    }
+
+#ifdef NUI_FRONTEND
+    // Mirror the to_json/from_json ADL bridges for the val-based serializer.
+    // Sync-namespace enums aren't found by ADL through SharedData::to_val, so
+    // we forward here.
+    inline void to_val(Nui::val& v, Direction const& e)
+    {
+        SharedData::to_val(v, e);
+    }
+    inline void from_val(Nui::val const& v, Direction& e)
+    {
+        SharedData::from_val(v, e);
+    }
+    inline void to_val(Nui::val& v, Action const& e)
+    {
+        SharedData::to_val(v, e);
+    }
+    inline void from_val(Nui::val const& v, Action& e)
+    {
+        SharedData::from_val(v, e);
+    }
+    // Intentionally no to_val/from_val forwarder for DiffOptions — the
+    // described-struct overload in nui's convertToVal picks it up automatically,
+    // and defining ADL hooks here would make HasToVal<DiffOptions> ambiguous
+    // against the generic path.
+#endif
 }

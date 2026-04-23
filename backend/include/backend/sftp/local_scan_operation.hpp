@@ -4,6 +4,8 @@
 #include <backend/sftp/operation.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
+#include <shared_data/sync/scan_node.hpp>
+#include <shared_data/sync/tree_directory_walker.hpp>
 #include <utility/directory_traversal.hpp>
 
 #include <cstdint>
@@ -26,6 +28,9 @@ class LocalScanOperation : public Operation
         bool recursive{true};
         /// When true, entries whose filename starts with '.' are skipped during scan.
         bool ignoreHidden{false};
+        /// When true, the operation builds a sorted @ref SharedData::Sync::ScanNode tree
+        /// instead of a flat entry vector.
+        bool buildTree{false};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -82,9 +87,24 @@ class LocalScanOperation : public Operation
     }
 
     /**
+     * @brief Variant of @ref withWalkerDo that drives a sorted ScanNode tree walker.
+     *        Only call when @ref ScanOperationOptions::buildTree was set.
+     */
+    auto withTreeWalkerDo(auto&& fn)
+    {
+        auto scan = [this](std::filesystem::path const& path)
+        {
+            return scanner(path);
+        };
+        using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
+        if (!walker_)
+            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan));
+        return fn(static_cast<WalkerType&>(*walker_));
+    }
+
+    /**
      * @brief Eject the scanned directory entries. Careful!: The internal list is moved out.
-     *
-     * @return std::vector<SharedData::DirectoryEntry>
+     *        Only valid when @ref buildsTree() is false.
      */
     std::vector<SharedData::DirectoryEntry> ejectEntries()
     {
@@ -94,6 +114,24 @@ class LocalScanOperation : public Operation
                 return std::move(walker).ejectEntries();
             }
         );
+    }
+
+    /**
+     * @brief Eject the scanned node tree. Only valid when @ref buildsTree() is true.
+     */
+    SharedData::Sync::ScanNode ejectScanTree()
+    {
+        return withTreeWalkerDo(
+            [](auto& walker)
+            {
+                return std::move(walker).ejectTree();
+            }
+        );
+    }
+
+    bool buildsTree() const noexcept
+    {
+        return buildTree_;
     }
 
     std::uint64_t totalBytes() const;
@@ -107,6 +145,7 @@ class LocalScanOperation : public Operation
     bool respectIgnoreFiles_;
     bool recursive_;
     bool ignoreHidden_;
+    bool buildTree_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;

@@ -1,6 +1,8 @@
 #pragma once
 
-#include <shared_data/directory_entry.hpp>
+#include <frontend/sync_dialog/backend_sync_provider.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_summary.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 #include <nui/utility/move_detector.hpp>
@@ -8,7 +10,6 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <vector>
 
 class ConfirmDialog;
 class OperationQueue;
@@ -23,41 +24,45 @@ class SyncDialog
     SyncDialog(SyncDialog&&);
     SyncDialog& operator=(SyncDialog&&);
 
-    /** @brief Opens the dialog with pre-scanned directory listings and computes the diff.
+    /**
+     * @brief Opens the dialog against a backend-resident sync session whose first
+     *        diff has already completed.
      *
-     * @param localPath    Absolute path of the local directory root.
-     * @param remotePath   Absolute path of the remote directory root.
-     * @param localEntries Flat entry list from a LocalScanOperation (fullPaths pre-computed).
-     * @param remoteEntries Flat entry list from a ScanOperation (fullPaths pre-computed).
+     * @param provider Non-owning handle to the session; must outlive the dialog.
+     * @param summary  The @ref DiffSummary returned from the initial recompute.
+     *                 Used to seed footer totals and drive root-tree layout.
+     * @param localPath Local scan root (for path column formatting only — data is
+     *                  served lazily from @p provider).
+     * @param remotePath Remote scan root.
      */
     void open(
+        BackendSyncProvider* provider,
+        SharedData::Sync::DiffSummary summary,
         std::filesystem::path localPath,
-        std::filesystem::path remotePath,
-        std::vector<SharedData::DirectoryEntry> localEntries,
-        std::vector<SharedData::DirectoryEntry> remoteEntries
+        std::filesystem::path remotePath
     );
 
-    /** @brief Sets the callback invoked when the user clicks Recompare.
-     *         The callback receives local/remote paths and an onResult function that should be
-     *         called once the new comparison is complete, passing the resulting entry lists.
-     *
-     * @param callback Callable with signature
-     *        (std::filesystem::path local, std::filesystem::path remote,
-     *         std::function<void(localEntries, remoteEntries)> onResult).
+    /**
+     * @brief Scan + diff settings snapshot handed to the Recompare callback.
+     *        The scan flags (respectIgnoreFiles/recursive/ignoreHidden) govern
+     *        the backend listing; the diff options are the first recompute's
+     *        inputs.
      */
-    void setOnRecompare(
-        std::function<void(
-            std::filesystem::path,
-            std::filesystem::path,
-            bool respectIgnoreFiles,
-            bool recursive,
-            bool ignoreHidden,
-            std::function<void(
-                std::vector<SharedData::DirectoryEntry>,
-                std::vector<SharedData::DirectoryEntry>
-            )>
-        )> callback
-    );
+    struct RecompareRequest
+    {
+        bool respectIgnoreFiles{true};
+        bool recursive{true};
+        bool ignoreHidden{false};
+        SharedData::Sync::DiffOptions diffOptions{};
+    };
+
+    /**
+     * @brief Called when the user clicks the Recompare button.  Session wires
+     *        this to close the existing provider, re-run the scan-and-diff flow
+     *        with the given settings, then @ref open the dialog again against a
+     *        fresh session.
+     */
+    void setOnRecompareRequested(std::function<void(RecompareRequest)> callback);
 
     Nui::ElementRenderer operator()();
 

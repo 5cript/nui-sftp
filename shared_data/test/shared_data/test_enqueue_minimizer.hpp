@@ -44,23 +44,26 @@ namespace SharedData::Sync::Test
         EXPECT_TRUE(result.empty());
     }
 
-    TEST(EnqueueMinimizerTests, FullySelectedSubtreeCollapsesToBulkDir)
+    TEST(EnqueueMinimizerTests, BulkDirInSetEmitsBulk)
     {
-        // dir/ is a bulk dir; both descendants are selected → emit just the dir.
+        // Sparse model: caller put the bulk dir itself in the set → emit bulk,
+        // descendants covered.
         std::vector<MinimizerItemView> items{
             {.relKey = "dir", .isBulkDir = true},
             {.relKey = "dir/a.txt", .isBulkDir = false},
             {.relKey = "dir/b.txt", .isBulkDir = false},
         };
-        std::unordered_set<std::string> selected{"dir/a.txt", "dir/b.txt"};
+        std::unordered_set<std::string> selected{"dir"};
 
         const auto result = minimizeEnqueueIndices(items, selected);
         ASSERT_EQ(result.size(), 1u);
         EXPECT_EQ(result.front(), 0u) << "must emit the bulk dir, not its descendants";
     }
 
-    TEST(EnqueueMinimizerTests, PartiallySelectedSubtreeEmitsOnlySelectedLeaves)
+    TEST(EnqueueMinimizerTests, IndividualLeafSelectionEmitsLeavesEvenUnderBulkDir)
     {
+        // Sparse model: caller did NOT collapse to the bulk dir; they selected
+        // one file under it.  Minimizer just emits what's in the set.
         std::vector<MinimizerItemView> items{
             {.relKey = "dir", .isBulkDir = true},
             {.relKey = "dir/a.txt", .isBulkDir = false},
@@ -87,27 +90,25 @@ namespace SharedData::Sync::Test
         EXPECT_TRUE(result.empty());
     }
 
-    TEST(EnqueueMinimizerTests, NestedFullySelectedSubtreeIsCoveredByOuterDir)
+    TEST(EnqueueMinimizerTests, OuterBulkDirCoversNestedBulkAndLeaves)
     {
-        // outer/ contains inner/ which contains file. With everything selected,
-        // only the outer bulk dir should be emitted (covers nested dir + leaf).
+        // outer is in the sparse set → bulk-emit and cover every descendant.
         std::vector<MinimizerItemView> items{
             {.relKey = "outer", .isBulkDir = true},
             {.relKey = "outer/inner", .isBulkDir = true},
             {.relKey = "outer/inner/leaf.txt", .isBulkDir = false},
         };
-        std::unordered_set<std::string> selected{"outer/inner/leaf.txt"};
+        std::unordered_set<std::string> selected{"outer"};
 
         const auto result = minimizeEnqueueIndices(items, selected);
         ASSERT_EQ(result.size(), 1u);
-        EXPECT_EQ(result.front(), 0u) << "expected outer dir to cover nested subtree";
+        EXPECT_EQ(result.front(), 0u) << "outer bulk emission must cover the whole subtree";
     }
 
     TEST(EnqueueMinimizerTests, NonBulkIntermediateNodeIsNotEmittedItself)
     {
-        // "dir" is NOT a bulk dir (e.g., it represents a file action that happens to share
-        // a relKey with descendants — the production scenario is rare but the algorithm
-        // still must not emit it on its own).
+        // Two-sided structural directory — no SFTP primitive syncs it as one op.
+        // Even when explicitly in the set it must not emit; its descendants do.
         std::vector<MinimizerItemView> items{
             {.relKey = "dir", .isBulkDir = false},
             {.relKey = "dir/leaf.txt", .isBulkDir = false},
@@ -119,6 +120,46 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(result.front(), 1u) << "intermediate non-bulk node must not be emitted";
     }
 
+    TEST(EnqueueMinimizerTests, StructuralDirInSetExpandsToLeafDescendants)
+    {
+        // Sparse set contains a structural (two-sided) dir.  No bulk primitive
+        // applies; every leaf descendant must emit individually via ancestor
+        // implication.
+        std::vector<MinimizerItemView> items{
+            {.relKey = "parent", .isBulkDir = false},
+            {.relKey = "parent/a.txt", .isBulkDir = false},
+            {.relKey = "parent/sub", .isBulkDir = false},
+            {.relKey = "parent/sub/b.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"parent"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_FALSE(resultContains(result, 0u)) << "structural dir itself not emitted";
+        EXPECT_TRUE(resultContains(result, 1u));
+        EXPECT_FALSE(resultContains(result, 2u)) << "nested structural dir not emitted";
+        EXPECT_TRUE(resultContains(result, 3u));
+    }
+
+    TEST(EnqueueMinimizerTests, StructuralDirInSetStillCollapsesNestedBulk)
+    {
+        // Structural outer dir in the sparse set; contains a nested bulk dir.
+        // The bulk dir should still collapse into a single emission (not
+        // descend into its own children).
+        std::vector<MinimizerItemView> items{
+            {.relKey = "outer", .isBulkDir = false},
+            {.relKey = "outer/bulk", .isBulkDir = true},
+            {.relKey = "outer/bulk/x.txt", .isBulkDir = false},
+            {.relKey = "outer/leaf.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"outer"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_FALSE(resultContains(result, 0u));
+        EXPECT_TRUE(resultContains(result, 1u)) << "inner bulk dir emitted once";
+        EXPECT_FALSE(resultContains(result, 2u)) << "leaf under inner bulk is covered";
+        EXPECT_TRUE(resultContains(result, 3u));
+    }
+
     TEST(EnqueueMinimizerTests, MixedSelectionAcrossSiblingSubtrees)
     {
         std::vector<MinimizerItemView> items{
@@ -128,23 +169,23 @@ namespace SharedData::Sync::Test
             {.relKey = "right/b.txt", .isBulkDir = false},
             {.relKey = "right/c.txt", .isBulkDir = false},
         };
-        // left is fully selected → collapse to bulk dir.
-        // right is partially selected → emit b.txt only.
-        std::unordered_set<std::string> selected{"left/a.txt", "right/b.txt"};
+        // Sparse: "left" means "take all of left"; individual leaves under
+        // "right" are selected atomically.
+        std::unordered_set<std::string> selected{"left", "right/b.txt"};
 
         const auto result = minimizeEnqueueIndices(items, selected);
         EXPECT_TRUE(resultContains(result, 0u)) << "left bulk dir";
-        EXPECT_FALSE(resultContains(result, 1u));
-        EXPECT_FALSE(resultContains(result, 2u)) << "right not fully selected → no bulk";
+        EXPECT_FALSE(resultContains(result, 1u)) << "left/a.txt covered by bulk";
+        EXPECT_FALSE(resultContains(result, 2u)) << "right not in set and no leaves cover it";
         EXPECT_TRUE(resultContains(result, 3u));
         EXPECT_FALSE(resultContains(result, 4u));
     }
 
     TEST(EnqueueMinimizerTests, BulkDirWithoutDescendantsIsEmittedWhenSelected)
     {
-        // A directory item with no descendants in the diff list (e.g., an empty dir
-        // that needs to be created on the other side) is itself a tree leaf — selecting
-        // it must cause it to be emitted so the dir actually gets created.
+        // A directory item with no descendants in the diff list (empty dir
+        // that needs to be created on the other side).  Selecting it must
+        // cause the row to emit so the dir actually gets created.
         std::vector<MinimizerItemView> items{
             {.relKey = "empty_dir", .isBulkDir = true},
         };
@@ -154,27 +195,39 @@ namespace SharedData::Sync::Test
         ASSERT_EQ(result.size(), 1u);
         EXPECT_EQ(result.front(), 0u);
 
-        // Without selection it is suppressed.
         EXPECT_TRUE(minimizeEnqueueIndices(items, {}).empty());
     }
 
-    TEST(EnqueueMinimizerTests, OuterDirNotEmittedWhenInnerHasUnselectedLeaf)
+    TEST(EnqueueMinimizerTests, RedundantAncestorAndDescendantAreTolerated)
     {
+        // Non-minimal sparse input: the ancestor already implies the descendant.
+        // Minimizer should still produce the correct emission (bulk once).
         std::vector<MinimizerItemView> items{
             {.relKey = "outer", .isBulkDir = true},
-            {.relKey = "outer/a.txt", .isBulkDir = false},
-            {.relKey = "outer/inner", .isBulkDir = true},
-            {.relKey = "outer/inner/leaf.txt", .isBulkDir = false},
-            {.relKey = "outer/inner/other.txt", .isBulkDir = false},
+            {.relKey = "outer/inner.txt", .isBulkDir = false},
         };
-        // Skip outer/inner/other.txt → outer cannot be collapsed.
-        std::unordered_set<std::string> selected{"outer/a.txt", "outer/inner/leaf.txt"};
+        std::unordered_set<std::string> selected{"outer", "outer/inner.txt"};
 
         const auto result = minimizeEnqueueIndices(items, selected);
-        EXPECT_FALSE(resultContains(result, 0u)) << "outer must not be emitted";
-        EXPECT_FALSE(resultContains(result, 2u)) << "inner not fully selected either";
+        ASSERT_EQ(result.size(), 1u);
+        EXPECT_EQ(result.front(), 0u);
+    }
+
+    TEST(EnqueueMinimizerTests, PartialStructuralSubtreeEmitsOnlySelectedLeaves)
+    {
+        std::vector<MinimizerItemView> items{
+            {.relKey = "parent", .isBulkDir = false},
+            {.relKey = "parent/a.txt", .isBulkDir = false},
+            {.relKey = "parent/b.txt", .isBulkDir = false},
+            {.relKey = "parent/c.txt", .isBulkDir = false},
+        };
+        // Sparse leaf-level selection (user filled out after unchecking one).
+        std::unordered_set<std::string> selected{"parent/a.txt", "parent/c.txt"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_FALSE(resultContains(result, 0u));
         EXPECT_TRUE(resultContains(result, 1u));
+        EXPECT_FALSE(resultContains(result, 2u));
         EXPECT_TRUE(resultContains(result, 3u));
-        EXPECT_FALSE(resultContains(result, 4u));
     }
 }

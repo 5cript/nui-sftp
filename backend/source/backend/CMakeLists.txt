@@ -27,6 +27,7 @@ add_library(
         sftp/rename_operation.cpp
         sftp/archive_download_operation.cpp
         sftp/archive_upload_operation.cpp
+        sync/sync_session.cpp
         "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
 )
 

@@ -3,12 +3,13 @@
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
-#include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/is_paused.hpp>
+
+#include <boost/asio/post.hpp>
 
 #include <log/log.hpp>
 #include <utility/overloaded.hpp>
@@ -643,14 +644,10 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                     if (cbIt != syncScanCallbacks_.end())
                     {
                         auto* scan = static_cast<ScanOperation*>(operation.get());
-                        auto entries = scan->ejectEntries();
-                        // Pre-compute absolute fullPaths from parent chain
-                        for (auto& entry : entries)
-                            entry.fullPath = SharedData::fullPath(entries, entry);
-                        const auto totalBytes = scan->totalBytes();
+                        auto tree = scan->ejectScanTree();
                         auto callback = std::move(cbIt->second);
                         syncScanCallbacks_.erase(cbIt);
-                        callback(std::move(entries), totalBytes);
+                        callback(std::move(tree));
                     }
                     else
                         Log::error("Scan operation completed but no following BulkOperation to set results to.");
@@ -688,13 +685,10 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                     if (cbIt != syncScanCallbacks_.end())
                     {
                         auto* scan = static_cast<LocalScanOperation*>(operation.get());
-                        auto entries = scan->ejectEntries();
-                        for (auto& entry : entries)
-                            entry.fullPath = SharedData::fullPath(entries, entry);
-                        const auto totalBytes = scan->totalBytes();
+                        auto tree = scan->ejectScanTree();
                         auto callback = std::move(cbIt->second);
                         syncScanCallbacks_.erase(cbIt);
-                        callback(std::move(entries), totalBytes);
+                        callback(std::move(tree));
                     }
                     else
                         Log::error("LocalScan operation completed but no following BulkOperation to set results to.");
@@ -1866,6 +1860,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
 
 void OperationQueue::addSyncScanOperation(
     SecureShell::SftpSession& sftp,
+    Ids::SyncSessionId syncSessionId,
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
     std::filesystem::path const& remotePath,
@@ -1875,42 +1870,57 @@ void OperationQueue::addSyncScanOperation(
     bool ignoreHidden
 )
 {
-    // Register completion callbacks that emit onSyncScanResult to the frontend.
+    // Create (or replace) the SyncSession.  A fresh id from the frontend is the
+    // norm; re-opening over an existing id is handled as "discard previous state".
+    auto session = std::make_shared<SyncSession>(
+        SyncSession::Options{
+            .sessionId = syncSessionId,
+            .localRoot = localPath,
+            .remoteRoot = remotePath,
+        },
+        executor_
+    );
+    syncSessions_[syncSessionId.value()] = session;
+
+    // Scan completion callbacks hand the ScanNode trees into the session on its
+    // own strand, then emit onSyncScanPhaseDone to the frontend.
     syncScanCallbacks_[remoteScanId.value()] =
-        [weak = weak_from_this(), remoteScanId](std::vector<SharedData::DirectoryEntry> entries, std::uint64_t totalBytes)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}]
+        (SharedData::Sync::ScanNode tree)
     {
         auto self = weak.lock();
-        if (!self)
+        auto sess = weakSession.lock();
+        if (!self || !sess)
             return;
-        self->hub_->callRemote(
-            self->rpcName("onSyncScanResult"),
-            SharedData::SyncScanResult{
-                .operationId = remoteScanId,
-                .isLocal = false,
-                .totalBytes = totalBytes,
-                .entries = std::move(entries),
+        boost::asio::post(
+            sess->strand(),
+            [sess, tree = std::move(tree)]() mutable
+            {
+                sess->setRemoteTreeInStrand(std::move(tree));
             }
         );
+        self->hub_->callRemote(self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/false);
     };
 
     syncScanCallbacks_[localScanId.value()] =
-        [weak = weak_from_this(), localScanId](std::vector<SharedData::DirectoryEntry> entries, std::uint64_t totalBytes)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}]
+        (SharedData::Sync::ScanNode tree)
     {
         auto self = weak.lock();
-        if (!self)
+        auto sess = weakSession.lock();
+        if (!self || !sess)
             return;
-        self->hub_->callRemote(
-            self->rpcName("onSyncScanResult"),
-            SharedData::SyncScanResult{
-                .operationId = localScanId,
-                .isLocal = true,
-                .totalBytes = totalBytes,
-                .entries = std::move(entries),
+        boost::asio::post(
+            sess->strand(),
+            [sess, tree = std::move(tree)]() mutable
+            {
+                sess->setLocalTreeInStrand(std::move(tree));
             }
         );
+        self->hub_->callRemote(self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/true);
     };
 
-    // Queue remote scan
+    // Queue remote scan — build-tree mode.
     auto remoteScan = std::make_unique<ScanOperation>(
         sftp,
         ScanOperation::ScanOperationOptions{
@@ -1920,6 +1930,7 @@ void OperationQueue::addSyncScanOperation(
             .respectIgnoreFiles = respectIgnoreFiles,
             .recursive = recursive,
             .ignoreHidden = ignoreHidden,
+            .buildTree = true,
         }
     );
     priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
@@ -1934,13 +1945,14 @@ void OperationQueue::addSyncScanOperation(
         }
     );
 
-    // Queue local scan
+    // Queue local scan — build-tree mode.
     auto localScan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
         .progressCallback = makeScanProgressCallback("onLocalScanProgress", localScanId),
         .localPath = localPath,
         .respectIgnoreFiles = respectIgnoreFiles,
         .recursive = recursive,
         .ignoreHidden = ignoreHidden,
+        .buildTree = true,
     });
     priorityOperations_.emplace_back(localScanId, std::move(localScan));
 
@@ -1953,6 +1965,22 @@ void OperationQueue::addSyncScanOperation(
             .localPath = localPath,
         }
     );
+}
+
+std::shared_ptr<SyncSession> OperationQueue::syncSession(Ids::SyncSessionId const& sessionId) const
+{
+    const auto iter = syncSessions_.find(sessionId.value());
+    return iter == syncSessions_.end() ? nullptr : iter->second;
+}
+
+void OperationQueue::closeSyncSession(Ids::SyncSessionId const& sessionId)
+{
+    const auto iter = syncSessions_.find(sessionId.value());
+    if (iter == syncSessions_.end())
+        return;
+    if (iter->second)
+        iter->second->cancel();
+    syncSessions_.erase(iter);
 }
 
 void OperationQueue::registerRpc()

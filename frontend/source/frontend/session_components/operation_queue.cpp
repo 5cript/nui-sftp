@@ -91,9 +91,18 @@ struct OperationQueue::Implementation
     // bulk up/download, or the aggregate id for bulk delete).  Auto-erased on
     // completion, same as transferProgressCallbacks.
     std::unordered_map<std::string, std::function<void(SharedData::BulkProgress const&)>> bulkProgressCallbacks;
-    // Keyed by operationId.value(); used for sync scan progress + completion routing.
+    // Keyed by operationId.value(); used for per-operation sync scan progress events.
     std::unordered_map<std::string, std::function<void(SharedData::ScanProgress const&)>> syncScanProgressCallbacks;
-    std::unordered_map<std::string, std::function<void(SharedData::SyncScanResult)>> syncScanCompletionCallbacks;
+
+    // Keyed by syncSessionId.value(); routes the backend's phase-done / diff-progress
+    // streams to the provider.  Cleared via @ref clearSyncSessionRouting.
+    struct SyncSessionRouting
+    {
+        std::array<Ids::OperationId, 2> scanIds{};   // [0]=remote, [1]=local
+        std::function<void(bool isLocal)> onScanPhaseDone;
+        std::function<void(std::uint64_t)> onDiffProgress;
+    };
+    std::unordered_map<std::string, SyncSessionRouting> syncSessionRouting;
     Nui::ListenRemover<decltype(paused)> pausedListener{};
 
     // Minimized-sync restore button state.  `minimizedSyncVisible` drives
@@ -602,28 +611,41 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
-            fmt::format("OperationQueue::{}::onSyncScanResult", impl_->sessionId.value()),
-            [this](Nui::val val)
+            fmt::format("OperationQueue::{}::onSyncScanPhaseDone", impl_->sessionId.value()),
+            [this](std::string const& sessionIdString, bool isLocal)
             {
-                SharedData::SyncScanResult result{};
+                const auto routingIt = impl_->syncSessionRouting.find(sessionIdString);
+                if (routingIt == impl_->syncSessionRouting.end())
+                    return;
+                // The per-operation progress entry for this side is no longer interesting.
+                const auto& scanId = routingIt->second.scanIds[isLocal ? 1 : 0];
+                impl_->syncScanProgressCallbacks.erase(scanId.value());
+                if (routingIt->second.onScanPhaseDone)
+                    routingIt->second.onScanPhaseDone(isLocal);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onSyncDiffProgress", impl_->sessionId.value()),
+            [this](std::string const& sessionIdString, std::string const& comparedString)
+            {
+                const auto routingIt = impl_->syncSessionRouting.find(sessionIdString);
+                if (routingIt == impl_->syncSessionRouting.end())
+                    return;
+                if (!routingIt->second.onDiffProgress)
+                    return;
+                std::uint64_t compared = 0;
                 try
                 {
-                    const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
-                    result = json.get<SharedData::SyncScanResult>();
+                    compared = std::stoull(comparedString);
                 }
-                catch (std::exception const& exc)
+                catch (std::exception const&)
                 {
-                    Log::error("Failed to parse SyncScanResult: {}", exc.what());
                     return;
                 }
-                const auto cbIt = impl_->syncScanCompletionCallbacks.find(result.operationId.value());
-                if (cbIt != impl_->syncScanCompletionCallbacks.end())
-                {
-                    auto callback = std::move(cbIt->second);
-                    impl_->syncScanCompletionCallbacks.erase(cbIt);
-                    impl_->syncScanProgressCallbacks.erase(result.operationId.value());
-                    callback(std::move(result));
-                }
+                routingIt->second.onDiffProgress(compared);
             }
         )
     );
@@ -1363,7 +1385,8 @@ void OperationQueue::unpause()
     );
 }
 
-void OperationQueue::enqueueSyncScans(
+void OperationQueue::openSyncSession(
+    Ids::SyncSessionId syncSessionId,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
@@ -1371,28 +1394,33 @@ void OperationQueue::enqueueSyncScans(
     bool ignoreHidden,
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
-    std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
-    std::function<void(SharedData::SyncScanResult)> onLocalComplete
+    std::function<void(bool)> onScanPhaseDone,
+    std::function<void(std::uint64_t)> onDiffProgress
 )
 {
     if (!impl_->fileEngine)
     {
-        Log::error("No file engine set for operation queue, cannot enqueue sync scans");
+        Log::error("No file engine set for operation queue, cannot open sync session");
         return;
     }
 
     const auto remoteScanId = Ids::generateOperationId();
     const auto localScanId = Ids::generateOperationId();
 
-    // Register callbacks before hitting the backend so no events are missed.
+    // Register per-operation scan-progress + per-session routing before hitting the
+    // backend so no events are missed.
     impl_->syncScanProgressCallbacks[remoteScanId.value()] = std::move(onRemoteProgress);
     impl_->syncScanProgressCallbacks[localScanId.value()] = std::move(onLocalProgress);
-    impl_->syncScanCompletionCallbacks[remoteScanId.value()] = std::move(onRemoteComplete);
-    impl_->syncScanCompletionCallbacks[localScanId.value()] = std::move(onLocalComplete);
+    impl_->syncSessionRouting[syncSessionId.value()] = Implementation::SyncSessionRouting{
+        .scanIds = {remoteScanId, localScanId},
+        .onScanPhaseDone = std::move(onScanPhaseDone),
+        .onDiffProgress = std::move(onDiffProgress),
+    };
 
-    impl_->fileEngine->addSyncScans(
+    impl_->fileEngine->openSyncSession(
         localPath,
         remotePath,
+        syncSessionId,
         remoteScanId,
         localScanId,
         respectIgnoreFiles,
@@ -1402,13 +1430,86 @@ void OperationQueue::enqueueSyncScans(
         {
             if (!success)
                 Log::error(
-                    "Failed to enqueue sync scans (remoteId={}, localId={}): {}",
+                    "Failed to open sync session (remoteId={}, localId={}): {}",
                     remoteScanId.value(),
                     localScanId.value(),
                     info
                 );
         }
     );
+}
+
+void OperationQueue::clearSyncSessionRouting(Ids::SyncSessionId syncSessionId)
+{
+    const auto routingIt = impl_->syncSessionRouting.find(syncSessionId.value());
+    if (routingIt == impl_->syncSessionRouting.end())
+        return;
+    // Drop the per-scan-operation progress entries too in case a phase-done never fired.
+    for (auto const& scanId : routingIt->second.scanIds)
+        impl_->syncScanProgressCallbacks.erase(scanId.value());
+    impl_->syncSessionRouting.erase(routingIt);
+}
+
+void OperationQueue::recomputeSyncDiff(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffOptions options,
+    std::function<void(SharedData::Sync::DiffSummary)> onSummary
+)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->recomputeSyncDiff(syncSessionId, std::move(options), std::move(onSummary));
+}
+
+void OperationQueue::loadSyncDiffChildren(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffSection section,
+    std::string const& parentRelKey,
+    std::uint64_t generation,
+    std::function<void(std::vector<SharedData::Sync::DiffTreeNode>)> onResolved,
+    std::function<void(std::string const&)> onRejected
+)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->loadSyncDiffChildren(
+        syncSessionId, section, parentRelKey, generation, std::move(onResolved), std::move(onRejected)
+    );
+}
+
+void OperationQueue::buildSyncEnqueuePlan(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffSection section,
+    std::vector<std::string> selectedRelKeys,
+    std::uint64_t generation,
+    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    std::function<void(std::string const&)> onRejected
+)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->buildSyncEnqueuePlan(
+        syncSessionId,
+        section,
+        std::move(selectedRelKeys),
+        generation,
+        std::move(onResolved),
+        std::move(onRejected)
+    );
+}
+
+void OperationQueue::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->cancelSyncDiff(syncSessionId);
+}
+
+void OperationQueue::closeSyncSession(Ids::SyncSessionId syncSessionId)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->closeSyncSession(syncSessionId);
 }
 
 void OperationQueue::createRemoteDirectory(

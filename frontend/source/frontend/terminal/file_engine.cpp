@@ -186,9 +186,10 @@ void FileEngine::createFile(
     );
 }
 
-void FileEngine::addSyncScans(
+void FileEngine::openSyncSession(
     std::filesystem::path const& localPath,
     std::filesystem::path const& remotePath,
+    Ids::SyncSessionId syncSessionId,
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
     bool respectIgnoreFiles,
@@ -198,34 +199,35 @@ void FileEngine::addSyncScans(
 )
 {
     Log::info(
-        "Requesting to add sync scan: local='{}' remote='{}'",
+        "Requesting openSyncSession: local='{}' remote='{}'",
         localPath.generic_string(),
         remotePath.generic_string()
     );
     lazyOpen(
-        [this, localPath, remotePath, remoteScanId, localScanId, respectIgnoreFiles, recursive, ignoreHidden,
-            onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        [this, localPath, remotePath, syncSessionId, remoteScanId, localScanId, respectIgnoreFiles, recursive,
+            ignoreHidden, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
-                Log::error("Cannot add sync scan, no channel");
+                Log::error("Cannot open sync session, no channel");
                 onComplete(false, info);
                 return;
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addSyncScan", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::openSyncSession", impl_->engine->sshSessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
                     {
-                        Log::error("(Frontend) Failed to add sync scan: {}", val["error"].as<std::string>());
+                        Log::error("(Frontend) Failed to open sync session: {}", val["error"].as<std::string>());
                         onComplete(false, val["error"].as<std::string>());
                         return;
                     }
                     onComplete(true, "Success");
                 },
                 channelId.value().value(),
+                syncSessionId.value(),
                 remoteScanId.value(),
                 localScanId.value(),
                 remotePath.generic_string(),
@@ -235,6 +237,138 @@ void FileEngine::addSyncScans(
                 ignoreHidden
             );
         }
+    );
+}
+
+void FileEngine::recomputeSyncDiff(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffOptions options,
+    std::function<void(SharedData::Sync::DiffSummary)> onSummary
+)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("Session::{}::sftp::recomputeSyncDiff", impl_->engine->sshSessionId().value()),
+        [onSummary = std::move(onSummary)](Nui::val val)
+        {
+            if (val.hasOwnProperty("error"))
+            {
+                Log::error("recomputeSyncDiff failed: {}", val["error"].as<std::string>());
+                SharedData::Sync::DiffSummary empty{};
+                empty.cancelled = true;
+                onSummary(std::move(empty));
+                return;
+            }
+            try
+            {
+                const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
+                onSummary(json.get<SharedData::Sync::DiffSummary>());
+            }
+            catch (std::exception const& exc)
+            {
+                Log::error("Failed to parse DiffSummary: {}", exc.what());
+                SharedData::Sync::DiffSummary empty{};
+                empty.cancelled = true;
+                onSummary(std::move(empty));
+            }
+        },
+        syncSessionId.value(),
+        options
+    );
+}
+
+void FileEngine::loadSyncDiffChildren(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffSection section,
+    std::string const& parentRelKey,
+    std::uint64_t generation,
+    std::function<void(std::vector<SharedData::Sync::DiffTreeNode>)> onResolved,
+    std::function<void(std::string const&)> onRejected
+)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("Session::{}::sftp::loadSyncDiffChildren", impl_->engine->sshSessionId().value()),
+        [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
+        {
+            if (val.hasOwnProperty("error"))
+            {
+                onRejected(val["error"].as<std::string>());
+                return;
+            }
+            try
+            {
+                const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
+                std::vector<SharedData::Sync::DiffTreeNode> nodes;
+                nodes.reserve(json.size());
+                for (auto const& elem : json)
+                    nodes.push_back(elem.get<SharedData::Sync::DiffTreeNode>());
+                onResolved(std::move(nodes));
+            }
+            catch (std::exception const& exc)
+            {
+                onRejected(exc.what());
+            }
+        },
+        syncSessionId.value(),
+        section,
+        parentRelKey,
+        std::to_string(generation)
+    );
+}
+
+void FileEngine::buildSyncEnqueuePlan(
+    Ids::SyncSessionId syncSessionId,
+    SharedData::Sync::DiffSection section,
+    std::vector<std::string> selectedRelKeys,
+    std::uint64_t generation,
+    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    std::function<void(std::string const&)> onRejected
+)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("Session::{}::sftp::buildSyncEnqueuePlan", impl_->engine->sshSessionId().value()),
+        [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
+        {
+            if (val.hasOwnProperty("error"))
+            {
+                onRejected(val["error"].as<std::string>());
+                return;
+            }
+            try
+            {
+                const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
+                std::vector<SharedData::Sync::EnqueuePlanEntry> plan;
+                plan.reserve(json.size());
+                for (auto const& elem : json)
+                    plan.push_back(elem.get<SharedData::Sync::EnqueuePlanEntry>());
+                onResolved(std::move(plan));
+            }
+            catch (std::exception const& exc)
+            {
+                onRejected(exc.what());
+            }
+        },
+        syncSessionId.value(),
+        section,
+        selectedRelKeys,
+        std::to_string(generation)
+    );
+}
+
+void FileEngine::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("Session::{}::sftp::cancelSyncDiff", impl_->engine->sshSessionId().value()),
+        [](Nui::val /*val*/) {},
+        syncSessionId.value()
+    );
+}
+
+void FileEngine::closeSyncSession(Ids::SyncSessionId syncSessionId)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("Session::{}::sftp::closeSyncSession", impl_->engine->sshSessionId().value()),
+        [](Nui::val /*val*/) {},
+        syncSessionId.value()
     );
 }
 

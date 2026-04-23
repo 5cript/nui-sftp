@@ -7,7 +7,8 @@
 #include <utility/language.hpp>
 
 #include <shared_data/file_operations/scan_progress.hpp>
-#include <shared_data/file_operations/sync_scan_result.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync_phase.hpp>
 
 #include <nui/event_system/event_context.hpp>
@@ -29,9 +30,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
-#include <vector>
 
 struct SyncProgressDialog::Implementation
 {
@@ -56,32 +55,14 @@ struct SyncProgressDialog::Implementation
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
 
-    std::function<void(
-        std::vector<SharedData::DirectoryEntry> localEntries,
-        std::vector<SharedData::DirectoryEntry> remoteEntries
-    )>
-        onDone_{};
+    BackendSyncProvider* provider_{nullptr};
+    SharedData::Sync::DiffOptions initialOptions_{};
+    std::function<void(SharedData::Sync::DiffSummary)> onDone_{};
 
-    // Intermediate storage while waiting for both scans to complete
-    std::optional<std::vector<SharedData::DirectoryEntry>> localEntries_{};
-    std::optional<std::vector<SharedData::DirectoryEntry>> remoteEntries_{};
-
-    // Cancelled flag; replaced on each open() to invalidate stale captures
+    // Cancel token; replaced on each open() to invalidate stale callback captures.
+    // The provider also has its own cancel flag that kills the backend walk — this
+    // one only guards the frontend lambdas.
     std::shared_ptr<bool> cancelToken_{std::make_shared<bool>(false)};
-
-    void checkBothComplete(SyncProgressDialog* /*dlg*/)
-    {
-        if (!localEntries_ || !remoteEntries_)
-            return;
-
-        // TODO: add Comparing phase here when hash/diff step is implemented
-        phase_ = SharedData::SyncPhase::Done;
-        open_ = false;
-        Nui::globalEventContext.executeActiveEventsImmediately();
-
-        if (onDone_)
-            onDone_(std::move(*localEntries_), std::move(*remoteEntries_));
-    }
 };
 
 SyncProgressDialog::SyncProgressDialog(OperationQueue* operationQueue)
@@ -94,24 +75,27 @@ SyncProgressDialog::SyncProgressDialog(SyncProgressDialog&&) = default;
 SyncProgressDialog& SyncProgressDialog::operator=(SyncProgressDialog&&) = default;
 
 void SyncProgressDialog::open(
+    BackendSyncProvider* provider,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
     bool recursive,
     bool ignoreHidden,
-    std::function<void(
-        std::vector<SharedData::DirectoryEntry> localEntries,
-        std::vector<SharedData::DirectoryEntry> remoteEntries
-    )> onDone
+    SharedData::Sync::DiffOptions initialOptions,
+    std::function<void(SharedData::Sync::DiffSummary)> onDone
 )
 {
-    // Cancel any in-progress scan
+    // Invalidate any stale callbacks from a previous open() by flipping the old
+    // token and swapping in a fresh one.  (The new backend provider has its own
+    // cancel flag that will also bail the current walk if one is running.)
     *impl_->cancelToken_ = true;
     auto token = std::make_shared<bool>(false);
     impl_->cancelToken_ = token;
 
+    impl_->provider_ = provider;
     impl_->localPath_ = std::move(localPath);
     impl_->remotePath_ = std::move(remotePath);
+    impl_->initialOptions_ = initialOptions;
     impl_->onDone_ = std::move(onDone);
 
     // Reset state
@@ -120,26 +104,16 @@ void SyncProgressDialog::open(
     impl_->remoteListed_ = 0ull;
     impl_->compared_ = 0ull;
     impl_->hashProgressBar_.max(0);
-    impl_->localEntries_.reset();
-    impl_->remoteEntries_.reset();
     impl_->open_ = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
-    operationQueue_->enqueueSyncScans(
+    provider->open(
         impl_->localPath_,
         impl_->remotePath_,
         respectIgnoreFiles,
         recursive,
         ignoreHidden,
-        // onRemoteProgress
-        [this, token](SharedData::ScanProgress const& progress)
-        {
-            if (*token)
-                return;
-            impl_->remoteListed_ = progress.totalScanned;
-            Nui::globalEventContext.executeActiveEventsImmediately();
-        },
-        // onLocalProgress
+        // onLocalListing
         [this, token](SharedData::ScanProgress const& progress)
         {
             if (*token)
@@ -147,21 +121,42 @@ void SyncProgressDialog::open(
             impl_->localListed_ = progress.totalScanned;
             Nui::globalEventContext.executeActiveEventsImmediately();
         },
-        // onRemoteComplete
-        [this, token](SharedData::SyncScanResult result)
+        // onRemoteListing
+        [this, token](SharedData::ScanProgress const& progress)
         {
             if (*token)
                 return;
-            impl_->remoteEntries_ = std::move(result.entries);
-            impl_->checkBothComplete(this);
+            impl_->remoteListed_ = progress.totalScanned;
+            Nui::globalEventContext.executeActiveEventsImmediately();
         },
-        // onLocalComplete
-        [this, token](SharedData::SyncScanResult result)
+        // onBothListed
+        [this, token]()
         {
             if (*token)
                 return;
-            impl_->localEntries_ = std::move(result.entries);
-            impl_->checkBothComplete(this);
+            impl_->phase_ = SharedData::SyncPhase::Comparing;
+            Nui::globalEventContext.executeActiveEventsImmediately();
+            impl_->provider_->recompute(
+                impl_->initialOptions_,
+                [this, token](SharedData::Sync::DiffSummary summary)
+                {
+                    if (*token)
+                        return;
+                    impl_->phase_ = SharedData::SyncPhase::Done;
+                    impl_->open_ = false;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                    if (impl_->onDone_)
+                        impl_->onDone_(std::move(summary));
+                }
+            );
+        },
+        // onDiffProgress
+        [this, token](std::uint64_t compared)
+        {
+            if (*token)
+                return;
+            impl_->compared_ = compared;
+            Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
 }
@@ -172,8 +167,8 @@ void SyncProgressDialog::cancel()
     impl_->cancelToken_ = std::make_shared<bool>(false);
     impl_->open_ = false;
     impl_->phase_ = SharedData::SyncPhase::Idle;
-    impl_->localEntries_.reset();
-    impl_->remoteEntries_.reset();
+    if (impl_->provider_)
+        impl_->provider_->cancelDiff();
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 

@@ -1,6 +1,8 @@
 #pragma once
 
-#include <shared_data/directory_entry.hpp>
+#include <frontend/sync_dialog/backend_sync_provider.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_summary.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 #include <nui/utility/move_detector.hpp>
@@ -8,7 +10,6 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <vector>
 
 class OperationQueue;
 
@@ -22,26 +23,36 @@ class SyncProgressDialog
     SyncProgressDialog(SyncProgressDialog&&);
     SyncProgressDialog& operator=(SyncProgressDialog&&);
 
-    /** @brief Opens the progress dialog and begins scanning both sides.
+    /**
+     * @brief Opens the progress dialog, runs both scans via @p provider, then
+     *        immediately triggers a backend diff.  @p onDone fires after both the
+     *        scans and the first diff have landed, passing the @ref DiffSummary
+     *        the frontend should seed its tree from.
      *
-     * @param localPath  Root of the local directory being compared.
-     * @param remotePath Root of the remote directory being compared.
-     * @param onDone     Called with (localEntries, remoteEntries) when both scans finish.
-     *                   Not called if the dialog is cancelled.
+     *        The dialog keeps showing the Comparing spinner during the diff walk;
+     *        light diffs finish within a frame so the phase effectively flashes.
+     *
+     * @param provider         Non-owning handle to the sync session.  Lifetime must
+     *                         outlive this call (typically owned by @c Session).
+     * @param initialOptions   The diff options to apply for the first recompute.
+     * @param onDone           Called exactly once on success.  Not invoked on cancel.
      */
     void open(
+        BackendSyncProvider* provider,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         bool respectIgnoreFiles,
         bool recursive,
         bool ignoreHidden,
-        std::function<void(
-            std::vector<SharedData::DirectoryEntry> localEntries,
-            std::vector<SharedData::DirectoryEntry> remoteEntries
-        )> onDone
+        SharedData::Sync::DiffOptions initialOptions,
+        std::function<void(SharedData::Sync::DiffSummary)> onDone
     );
 
-    /** @brief Cancels an in-progress scan and closes the dialog. */
+    /**
+     * @brief Cancels the in-progress scan or diff and closes the dialog.  Safe to
+     *        call before @ref open or after @ref open completes (no-op in those
+     *        cases).
+     */
     void cancel();
 
     Nui::ElementRenderer operator()();

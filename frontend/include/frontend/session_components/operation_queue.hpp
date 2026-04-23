@@ -10,7 +10,6 @@
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
-#include <shared_data/file_operations/sync_scan_result.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
@@ -228,7 +227,19 @@ class OperationQueue
     /** @brief Hides the minimized-sync restore button (e.g. when the dialog is closed or reopened). */
     void hideMinimizedSync();
 
-    void enqueueSyncScans(
+    /**
+     * @brief Opens a backend SyncSession and kicks both scans.  The two scans build
+     *        sorted ScanNode trees on the backend; no entry payloads cross RPC.
+     *
+     *        The frontend learns when each side finishes via the per-side phase-done
+     *        callback (separate from scan-progress events).  A backend
+     *        @c onSyncDiffProgress stream — registered here too — is routed to the
+     *        provider-level progress callback so the Comparing phase can animate.
+     *
+     * @param syncSessionId  Pre-allocated session id; reused across later RPCs.
+     */
+    void openSyncSession(
+        Ids::SyncSessionId syncSessionId,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         bool respectIgnoreFiles,
@@ -236,9 +247,46 @@ class OperationQueue
         bool ignoreHidden,
         std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
         std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
-        std::function<void(SharedData::SyncScanResult)> onRemoteComplete,
-        std::function<void(SharedData::SyncScanResult)> onLocalComplete
+        std::function<void(/*isLocal=*/bool)> onScanPhaseDone,
+        std::function<void(std::uint64_t compared)> onDiffProgress
     );
+
+    /**
+     * @brief Clears per-session routing state installed by @ref openSyncSession.
+     *        Called when the provider tears down (dialog close or session drop).
+     */
+    void clearSyncSessionRouting(Ids::SyncSessionId syncSessionId);
+
+    // Thin pass-throughs to @ref FileEngine for the sync-session RPC surface.
+    // Keep them on @ref OperationQueue so @ref BackendSyncProvider doesn't need
+    // direct FileEngine access — matches the rest of the file-op RPCs here.
+
+    void recomputeSyncDiff(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffOptions options,
+        std::function<void(SharedData::Sync::DiffSummary)> onSummary
+    );
+
+    void loadSyncDiffChildren(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffSection section,
+        std::string const& parentRelKey,
+        std::uint64_t generation,
+        std::function<void(std::vector<SharedData::Sync::DiffTreeNode>)> onResolved,
+        std::function<void(std::string const&)> onRejected
+    );
+
+    void buildSyncEnqueuePlan(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffSection section,
+        std::vector<std::string> selectedRelKeys,
+        std::uint64_t generation,
+        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+        std::function<void(std::string const&)> onRejected
+    );
+
+    void cancelSyncDiff(Ids::SyncSessionId syncSessionId);
+    void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
     /**
      * @brief Extracts a resumable descriptor for every currently-in-flight

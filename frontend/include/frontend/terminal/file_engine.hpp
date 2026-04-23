@@ -3,6 +3,10 @@
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_summary.hpp>
+#include <shared_data/sync/diff_tree_node.hpp>
+#include <shared_data/sync/enqueue_plan_entry.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
@@ -32,19 +36,18 @@ class FileEngine
     createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
     void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
 
-    /** @brief Queues both a remote and a local scan as priority operations for sync comparison.
-     *         The pre-generated IDs are used by the backend; the frontend registers listeners
-     *         for those IDs before calling this so that no progress events are missed.
+    /**
+     * @brief Opens a backend-resident SyncSession and queues both scans.  The scans
+     *        build sorted ScanNode trees; the session diff-then-serves lazy subtrees.
      *
-     * @param localPath     Local directory root.
-     * @param remotePath    Remote directory root.
-     * @param remoteScanId  Pre-generated operation ID for the remote scan.
-     * @param localScanId   Pre-generated operation ID for the local scan.
-     * @param onComplete    Called on success/failure with (success, info).
+     * @param syncSessionId Pre-generated session id used for all follow-up RPCs.
+     * @param remoteScanId  Operation id for the remote scan card.
+     * @param localScanId   Operation id for the local scan card.
      */
-    void addSyncScans(
+    void openSyncSession(
         std::filesystem::path const& localPath,
         std::filesystem::path const& remotePath,
+        Ids::SyncSessionId syncSessionId,
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
         bool respectIgnoreFiles,
@@ -52,6 +55,52 @@ class FileEngine
         bool ignoreHidden,
         std::function<void(bool success, std::string const& info)> onComplete
     );
+
+    /**
+     * @brief Runs (or re-runs) the diff on an open sync session and returns the
+     *        summary.  @p onSummary receives a failed/empty summary with
+     *        `cancelled=true` if the call fails.
+     */
+    void recomputeSyncDiff(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffOptions options,
+        std::function<void(SharedData::Sync::DiffSummary)> onSummary
+    );
+
+    /**
+     * @brief Loads direct children of @p parentRelKey in @p section.  @p generation
+     *        must match the most recent @ref recomputeSyncDiff reply or the server
+     *        rejects as stale — the caller then discards.
+     */
+    void loadSyncDiffChildren(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffSection section,
+        std::string const& parentRelKey,
+        std::uint64_t generation,
+        std::function<void(std::vector<SharedData::Sync::DiffTreeNode>)> onResolved,
+        std::function<void(std::string const&)> onRejected
+    );
+
+    /**
+     * @brief Asks the backend to collapse the selected relKey SPARSE set in @p section
+     *        into a minimal enqueue plan.  An entry X in @p selectedRelKeys means "X
+     *        and every descendant selected"; the backend-resident minimizer handles
+     *        bulk-dir / structural-dir rules.
+     */
+    void buildSyncEnqueuePlan(
+        Ids::SyncSessionId syncSessionId,
+        SharedData::Sync::DiffSection section,
+        std::vector<std::string> selectedRelKeys,
+        std::uint64_t generation,
+        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+        std::function<void(std::string const&)> onRejected
+    );
+
+    /** @brief Flips the backend cancel flag. The running walk exits at next checkpoint. */
+    void cancelSyncDiff(Ids::SyncSessionId syncSessionId);
+
+    /** @brief Releases backend-side memory for @p syncSessionId. */
+    void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
     void addDownload(
         NuiFileExplorer::Item const& remotePath,
