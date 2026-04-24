@@ -40,7 +40,6 @@ jobs:
             boost-libs \
             aws-cli-v2 \
             github-cli \
-            sdbus-cpp \
             nlohmann-json \
             zlib \
             bzip2 \
