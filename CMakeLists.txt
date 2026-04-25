@@ -154,3 +154,13 @@ else()
         add_subdirectory(tools/language_check/source/language_check)
     endif()
 endif()
+
+# -----------------------------------------------------------------------------
+# Marketing webpage (separate, isolated emscripten module)
+# Off by default. The webpage produces its own bin/ output independent from the
+# main application frontend.
+# -----------------------------------------------------------------------------
+option(BUILD_WEBPAGE "Build the standalone nui-sftp marketing webpage" OFF)
+if (BUILD_WEBPAGE AND NOT EMSCRIPTEN)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/webpage")
+endif()

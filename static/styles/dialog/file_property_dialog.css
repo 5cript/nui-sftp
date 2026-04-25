@@ -3,6 +3,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 8px 1rem;
     overflow: hidden;
+    padding: 0.5em;
 
     /* direct descendant divs do subgrid */
     >div {
@@ -16,8 +17,11 @@
     }
 }
 
-#FilePropertyDialog_0 {
+/* Each FilePropertyDialog instance gets a unique counter-suffixed id, so
+   match by prefix instead of pinning to _0. */
+[id^="FilePropertyDialog_"] {
     &>.script-nui-dialog-body {
         overflow: hidden;
+        padding: 1.25em 1.5em;
     }
 }
