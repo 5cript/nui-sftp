@@ -73,12 +73,20 @@ jobs:
             -DCMAKE_CXX_STANDARD=23 \
             -DJSON_Diagnostics=ON \
             -DNUI_FETCH_TRAITS=OFF \
+            -DNUI_SFTP_ENABLE_TESTING=ON \
 
       - name: Build
         run: |
           cmake --build \
             "${{ env.BUILD_DIR }}" \
             --config "${{ env.BUILD_TYPE }}"
+
+      - name: Run Tests
+        run: |
+          ctest \
+            --test-dir "${{ env.BUILD_DIR }}" \
+            --build-config "${{ env.BUILD_TYPE }}" \
+            --output-on-failure
 
       - name: Run Deploy
         run: |
