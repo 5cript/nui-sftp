@@ -5,6 +5,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/settings.hpp>
+#include <frontend/licenses.hpp>
 #include <utility/language.hpp>
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
@@ -32,6 +33,7 @@ struct MainPage::Implementation
     Toolbar toolbar;
     SessionArea sessionArea;
     Settings settings;
+    Licenses licenses;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
 
@@ -51,6 +53,7 @@ struct MainPage::Implementation
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog}
+        , licenses{events}
         , darkMode{true}
         , setupWait{}
     {
@@ -139,6 +142,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->directConnectDialog(),
         impl_->multiInputDialog(),
         impl_->settings(),
+        impl_->licenses(),
         div{
             class_ = "main-page",
         }(

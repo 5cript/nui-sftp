@@ -7,6 +7,81 @@ add_npm_install(
     INSTALL_ARGS ${NUISCP_NPM_INSTALL_ARGS}
 )
 
+# ── Embedded license bundle ────────────────────────────────────────────────
+# Generates licenses_data.hpp at build time and embeds the merged C++ + npm
+# license bundle as a std::string_view, so the WASM frontend can render the
+# Licenses page without any runtime file lookup.
+
+set(NUI_SFTP_LICENSES_GEN_DIR "${CMAKE_BINARY_DIR}/generated/licenses")
+set(NUI_SFTP_NPM_LICENSES_JSON "${NUI_SFTP_LICENSES_GEN_DIR}/npm-licenses.json")
+set(NUI_SFTP_LICENSES_JSON     "${NUI_SFTP_LICENSES_GEN_DIR}/licenses.json")
+set(NUI_SFTP_LICENSES_HEADER   "${NUI_SFTP_LICENSES_GEN_DIR}/licenses_data.hpp")
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# Glob the per-package license texts so the header re-generates whenever any
+# of them is edited.
+file(GLOB NUI_SFTP_LICENSE_TEXT_FILES
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/licenses/texts/*"
+)
+
+# Step 1: walk the build-tree node_modules and dump per-package license info.
+add_custom_command(
+    OUTPUT "${NUI_SFTP_NPM_LICENSES_JSON}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${NUI_SFTP_LICENSES_GEN_DIR}"
+    COMMAND "${CMAKE_BINARY_DIR}/node_modules/.bin/license-checker-rseidelsohn"
+        --start "${CMAKE_BINARY_DIR}"
+        --production
+        --json
+        --out "${NUI_SFTP_NPM_LICENSES_JSON}"
+    DEPENDS ${PROJECT_NAME}-npm-install
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMENT "Collecting npm production licenses"
+    VERBATIM
+)
+
+# Step 2: merge SPDX + npm output into the embedded C++ header. Re-runs when
+# any source license input changes.
+add_custom_command(
+    OUTPUT "${NUI_SFTP_LICENSES_HEADER}" "${NUI_SFTP_LICENSES_JSON}"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/build_licenses_bundle.py"
+        --out    "${NUI_SFTP_LICENSES_JSON}"
+        --header "${NUI_SFTP_LICENSES_HEADER}"
+        --npm-licenses  "${NUI_SFTP_NPM_LICENSES_JSON}"
+        --npm-host-root "${CMAKE_BINARY_DIR}"
+    DEPENDS
+        "${NUI_SFTP_NPM_LICENSES_JSON}"
+        "${CMAKE_SOURCE_DIR}/scripts/build_licenses_bundle.py"
+        "${CMAKE_SOURCE_DIR}/licenses/third_party.spdx.json"
+        ${NUI_SFTP_LICENSE_TEXT_FILES}
+    COMMENT "Generating embedded license header"
+    VERBATIM
+)
+
+add_custom_target(nui-sftp-licenses-data
+    DEPENDS "${NUI_SFTP_LICENSES_HEADER}"
+)
+
+# Ensure the embedded header exists at configure time, so source files that
+# `#include <licenses_data.hpp>` resolve before the build-time custom command
+# has run. Whatever is here will be overwritten on the first build with the
+# full cpp+npm bundle once npm install has produced a node_modules.
+if (NOT EXISTS "${NUI_SFTP_LICENSES_HEADER}")
+    file(MAKE_DIRECTORY "${NUI_SFTP_LICENSES_GEN_DIR}")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/build_licenses_bundle.py"
+            --out    "${NUI_SFTP_LICENSES_JSON}"
+            --header "${NUI_SFTP_LICENSES_HEADER}"
+            --npm-licenses  "${NUI_SFTP_NPM_LICENSES_JSON}"
+            --npm-host-root "${CMAKE_BINARY_DIR}"
+        RESULT_VARIABLE NUI_SFTP_LICENSES_BOOTSTRAP_RESULT
+    )
+    if (NOT NUI_SFTP_LICENSES_BOOTSTRAP_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to bootstrap licenses_data.hpp at configure time")
+    endif()
+endif()
+
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -18,6 +93,7 @@ target_sources(
         session.cpp
         proto_session.cpp
         settings.cpp
+        licenses.cpp
         color.cpp
         icon_from_name.cpp
         theme_controller.cpp
@@ -69,7 +145,16 @@ target_sources(
         file_explorer/remote_side_model.cpp
         file_explorer/local_side_model.cpp
         "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
+        "${NUI_SFTP_LICENSES_HEADER}"
 )
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${NUI_SFTP_LICENSES_GEN_DIR}")
+add_dependencies(${PROJECT_NAME} nui-sftp-licenses-data)
+# Nui's inline preprocessor compiles every .cpp into a .i before the WASM
+# target builds, so it also needs the generated header to exist first.
+if (TARGET nui-inline-${PROJECT_NAME})
+    add_dependencies(nui-inline-${PROJECT_NAME} nui-sftp-licenses-data)
+endif()
 
 function(set_memory64_flags)
     cmake_parse_arguments(
@@ -161,6 +246,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/licenses.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sync_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"

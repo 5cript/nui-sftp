@@ -107,12 +107,23 @@ jobs:
         run: |
           cd "${{ env.BUILD_DIR }}" && tar -czf "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz" frontend
 
+      - name: Build standalone licenses tarball
+        run: |
+          # The cmake build already produced licenses.json (and embedded it
+          # into the WASM binary). This step only repackages it as a release
+          # artifact for inspection outside the app.
+          python scripts/build_licenses_bundle.py \
+            --out "${{ env.BUILD_DIR }}/licenses.json" \
+            --tarball "${{ env.BUILD_DIR }}/nui-sftp-licenses_${{ env.VERSION }}.tar.gz" \
+            --npm-licenses "${{ env.BUILD_DIR }}/generated/licenses/npm-licenses.json"
+
       - name: Upload Artifact to Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.RELEASEUPLOADPAT }}
         run: |
           gh release upload "v${{ env.VERSION_CLEAN }}" "${{ env.BUILD_DIR }}/nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
+          gh release upload "v${{ env.VERSION_CLEAN }}" "${{ env.BUILD_DIR }}/nui-sftp-licenses_${{ env.VERSION }}.tar.gz"
 
       - name: Upload artifacts to MEGA S4
         if: startsWith(github.ref, 'refs/tags/v')
@@ -120,14 +131,16 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.MEGAS4ACCESS }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MEGAS4KEY }}
           ENDPOINT: https://s3.eu-central-1.s4.mega.io
-          FILENAME: "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz"
-          S3_PATH: "s3://nui-sftp-releases/linux-frontend/"
         run: |
-          # Check if the file exists on the remote
-          if aws s3 ls "${{ env.S3_PATH }}${{ env.FILENAME }}" --endpoint-url ${{ env.ENDPOINT }} > /dev/null 2>&1; then
-            echo "Error: File ${{ env.FILENAME }} already exists in S4. Exiting to prevent overwrite."
-            exit 0
-          fi
+          upload_if_absent() {
+            local filename="$1"
+            local s3_path="$2"
+            if aws s3 ls "${s3_path}${filename}" --endpoint-url "${ENDPOINT}" > /dev/null 2>&1; then
+              echo "Skipping: ${filename} already exists in S4."
+              return 0
+            fi
+            aws s3 cp "${{ env.BUILD_DIR }}/${filename}" "${s3_path}" --endpoint-url "${ENDPOINT}"
+          }
 
-          # If it doesnt exist, upload it
-          aws s3 cp "${{ env.BUILD_DIR }}/${{ env.FILENAME }}" "${{ env.S3_PATH }}" --endpoint-url ${{ env.ENDPOINT }}
+          upload_if_absent "nui-sftp-linux-frontend_${{ env.VERSION }}.tar.gz" "s3://nui-sftp-releases/linux-frontend/"
+          upload_if_absent "nui-sftp-licenses_${{ env.VERSION }}.tar.gz" "s3://nui-sftp-releases/licenses/"

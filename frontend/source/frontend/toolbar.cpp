@@ -19,6 +19,7 @@
 #include <ui5-sap-icons/icons/light-mode.hpp>
 #include <ui5-sap-icons/icons/dark-mode.hpp>
 #include <ui5-sap-icons/icons/connected.hpp>
+#include <ui5-sap-icons/icons/signature.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -316,6 +317,14 @@ Nui::ElementRenderer Toolbar::operator()()
                             }
                         }
                     );
+                },
+            },
+        }),
+        Snc::button({
+            .icon = Ui5Icons::signature(),
+            .attributes = {
+                onClick = [this]() {
+                    impl_->events->licensesOpen = true;
                 },
             },
         }),

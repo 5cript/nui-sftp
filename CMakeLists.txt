@@ -69,6 +69,23 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui" EXCLUDE_FROM_ALL)
 add_executable(${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} PUBLIC core-target)
 
+# Third-party license drift check: fails the build if a CMake-declared dep
+# is missing from licenses/third_party.spdx.json (or vice versa) or any
+# referenced license text file is empty / still a PLACEHOLDER.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if (Python3_Interpreter_FOUND)
+    add_custom_target(check_licenses
+        ALL
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/check_licenses.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Checking third-party license manifest"
+        VERBATIM
+    )
+    add_dependencies(${PROJECT_NAME} check_licenses)
+else()
+    message(WARNING "Python3 interpreter not found; skipping license drift check.")
+endif()
+
 # Subdirectories & Dependencies
 add_library(roar-include-only INTERFACE)
 target_include_directories(roar-include-only INTERFACE "${CMAKE_CURRENT_LIST_DIR}/dependencies/roar/include")

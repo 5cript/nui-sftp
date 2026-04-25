@@ -16,6 +16,7 @@ struct FrontendEvents : public AppWideEvents
     Nui::Observed<std::string> onNewSession{};
     Nui::Observed<bool> onLayoutsChanged{false};
     Nui::Observed<bool> settingsOpen{false};
+    Nui::Observed<bool> licensesOpen{false};
     /// Opens settings and scrolls to the rendered element whose DOM id equals
     /// this string. Settings walks up from the element to find its
     /// [data-settings-section] ancestor and activates that section first, so
