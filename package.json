@@ -3,12 +3,14 @@
     "name": "nui-sftp",
     "version": "1.0.0",
     "scripts": {
-        "tailwatch": "cross-env NODE_ENV=development tailwindcss --config tailwind.config.js --watch=always --output build/clang_debug/bin/liveload/tailwind.css"
+        "tailwatch": "cross-env NODE_ENV=development tailwindcss --config tailwind.config.js --watch=always --output build/clang_debug/bin/liveload/tailwind.css",
+        "licenses": "license-checker-rseidelsohn --production --json --out licenses/npm-licenses.json"
     },
     "devDependencies": {
         "cross-env": "^7.0.3",
         "dotenv": "^16.4.5",
         "less": "^4.2.2",
+        "license-checker-rseidelsohn": "^4.4.2",
         "parcel": "^2.13.0",
         "parcel-reporter-static-files-copy": "^1.5.0",
         "webpack": "^5.98.0",
@@ -21,7 +23,6 @@
         "@lumino/dragdrop": "^2.1.7",
         "@lumino/messaging": "^2.0.4",
         "@lumino/widgets": "^2.7.3",
-        "@viselect/vanilla": "^3.7.0",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/addon-serialize": "^0.14.0",
         "@xterm/addon-webgl": "^0.19.0",
