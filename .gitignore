@@ -12,3 +12,4 @@ install
 .claude
 .mcp.json
 licenses/npm-licenses.json
+webpage/design/*

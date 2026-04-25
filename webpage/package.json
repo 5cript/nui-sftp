@@ -1,0 +1,13 @@
+{
+    "name": "nui-sftp-webpage",
+    "version": "0.1.0",
+    "description": "Standalone marketing webpage for nui-sftp, built with Nui (C++/WASM).",
+    "private": true,
+    "scripts": {
+        "serve": "bash scripts/serve.sh"
+    },
+    "devDependencies": {
+        "live-server": "^1.2.2",
+        "parcel": "^2.13.0"
+    }
+}

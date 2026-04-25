@@ -110,6 +110,30 @@
     /* Popup menu */
     --script-nui-popup-menu-primary-color: var(--theme-color);
 
+    /* Dialog — keep body / header / footer surfaces on the host theme. */
+    --script-nui-components-dialog-cell-background: var(--background-color);
+    --script-nui-components-dialog-border-color: var(--border-color-fields);
+    --script-nui-components-dialog-color: var(--color);
+    --script-nui-components-dialog-header-color: var(--color);
+    --script-nui-components-dialog-footer-color: var(--color-secondary);
+
+    /* Carousel — bind to host theme so the dot, frame, and chrome match the
+       app palette in both dark and light modes. The marketing landing page
+       sets its own --glass-bg / --accent-grad / --ink-* and is unaffected. */
+    --script-nui-carousel-frame-bg: var(--background-color-fields);
+    --script-nui-carousel-frame-border: var(--border-color-fields);
+    --script-nui-carousel-frame-blur: 0px;
+    --script-nui-carousel-frame-radius: 6px;
+    --script-nui-carousel-frame-min-height: 0px;
+    --script-nui-carousel-button-color: var(--color-secondary);
+    --script-nui-carousel-button-hover-color: var(--color);
+    --script-nui-carousel-button-bg: transparent;
+    --script-nui-carousel-button-hover-background: color-mix(in srgb, var(--color) 12%, transparent);
+    --script-nui-carousel-indicator-color: var(--color-secondary);
+    --script-nui-carousel-counter-color: var(--color-secondary);
+    --script-nui-carousel-dot-color: var(--border-color-fields);
+    --script-nui-carousel-dot-active-bg: var(--theme-color);
+
     /* Button */
     --script-nui-components-button-color: var(--color);
     --script-nui-components-button-color-regular: var(--background-color-fields);
