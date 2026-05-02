@@ -1,8 +1,10 @@
 #include <backend/file_tracking/instance_lock.hpp>
 
-#include <utility>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <unistd.h>
+
+#include <utility>
 
 // Linux & Mac implementation
 namespace FileTracking
