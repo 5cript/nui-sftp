@@ -1,8 +1,11 @@
 # nui-sftp
 
-This project contains a cross platform (Linux & Windows) SSH and SFTP client.
+This project contains a cross platform (Linux & Windows) SSH and SFTP workbench.
 
 ![AppImage](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/session.png)
+
+## Website
+[https://nui-sftp.nuicpp.org](https://nui-sftp.nuicpp.org)
 
 # Installation
 
