@@ -119,10 +119,7 @@ namespace NuiSftpPage::Sections
             }(div{class_ = "section-eyebrow"}("// download"),
                 h2{class_ = "section-title"}("Native on Windows. Flatpak on Linux. Arch & NixOS coming native."),
                 p{class_ = "section-sub"}()),
-            div{
-                class_ = "platforms",
-                style = "grid-template-columns: 1fr 1fr",
-            }(windowsCard(), linuxCard())
+            div{class_ = "platforms"}(windowsCard(), linuxCard())
         ));
     }
 }
