@@ -25,7 +25,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: clip; }
 body {
   font-family: 'Inter', system-ui, sans-serif;
   background: var(--bg-0);
@@ -33,7 +33,6 @@ body {
   font-size: 16px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
   min-height: 100vh;
 }
 
