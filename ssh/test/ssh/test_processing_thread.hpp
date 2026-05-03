@@ -627,6 +627,53 @@ namespace SecureShell::Test
         ASSERT_TRUE(awaiter.waitFor());
     }
 
+    TEST_F(ProcessingThreadTest, ExternalRemovePermanentTaskWhileProcessingDoesNotKillThread)
+    {
+        // Regression: while the processing thread iterated permanent tasks, an external
+        // call to removePermanentTask enqueued a promise-fulfilling lambda into
+        // deferredTaskModification_. The vector was never cleared after being drained, so
+        // the same lambda replayed on the next cycle, throwing future_error from the
+        // already-satisfied promise. The outer catch then set running_ = false and the
+        // thread silently died, deadlocking any subsequent .get() on a queued task.
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+
+        Awaiter blockerStarted{};
+        auto blocker = processingThread.pushPermanentTask(
+            [&blockerStarted](auto)
+            {
+                blockerStarted.arrive();
+                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+                return true;
+            }
+        );
+        ASSERT_TRUE(blocker.first);
+
+        auto victim = processingThread.pushPermanentTask(
+            [](auto)
+            {
+                return true;
+            }
+        );
+        ASSERT_TRUE(victim.first);
+
+        ASSERT_TRUE(blockerStarted.waitFor());
+
+        EXPECT_TRUE(processingThread.removePermanentTask(victim.second));
+
+        // Allow several cycles for the buggy replay path to crash the run loop.
+        std::this_thread::sleep_for(std::chrono::milliseconds{300});
+
+        Awaiter postRemoval{};
+        EXPECT_TRUE(processingThread.pushTask(
+            [&postRemoval]
+            {
+                postRemoval.arrive();
+            }
+        ));
+        EXPECT_TRUE(postRemoval.waitFor());
+    }
+
     TEST_F(ProcessingThreadTest, PermanentTaskReturningFalseIsRemoved)
     {
         ProcessingThread processingThread;
