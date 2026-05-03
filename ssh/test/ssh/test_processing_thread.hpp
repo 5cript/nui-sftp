@@ -696,4 +696,138 @@ namespace SecureShell::Test
         awaiter.wait();
         EXPECT_EQ(0, processingThread.permanentTaskCount());
     }
+
+    TEST_F(ProcessingThreadTest, StrandFinalizesAfterSelfRemovingPermanentTask)
+    {
+        // The strand wrapper no longer erases self-removed ids from the strand's set; the
+        // stale id lingers until finalization, where ProcessingThread::removePermanentTask
+        // is a no-op for unknown ids. This test exercises that path end-to-end.
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+
+        Awaiter selfRemoved{};
+        auto result = strand->pushPermanentTask(
+            [&selfRemoved]
+            {
+                selfRemoved.arrive();
+                return false;
+            }
+        );
+        ASSERT_TRUE(result.first);
+        ASSERT_TRUE(selfRemoved.waitFor());
+
+        // Confirm the thread side dropped the task.
+        Awaiter sync{};
+        strand->pushTask(
+            [&sync]
+            {
+                sync.arrive();
+            }
+        );
+        ASSERT_TRUE(sync.waitFor());
+        EXPECT_EQ(0, processingThread.permanentTaskCount());
+
+        // Strand still holds the stale id; finalization must complete cleanly.
+        Awaiter finalRan{};
+        strand->pushFinalTask(
+            [&finalRan]
+            {
+                finalRan.arrive();
+            }
+        );
+        EXPECT_TRUE(finalRan.waitFor());
+    }
+
+    TEST_F(ProcessingThreadTest, PendingTasksAtStopAreDrainedInFifoOrder)
+    {
+        std::vector<int> order;
+        std::mutex orderMutex;
+
+        ProcessingThread processingThread;
+        for (int i = 0; i < 5; ++i)
+        {
+            processingThread.pushTask(
+                [i, &order, &orderMutex]
+                {
+                    std::lock_guard lock{orderMutex};
+                    order.push_back(i);
+                }
+            );
+        }
+        processingThread.stop();
+
+        EXPECT_EQ(order, (std::vector<int>{0, 1, 2, 3, 4}));
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingPermanentTaskRunsRemainingBatchAndStopsThread)
+    {
+        std::atomic_int throwerCount = 0;
+        std::atomic_int goodCount = 0;
+
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(
+            [&throwerCount](auto)
+            {
+                ++throwerCount;
+                throw std::runtime_error("boom");
+                return true;
+            }
+        );
+        processingThread.pushPermanentTask(
+            [&goodCount](auto)
+            {
+                ++goodCount;
+                return true;
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+
+        // Allow the cycle to complete and the run loop to exit via the rethrow.
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+
+        EXPECT_EQ(1, throwerCount.load());   // thrower not re-run
+        EXPECT_EQ(1, goodCount.load());      // remaining task in batch still ran
+        EXPECT_FALSE(processingThread.isRunning());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingRegularTaskRunsRemainingBatchAndStopsThread)
+    {
+        std::atomic_int firstRan = 0;
+        std::atomic_int thirdRan = 0;
+
+        ProcessingThread processingThread;
+        processingThread.pushTask(
+            [&firstRan]
+            {
+                firstRan = 1;
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.pushTask(
+            [&thirdRan]
+            {
+                thirdRan = 1;
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+
+        EXPECT_EQ(1, firstRan.load());
+        EXPECT_EQ(1, thirdRan.load());       // task after thrower in same batch still ran
+        EXPECT_FALSE(processingThread.isRunning());
+    }
+
+    TEST_F(ProcessingThreadTest, StartingTwiceWithoutStopThrows)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        EXPECT_THROW(processingThread.start(std::chrono::milliseconds{1}), std::logic_error);
+    }
 }

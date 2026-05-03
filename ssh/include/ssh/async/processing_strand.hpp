@@ -53,13 +53,15 @@ namespace SecureShell
             std::scoped_lock lock(mutex_);
             if (finalized_)
                 return {false, ProcessingThread::PermanentTaskId{-1}};
+            // The wrapper does NOT erase the id from permanentTasks_ on self-removal: doing so would
+            // require holding mutex_ from the processing thread, which can deadlock against
+            // pushFinalPromiseTask (which holds mutex_ while waiting on the processing thread).
+            // Stale ids are reaped at finalization, where ProcessingThread::removePermanentTask
+            // is a harmless no-op for unknown ids.
             auto result = processingThread_->pushPermanentTask(
-                [task = std::move(task), this](ProcessingThread::PermanentTaskId id)
+                [task = std::move(task)](ProcessingThread::PermanentTaskId)
                 {
-                    const auto result = task();
-                    if (!result)
-                        permanentTasks_.erase(id);
-                    return result;
+                    return task();
                 }
             );
             this->permanentTasks_.insert(result.second);
