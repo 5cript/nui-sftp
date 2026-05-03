@@ -18,6 +18,8 @@ namespace SecureShell
     }
     void ProcessingThread::start(std::chrono::milliseconds const& minimumCycleWait)
     {
+        if (thread_.joinable())
+            throw std::logic_error("ProcessingThread::start called while a previous thread is still joinable; call stop() first.");
         {
             std::lock_guard lock{taskMutex_};
             running_ = true;
@@ -44,12 +46,12 @@ namespace SecureShell
         if (thread_.joinable())
             thread_.join();
 
-        // execute all pending tasks:
+        // execute all pending tasks in FIFO order, matching the run loop:
         std::lock_guard lock{taskMutex_};
         while (!tasks_.empty())
         {
-            tasks_.back()();
-            tasks_.pop_back();
+            tasks_.front()();
+            tasks_.pop_front();
         }
         shuttingDown_ = false;
     }
@@ -162,6 +164,7 @@ namespace SecureShell
         try
         {
             std::vector<PermanentTaskId> toRemove{};
+            std::exception_ptr pendingException{};
             while (running_)
             {
                 timePoint = std::chrono::steady_clock::now();
@@ -176,11 +179,21 @@ namespace SecureShell
 
                     for (auto const& [id, task] : permaTasksMoved)
                     {
-                        // Task is checked before adding, shouldnt possibly be empty:
-                        if (!task(id))
+                        // Throwing tasks are removed (not re-run) and the exception is
+                        // captured for rethrow at end of cycle so cleanup below still runs.
+                        bool keep = false;
+                        try
+                        {
+                            keep = task(id);
+                        }
+                        catch (...)
+                        {
+                            if (!pendingException)
+                                pendingException = std::current_exception();
+                        }
+                        if (!keep)
                             toRemove.push_back(id);
 
-                        // Stop running if shutdown was requested:
                         if (!running_ || shuttingDown_)
                             break;
                     }
@@ -235,9 +248,20 @@ namespace SecureShell
                             throw std::runtime_error("Task must not be empty.");
                         }
 #endif
-                        task();
+                        try
+                        {
+                            task();
+                        }
+                        catch (...)
+                        {
+                            if (!pendingException)
+                                pendingException = std::current_exception();
+                        }
                     }
                 }
+
+                if (pendingException)
+                    std::rethrow_exception(pendingException);
 
                 if (minimumCycleWait.count() > 0)
                 {
