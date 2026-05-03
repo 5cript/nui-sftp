@@ -208,6 +208,7 @@ namespace SecureShell
                     {
                         modify();
                     }
+                    deferredTaskModification_.clear();
                 }
 
                 {
