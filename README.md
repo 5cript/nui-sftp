@@ -19,7 +19,13 @@ Download the windows zip and extract it somewhere. If you want an installer, cre
 
 ### ArchLinux
 
-You can install the flatpak or install via makepkg
+nui-sftp is published on the AUR: [nui-sftp](https://aur.archlinux.org/packages/nui-sftp)
+With your favorite AUR helper (yay as an example):
+```
+yay -S nui-sftp
+```
+
+Alternatively you can install directly from the PKGBUILD, which is primarily maintained in [this repository](https://github.com/5cript/nui-sftp-deploy):
 ```bash
 git clone https://github.com/5cript/nui-sftp-deploy.git
 cd nui-sftp-deploy
@@ -29,8 +35,6 @@ to uninstall:
 ```bash
 sudo pacman -R nui-sftp
 ```
-
-This project will be submitted to the AUR at a later date.
 
 ### All Other Distributions
 
