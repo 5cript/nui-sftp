@@ -217,19 +217,25 @@ namespace Utility::Test
         createSomeFilesIn(subDir, fileCount);
 
         auto result = withWalkerDo([](auto& walker) {
-            walker.walkAll();
+            auto res = walker.walkAll();
             return std::make_tuple(
-                walker.totalEntries(), walker.totalBytes(), walker.currentIndex(), walker.completed());
+                std::move(res),
+                walker.totalEntries(),
+                walker.totalBytes(),
+                walker.currentIndex(),
+                walker.completed());
         });
 
         constexpr auto calculatedSize = (fileCount * (fileCount + 1)) / 2;
 
-        EXPECT_EQ(std::get<0>(result), dirCount + fileCount + 1)
+        ASSERT_TRUE(std::get<0>(result).has_value())
+            << "Error during walk: " << (std::get<0>(result).has_value() ? "" : std::get<0>(result).error());
+        EXPECT_EQ(std::get<1>(result), dirCount + fileCount + 1)
             << "Total entries should be " << (dirCount + fileCount + 1);
-        EXPECT_EQ(std::get<1>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
-        EXPECT_EQ(std::get<2>(result), dirCount + fileCount + 1)
+        EXPECT_EQ(std::get<2>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
+        EXPECT_EQ(std::get<3>(result), dirCount + fileCount + 1)
             << "Current index should be " << (dirCount + fileCount + 1);
-        EXPECT_TRUE(std::get<3>(result)) << "There should not be any more work";
+        EXPECT_TRUE(std::get<4>(result)) << "There should not be any more work";
     }
 
     TEST_F(DirectoryTraversalTests, DeeplyNestedFilesAreFound)
@@ -247,19 +253,25 @@ namespace Utility::Test
         }
 
         auto result = withWalkerDo([](auto& walker) {
-            walker.walkAll();
+            auto res = walker.walkAll();
             return std::make_tuple(
-                walker.totalEntries(), walker.totalBytes(), walker.currentIndex(), walker.completed());
+                std::move(res),
+                walker.totalEntries(),
+                walker.totalBytes(),
+                walker.currentIndex(),
+                walker.completed());
         });
 
         constexpr auto totalFiles = depth * fileCountPerLevel;
         const auto calculatedSize = ((fileCounter_) * (fileCounter_ + 1) / 2);
         constexpr auto totalEntries = totalFiles + depth + 1;
 
-        EXPECT_EQ(std::get<0>(result), totalEntries) << "Total entries should be " << totalEntries;
-        EXPECT_EQ(std::get<1>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
-        EXPECT_EQ(std::get<2>(result), totalEntries) << "Current index should be " << totalEntries;
-        EXPECT_TRUE(std::get<3>(result)) << "There should not be any more work";
+        ASSERT_TRUE(std::get<0>(result).has_value())
+            << "Error during walk: " << (std::get<0>(result).has_value() ? "" : std::get<0>(result).error());
+        EXPECT_EQ(std::get<1>(result), totalEntries) << "Total entries should be " << totalEntries;
+        EXPECT_EQ(std::get<2>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
+        EXPECT_EQ(std::get<3>(result), totalEntries) << "Current index should be " << totalEntries;
+        EXPECT_TRUE(std::get<4>(result)) << "There should not be any more work";
     }
 
     TEST_F(DirectoryTraversalTests, WideAndDeeplyNestedFilesAreFound)
@@ -289,18 +301,24 @@ namespace Utility::Test
         }
 
         auto result = withWalkerDo([](auto& walker) {
-            walker.walkAll();
+            auto res = walker.walkAll();
             return std::make_tuple(
-                walker.totalEntries(), walker.totalBytes(), walker.currentIndex(), walker.completed());
+                std::move(res),
+                walker.totalEntries(),
+                walker.totalBytes(),
+                walker.currentIndex(),
+                walker.completed());
         });
 
         const auto calculatedSize = (createdFiles * (createdFiles + 1) / 2);
         const auto totalEntries = createdFiles + createdDirs + 1;
 
-        EXPECT_EQ(std::get<0>(result), totalEntries) << "Total entries should be " << totalEntries;
-        EXPECT_EQ(std::get<1>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
-        EXPECT_EQ(std::get<2>(result), totalEntries) << "Current index should be " << totalEntries;
-        EXPECT_TRUE(std::get<3>(result)) << "There should not be any more work";
+        ASSERT_TRUE(std::get<0>(result).has_value())
+            << "Error during walk: " << (std::get<0>(result).has_value() ? "" : std::get<0>(result).error());
+        EXPECT_EQ(std::get<1>(result), totalEntries) << "Total entries should be " << totalEntries;
+        EXPECT_EQ(std::get<2>(result), calculatedSize) << "Total bytes should be " << calculatedSize;
+        EXPECT_EQ(std::get<3>(result), totalEntries) << "Current index should be " << totalEntries;
+        EXPECT_TRUE(std::get<4>(result)) << "There should not be any more work";
     }
 
     TEST_F(DirectoryTraversalTests, ListedFilesHaveTheExpectedPaths)
@@ -318,13 +336,17 @@ namespace Utility::Test
         createSomeFilesIn(subSubDir, fileCount);
 
         std::vector<std::filesystem::path> paths{};
-        withWalkerDo([&paths](auto& walker) {
-            walker.walkAll();
+        const auto walkResult = withWalkerDo([&paths](auto& walker) {
+            auto res = walker.walkAll();
             auto const& entries = walker.entries();
             std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
                 return walker.fullPath(entry);
             });
+            return res;
         });
+
+        ASSERT_TRUE(walkResult.has_value())
+            << "Error during walk: " << (walkResult.has_value() ? "" : walkResult.error());
 
         std::vector<std::filesystem::path> expectedPaths{
             isolateDirectory_.path(),
@@ -401,13 +423,17 @@ namespace Utility::Test
         };
 
         std::vector<std::filesystem::path> paths{};
-        withWalkerDo<true>([&paths](auto& walker) {
-            walker.walk();
+        const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
+            auto res = walker.walk();
             auto const& entries = walker.entries();
             std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
                 return walker.fullPath(entry);
             });
+            return res;
         });
+
+        ASSERT_TRUE(walkResult.has_value())
+            << "Error during walk: " << (walkResult.has_value() ? "" : walkResult.error());
 
         std::vector<std::filesystem::path> expectedPaths{
             isolateDirectory_.path(),
@@ -454,14 +480,17 @@ namespace Utility::Test
 
         auto doTheWalk = [this, &paths]() {
             paths.clear();
-            withWalkerDo<true>([&paths](auto& walker) {
+            const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
                 walker.reset();
-                walker.walk();
+                auto res = walker.walk();
                 auto const& entries = walker.entries();
                 std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
                     return walker.fullPath(entry);
                 });
+                return res;
             });
+            ASSERT_TRUE(walkResult.has_value())
+                << "Error during walk: " << (walkResult.has_value() ? "" : walkResult.error());
         };
 
         std::vector<std::filesystem::path> expectedPaths{

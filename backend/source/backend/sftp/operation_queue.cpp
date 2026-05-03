@@ -254,16 +254,16 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
             return;
         self->within_strand_do(
             [weak,
-             name,
-             operationId,
-             currentFile,
-             fileCurrentIndex,
-             fileCount,
-             currentFileBytes,
-             currentFileTotalBytes,
-             bytesCurrent,
-             bytesTotal,
-             bytesPerSecond]()
+                name,
+                operationId,
+                currentFile,
+                fileCurrentIndex,
+                fileCount,
+                currentFileBytes,
+                currentFileTotalBytes,
+                bytesCurrent,
+                bytesTotal,
+                bytesPerSecond]()
             {
                 auto self = weak.lock();
                 if (!self)
@@ -316,7 +316,7 @@ void OperationQueue::cancel(Ids::OperationId id)
             {
                 bool isMatch = op.first == id;
                 if (isMatch)
-                    op.second->cancel(true);
+                    std::ignore = op.second->cancel(true);
                 return isMatch;
             };
 
@@ -357,10 +357,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             // and reordering would alter the indices it iterates.
             if (!self->paused_)
             {
-                Log::warn(
-                    "OperationQueue::moveOperation refused — queue not paused (op '{}')",
-                    operationId.value()
-                );
+                Log::warn("OperationQueue::moveOperation refused — queue not paused (op '{}')", operationId.value());
                 return emitResolution(newIndex, false);
             }
 
@@ -369,10 +366,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             {
                 if (pid == operationId)
                 {
-                    Log::warn(
-                        "OperationQueue::moveOperation refused — '{}' is a priority op",
-                        operationId.value()
-                    );
+                    Log::warn("OperationQueue::moveOperation refused — '{}' is a priority op", operationId.value());
                     return emitResolution(newIndex, false);
                 }
             }
@@ -447,10 +441,7 @@ void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
 {
     if (bulkResumeStash_.empty())
         return;
-    Log::info(
-        "OperationQueue::dumpBulkResumes: persisting {} bulk-operation backup(s)",
-        bulkResumeStash_.size()
-    );
+    Log::info("OperationQueue::dumpBulkResumes: persisting {} bulk-operation backup(s)", bulkResumeStash_.size());
     for (auto& [opId, entry] : bulkResumeStash_)
         registry.store(opId, std::move(entry));
     bulkResumeStash_.clear();
@@ -474,7 +465,8 @@ void OperationQueue::adoptBulkResume(
     // reuse the original aggregate id (so the surviving frontend card
     // re-attaches) and synthesise fresh per-entry ids since their cards
     // no longer exist in the new session.
-    auto operationIdFor = [](std::size_t) {
+    auto operationIdFor = [](std::size_t)
+    {
         return Ids::generateOperationId();
     };
 
@@ -594,9 +586,9 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
 
         if (!item.result.has_value())
         {
-            completeOperation(makeCompletedOperation(
-                OperationQueue::CompletionReason::Failed, id, *operation, item.result.error()
-            ));
+            completeOperation(
+                makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, item.result.error())
+            );
             queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
@@ -604,8 +596,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            auto* next =
-                (item.queueIndex + 1 < queue.size()) ? queue[item.queueIndex + 1].second.get() : nullptr;
+            auto* next = (item.queueIndex + 1 < queue.size()) ? queue[item.queueIndex + 1].second.get() : nullptr;
             if (operation->type() == SharedData::OperationType::Scan)
             {
                 // Walk past any additional queued scans to find the archive
@@ -634,9 +625,8 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                 else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveDownload)
                 {
                     auto* scan = static_cast<ScanOperation*>(operation.get());
-                    static_cast<ArchiveDownloadOperation*>(nextNonScan)->setScanResultForRoot(
-                        scan->remotePath(), scan->ejectEntries(), scan->totalBytes()
-                    );
+                    static_cast<ArchiveDownloadOperation*>(nextNonScan)
+                        ->setScanResultForRoot(scan->remotePath(), scan->ejectEntries(), scan->totalBytes());
                 }
                 else
                 {
@@ -675,9 +665,8 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                 else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveUpload)
                 {
                     auto* scan = static_cast<LocalScanOperation*>(operation.get());
-                    static_cast<ArchiveUploadOperation*>(nextNonScan)->setScanResultForRoot(
-                        scan->localPath(), scan->ejectEntries(), scan->totalBytes()
-                    );
+                    static_cast<ArchiveUploadOperation*>(nextNonScan)
+                        ->setScanResultForRoot(scan->localPath(), scan->ejectEntries(), scan->totalBytes());
                 }
                 else
                 {
@@ -898,8 +887,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             .mode = mode,
         };
         bulkResumeStash_.insert_or_assign(
-            operationId,
-            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = std::move(synthetic)}
+            operationId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = std::move(synthetic)}
         );
 
         return {};
@@ -919,9 +907,7 @@ namespace
      * Keeps the frontend ignorant of codec specifics: the slider just says
      * "1 = fastest, 9 = smallest" and this picks a sensible setting per codec.
      */
-    TarArchive::CompressionOptions compressionOptionsFromLevel(
-        TarArchive::Compression codec, int userLevel
-    )
+    TarArchive::CompressionOptions compressionOptionsFromLevel(TarArchive::Compression codec, int userLevel)
     {
         const int clampedLevel = std::clamp(userLevel, 1, 9);
         TarArchive::CompressionOptions options{};
@@ -935,8 +921,7 @@ namespace
                 break;
             case TarArchive::Compression::Zstd:
                 // Linear map 1..9 → 1..22 (rounded).
-                options.zstdLevel =
-                    1 + static_cast<int>((clampedLevel - 1) * 21.0 / 8.0 + 0.5);
+                options.zstdLevel = 1 + static_cast<int>((clampedLevel - 1) * 21.0 / 8.0 + 0.5);
                 break;
             case TarArchive::Compression::Xz:
                 options.xzPreset = std::clamp(clampedLevel - 1, 0, 9);
@@ -965,10 +950,12 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     if (entries.empty())
     {
         Log::error("addArchiveDownloadOperation: no entries provided.");
-        return std::unexpected(Operation::Error{
-            .type = Operation::ErrorType::InvalidPath,
-            .extraInfo = "archive has no entries",
-        });
+        return std::unexpected(
+            Operation::Error{
+                .type = Operation::ErrorType::InvalidPath,
+                .extraInfo = "archive has no entries",
+            }
+        );
     }
 
     std::uint64_t totalPayloadBytes = 0u;
@@ -1001,10 +988,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     opts.mayOverwrite = mayOverwrite;
     opts.createMissingDirectories = true;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    opts.progressCallback =
-        [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](
-            auto min, auto max, auto current, auto bytesPerSecond
-        )
+    opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](
+                                auto min, auto max, auto current, auto bytesPerSecond
+                            )
     {
         auto self = weak.lock();
         if (!self)
@@ -1029,8 +1015,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         );
     };
 
-    auto& targetQueue =
-        (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     // Scans first so the dispatcher can hand each scan's results to the
     // archive op sitting one-or-more slots ahead.  They share a single queue
@@ -1059,9 +1044,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         );
     }
 
-    targetQueue.emplace_back(
-        operationId, std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts))
-    );
+    targetQueue.emplace_back(operationId, std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts)));
 
     Log::info(
         "OperationQueue::{}::onOperationAdded (ArchiveDownload, {} entries, {} bytes, {} pre-scans)",
@@ -1100,10 +1083,12 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     if (localPaths.empty())
     {
         Log::error("addArchiveUploadOperation: no local paths provided.");
-        return std::unexpected(Operation::Error{
-            .type = Operation::ErrorType::InvalidPath,
-            .extraInfo = "archive has no entries",
-        });
+        return std::unexpected(
+            Operation::Error{
+                .type = Operation::ErrorType::InvalidPath,
+                .extraInfo = "archive has no entries",
+            }
+        );
     }
 
     // Rough totalBytes estimate for the OperationAdded event; actual progress
@@ -1137,10 +1122,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    opts.progressCallback =
-        [weak = weak_from_this(), operationId, name = rpcName("onArchiveUploadProgress")](
-            auto min, auto max, auto current, auto bytesPerSecond
-        )
+    opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveUploadProgress")](
+                                auto min, auto max, auto current, auto bytesPerSecond
+                            )
     {
         auto self = weak.lock();
         if (!self)
@@ -1165,8 +1149,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         );
     };
 
-    auto& targetQueue =
-        (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     // Scans first: the scan-complete dispatcher walks past subsequent scans
     // to reach this archive op and feeds each LocalScan's slice into its
@@ -1174,12 +1157,10 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     for (auto const& rootPath : directoryRootPaths)
     {
         const auto scanId = Ids::generateOperationId();
-        auto scan = std::make_unique<LocalScanOperation>(
-            LocalScanOperation::ScanOperationOptions{
-                .progressCallback = makeScanProgressCallback("onLocalScanProgress", scanId),
-                .localPath = rootPath,
-            }
-        );
+        auto scan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
+            .progressCallback = makeScanProgressCallback("onLocalScanProgress", scanId),
+            .localPath = rootPath,
+        });
         targetQueue.emplace_back(scanId, std::move(scan));
         hub_->callRemote(
             rpcName("onOperationAdded"),
@@ -1192,9 +1173,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         );
     }
 
-    targetQueue.emplace_back(
-        operationId, std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts))
-    );
+    targetQueue.emplace_back(operationId, std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts)));
 
     Log::info(
         "OperationQueue::{}::onOperationAdded (ArchiveUpload, {} paths, ~{} bytes, {} pre-scans)",
@@ -1234,8 +1213,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     if (request.allowOverwrite)
         transferOptions.mayOverwrite = true;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    auto& targetQueue =
-        (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     std::vector<BulkDownloadOperation::PrescannedFile> files;
     files.reserve(request.entries.size());
@@ -1268,13 +1246,15 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             ++directoryCount;
             continue;
         }
-        files.push_back(BulkDownloadOperation::PrescannedFile{
-            .remoteSrc = entry.src,
-            .localDst = entry.dst,
-            .sizeBytes = entry.sizeBytes,
-            .mtime = entry.mtime,
-            .mtimeNsec = entry.mtimeNsec,
-        });
+        files.push_back(
+            BulkDownloadOperation::PrescannedFile{
+                .remoteSrc = entry.src,
+                .localDst = entry.dst,
+                .sizeBytes = entry.sizeBytes,
+                .mtime = entry.mtime,
+                .mtimeNsec = entry.mtimeNsec,
+            }
+        );
     }
 
     if (!files.empty())
@@ -1293,8 +1273,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
-                .overallProgressCallback =
-                    makeBulkProgressCallback("onBulkDownloadProgress", bulkOpId),
+                .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkOpId),
                 .remotePath = firstSrc.parent_path(),
                 .localPath = firstDst.parent_path(),
                 .individualOptions = std::move(downloadOpts),
@@ -1317,10 +1296,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         );
     }
 
-    Log::info(
-        "Bulk download: queued one bulk card (for files) + {} directory entries",
-        directoryCount
-    );
+    Log::info("Bulk download: queued one bulk card (for files) + {} directory entries", directoryCount);
 
     // Stash the request keyed by the aggregate bulk card id so a teardown
     // can hand it to the resume registry.  Mixed file/directory entries
@@ -1329,8 +1305,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     if (!request.entries.empty())
     {
         bulkResumeStash_.insert_or_assign(
-            bulkCardId,
-            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = request}
+            bulkCardId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = request}
         );
     }
 
@@ -1488,8 +1463,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             .mode = mode,
         };
         bulkResumeStash_.insert_or_assign(
-            bulkId,
-            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = std::move(synthetic)}
+            bulkId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = std::move(synthetic)}
         );
 
         return {};
@@ -1515,8 +1489,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
     if (request.allowOverwrite)
         transferOptions.mayOverwrite = true;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    auto& targetQueue =
-        (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     std::vector<BulkUploadOperation::PrescannedFile> files;
     files.reserve(request.entries.size());
@@ -1549,11 +1522,13 @@ std::size_t OperationQueue::addBulkUploadOperation(
             ++directoryCount;
             continue;
         }
-        files.push_back(BulkUploadOperation::PrescannedFile{
-            .localSrc = entry.src,
-            .remoteDst = entry.dst,
-            .sizeBytes = entry.sizeBytes,
-        });
+        files.push_back(
+            BulkUploadOperation::PrescannedFile{
+                .localSrc = entry.src,
+                .remoteDst = entry.dst,
+                .sizeBytes = entry.sizeBytes,
+            }
+        );
     }
 
     if (!files.empty())
@@ -1569,8 +1544,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp,
             BulkUploadOperation::BulkUploadOperationOptions{
-                .overallProgressCallback =
-                    makeBulkProgressCallback("onBulkUploadProgress", bulkOpId),
+                .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkOpId),
                 .remotePath = firstDst.parent_path(),
                 .localPath = firstSrc.parent_path(),
                 .individualOptions = std::move(uploadOpts),
@@ -1593,16 +1567,12 @@ std::size_t OperationQueue::addBulkUploadOperation(
         );
     }
 
-    Log::info(
-        "Bulk upload: queued one bulk card (for files) + {} directory entries",
-        directoryCount
-    );
+    Log::info("Bulk upload: queued one bulk card (for files) + {} directory entries", directoryCount);
 
     if (!request.entries.empty())
     {
         bulkResumeStash_.insert_or_assign(
-            bulkCardId,
-            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = request}
+            bulkCardId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = request}
         );
     }
 
@@ -1713,8 +1683,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     // recursive scan-then-delete flow so descendants are removed; those
     // become standard single-Delete cards via addDeleteOperation.
 
-    auto& targetQueue =
-        (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
     std::vector<SharedData::DirectoryEntry> fileEntries;
@@ -1814,8 +1783,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     if (!request.entries.empty())
     {
         bulkResumeStash_.insert_or_assign(
-            bulkOperationId,
-            BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDelete, .request = request}
+            bulkOperationId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDelete, .request = request}
         );
     }
 
@@ -1885,8 +1853,7 @@ void OperationQueue::addSyncScanOperation(
     // Scan completion callbacks hand the ScanNode trees into the session on its
     // own strand, then emit onSyncScanPhaseDone to the frontend.
     syncScanCallbacks_[remoteScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}]
-        (SharedData::Sync::ScanNode tree)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](SharedData::Sync::ScanNode tree)
     {
         auto self = weak.lock();
         auto sess = weakSession.lock();
@@ -1903,8 +1870,7 @@ void OperationQueue::addSyncScanOperation(
     };
 
     syncScanCallbacks_[localScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}]
-        (SharedData::Sync::ScanNode tree)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](SharedData::Sync::ScanNode tree)
     {
         auto self = weak.lock();
         auto sess = weakSession.lock();
@@ -2029,9 +1995,7 @@ void OperationQueue::registerRpc()
 
     on(rpcName("moveOperation"))
         .perform(
-            [weak = weak_from_this()](
-                RpcHelper::RpcOnce&& reply, Ids::OperationId operationId, std::int32_t newIndex
-            )
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, Ids::OperationId operationId, std::int32_t newIndex)
             {
                 auto self = weak.lock();
                 if (!self)
