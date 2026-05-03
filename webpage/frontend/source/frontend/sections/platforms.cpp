@@ -71,12 +71,12 @@ namespace NuiSftpPage::Sections
             using Nui::Elements::div;
             using Nui::Elements::span;
 
-            // "Flatpak today · Arch & NixOS native soon" — middle dot U+00B7
-            std::string const versionLine = "Flatpak today " + Utf8::cp(0x00B7) + " Arch & NixOS native soon";
+            // "AUR today · Flathub & NixOS soon" — middle dot U+00B7
+            std::string const versionLine = "AUR today " + Utf8::cp(0x00B7) + " Flathub & NixOS soon";
 
             std::string const description =
-                "Distro-agnostic Flatpak runs everywhere from a single bundle. "
-                "Native packaging for Arch and NixOS is on the way.";
+                "Native AUR package and a Flatpak bundle from Releases today. "
+                "Flathub and nixpkgs are on the way.";
 
             return div{class_ = "platform-card glass shine"}(
                 div{
@@ -92,8 +92,9 @@ namespace NuiSftpPage::Sections
                         }(versionLine)
                     )),
                 p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
-                pkgRow("flatpak install org.nuicpp.nui-sftp", "flatpak"),
-                pkgRow("nui-sftp · AUR", "soon", true),
+                pkgRow("yay -S nui-sftp", "archlinux user repository"),
+                pkgRow("flatpak install ./nui-sftp-*.flatpak", "from releases"),
+                pkgRow("flathub: org.nuicpp.nui_sftp", "soon", true),
                 pkgRow("nixpkgs.nui-sftp", "soon", true),
                 a{
                     class_ = "btn primary shine",
@@ -101,7 +102,7 @@ namespace NuiSftpPage::Sections
                     target = "_blank",
                     rel = "noreferrer",
                     style = "margin-top: 8px",
-                }(span{}("Install via Flatpak"))
+                }(span{}("Download from Releases"))
             );
         }
     }
@@ -117,7 +118,7 @@ namespace NuiSftpPage::Sections
             div{
                 class_ = "section-head"
             }(div{class_ = "section-eyebrow"}("// download"),
-                h2{class_ = "section-title"}("Native on Windows. Flatpak on Linux. Arch & NixOS coming native."),
+                h2{class_ = "section-title"}("Native on Windows. AUR on Arch. Flathub & NixOS coming."),
                 p{class_ = "section-sub"}()),
             div{class_ = "platforms"}(windowsCard(), linuxCard())
         ));

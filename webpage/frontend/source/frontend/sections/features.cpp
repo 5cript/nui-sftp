@@ -51,7 +51,6 @@ namespace NuiSftpPage::Sections
                 auto const rq = Utf8::cp(0x201D); // right double quote
 
                 std::string const tagBashEtc = fmt::format("bash {0} zsh {0} fish {0} pwsh", dot);
-                std::string const tagArchSoon = fmt::format("Arch {} NixOS soon", dot);
 
                 return std::vector<Feature>{
                     {
@@ -120,9 +119,9 @@ namespace NuiSftpPage::Sections
                         "cross_platform",
                         "Native on Windows. Flatpak on Linux. Native on Arch. NixOS & AppImage & Ubuntu 26 coming.",
                         "First-class Windows builds, distro-agnostic Flatpak today, and native "
-                        "AUR / nixpkgs packages on the way. Same UI, same configuration, same "
+                        "nixpkgs packages on the way. Same UI, same configuration, same "
                         "keybinds.",
-                        {"Windows 10/11", "Flatpak", "AppImage", tagArchSoon},
+                        {"Windows 10/11", "AUR", "Flatpak", "AppImage Soon"},
                     },
                 };
             }();
