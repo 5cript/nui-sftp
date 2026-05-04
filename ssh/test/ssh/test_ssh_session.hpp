@@ -19,10 +19,10 @@ namespace SecureShell::Test
     {
         void TearDown() override
         {
-            if (std::filesystem::exists(programDirectory / "temp" / "log.txt"))
+            if (std::filesystem::exists(isolateDirectory_.path() / "log.txt"))
             {
                 std::filesystem::rename(
-                    programDirectory / "temp" / "log.txt",
+                    isolateDirectory_.path() / "log.txt",
                     programDirectory / "temp" /
                         ("log_"s + ::testing::UnitTest::GetInstance()->current_test_info()->test_case_name() + "_"s +
                             ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".txt")
