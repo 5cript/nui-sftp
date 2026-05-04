@@ -148,24 +148,32 @@ namespace SecureShell::Test
         std::string channel2Output{};
 
         std::promise<void> awaiter1{};
+        bool awaiter1Set = false;
         channelStartReading(
             channel1,
-            [&channel1Output, &awaiter1](std::string const& output)
+            [&channel1Output, &awaiter1, &awaiter1Set](std::string const& output)
             {
                 channel1Output += output;
-                if (channel1Output.find("bashrc") != std::string::npos)
+                if (!awaiter1Set && channel1Output.find("bashrc") != std::string::npos)
+                {
+                    awaiter1Set = true;
                     awaiter1.set_value();
+                }
             }
         );
 
         std::promise<void> awaiter2{};
+        bool awaiter2Set = false;
         channelStartReading(
             channel2,
-            [&channel2Output, &awaiter2](std::string const& output)
+            [&channel2Output, &awaiter2, &awaiter2Set](std::string const& output)
             {
                 channel2Output += output;
-                if (channel2Output.find("bashrc") != std::string::npos)
+                if (!awaiter2Set && channel2Output.find("bashrc") != std::string::npos)
+                {
+                    awaiter2Set = true;
                     awaiter2.set_value();
+                }
             }
         );
 
@@ -375,13 +383,17 @@ namespace SecureShell::Test
         channel1->close();
 
         std::promise<void> awaiter2{};
+        bool awaiter2Set = false;
         channelStartReading(
             channel2,
-            [&channel2Output, &awaiter2](std::string const& output)
+            [&channel2Output, &awaiter2, &awaiter2Set](std::string const& output)
             {
                 channel2Output += output;
-                if (channel2Output.find("bashrc") != std::string::npos)
+                if (!awaiter2Set && channel2Output.find("bashrc") != std::string::npos)
+                {
+                    awaiter2Set = true;
                     awaiter2.set_value();
+                }
             }
         );
 
