@@ -56,7 +56,7 @@ namespace SecureShell::Test
       protected:
         void SetUp() override
         {
-            std::ofstream privateKeyFile{programDirectory / "temp" / "key.private", std::ios_base::binary};
+            std::ofstream privateKeyFile{isolateDirectory_.path() / "key.private", std::ios_base::binary};
             privateKeyFile.write(privateKey, std::strlen(privateKey));
         }
 
@@ -172,7 +172,7 @@ namespace SecureShell::Test
             );
         }
 
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", false};
+        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
         boost::asio::thread_pool pool_{1};
         nlohmann::json defaultPackageJson_ = nlohmann::json({
             {"name", "test"},
