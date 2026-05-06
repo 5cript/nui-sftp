@@ -38,12 +38,24 @@ sudo pacman -R nui-sftp
 
 ### All Other Distributions
 
+#### AppImage
+
+An AppImage is provided for most distributions. Download it from the releases section and run it directly:
+```bash
+chmod +x nui-sftp-*.AppImage
+./nui-sftp-*.AppImage
+```
+
+#### Flatpak
+
 For other distributions a flatpak is provided. Currently not in the official flathub, but that will come eventually.
 Download the flatpak from a release and install it like so:
 ```bash
 # Make sure to pass the correct file name!
 flatpak install nui-sftp-flatpak-x86_64_0.1.1.flatpak
 ```
+
+> **Note:** Local shells do not work inside the flatpak due to sandbox restrictions. If you need the local shell feature, use the AppImage or the AUR package instead.
 
 ## Apple Computers
 
