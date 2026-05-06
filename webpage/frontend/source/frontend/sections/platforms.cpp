@@ -75,7 +75,7 @@ namespace NuiSftpPage::Sections
             std::string const versionLine = "AUR today " + Utf8::cp(0x00B7) + " Flathub & NixOS soon";
 
             std::string const description =
-                "Native AUR package and a Flatpak bundle from Releases today. "
+                "Native AUR package, an AppImage, and a Flatpak bundle from Releases today. "
                 "Flathub and nixpkgs are on the way.";
 
             return div{class_ = "platform-card glass shine"}(
@@ -93,6 +93,7 @@ namespace NuiSftpPage::Sections
                     )),
                 p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
                 pkgRow("yay -S nui-sftp", "archlinux user repository"),
+                pkgRow("./nui-sftp-*.AppImage", "appimage"),
                 pkgRow("flatpak install ./nui-sftp-*.flatpak", "from releases"),
                 pkgRow("flathub: org.nuicpp.nui_sftp", "soon", true),
                 pkgRow("nixpkgs.nui-sftp", "soon", true),
