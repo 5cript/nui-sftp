@@ -927,6 +927,7 @@ bool Settings::isActive(SectionSelectorOptions const& options)
 
 void Settings::addNewSession()
 {
+    impl_->events->onAddNewSessionRequested.modify();
     impl_->newSessionDialog.open({
         .onConfirm = [this](auto const& result)
         {

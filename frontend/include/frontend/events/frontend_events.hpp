@@ -14,6 +14,11 @@ struct FrontendEvents : public AppWideEvents
     {}
 
     Nui::Observed<std::string> onNewSession{};
+    /// Fires (via `.modify()`) when the user clicks the "Add New" entry in
+    /// the Settings side panel. Carries no payload — the new-session dialog
+    /// owns the actual creation flow; this is purely an intent signal for
+    /// observers like the onboarding orchestrator.
+    Nui::Observed<bool> onAddNewSessionRequested{false};
     Nui::Observed<bool> onLayoutsChanged{false};
     Nui::Observed<bool> settingsOpen{false};
     /// Latches to true the first time the Settings panel finishes its

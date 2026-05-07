@@ -15,7 +15,7 @@ namespace Frontend
         FrontendEvents* events;
         ScriptNuiComponents::SpotlightOverlay overlay;
         Nui::ListenRemover<decltype(FrontendEvents::settingsOpen)> settingsOpenListener{};
-        Nui::ListenRemover<decltype(FrontendEvents::onNewSession)> newSessionListener{};
+        Nui::ListenRemover<decltype(FrontendEvents::onAddNewSessionRequested)> addNewSessionListener{};
         Nui::ListenRemover<decltype(FrontendEvents::settingsInitialLoadComplete)> settingsLoadedListener{};
         OnboardingStep step{OnboardingStep::Inactive};
         bool persisted{false};
@@ -127,13 +127,15 @@ namespace Frontend
         {
             step = OnboardingStep::AddNewServer;
             settingsLoadedListener = {};
-            // Clicking the highlighted "Add New" button writes a session
-            // name into onNewSession; advance when it changes.
-            newSessionListener = Nui::smartListen(
-                events->onNewSession,
-                [this](std::string const& sessionName)
+            // Clicking the highlighted "Add New" entry pulses
+            // onAddNewSessionRequested; finish on that signal regardless of
+            // whether the user goes on to confirm or cancel the dialog —
+            // they've already learned where the entry point is.
+            addNewSessionListener = Nui::smartListen(
+                events->onAddNewSessionRequested,
+                [this](bool)
                 {
-                    if (!sessionName.empty() && step == OnboardingStep::AddNewServer)
+                    if (step == OnboardingStep::AddNewServer)
                         finish();
                 }
             );
@@ -166,7 +168,7 @@ namespace Frontend
         {
             step = terminal;
             settingsOpenListener = {};
-            newSessionListener = {};
+            addNewSessionListener = {};
             settingsLoadedListener = {};
             overlay.hide();
         }
