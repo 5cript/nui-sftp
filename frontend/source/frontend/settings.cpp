@@ -275,6 +275,7 @@ Settings::Settings(
                                         [this](Nui::val)
                                         {
                                             impl_->initialLoadDone = true;
+                                            impl_->events->settingsInitialLoadComplete = true;
                                             Nui::globalEventContext.executeActiveEventsImmediately();
                                         },
                                         std::placeholders::_1

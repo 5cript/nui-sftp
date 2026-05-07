@@ -16,8 +16,12 @@ namespace Frontend
     {
         Inactive = 0,
         OpenSettings = 1,
-        AddNewServer = 2,
-        Done = 3,
+        // User clicked the Settings button; the spotlight is hidden while we
+        // wait for the panel's initial 3-pass reveal to finish so step 2
+        // doesn't overlap with the loader.
+        WaitingForSettingsLoad = 2,
+        AddNewServer = 3,
+        Done = 4,
     };
 
     /** @brief DOM ids the onboarding orchestrator targets. The application
