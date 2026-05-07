@@ -125,8 +125,7 @@ struct Settings::Implementation
             .languageCode = generalSettings.localization.language.value(),
             .logDirectory = generalSettings.logOptions.logDirectory.value(),
             .disableFileLogging = generalSettings.logOptions.disableFileLogging.value(),
-            .temporaryDownloadsDirectory =
-                generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value(),
+            .temporaryDownloadsDirectory = generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value(),
             .concurrency = sftpOptions.concurrency.value(),
         };
         requiresRestart = false;
@@ -136,13 +135,12 @@ struct Settings::Implementation
     {
         if (applyingToUi)
             return;
-        requiresRestart =
-            generalSettings.localization.language.value() != restartBaseline.languageCode
-            || generalSettings.logOptions.logDirectory.value() != restartBaseline.logDirectory
-            || generalSettings.logOptions.disableFileLogging.value() != restartBaseline.disableFileLogging
-            || generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value()
-                != restartBaseline.temporaryDownloadsDirectory
-            || sftpOptions.concurrency.value() != restartBaseline.concurrency;
+        requiresRestart = generalSettings.localization.language.value() != restartBaseline.languageCode ||
+            generalSettings.logOptions.logDirectory.value() != restartBaseline.logDirectory ||
+            generalSettings.logOptions.disableFileLogging.value() != restartBaseline.disableFileLogging ||
+            generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value() !=
+                restartBaseline.temporaryDownloadsDirectory ||
+            sftpOptions.concurrency.value() != restartBaseline.concurrency;
     }
 
     Implementation(
@@ -264,13 +262,16 @@ Settings::Settings(
                     // (void0ArgsFunctor called with 1 argument).
                     auto raf = Nui::val::global("requestAnimationFrame");
                     raf(Nui::bind(
-                        [raf, this](Nui::val) {
+                        [raf, this](Nui::val)
+                        {
                             raf(Nui::bind(
-                                [raf, this](Nui::val) {
+                                [raf, this](Nui::val)
+                                {
                                     impl_->wasInitiallyLoaded = true;
                                     Nui::globalEventContext.executeActiveEventsImmediately();
                                     raf(Nui::bind(
-                                        [this](Nui::val) {
+                                        [this](Nui::val)
+                                        {
                                             impl_->initialLoadDone = true;
                                             Nui::globalEventContext.executeActiveEventsImmediately();
                                         },
@@ -309,7 +310,8 @@ Settings::Settings(
             auto attempts = std::make_shared<int>(0);
             static constexpr int maxAttempts = 30;
             auto tryLocate = std::make_shared<std::function<void()>>();
-            *tryLocate = [this, idCopy, attempts, tryLocate]() {
+            *tryLocate = [this, idCopy, attempts, tryLocate]()
+            {
                 auto document = Nui::val::global("document");
                 auto element = document.call<Nui::val>("getElementById", idCopy);
                 if (element.isNull() || element.isUndefined())
@@ -317,24 +319,24 @@ Settings::Settings(
                     if (++(*attempts) >= maxAttempts)
                     {
                         Log::warn(
-                            "requestedSettingScrollId: no element with id '{}' after {} frames",
-                            idCopy, maxAttempts
+                            "requestedSettingScrollId: no element with id '{}' after {} frames", idCopy, maxAttempts
                         );
                         return;
                     }
-                    Nui::val::global("requestAnimationFrame")(
-                        Nui::bind([tryLocate](Nui::val) { (*tryLocate)(); }, std::placeholders::_1)
-                    );
+                    Nui::val::global("requestAnimationFrame")(Nui::bind(
+                        [tryLocate](Nui::val)
+                        {
+                            (*tryLocate)();
+                        },
+                        std::placeholders::_1
+                    ));
                     return;
                 }
 
                 auto section = element.call<Nui::val>("closest", std::string{"[data-settings-section]"});
                 if (section.isNull() || section.isUndefined())
                 {
-                    Log::warn(
-                        "requestedSettingScrollId: element '{}' has no [data-settings-section] ancestor",
-                        idCopy
-                    );
+                    Log::warn("requestedSettingScrollId: element '{}' has no [data-settings-section] ancestor", idCopy);
                     return;
                 }
 
@@ -354,18 +356,24 @@ Settings::Settings(
 
                 // Expand any collapsed settings-group ancestors so the target
                 // isn't hidden behind a max-height:0 group.
-                Nui::val::global("addressableSettings")
-                    .call<void>("expandCollapsedGroupsContaining", idCopy);
+                Nui::val::global("addressableSettings").call<void>("expandCollapsedGroupsContaining", idCopy);
 
                 // rAF twice so the section display-swap + any group expansion
                 // have painted before scroll measurement.
                 auto raf = Nui::val::global("requestAnimationFrame");
-                raf(Nui::bind([raf, idCopy](Nui::val) {
-                    raf(Nui::bind([idCopy](Nui::val) {
-                        Nui::val::global("addressableSettings")
-                            .call<void>("scrollToAndHighlight", idCopy);
-                    }, std::placeholders::_1));
-                }, std::placeholders::_1));
+                raf(Nui::bind(
+                    [raf, idCopy](Nui::val)
+                    {
+                        raf(Nui::bind(
+                            [idCopy](Nui::val)
+                            {
+                                Nui::val::global("addressableSettings").call<void>("scrollToAndHighlight", idCopy);
+                            },
+                            std::placeholders::_1
+                        ));
+                    },
+                    std::placeholders::_1
+                ));
             };
             (*tryLocate)();
         }
@@ -451,7 +459,10 @@ void Settings::applySettingsToUi()
                 return;
 
             impl_->applyingToUi = true;
-            Nui::ScopeExit clearApplyingFlag{[this]() noexcept { impl_->applyingToUi = false; }};
+            Nui::ScopeExit clearApplyingFlag{[this]() noexcept
+                {
+                    impl_->applyingToUi = false;
+                }};
 
             impl_->sessionSelectors.value().clear();
             for (auto const& [sessionId, session] : impl_->stateHolder->stateCache().sessions)
