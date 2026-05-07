@@ -62,7 +62,7 @@ struct Settings::Implementation
 
         struct SessionCollapsibles
         {
-            Nui::Observed<bool> overarchingSettings{true};
+            Nui::Observed<bool> overarchingSettings{false};
             Nui::Observed<bool> sshOptions{true};
             Nui::Observed<bool> sftpOptions{true};
             Nui::Observed<bool> terminalOptions{true};
