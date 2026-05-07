@@ -40,7 +40,7 @@ sudo pacman -R nui-sftp
 
 #### AppImage
 
-An AppImage is provided for most distributions. Download it from the releases section and run it directly:
+An AppImage is provided for most distributions. It requires at least glibc 2.39 (the version shipped with Ubuntu 24.04). Download it from the releases section and run it directly:
 ```bash
 chmod +x nui-sftp-*.AppImage
 ./nui-sftp-*.AppImage
