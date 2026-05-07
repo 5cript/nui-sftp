@@ -654,6 +654,10 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                     hub->callRemote(responseId, j);
 #endif
                 }
+                else
+                {
+                    hub->callRemote(responseId, nlohmann::json{{"error", "Process is not a PTY"}});
+                }
             }
             catch (std::exception const& e)
             {
@@ -713,6 +717,8 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 // Does nothing ?
                 process->second->signal(SIGWINCH);
 #endif
+
+                hub->callRemote(responseId, nlohmann::json{{"success", true}});
             }
             catch (std::exception const& e)
             {
