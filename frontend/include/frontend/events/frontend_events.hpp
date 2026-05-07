@@ -16,6 +16,12 @@ struct FrontendEvents : public AppWideEvents
     Nui::Observed<std::string> onNewSession{};
     Nui::Observed<bool> onLayoutsChanged{false};
     Nui::Observed<bool> settingsOpen{false};
+    /// Latches to true the first time the Settings panel finishes its
+    /// initial 3-pass reveal (loader -> heavy subtree mount -> loader hidden).
+    /// Stays true for the rest of the session; consumers that need to wait
+    /// for the panel to be visually settled (e.g. onboarding step 2) can
+    /// gate on this rather than polling the DOM.
+    Nui::Observed<bool> settingsInitialLoadComplete{false};
     Nui::Observed<bool> licensesOpen{false};
     /// Opens settings and scrolls to the rendered element whose DOM id equals
     /// this string. Settings walks up from the element to find its

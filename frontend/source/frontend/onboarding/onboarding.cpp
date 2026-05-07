@@ -16,6 +16,7 @@ namespace Frontend
         ScriptNuiComponents::SpotlightOverlay overlay;
         Nui::ListenRemover<decltype(FrontendEvents::settingsOpen)> settingsOpenListener{};
         Nui::ListenRemover<decltype(FrontendEvents::onNewSession)> newSessionListener{};
+        Nui::ListenRemover<decltype(FrontendEvents::settingsInitialLoadComplete)> settingsLoadedListener{};
         OnboardingStep step{OnboardingStep::Inactive};
         bool persisted{false};
 
@@ -89,15 +90,43 @@ namespace Frontend
                 [this](bool open)
                 {
                     if (open && step == OnboardingStep::OpenSettings)
-                        enterStep2();
+                        beginAwaitingSettingsLoad();
                 }
             );
             overlay.show(buildStep1Options());
         }
 
+        void beginAwaitingSettingsLoad()
+        {
+            step = OnboardingStep::WaitingForSettingsLoad;
+            // Hide the spotlight while the settings panel runs its 3-pass
+            // reveal (loader -> heavy subtree -> loader hidden). Showing
+            // step 2 over the loader is visually confusing because the
+            // target button is not yet visible.
+            overlay.hide();
+
+            // If a previous open already latched the load-complete signal
+            // (subsequent opens are instant), advance immediately.
+            if (events->settingsInitialLoadComplete.value())
+            {
+                enterStep2();
+                return;
+            }
+
+            settingsLoadedListener = Nui::smartListen(
+                events->settingsInitialLoadComplete,
+                [this](bool loaded)
+                {
+                    if (loaded && step == OnboardingStep::WaitingForSettingsLoad)
+                        enterStep2();
+                }
+            );
+        }
+
         void enterStep2()
         {
             step = OnboardingStep::AddNewServer;
+            settingsLoadedListener = {};
             // Clicking the highlighted "Add New" button writes a session
             // name into onNewSession; advance when it changes.
             newSessionListener = Nui::smartListen(
@@ -117,8 +146,8 @@ namespace Frontend
             // "Next" instead of clicking the highlighted button.
             if (!events->settingsOpen.value())
                 events->settingsOpen = true;
-            // The settings listener will pick that up and call enterStep2;
-            // no need to call it directly here.
+            // The settings listener will pick that up and call
+            // beginAwaitingSettingsLoad; no need to invoke it directly.
         }
 
         void finish()
@@ -138,6 +167,7 @@ namespace Frontend
             step = terminal;
             settingsOpenListener = {};
             newSessionListener = {};
+            settingsLoadedListener = {};
             overlay.hide();
         }
 
