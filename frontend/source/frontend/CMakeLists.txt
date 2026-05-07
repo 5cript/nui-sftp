@@ -141,6 +141,7 @@ target_sources(
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
         components/progress_bar.cpp
+        onboarding/onboarding.cpp
         file_explorer/side_model.cpp
         file_explorer/remote_side_model.cpp
         file_explorer/local_side_model.cpp
@@ -289,6 +290,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/popup_menu.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/dropdown_menu.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/resizeable_table.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/spotlight_overlay.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/select.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/switch.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"

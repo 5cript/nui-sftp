@@ -12,6 +12,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
+#include <frontend/onboarding/onboarding.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -34,6 +35,7 @@ struct MainPage::Implementation
     SessionArea sessionArea;
     Settings settings;
     Licenses licenses;
+    Frontend::Onboarding onboarding;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
 
@@ -54,6 +56,7 @@ struct MainPage::Implementation
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog}
         , licenses{events}
+        , onboarding{stateHolder, events}
         , darkMode{true}
         , setupWait{}
     {
@@ -83,16 +86,26 @@ void MainPage::onSetupComplete()
             auto showPersistenceWarning = [this, response]()
             {
                 if (!response.hasOwnProperty("warning"))
+                {
+                    impl_->onboarding.maybeStart();
                     return;
+                }
                 const auto warning = response["warning"].as<std::string>();
                 if (warning.empty())
+                {
+                    impl_->onboarding.maybeStart();
                     return;
+                }
                 impl_->confirmDialog.open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                     .headerText = language->get("persistence", "warningLoadingState"),
                     .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "persistenceLoadWarning",
+                    .onClose = [this](auto)
+                    {
+                        impl_->onboarding.maybeStart();
+                    },
                 });
             };
 
@@ -103,7 +116,10 @@ void MainPage::onSetupComplete()
                     .headerText = language->get("rootWarning", "header"),
                     .text = language->get("rootWarning", "text"),
                     .buttons = ConfirmDialog::Button::Ok,
-                    .onClose = [showPersistenceWarning](auto) { showPersistenceWarning(); },
+                    .onClose = [showPersistenceWarning](auto)
+                    {
+                        showPersistenceWarning();
+                    },
                 });
                 return;
             }
