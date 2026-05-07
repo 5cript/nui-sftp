@@ -685,3 +685,11 @@ directConnectDialog:
   sshKeyPrivateLabel: "SSH Private Key:"
   hostValidationMessage: "Host must not be empty."
   portValidationMessage: "Port must be a number between 1 and 65535."
+onboarding:
+  step1Title: "Open Settings"
+  step1Body: "Click the gear icon to open Settings, where you can configure your first SFTP server."
+  step2Title: "Add a new server"
+  step2Body: "Use the Add New entry to create your first server connection. You can save host, port, user and key files for one-click reconnects."
+  next: "Next"
+  finish: "Finish"
+  skip: "Skip"

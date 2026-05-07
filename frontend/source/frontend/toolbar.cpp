@@ -13,6 +13,8 @@
 #include <script-nui-components/select.hpp>
 #include <script-nui-components/button.hpp>
 
+#include <frontend/onboarding/onboarding.hpp>
+
 #include <frontend/svgs/add.hpp>
 #include <frontend/svgs/decline.hpp>
 #include <frontend/svgs/settings.hpp>
@@ -111,8 +113,7 @@ Toolbar::Toolbar(
     DirectConnectDialog* directConnectDialog,
     ThemeController& themeController
 )
-    : impl_(std::make_unique<
-            Implementation>(stateHolder, events, confirmDialog, directConnectDialog, themeController))
+    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog, directConnectDialog, themeController))
 {
     Log::info("Toolbar::Toolbar");
     impl_->updateSessionsList(
@@ -331,6 +332,7 @@ Nui::ElementRenderer Toolbar::operator()()
         Snc::button({
             .icon = GeneratedSvgs::settings(),
             .attributes = {
+                id = std::string{Frontend::OnboardingTargets::toolbarSettingsButtonId},
                 onClick = [this]() {
                     impl_->events->settingsOpen = true;
                 },

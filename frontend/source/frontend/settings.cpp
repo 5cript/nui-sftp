@@ -23,6 +23,8 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/subgroup.hpp>
 #include <frontend/settings/setting_group.hpp>
+#include <frontend/settings/addressable_setting.hpp>
+#include <frontend/onboarding/onboarding.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 
@@ -935,7 +937,7 @@ void Settings::addNewSession()
                 Persistence::SessionOptions::create(result.iconName, engineType);
 
             impl_->stateHolder->save(
-                [this, result](std::optional<std::string> const& error)
+                [this, result, engineType](std::optional<std::string> const& error)
                 {
                     if (error)
                     {
@@ -959,6 +961,19 @@ void Settings::addNewSession()
                     );
                     impl_->events->onSettingsChanged.modify();
                     impl_->sessionSelectors.modifyNow();
+
+                    // Activate the freshly-created session in the editor so
+                    // the user lands directly in its config rather than
+                    // having to click it in the side panel.
+                    impl_->activeSection = Section::Session;
+                    impl_->activeSession = result.sessionName;
+                    loadSessionFromState(result.sessionName);
+
+                    // For SSH sessions, draw the eye to the Host/IP field —
+                    // that's the first thing the user must fill in to make
+                    // the new session functional.
+                    if (engineType == Persistence::TerminalEngineType::ssh)
+                        impl_->events->requestOpenSettingsAtId("session-host");
                 }
             );
         },
@@ -1017,6 +1032,11 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                     return fmt::format("settings-page-section-selector {}", isActive(options) ? "active" : "");
                 }
             ),
+            // The onboarding overlay targets the "Add New" selector by id;
+            // other sections don't carry an id (kept off the wider DOM).
+            id = options.thisSection == Section::Add
+                ? std::string{Frontend::OnboardingTargets::settingsAddNewButtonId}
+                : std::string{},
             onClick = [this, options]() {
                 if (options.thisSection == Section::Add) {
                     addNewSession();
@@ -1483,13 +1503,10 @@ Nui::ElementRenderer Settings::currentSession()
             impl_->currentSessionOptions.icon(
                 language->getObserved("settings", "sessionOptions", "icon")
             ),
-            impl_->currentSessionOptions.orderBy(
-                language->getObserved("settings", "sessionOptions", "orderBy")
-            ),
-            impl_->currentSessionOptions.isStartupSession(
-                language->getObserved("settings", "sessionOptions", "isStartupSession")
-            ),
-            impl_->currentSessionOptions.layout(),
+            // SSH/local server options sit directly under the icon picker so
+            // the connection-relevant fields (host, port, etc.) are visible
+            // without scrolling. Sort/startup/layout controls live further
+            // down — they're rarely-touched session metadata.
             div{
                 class_ = "settings-visibility-box",
                 style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
@@ -1505,7 +1522,10 @@ Nui::ElementRenderer Settings::currentSession()
                         onChange();
                     }},
                     fragment(
-                        impl_->currentSessionOptions.sshSessionOptions.host(language->getObserved("settings", "sessionOptions", "host")),
+                        addressableSetting(
+                            "session-host",
+                            impl_->currentSessionOptions.sshSessionOptions.host(language->getObserved("settings", "sessionOptions", "host"))
+                        ),
                         impl_->currentSessionOptions.sshSessionOptions.port(language->getObserved("settings", "sessionOptions", "port")),
                         impl_->currentSessionOptions.sshSessionOptions.user(language->getObserved("settings", "sessionOptions", "user")),
                         impl_->currentSessionOptions.sshSessionOptions.sshKeyPrivate(language->getObserved("settings", "sessionOptions", "sshKeyPrivate")),
@@ -1541,7 +1561,14 @@ Nui::ElementRenderer Settings::currentSession()
                             language->getObserved("settings", "sessionOptions", "cleanEnvironment"))
                     )
                 )
-            )
+            ),
+            impl_->currentSessionOptions.orderBy(
+                language->getObserved("settings", "sessionOptions", "orderBy")
+            ),
+            impl_->currentSessionOptions.isStartupSession(
+                language->getObserved("settings", "sessionOptions", "isStartupSession")
+            ),
+            impl_->currentSessionOptions.layout()
         );
 
         return fragment(

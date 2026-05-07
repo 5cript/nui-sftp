@@ -23,6 +23,9 @@ namespace Persistence
         int fileGridPageSize{500};
         std::set<std::string> neverShowAgainDialogs{};
         std::vector<std::string> localFavorites{};
+        // Whether the first-launch onboarding flow has been completed
+        // (finished or dismissed). Set once; never auto-reset.
+        bool onboardingCompleted{false};
         std::map<std::string /*extension*/, std::string /*assetPath*/> fileGridExtensionIcons{
             {".cpp", "icons/Development/noun-c-4921443.png"},
             {".hpp", "icons/Development/noun-c-4921443.png"},
@@ -57,6 +60,7 @@ namespace Persistence
             fileGridPageSize,
             neverShowAgainDialogs,
             localFavorites,
+            onboardingCompleted,
             fileGridExtensionIcons)
     )
 }
