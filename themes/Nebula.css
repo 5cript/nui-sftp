@@ -1,0 +1,278 @@
+:root[data-custom-theme="Nebula"] {
+    --bg-0: #08080c;
+    --bg-1: #0e0e14;
+    --bg-2: #14141c;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.13);
+    --ink: #ecebf2;
+    --ink-dim: #a6a3b8;
+    --ink-muted: #6e6b80;
+
+    --accent-a: oklch(0.70 0.18 295);
+    --accent-b: oklch(0.78 0.13 195);
+    --accent-grad: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+
+    --glass-bg: rgba(22, 22, 30, 0.55);
+    --glass-blur: 22px;
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-highlight: rgba(255, 255, 255, 0.06);
+
+    --theme-color: oklch(0.78 0.13 195);
+
+    --background-color: #0e0e14;
+    --background-color-fields: #14141c;
+    --brighter-background: #1a1a24;
+    --darker-background: #08080c;
+
+    --color: #ecebf2;
+    --color-secondary: #a6a3b8;
+    --color-fields: #ecebf2;
+    --subdued-text: #6e6b80;
+
+    --border-color-fields: rgba(255, 255, 255, 0.13);
+    --foreground-border-color: rgba(255, 255, 255, 0.07);
+    --resize-handle-color: rgba(255, 255, 255, 0.13);
+
+    --brightness-mixin: black;
+    --brightness-mixin-percent: 50%;
+    --anti-brightness-mixin: white;
+    --anti-brightness-mixin-percent: 80%;
+
+    --opq-card: #0b0b12;
+    --opq-muted: var(--ink-muted);
+    --opq-border-faint: rgba(255, 255, 255, 0.06);
+    --opq-border: rgba(255, 255, 255, 0.18);
+    --opq-zebra-alternation: rgba(255, 255, 255, 0.025);
+    --opq-accent: oklch(0.70 0.18 295);
+
+    --app-scrollbar-thumb: rgba(255, 255, 255, 0.10);
+    --app-scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+    --app-scrollbar-thumb-active: color-mix(in oklch, var(--accent-a) 55%, transparent);
+
+    --sync-progress-color: color-mix(in oklch, var(--accent-b) 35%, transparent);
+    --sync-done-color: color-mix(in oklch, var(--accent-b) 32%, transparent);
+    --sync-error-color: rgba(231, 76, 60, 0.40);
+
+    --script-nui-components-tabs-primary-color: var(--accent-b);
+    --script-nui-components-pagination-primary-color: var(--accent-b);
+    --script-nui-popup-menu-primary-color: var(--accent-b);
+    --settings-group-header-title-color: var(--accent-b);
+
+    --nui-file-grid-background-color: transparent;
+    --nui-file-grid-table-header-background: rgba(20, 20, 28, 0.55);
+    --nui-file-grid-table-cell-background: transparent;
+    --nui-file-grid-border-color: rgba(255, 255, 255, 0.07);
+    --nui-file-grid-item-highlight: color-mix(in oklch, var(--accent-a) 30%, transparent);
+    --nui-file-grid-symbolic-link-color: color-mix(in oklch, var(--accent-b) 70%, white 20%);
+}
+
+:root[data-custom-theme="Nebula"] body {
+    background-color: #05060a !important;
+    background-image:
+        radial-gradient(1100px 700px at 50% 30%, rgba(30, 45, 80, 0.25), transparent 65%),
+        radial-gradient(900px 700px at 80% 100%, rgba(15, 22, 45, 0.40), transparent 70%),
+        radial-gradient(700px 600px at 10% 0%, rgba(15, 22, 45, 0.30), transparent 70%) !important;
+    background-attachment: fixed !important;
+}
+
+:root[data-custom-theme="Nebula"] .toolbar {
+    background:
+        linear-gradient(180deg, rgba(20, 20, 28, 0.85), rgba(14, 14, 20, 0.85)) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset !important;
+}
+
+:root[data-custom-theme="Nebula"] .toolbar-brand-mark {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 8px !important;
+    background: #0a0a14 !important;
+    border: 1px solid rgba(255, 255, 255, 0.13) !important;
+    color: #cfe0ff !important;
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+        0 8px 18px -6px rgba(140, 180, 255, 0.40) !important;
+    overflow: hidden !important;
+}
+
+:root[data-custom-theme="Nebula"] .toolbar-brand-mark svg {
+    width: 78% !important;
+    height: 78% !important;
+    filter: drop-shadow(0 0 4px rgba(180, 210, 255, 0.50)) !important;
+}
+
+:root[data-custom-theme="Nebula"] .sidebar,
+:root[data-custom-theme="Nebula"] .icon-panel-bar {
+    background:
+        linear-gradient(180deg, rgba(14, 14, 20, 0.92), rgba(8, 8, 12, 0.92)) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+:root[data-custom-theme="Nebula"] dialog,
+:root[data-custom-theme="Nebula"] .script-nui-dialog {
+    background: rgba(22, 22, 30, 0.78) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 14px !important;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.06) inset,
+        0 30px 60px -30px rgba(0, 0, 0, 0.6),
+        0 8px 24px -10px rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: blur(22px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(140%) !important;
+}
+
+:root[data-custom-theme="Nebula"] dialog::backdrop {
+    background: rgba(5, 6, 10, 0.55) !important;
+    backdrop-filter: blur(12px) saturate(120%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+}
+
+:root[data-custom-theme="Nebula"] .script-nui-button.style-variant-primary,
+:root[data-custom-theme="Nebula"] .script-nui-button[data-style-variant="primary"] {
+    background: linear-gradient(135deg, var(--accent-a), var(--accent-b)) !important;
+    color: #0a0a10 !important;
+    border: 1px solid transparent !important;
+    box-shadow:
+        0 10px 30px -10px color-mix(in oklch, var(--accent-a) 70%, transparent),
+        0 0 0 1px rgba(255, 255, 255, 0.12) inset !important;
+}
+
+:root[data-custom-theme="Nebula"] .script-nui-button:not(.style-variant-primary):not([data-style-variant="primary"]):not(.style-variant-danger):not([data-style-variant="danger"]) {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.13) !important;
+    color: var(--color) !important;
+}
+
+:root[data-custom-theme="Nebula"] .script-nui-button:not(.style-variant-primary):not([data-style-variant="primary"]):not(.style-variant-danger):not([data-style-variant="danger"]):hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-custom-theme="Nebula"] .nui-file-grid-background {
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] {
+    --accent-a: oklch(0.55 0.18 295);
+    --accent-b: oklch(0.58 0.14 195);
+    --accent-grad: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-border: rgba(0, 0, 0, 0.08);
+    --glass-highlight: rgba(255, 255, 255, 0.60);
+
+    --theme-color: oklch(0.58 0.14 195);
+
+    --background-color: #eceef2;
+    --background-color-fields: #e3e6ec;
+    --brighter-background: #f4f5f8;
+    --darker-background: #d6d9e0;
+
+    --color: #1a1b22;
+    --color-secondary: #4a4b58;
+    --color-fields: #1a1b22;
+    --subdued-text: #7a7b88;
+
+    --border-color-fields: rgba(0, 0, 0, 0.13);
+    --foreground-border-color: rgba(0, 0, 0, 0.07);
+    --resize-handle-color: rgba(0, 0, 0, 0.13);
+
+    --brightness-mixin: white;
+    --brightness-mixin-percent: 80%;
+    --anti-brightness-mixin: black;
+    --anti-brightness-mixin-percent: 60%;
+
+    --opq-card: #ffffff;
+    --opq-muted: var(--ink-muted);
+    --opq-border-faint: rgba(0, 0, 0, 0.06);
+    --opq-border: rgba(0, 0, 0, 0.13);
+    --opq-zebra-alternation: rgba(0, 0, 0, 0.025);
+    --opq-accent: oklch(0.55 0.18 295);
+
+    --app-scrollbar-thumb: rgba(0, 0, 0, 0.18);
+    --app-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+    --app-scrollbar-thumb-active: color-mix(in oklch, var(--accent-a) 55%, transparent);
+
+    --sync-progress-color: color-mix(in oklch, var(--accent-b) 32%, transparent);
+    --sync-done-color: color-mix(in oklch, var(--accent-b) 28%, transparent);
+    --sync-error-color: rgba(198, 40, 40, 0.32);
+
+    --nui-file-grid-table-header-background: rgba(255, 255, 255, 0.65);
+    --nui-file-grid-border-color: rgba(0, 0, 0, 0.07);
+    --nui-file-grid-item-highlight: color-mix(in oklch, var(--accent-a) 22%, transparent);
+    --nui-file-grid-symbolic-link-color: color-mix(in oklch, var(--accent-a) 70%, black 10%);
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] body {
+    background-color: #eef0f4 !important;
+    background-image:
+        radial-gradient(1100px 700px at 50% 30%, rgba(150, 130, 200, 0.10), transparent 65%),
+        radial-gradient(900px 700px at 80% 100%, rgba(120, 160, 200, 0.12), transparent 70%),
+        radial-gradient(700px 600px at 10% 0%, rgba(180, 160, 220, 0.08), transparent 70%) !important;
+    background-attachment: fixed !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .toolbar {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(244, 246, 250, 0.72)) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07) !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.40) inset !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .toolbar-brand-mark {
+    background: #f7f8fc !important;
+    border: 1px solid rgba(0, 0, 0, 0.13) !important;
+    color: #3a2f7a !important;
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.60) inset,
+        0 8px 18px -6px rgba(120, 100, 200, 0.30) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .toolbar-brand-mark svg {
+    filter: drop-shadow(0 0 3px rgba(140, 110, 220, 0.40)) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .sidebar,
+:root[data-custom-theme="Nebula"][data-theme="light"] .icon-panel-bar {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.90), rgba(244, 246, 250, 0.90)) !important;
+    border-right: 1px solid rgba(0, 0, 0, 0.07) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] dialog,
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-dialog {
+    background: rgba(255, 255, 255, 0.78) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.60) inset,
+        0 30px 60px -30px rgba(60, 70, 110, 0.32),
+        0 8px 24px -10px rgba(60, 70, 110, 0.22) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] dialog::backdrop {
+    background: rgba(220, 222, 230, 0.55) !important;
+    backdrop-filter: blur(12px) saturate(120%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button.style-variant-primary,
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button[data-style-variant="primary"] {
+    background: linear-gradient(135deg, var(--accent-a), var(--accent-b)) !important;
+    color: #ffffff !important;
+    border: 1px solid transparent !important;
+    box-shadow:
+        0 10px 30px -10px color-mix(in oklch, var(--accent-a) 50%, transparent),
+        0 0 0 1px rgba(255, 255, 255, 0.20) inset !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button:not(.style-variant-primary):not([data-style-variant="primary"]):not(.style-variant-danger):not([data-style-variant="danger"]) {
+    background: rgba(255, 255, 255, 0.55) !important;
+    border: 1px solid rgba(0, 0, 0, 0.13) !important;
+    color: var(--color) !important;
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button:not(.style-variant-primary):not([data-style-variant="primary"]):not(.style-variant-danger):not([data-style-variant="danger"]):hover {
+    background: rgba(255, 255, 255, 0.85) !important;
+}
