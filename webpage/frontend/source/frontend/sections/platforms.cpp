@@ -13,16 +13,37 @@ namespace NuiSftpPage::Sections
     {
         // A single distribution row: <package label> · · · <kind tag>
         // `comingSoon` dims the row to mark not-yet-available distros.
-        Nui::ElementRenderer pkgRow(std::string const& label, std::string const& kind, bool comingSoon = false)
+        // `copyText` makes the row click-to-copy via globalThis.nuiSftpCopyToClipboard.
+        Nui::ElementRenderer
+        pkgRow(std::string const& label, std::string const& kind, bool comingSoon = false, std::string copyText = {})
         {
             using namespace Nui::Elements;
             using namespace Nui::Attributes;
             using Nui::Elements::div;
             using Nui::Elements::span;
 
+            std::string classes = "pkg-row";
+            if (!copyText.empty())
+                classes += " copyable";
+
+            auto const styleStr = comingSoon ? std::string{"opacity: 0.6"} : std::string{};
+
+            if (copyText.empty())
+            {
+                return div{
+                    class_ = classes,
+                    style = styleStr,
+                }(span{}(label), span{class_ = "sep"}(), span{class_ = "copy"}(kind));
+            }
+
             return div{
-                class_ = "pkg-row",
-                style = comingSoon ? "opacity: 0.6" : "",
+                class_ = classes,
+                style = styleStr,
+                Nui::Attributes::title = "Click to copy",
+                onClick =
+                    [copyText](Nui::val event) {
+                        Nui::val::global("nuiSftpCopyToClipboard")(event["currentTarget"], copyText);
+                    },
             }(span{}(label), span{class_ = "sep"}(), span{class_ = "copy"}(kind));
         }
 
@@ -71,12 +92,13 @@ namespace NuiSftpPage::Sections
             using Nui::Elements::div;
             using Nui::Elements::span;
 
-            // "AUR today · Flathub & NixOS soon" — middle dot U+00B7
-            std::string const versionLine = "AUR today " + Utf8::cp(0x00B7) + " Flathub & NixOS soon";
+            // "AUR · Flathub · AppImage today · NixOS soon" — middle dot U+00B7
+            std::string const dot = " " + Utf8::cp(0x00B7) + " ";
+            std::string const versionLine = "AUR" + dot + "Flathub" + dot + "AppImage today" + dot + "NixOS soon";
 
             std::string const description =
-                "Native AUR package, an AppImage, and a Flatpak bundle from Releases today. "
-                "Flathub and nixpkgs are on the way.";
+                "Native AUR package, an AppImage from Releases, and an official Flatpak on Flathub today. "
+                "nixpkgs is on the way.";
 
             return div{class_ = "platform-card glass shine"}(
                 div{
@@ -92,10 +114,13 @@ namespace NuiSftpPage::Sections
                         }(versionLine)
                     )),
                 p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
-                pkgRow("yay -S nui-sftp", "archlinux user repository"),
+                pkgRow("yay -S nui-sftp", "archlinux user repository", false, "yay -S nui-sftp"),
                 pkgRow("./nui-sftp-*.AppImage", "appimage"),
-                pkgRow("flatpak install ./nui-sftp-*.flatpak", "from releases"),
-                pkgRow("flathub: org.nuicpp.nui_sftp", "soon", true),
+                pkgRow(
+                    "flatpak install flathub org.nuicpp.nui_sftp",
+                    "flathub",
+                    false,
+                    "flatpak install flathub org.nuicpp.nui_sftp"),
                 pkgRow("nixpkgs.nui-sftp", "soon", true),
                 a{
                     class_ = "btn primary shine",
@@ -119,7 +144,7 @@ namespace NuiSftpPage::Sections
             div{
                 class_ = "section-head"
             }(div{class_ = "section-eyebrow"}("// download"),
-                h2{class_ = "section-title"}("Native on Windows. AUR on Arch. Flathub & NixOS coming."),
+                h2{class_ = "section-title"}("Native on Windows. AUR on Arch. Flathub & AppImage everywhere else."),
                 p{class_ = "section-sub"}()),
             div{class_ = "platforms"}(windowsCard(), linuxCard())
         ));
