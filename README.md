@@ -48,8 +48,13 @@ chmod +x nui-sftp-*.AppImage
 
 #### Flatpak
 
-For other distributions a flatpak is provided. Currently not in the official flathub, but that will come eventually.
-Download the flatpak from a release and install it like so:
+A flatpak is published on [Flathub](https://flathub.org/apps/org.nuicpp.nui_sftp) as `org.nuicpp.nui_sftp`:
+```bash
+flatpak install flathub org.nuicpp.nui_sftp
+flatpak run org.nuicpp.nui_sftp
+```
+
+Flatpak bundles are also attached to each release if you prefer to install one directly:
 ```bash
 # Make sure to pass the correct file name!
 flatpak install nui-sftp-flatpak-x86_64_0.1.1.flatpak
