@@ -1,6 +1,7 @@
 .toolbar {
     grid-area: Toolbar;
     display: flex;
+    align-items: center;
     border-bottom: 1px solid var(--border-color-fields);
     background-color: var(--background-color);
     gap: 5px;
@@ -9,4 +10,25 @@
     &>.script-nui-select {
         min-width: 200px;
     }
+}
+
+/* Inline brand-mark shown at the left of the toolbar. Defaults to a flat
+   theme-tinted plate; themes (e.g. Nebula) override the chrome for richer
+   looks. */
+.toolbar-brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    color: var(--theme-color);
+    background: color-mix(in srgb, var(--theme-color) 18%, var(--background-color));
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.toolbar-brand-mark svg {
+    width: 78%;
+    height: 78%;
+    display: block;
 }

@@ -2,7 +2,6 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
-#include <frontend/components/icon_panel.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
 #include <utility/language.hpp>
@@ -15,6 +14,7 @@
 
 #include <frontend/onboarding/onboarding.hpp>
 
+#include <frontend/brand_mark.hpp>
 #include <frontend/svgs/add.hpp>
 #include <frontend/svgs/decline.hpp>
 #include <frontend/svgs/settings.hpp>
@@ -192,17 +192,9 @@ Nui::ElementRenderer Toolbar::operator()()
 
     // clang-format off
     return div{class_ = "toolbar"}(
-        iconPanel({
-            .icon = [](){
-                return img{
-                    src = "nui://app.example/icons/nui-sftp-logo.svg",
-                    style = "width: 32px; height: 32px;",
-                }();
-            }(),
-            .color = "var(--theme-color)",
-            .padding = 0,
-            .withBorder = false
-        }),
+        div{class_ = "toolbar-brand-mark"}(
+            Frontend::brandMarkSvg()
+        ),
         Snc::select(Snc::SelectOptions<decltype(impl_->activeTerminalEngine), decltype(impl_->terminalEngines)>{
             .activeOption = impl_->activeTerminalEngine,
             .options = impl_->terminalEngines,
