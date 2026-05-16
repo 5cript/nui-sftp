@@ -334,6 +334,7 @@ Session::Session(Params params)
         },
         .onLayoutCreationFailed = [this]() { closeSelf(); },
     });
+    impl_->snapshotManager->setLayoutInitializer(impl_->layoutInitializer.get());
 
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(impl_->engineOptions.engine))
     {
@@ -421,6 +422,7 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         },
         .onLayoutCreationFailed = [this]() { closeSelf(); },
     });
+    impl_->snapshotManager->setLayoutInitializer(impl_->layoutInitializer.get());
 
     // Copy the pending Lumino layout out of the snapshot before onOpenSession
     // resets it, so the DOM-attach-triggered restore still finds the panels.
@@ -726,11 +728,12 @@ void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string
 {
     if (!channelId)
     {
+        Log::warn("Session::onOpenChannel: channel creation failed: {}.", info);
         impl_->terminalPanel->onChannelCreationFailed(info);
         return;
     }
 
-    Log::info("Channel opened successfully: {}", channelId->value());
+    Log::info("Session::onOpenChannel: channel opened successfully: {}.", channelId->value());
 
     // Reconnect path: drain one scrollback dump into this channel iff it is
     // a primary (SSH) channel.  Local-shell adoption has its own replay path

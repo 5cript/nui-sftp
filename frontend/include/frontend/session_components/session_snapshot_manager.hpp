@@ -104,6 +104,15 @@ class SessionSnapshotManager
     void resetPending();
 
     /**
+     * @brief Wires the layout initializer in after construction.  Session
+     *        builds the snapshot manager first (the initializer depends on
+     *        its `pendingLocalShellAdoptionsPtr`), so the pointer can only
+     *        be set once the initializer exists.  Without this, capture()
+     *        skips the Lumino layout and reconnect restores the default.
+     */
+    void setLayoutInitializer(SessionLayoutInitializer* layoutInitializer);
+
+    /**
      * @brief Layout-initializer takeResumeLayout callback target: returns
      *        pendingResumeLayout (and consumes it) if present, else the
      *        pending snapshot's luminoLayout, else nullopt.
