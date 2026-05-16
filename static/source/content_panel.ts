@@ -11,6 +11,7 @@ import {
     TabBar,
     DockLayout
 } from '@lumino/widgets';
+import { MessageLoop } from '@lumino/messaging';
 import { ChannelId } from './ids.ts';
 
 /**
@@ -202,7 +203,25 @@ export class ContentPanel {
             this.resizeObserver = undefined;
         }
         if (!this.main.isDisposed) {
-            this.main.dispose();
+            // Nui's reactive renderer can remove the Session's host div from
+            // the DOM before contentPanelManager.removePanel runs.  At that
+            // point main thinks it's still attached (isAttached === true) but
+            // its node is no longer connected, so Widget.dispose → Widget.detach
+            // would throw "Widget is not attached".  Send the detach messages
+            // ourselves so child widgets get their onAfterDetach cascade
+            // (NuiWidget's deleter relies on it) and the IsAttached flag is
+            // cleared, then dispose proceeds without trying to remove an
+            // already-removed node.
+            if (this.main.isAttached && !this.main.node.isConnected) {
+                MessageLoop.sendMessage(this.main, Widget.Msg.BeforeDetach);
+                MessageLoop.sendMessage(this.main, Widget.Msg.AfterDetach);
+            }
+            try {
+                this.main.dispose();
+            } catch (e) {
+                console.error(`[ContentPanel ${this.id}] detach: main.dispose() threw`, e);
+                throw e;
+            }
         }
     }
 
@@ -240,9 +259,6 @@ export class ContentPanel {
                 return null;
             }
 
-            // Currently everything can only be constructed once!
-            const usedUpIds = new Set<string>();
-
             if (type === 'tab-area') {
                 const { currentIndex, widgets } = area;
                 const hydrated = {
@@ -250,14 +266,8 @@ export class ContentPanel {
                     currentIndex: currentIndex || 0,
                     widgets:
                         (widgets &&
-                            (widgets.map((widget: any) => {
-                                if (usedUpIds.has(widget)) {
-                                    console.error(`Duplicate widget id: ${widget}`);
-                                    return null;
-                                }
-                                usedUpIds.add(widget);
-                                return this.fabricateComponentFromId(widget);
-                            }).filter((widget: any) => !!widget))) || [],
+                            (widgets.map((widget: any) => this.fabricateComponentFromId(widget))
+                                    .filter((widget: any) => !!widget))) || [],
                 };
 
                 if (hydrated.currentIndex > hydrated.widgets.length - 1) {

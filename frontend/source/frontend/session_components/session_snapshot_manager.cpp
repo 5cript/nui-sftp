@@ -146,7 +146,18 @@ SessionSnapshot SessionSnapshotManager::capture(bool withEjection)
     if (impl_->layoutInitializer)
     {
         if (auto layout = impl_->layoutInitializer->getLayout(); layout)
+        {
+            Log::info("capture: Lumino layout captured ({} chars): {}.", layout->dump().size(), layout->dump());
             out.luminoLayout = std::move(*layout);
+        }
+        else
+        {
+            Log::warn("capture: layoutInitializer->getLayout() returned nullopt.");
+        }
+    }
+    else
+    {
+        Log::warn("capture: no layoutInitializer wired, Lumino layout not captured.");
     }
 
     return out;
@@ -323,21 +334,36 @@ void SessionSnapshotManager::resetPending()
     impl_->pendingResumeSnapshot.reset();
 }
 
+void SessionSnapshotManager::setLayoutInitializer(SessionLayoutInitializer* layoutInitializer)
+{
+    impl_->layoutInitializer = layoutInitializer;
+}
+
 std::optional<nlohmann::json> SessionSnapshotManager::takeResumeLayout()
 {
     if (!impl_->pendingResumeLayout.is_null())
     {
         auto layout = std::move(impl_->pendingResumeLayout);
         impl_->pendingResumeLayout = nlohmann::json{};
+        Log::info("takeResumeLayout: returning seeded layout ({} chars): {}.", layout.dump().size(), layout.dump());
         return layout;
     }
     if (impl_->pendingResumeSnapshot && !impl_->pendingResumeSnapshot->luminoLayout.is_null())
+    {
+        Log::info(
+            "takeResumeLayout: returning snapshot's luminoLayout ({} chars): {}.",
+            impl_->pendingResumeSnapshot->luminoLayout.dump().size(),
+            impl_->pendingResumeSnapshot->luminoLayout.dump()
+        );
         return impl_->pendingResumeSnapshot->luminoLayout;
+    }
+    Log::info("takeResumeLayout: no layout available, returning nullopt.");
     return std::nullopt;
 }
 
 void SessionSnapshotManager::seedPendingResumeLayout(nlohmann::json layout)
 {
+    Log::info("seedPendingResumeLayout: seeding layout ({} chars): {}.", layout.dump().size(), layout.dump());
     impl_->pendingResumeLayout = std::move(layout);
 }
 

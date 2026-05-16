@@ -373,7 +373,10 @@ void SessionLayoutInitializer::initialize()
         Nui::bind(
             [this]() -> Nui::val
             {
-                Nui::WebApi::Console::log("Channel factory content panel manager");
+                Log::info(
+                    "terminalFactory invoked (channelElements size before: {}).",
+                    impl_->terminalPanel->channelElements().size()
+                );
                 auto elem = Nui::Dom::makeStandaloneElement(impl_->terminalPanel->makeChannelElement());
                 impl_->terminalPanel->channelElements().push_back(elem);
                 return elem->val();

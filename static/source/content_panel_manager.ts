@@ -125,7 +125,12 @@ class ContentPanelManager {
     removePanel = (id: string) => {
         const panel = this.panels.get(id);
         if (!panel) return;
-        panel.detach();
+        try {
+            panel.detach();
+        } catch (e) {
+            console.error(`[contentPanelManager] removePanel: panel.detach threw for ${id}`, e);
+            throw e;
+        }
         this.panels.delete(id);
         if (this.lastAddRequest && this.lastAddRequest.panelId === id) {
             this.lastAddRequest = undefined;

@@ -60,7 +60,6 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
             terminal.loadAddon(value);
     }
 
-    terminal.open(host);
     const id = nanoid();
 
     // Resizing:
@@ -83,10 +82,25 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
         });
     });
     addons.resizeObserver = resizeObserver;
-    addons.resizeObserver.observe(host);
-
-    terminal.focus();
     globalThis.terminalUtility.set(id, terminal, addons);
+
+    const openAndObserve = () => {
+        terminal.open(host);
+        resizeObserver.observe(host);
+        terminal.focus();
+    };
+    if (host.isConnected) {
+        openAndObserve();
+    } else {
+        const wait = () => {
+            if (host.isConnected) {
+                openAndObserve();
+            } else {
+                requestAnimationFrame(wait);
+            }
+        };
+        wait();
+    }
     return id;
 };
 globalThis.terminalUtility.getTerminal = (id) => {
