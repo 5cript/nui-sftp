@@ -964,6 +964,17 @@ h2.section-title {
   font-size: 10px; color: var(--ink-muted);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
+.platform-card .pkg-row.copyable {
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.platform-card .pkg-row.copyable:hover {
+  background: rgba(0,0,0,0.45);
+  border-color: var(--line-strong);
+}
+.platform-card .pkg-row.copied .copy {
+  color: var(--accent-a);
+}
 
 /* ---------- oss block ---------- */
 .oss {
