@@ -66,6 +66,12 @@ cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/file.png" "${INSTALL_TARGET}/assets/icons/"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/icons/"
 
+# Generated Windows .ico (only present on Windows builds; used by the Inno Setup
+# installer as SetupIconFile and Start Menu shortcut icon).
+if [ -f "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" ]; then
+    cp "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" "${INSTALL_TARGET}/assets/icons/"
+fi
+
 # Extra icons bundle (e.g. OS folder icons).
 if [ -n "${ICONS_SOURCE}" ] && [ -d "${ICONS_SOURCE}" ]; then
     cp -r "${ICONS_SOURCE}/." "${INSTALL_TARGET}/assets/icons/"

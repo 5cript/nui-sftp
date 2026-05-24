@@ -57,7 +57,9 @@ namespace NuiSftpPage::Sections
             // "Windows 10 · 11 · x86_64" — middle dot U+00B7
             std::string const versionLine = "Windows 10 " + Utf8::cp(0x00B7) + " 11 " + Utf8::cp(0x00B7) + " x86_64";
 
-            std::string const description = "Download and unpack in the location of your choice.";
+            std::string const description =
+                "Pick the installer for a Start Menu entry and clean in-place upgrades, "
+                "or grab the portable zip and unpack anywhere.";
 
             return div{class_ = "platform-card glass shine"}(
                 div{
@@ -73,8 +75,8 @@ namespace NuiSftpPage::Sections
                         }(versionLine)
                     )),
                 p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
-                pkgRow("nui-sftp-portable.zip", ".zip"),
-                pkgRow("nui-sftp-setup.exe", ".exe", true),
+                pkgRow("nui-sftp-setup.exe", "installer"),
+                pkgRow("nui-sftp-portable.zip", "portable"),
                 a{
                     class_ = "btn primary shine",
                     href = "https://github.com/5cript/nui-sftp/releases",

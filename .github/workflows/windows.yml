@@ -51,6 +51,7 @@ jobs:
             mingw-w64-clang-x86_64-bzip2
             mingw-w64-clang-x86_64-zstd
             mingw-w64-clang-x86_64-xz
+            mingw-w64-clang-x86_64-imagemagick
 
       - name: Workspace Path Fixup
         run: |

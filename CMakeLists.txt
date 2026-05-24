@@ -69,6 +69,22 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui" EXCLUDE_FROM_ALL)
 add_executable(${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} PUBLIC core-target)
 
+if (WIN32)
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/icon.cmake")
+    file(TO_CMAKE_PATH "${NUI_SFTP_ICO}" NUI_SFTP_ICO_FORWARD)
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/nui-sftp.rc.in"
+        "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
+        @ONLY
+    )
+    target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc")
+    set_source_files_properties(
+        "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
+        PROPERTIES OBJECT_DEPENDS "${NUI_SFTP_ICO}"
+    )
+    add_dependencies(${PROJECT_NAME} nui-sftp-icon)
+endif()
+
 # Third-party license drift check: fails the build if a CMake-declared dep
 # is missing from licenses/third_party.spdx.json (or vice versa) or any
 # referenced license text file is empty / still a PLACEHOLDER.
