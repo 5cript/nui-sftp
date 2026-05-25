@@ -13,7 +13,7 @@ First go to the releases section https://github.com/5cript/nui-sftp/releases Thi
 
 ## Windows
 
-Download the windows zip and extract it somewhere. If you want an installer, create an issue so I know that there is demand.
+Download the windows installer/setup.exe and run it. Or download the windows zip and extract the contents in a place of your choosing.
 
 ## GNU/Linux
 
