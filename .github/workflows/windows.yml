@@ -52,6 +52,7 @@ jobs:
             mingw-w64-clang-x86_64-zstd
             mingw-w64-clang-x86_64-xz
             mingw-w64-clang-x86_64-imagemagick
+            mingw-w64-clang-x86_64-librsvg
 
       - name: Workspace Path Fixup
         run: |
