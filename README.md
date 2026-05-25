@@ -9,11 +9,11 @@ This project contains a cross platform (Linux & Windows) SSH and SFTP workbench.
 
 # Installation
 
-First go to the releases section https://github.com/5cript/nui-sftp/releases This is where you can find the latest releases of the app. (Not every release might have packages attached to it, pick the latest one with packages).
+First go to the releases section https://github.com/5cript/nui-sftp/releases. This is where you can find the latest releases of the app. (Not every release might have packages attached to it; pick the latest one with packages.)
 
 ## Windows
 
-Download the windows installer/setup.exe and run it. Or download the windows zip and extract the contents in a place of your choosing.
+Download the Windows installer/setup.exe and run it. Or download the Windows zip and extract the contents in a place of your choosing.
 
 ## GNU/Linux
 
@@ -81,11 +81,11 @@ Run a PTY on your local machine with a file view.
 ![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/local.png)
 
 ## Settings
-When a user might want to change the behavior of the app, I decided: Lets make it configurable.
+When a user might want to change the behavior of the app, I decided: Let's make it configurable.
 ![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/settings.png)
 
 ## Theming & Customizability
-Includes bright theme and more theme colors. Can be fully customized by overwriting CSS (although thats more of a power user feature).
+Includes a bright theme and more theme colors. Can be fully customized by overwriting CSS (although that's more of a power user feature).
 ![BrightTheme](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/theming.png)
 
 ## Download & Upload directly as Archive
@@ -103,7 +103,7 @@ You can download and upload files and folders directly as tar archives, no manua
 - Download & Upload, Single files and directories.
 - Download & Upload to tar archives streamingly, no manual packing required.
 - Folder Synchronization.
-- Download & Live observe changes that automatically resync to the server.
+- Download & live-observe changes that automatically resync to the server.
 - Delete file.
 - Rename file.
 - Create file.
@@ -115,12 +115,12 @@ You can download and upload files and folders directly as tar archives, no manua
 - Recursive folder delete.
 
 ## General UI
-- Flexible Layouting - organize widgets as you like
+- Flexible Layout - organize widgets as you like
 - Save and Load Layouts.
 - Run multiple SSH or Local Shell Session in parallel.
 
 ## Settings UI
-- If its configurable, its in the settings.
+- If it's configurable, it's in the settings.
 
 ## File View UI
 - Grid view.
@@ -128,7 +128,7 @@ You can download and upload files and folders directly as tar archives, no manua
 - Box drag select for icon view.
 - Auto refresh after operation complete.
 - Resize left vs right.
-- Upload drag and drop (within view and into the app (linux caveat: only a single file, bug in webkitgtk)).
+- Upload drag and drop (within view and into the app (Linux caveat: only a single file, bug in webkitgtk)).
 - Download drag and drop (within view).
 - Searching files.
 - Sorting files.
@@ -137,9 +137,9 @@ You can download and upload files and folders directly as tar archives, no manua
 # No intention to support for now:
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
 - GSSAPI auth: Will make work when a need arises
-- KeypassXc database integration: lots of work for tiny use cases. Its a cool idea for later.
+- KeypassXc database integration: lots of work for tiny use cases. It's a cool idea for later.
 
 # Known Problems
 
-- Cannot use mouse side keys for history navigation (yet) because of a bug in webkit show them as "button 0".
+- Cannot use mouse side keys for history navigation (yet) because of a bug in WebKit that shows them as "button 0".
 - On WebKit Systems (Linux), the drag and drop from the desktop only supports single files and folders, not a list of items, because WebKit removed the functionality entirely because of an unfixed security issue.
