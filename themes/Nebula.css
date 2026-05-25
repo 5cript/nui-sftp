@@ -64,6 +64,65 @@
     --nui-file-grid-border-color: rgba(255, 255, 255, 0.07);
     --nui-file-grid-item-highlight: color-mix(in oklch, var(--accent-a) 30%, transparent);
     --nui-file-grid-symbolic-link-color: color-mix(in oklch, var(--accent-b) 70%, white 20%);
+
+    --script-nui-components-field-background-color: rgba(255, 255, 255, 0.04);
+    --script-nui-components-field-color: var(--color);
+    --script-nui-components-field-border-color: rgba(255, 255, 255, 0.13);
+    --script-nui-components-field-border-radius: 6px;
+    --script-nui-components-field-hover-shadow: 0 0 0 1px var(--accent-b);
+    --script-nui-components-field-focus-shadow: 0 0 0 2px color-mix(in oklch, var(--accent-b) 45%, transparent);
+
+    --script-nui-components-button-color-regular: rgba(255, 255, 255, 0.04);
+    --script-nui-components-button-border-color-regular: rgba(255, 255, 255, 0.13);
+    --script-nui-components-button-color: var(--color);
+
+    --script-nui-components-tabs-background-color: transparent;
+    --script-nui-components-tabs-background-color-tab: rgba(255, 255, 255, 0.025);
+    --script-nui-components-tabs-background-color-tab-hover: rgba(255, 255, 255, 0.06);
+    --script-nui-components-tabs-background-color-tab-selected: rgba(255, 255, 255, 0.08);
+    --script-nui-components-tabs-bar-border-color: rgba(255, 255, 255, 0.07);
+    --script-nui-components-tabs-border-color-tab: transparent;
+    --script-nui-components-tabs-border-color-tab-hover: rgba(255, 255, 255, 0.10);
+    --script-nui-components-tabs-color-tab: var(--color-secondary);
+    --script-nui-components-tabs-color-tab-hover: var(--color);
+    --script-nui-components-tabs-color-tab-selected: var(--color);
+    --script-nui-components-tabs-tab-border-color-selected: rgba(255, 255, 255, 0.13);
+
+    --script-nui-components-tree-row-hover-bg: rgba(255, 255, 255, 0.04);
+    --script-nui-components-tree-row-selected-bg: color-mix(in oklch, var(--accent-a) 22%, transparent);
+    --script-nui-components-tree-guide-color: rgba(255, 255, 255, 0.07);
+
+    --script-nui-components-dialog-background-color--regular: rgba(22, 22, 30, 0.78);
+    --script-nui-components-dialog-border-color: rgba(255, 255, 255, 0.08);
+    --script-nui-components-dialog-color: var(--color);
+    --script-nui-components-dialog-header-color: var(--color);
+    --script-nui-components-dialog-footer-color: var(--color-secondary);
+
+    --script-nui-components-table-color: var(--color);
+    --script-nui-components-table-header-color: var(--color);
+    --script-nui-components-table-footer-color: var(--color-secondary);
+    --script-nui-components-table-cell-background: rgba(20, 20, 28, 0.55);
+    --script-nui-components-table-header-background: linear-gradient(180deg, rgba(30, 30, 40, 0.65), rgba(14, 14, 20, 0.65));
+    --script-nui-components-table-footer-background: rgba(14, 14, 20, 0.65);
+    --script-nui-components-table-border-color: rgba(255, 255, 255, 0.07);
+    --script-nui-components-table-row-hover: rgba(255, 255, 255, 0.04);
+    --script-nui-components-table-handle-color: rgba(255, 255, 255, 0.18);
+    --script-nui-components-table-handle-active: var(--accent-b);
+
+    --script-nui-popup-menu-bg-color: #14141c;
+    --script-nui-popup-menu-surface-color: #1c1c26;
+    --script-nui-popup-menu-border-color: rgba(255, 255, 255, 0.13);
+    --script-nui-popup-menu-text-color: var(--color);
+    --script-nui-popup-menu-text-muted-color: var(--color-secondary);
+    --script-nui-popup-menu-disabled-color: var(--subdued-text);
+    --script-nui-popup-menu-separator-color: rgba(255, 255, 255, 0.07);
+    --script-nui-popup-menu-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+:root[data-custom-theme="Nebula"] .script-nui-select-popover {
+    background-color: #14141c !important;
+    border-color: rgba(255, 255, 255, 0.13) !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55) !important;
 }
 
 :root[data-custom-theme="Nebula"] body {
@@ -202,6 +261,65 @@
     --nui-file-grid-border-color: rgba(0, 0, 0, 0.07);
     --nui-file-grid-item-highlight: color-mix(in oklch, var(--accent-a) 22%, transparent);
     --nui-file-grid-symbolic-link-color: color-mix(in oklch, var(--accent-a) 70%, black 10%);
+
+    --script-nui-components-field-background-color: rgba(255, 255, 255, 0.65);
+    --script-nui-components-field-color: var(--color);
+    --script-nui-components-field-border-color: rgba(0, 0, 0, 0.13);
+    --script-nui-components-field-border-radius: 6px;
+    --script-nui-components-field-hover-shadow: 0 0 0 1px var(--accent-b);
+    --script-nui-components-field-focus-shadow: 0 0 0 2px color-mix(in oklch, var(--accent-b) 35%, transparent);
+
+    --script-nui-components-button-color-regular: rgba(255, 255, 255, 0.55);
+    --script-nui-components-button-border-color-regular: rgba(0, 0, 0, 0.13);
+    --script-nui-components-button-color: var(--color);
+
+    --script-nui-components-tabs-background-color: transparent;
+    --script-nui-components-tabs-background-color-tab: rgba(255, 255, 255, 0.40);
+    --script-nui-components-tabs-background-color-tab-hover: rgba(255, 255, 255, 0.70);
+    --script-nui-components-tabs-background-color-tab-selected: rgba(255, 255, 255, 0.85);
+    --script-nui-components-tabs-bar-border-color: rgba(0, 0, 0, 0.07);
+    --script-nui-components-tabs-border-color-tab: transparent;
+    --script-nui-components-tabs-border-color-tab-hover: rgba(0, 0, 0, 0.10);
+    --script-nui-components-tabs-color-tab: var(--color-secondary);
+    --script-nui-components-tabs-color-tab-hover: var(--color);
+    --script-nui-components-tabs-color-tab-selected: var(--color);
+    --script-nui-components-tabs-tab-border-color-selected: rgba(0, 0, 0, 0.13);
+
+    --script-nui-components-tree-row-hover-bg: rgba(0, 0, 0, 0.04);
+    --script-nui-components-tree-row-selected-bg: color-mix(in oklch, var(--accent-a) 18%, transparent);
+    --script-nui-components-tree-guide-color: rgba(0, 0, 0, 0.10);
+
+    --script-nui-components-dialog-background-color--regular: rgba(255, 255, 255, 0.85);
+    --script-nui-components-dialog-border-color: rgba(0, 0, 0, 0.08);
+    --script-nui-components-dialog-color: var(--color);
+    --script-nui-components-dialog-header-color: var(--color);
+    --script-nui-components-dialog-footer-color: var(--color-secondary);
+
+    --script-nui-components-table-color: var(--color);
+    --script-nui-components-table-header-color: var(--color);
+    --script-nui-components-table-footer-color: var(--color-secondary);
+    --script-nui-components-table-cell-background: rgba(255, 255, 255, 0.55);
+    --script-nui-components-table-header-background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(244, 246, 250, 0.85));
+    --script-nui-components-table-footer-background: rgba(244, 246, 250, 0.85);
+    --script-nui-components-table-border-color: rgba(0, 0, 0, 0.08);
+    --script-nui-components-table-row-hover: rgba(0, 0, 0, 0.04);
+    --script-nui-components-table-handle-color: rgba(0, 0, 0, 0.18);
+    --script-nui-components-table-handle-active: var(--accent-b);
+
+    --script-nui-popup-menu-bg-color: #ffffff;
+    --script-nui-popup-menu-surface-color: #f4f5f8;
+    --script-nui-popup-menu-border-color: rgba(0, 0, 0, 0.13);
+    --script-nui-popup-menu-text-color: var(--color);
+    --script-nui-popup-menu-text-muted-color: var(--color-secondary);
+    --script-nui-popup-menu-disabled-color: var(--subdued-text);
+    --script-nui-popup-menu-separator-color: rgba(0, 0, 0, 0.07);
+    --script-nui-popup-menu-shadow-color: rgba(60, 70, 110, 0.25);
+}
+
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-select-popover {
+    background-color: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.13) !important;
+    box-shadow: 0 12px 28px rgba(60, 70, 110, 0.25) !important;
 }
 
 :root[data-custom-theme="Nebula"][data-theme="light"] body {
