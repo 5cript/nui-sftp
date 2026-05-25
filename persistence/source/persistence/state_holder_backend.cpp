@@ -61,9 +61,10 @@ namespace Persistence
         const auto path = Nui::resolvePath(Constants::persistencePath);
 
         std::optional<std::string> error{std::nullopt};
+        bool fileExisted = false;
         try
         {
-            const auto before = [&path, &error]()
+            const auto before = [&path, &error, &fileExisted]()
             {
                 try
                 {
@@ -73,6 +74,7 @@ namespace Persistence
                         Log::warn("Config file does not exist, creating it with defaults.");
                         return nlohmann::json(nullptr);
                     }
+                    fileExisted = true;
                     return nlohmann::json::parse(reader, nullptr, true, true);
                 }
                 catch (nlohmann::json::parse_error const& e)
@@ -108,7 +110,12 @@ namespace Persistence
             if (before.is_null())
             {
                 // Save something valid
-                appendWarning(dataFixer(nlohmann::json::object()));
+                const auto warning = dataFixer(nlohmann::json::object());
+                // On a true first run (no file existed) every default we just
+                // populated is expected behaviour, not something to warn about.
+                // Only surface warnings if the file existed but was unreadable.
+                if (fileExisted)
+                    appendWarning(warning);
                 error = std::nullopt;
             }
             else
@@ -148,7 +155,8 @@ namespace Persistence
     std::optional<std::string> StateHolder::dataFixer(nlohmann::json const& before)
     {
         const auto after = nlohmann::json(stateCache_);
-        bool mustSave = !nlohmann::json::diff(before, after).empty();
+        const auto diff = nlohmann::json::diff(before, after);
+        bool mustSave = !diff.empty();
         std::optional<std::string> warning{std::nullopt};
 
         auto extendWarning = [&](std::string const& msg)
@@ -161,15 +169,29 @@ namespace Persistence
 
         if (mustSave)
         {
-            Log::warn("Config diff: {}", nlohmann::json::diff(before, after).dump());
-            extendWarning(
-                fmt::format(
-                    "Loaded json contains entries that are not understood by this version and were removed.\nThese "
-                    "might have been some typos or entries from a newer version.\nPlease check the config file and "
-                    "re-apply any necessary settings.\nDiff:\n{}",
-                    nlohmann::json::diff(before, after).dump(4)
-                )
-            );
+            Log::warn("Config diff: {}", diff.dump());
+
+            // "Not understood by this version and were removed" only makes sense
+            // for actual remove ops. Pure-add diffs are the normal case when this
+            // version introduces fields the previous config didn't have -- not
+            // user-facing noise.
+            nlohmann::json droppedOps = nlohmann::json::array();
+            for (auto const& op : diff)
+            {
+                if (op.is_object() && op.value("op", std::string{}) == "remove")
+                    droppedOps.push_back(op);
+            }
+            if (!droppedOps.empty())
+            {
+                extendWarning(
+                    fmt::format(
+                        "Loaded json contains entries that are not understood by this version and were removed.\n"
+                        "These might have been some typos or entries from a newer version.\nPlease check the config "
+                        "file and re-apply any necessary settings.\nDiff:\n{}",
+                        droppedOps.dump(4)
+                    )
+                );
+            }
         }
 
         bool hasMissingDefaults = false;
@@ -208,6 +230,56 @@ namespace Persistence
                 },
             };
             extendWarning("Added default terminal options.");
+            mustSave = true;
+            hasMissingDefaults = true;
+        }
+
+        auto terminalOptionsNebula = stateCache_.terminalOptions.find("nebula");
+        if (terminalOptionsNebula == stateCache_.terminalOptions.end())
+        {
+            Log::warn("Config file misses 'nebula' terminal options, adding defaults.");
+            stateCache_.terminalOptions["nebula"] = TerminalOptions{
+#ifdef _WIN32
+                .fontFamily = "consolas, monospace",
+#else
+                .fontFamily = "Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace",
+#endif
+                .fontSize = 14,
+                .lineHeight = 1.0,
+                .cursorBlink = false,
+#ifdef __linux__
+                .renderer = "dom",
+#else
+                .renderer = "webgl",
+#endif
+                .letterSpacing = 0,
+                .theme = TerminalTheme{
+                    .background = "#0e0e14",
+                    .black = "#0a0a14",
+                    .blue = "#7aa2f7",
+                    .brightBlack = "#3a3a4a",
+                    .brightBlue = "#9bbefb",
+                    .brightCyan = "#88e0e8",
+                    .brightGreen = "#a7f3c5",
+                    .brightMagenta = "#c4a8ff",
+                    .brightRed = "#ff8585",
+                    .brightWhite = "#ecebf2",
+                    .brightYellow = "#f4d999",
+                    .cursor = "#5fc8d4",
+                    .cursorAccent = "#0e0e14",
+                    .cyan = "#5fc8d4",
+                    .foreground = "#ecebf2",
+                    .green = "#7ee8a2",
+                    .magenta = "#a78bfa",
+                    .red = "#e25c5c",
+                    .selectionBackground = "rgba(140, 110, 220, 0.35)",
+                    .selectionForeground = "#ecebf2",
+                    .selectionInactiveBackground = "rgba(140, 110, 220, 0.18)",
+                    .white = "#c5c2d4",
+                    .yellow = "#e5c87a",
+                },
+            };
+            extendWarning("Added 'nebula' terminal options preset.");
             mustSave = true;
             hasMissingDefaults = true;
         }

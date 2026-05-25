@@ -96,6 +96,11 @@ void MainPage::onSetupComplete()
                     impl_->onboarding.maybeStart();
                     return;
                 }
+                if (!impl_->stateHolder->stateCache().uiOptions.onboardingCompleted)
+                {
+                    impl_->onboarding.maybeStart();
+                    return;
+                }
                 impl_->confirmDialog.open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                     .headerText = language->get("persistence", "warningLoadingState"),
