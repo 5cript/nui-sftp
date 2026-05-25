@@ -5,6 +5,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
+#include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/session_options.hpp>
 #include <frontend/settings/setting_group.hpp>
@@ -27,13 +28,20 @@ class Settings
         std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
         InputDialog& inputDialog,
         ConfirmDialog& confirmDialog,
-        MultiInputDialog& multiInputDialog
+        MultiInputDialog& multiInputDialog,
+        NewSessionDialog& newSessionDialog
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Settings);
 
     Nui::ElementRenderer operator()();
 
     void applySettingsToUi();
+
+    /** @brief Open the new-session dialog; on confirm, create the session, persist it,
+     *         activate it in Settings and scroll to its Host field. Safe to call when
+     *         the Settings panel is closed -- it will open via requestOpenSettingsAtId.
+     */
+    void addNewSession();
 
   private:
     Nui::ElementRenderer side();
@@ -58,7 +66,6 @@ class Settings
     Nui::ElementRenderer sectionSelector(SectionSelectorOptions const& options);
     bool isActive(SectionSelectorOptions const& options);
 
-    void addNewSession();
     void onChange();
     void save();
     void applySettingsToState(Persistence::State& state);

@@ -674,7 +674,8 @@ rootWarning:
   text: "nui-sftp läuft mit Root-Rechten.\n\nDas ist gefährlich und unnötig:\n  - Übertragene oder neu erstellte Dateien gehören anschließend root.\n  - Ein Fehler, ein bösartiger Server oder ein kompromittiertes Gegenüber kann Ihr gesamtes System beschädigen.\n  - Die Benutzer-D-Bus-Sitzung ist nicht verfügbar, daher funktioniert das Öffnen von Dateien mit externen Anwendungen nicht.\n  - SSH-Schlüssel, Agents und Konfiguration aus Ihrem eigentlichen Heimatverzeichnis werden nicht verwendet.\n\nBitte schließen Sie die Anwendung und starten Sie sie als normaler Benutzer neu. Verwenden Sie sudo nur, wenn Sie wirklich Dateien bearbeiten müssen, die das erfordern, und ändern Sie lieber Dateiberechtigungen als die gesamte Oberfläche als root zu starten."
 toolbar:
   cannotUpdateLayouts: "Layouts können nicht aktualisiert werden."
-  newSession: "Neue Sitzung"
+  newSession: "Server Hinzufügen"
+  connect: "Verbinden"
   endSession: "Sitzung Beenden"
   directConnect: "Direktverbindung"
   settings: "Einstellungen"

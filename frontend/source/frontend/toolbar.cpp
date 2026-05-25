@@ -1,6 +1,7 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
+#include <frontend/settings.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
@@ -11,6 +12,7 @@
 
 #include <script-nui-components/select.hpp>
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/style_variant.hpp>
 
 #include <frontend/onboarding/onboarding.hpp>
 
@@ -21,6 +23,7 @@
 #include <ui5-sap-icons/icons/light-mode.hpp>
 #include <ui5-sap-icons/icons/dark-mode.hpp>
 #include <ui5-sap-icons/icons/connected.hpp>
+#include <ui5-sap-icons/icons/begin.hpp>
 #include <ui5-sap-icons/icons/signature.hpp>
 
 #include <nui/event_system/observed_value.hpp>
@@ -32,6 +35,7 @@ struct Toolbar::Implementation
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
     SessionArea* sessionArea;
+    Settings* settings{nullptr};
     ConfirmDialog* confirmDialog;
     DirectConnectDialog* directConnectDialog;
     ThemeController* themeController;
@@ -218,14 +222,26 @@ Nui::ElementRenderer Toolbar::operator()()
             }
         }),
         Snc::button({
-            .text = language->get("toolbar", "newSession"),
-            .icon = GeneratedSvgs::add(),
+            .text = language->get("toolbar", "connect"),
+            .icon = Ui5Icons::begin(),
             .attributes = {
+                disabled = Nui::observe(impl_->terminalEngines).generate(
+                    [](auto const& engines) -> std::optional<bool> {
+                        return engines.empty() ? std::optional<bool>{true} : std::nullopt;
+                    }
+                ),
                 onClick = [this]() {
+                    if (impl_->terminalEngines.value().empty())
+                        return;
                     impl_->events->onNewSession = impl_->activeTerminalEngine.value();
                     impl_->events->onNewSession.modifyNow();
                 },
             },
+            .styleVariant = Nui::observe(impl_->terminalEngines).generate(
+                [](auto const& engines) {
+                    return engines.empty() ? Snc::StyleVariant::Regular : Snc::StyleVariant::Primary;
+                }
+            ),
         }),
         Snc::button({
             .text = language->get("toolbar", "endSession"),
@@ -239,6 +255,24 @@ Nui::ElementRenderer Toolbar::operator()()
                     }
                 },
             },
+        }),
+        Snc::button({
+            .text = language->get("toolbar", "newSession"),
+            .icon = GeneratedSvgs::add(),
+            .attributes = {
+                onClick = [this]() {
+                    if (!impl_->settings) {
+                        Log::error("Toolbar::AddServer: settings is not set.");
+                        return;
+                    }
+                    impl_->settings->addNewSession();
+                },
+            },
+            .styleVariant = Nui::observe(impl_->terminalEngines).generate(
+                [](auto const& engines) {
+                    return engines.empty() ? Snc::StyleVariant::Primary : Snc::StyleVariant::Regular;
+                }
+            ),
         }),
         Snc::button({
             .text = language->get("toolbar", "directConnect"),
@@ -342,4 +376,9 @@ std::string Toolbar::selectedLayout() const
 void Toolbar::sessionArea(SessionArea& sessionArea)
 {
     impl_->sessionArea = &sessionArea;
+}
+
+void Toolbar::settings(Settings& settings)
+{
+    impl_->settings = &settings;
 }

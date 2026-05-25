@@ -12,6 +12,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
+#include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/onboarding/onboarding.hpp>
 #include <log/log.hpp>
 
@@ -28,6 +29,7 @@ struct MainPage::Implementation
     FilePropertyDialog filePropertyDialog;
     ArchiveTransferDialog archiveTransferDialog;
     DirectConnectDialog directConnectDialog;
+    NewSessionDialog newSessionDialog;
     PasswordPrompter prompter;
     MultiInputDialog multiInputDialog;
     Sidebar sidebar;
@@ -47,6 +49,7 @@ struct MainPage::Implementation
         , filePropertyDialog{"FilePropertyDialog"}
         , archiveTransferDialog{"ArchiveTransferDialog"}
         , directConnectDialog{"DirectConnectDialog", stateHolder}
+        , newSessionDialog{"NewSessionDialog"}
         , prompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
@@ -54,7 +57,7 @@ struct MainPage::Implementation
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
-        }, newItemAskDialog, confirmDialog, multiInputDialog}
+        }, newItemAskDialog, confirmDialog, multiInputDialog, newSessionDialog}
         , licenses{events}
         , onboarding{stateHolder, events}
         , darkMode{true}
@@ -62,6 +65,7 @@ struct MainPage::Implementation
     {
         Log::info("MainPage::Implementation()");
         toolbar.sessionArea(sessionArea);
+        toolbar.settings(settings);
     }
 
     ~Implementation()
@@ -161,6 +165,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->filePropertyDialog(),
         impl_->archiveTransferDialog(),
         impl_->directConnectDialog(),
+        impl_->newSessionDialog(),
         impl_->multiInputDialog(),
         impl_->settings(),
         impl_->licenses(),

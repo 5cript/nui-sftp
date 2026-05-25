@@ -78,7 +78,7 @@ struct Settings::Implementation
     InputDialog* inputDialog;
     ConfirmDialog* confirmDialog;
     MultiInputDialog* multiInputDialog;
-    NewSessionDialog newSessionDialog{"settings"};
+    NewSessionDialog* newSessionDialog{nullptr};
     Nui::ThrottledFunction throttledSave{};
     Nui::ThrottledFunction throttledReloadInheritance{};
     Nui::Observed<Settings::Section> activeSection{Settings::Section::GeneralSettings};
@@ -152,6 +152,7 @@ struct Settings::Implementation
         InputDialog& inputDialog,
         ConfirmDialog& confirmDialog,
         MultiInputDialog& multiInputDialog,
+        NewSessionDialog& newSessionDialog,
         std::invocable auto const& onChange,
         std::invocable auto const& reloadInheritance
     )
@@ -160,6 +161,7 @@ struct Settings::Implementation
         , inputDialog{&inputDialog}
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
+        , newSessionDialog{&newSessionDialog}
         , generalSettings{onChange, events, inputDialog, multiInputDialog}
         , termiosSettings{[onChange, reloadInheritance]()
               {
@@ -196,7 +198,8 @@ Settings::Settings(
     std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
     InputDialog& inputDialog,
     ConfirmDialog& confirmDialog,
-    MultiInputDialog& multiInputDialog
+    MultiInputDialog& multiInputDialog,
+    NewSessionDialog& newSessionDialog
 )
     : impl_{std::make_unique<Implementation>(
           stateHolder,
@@ -205,6 +208,7 @@ Settings::Settings(
           inputDialog,
           confirmDialog,
           multiInputDialog,
+          newSessionDialog,
           [this]()
           {
               if (impl_->applyingToUi)
@@ -760,7 +764,6 @@ Nui::ElementRenderer Settings::operator()()
             }(
                 Nui::Elements::span{}(language->get("settings", "loadingSettings"))
             ),
-            impl_->newSessionDialog(),
             div{
                 class_ = "settings-page",
             }(
@@ -928,7 +931,7 @@ bool Settings::isActive(SectionSelectorOptions const& options)
 void Settings::addNewSession()
 {
     impl_->events->onAddNewSessionRequested.modify();
-    impl_->newSessionDialog.open({
+    impl_->newSessionDialog->open({
         .onConfirm = [this](auto const& result)
         {
             Log::info("New session created: {}.", result.sessionName);
@@ -1324,7 +1327,7 @@ void Settings::renameActiveSession()
         return;
 
     const auto oldSessionId = **impl_->activeSession;
-    impl_->newSessionDialog.open({
+    impl_->newSessionDialog->open({
         .onConfirm =
             [this, oldSessionId](NewSessionDialog::ConfirmResult const& result)
         {
@@ -1395,7 +1398,7 @@ void Settings::copyActiveSession()
     const auto sourceIcon = impl_->stateHolder->stateCache().sessions.count(sourceSessionId)
         ? impl_->stateHolder->stateCache().sessions.at(sourceSessionId).icon
         : std::string{"laptop"};
-    impl_->newSessionDialog.open({
+    impl_->newSessionDialog->open({
         .onConfirm =
             [this, sourceSessionId](NewSessionDialog::ConfirmResult const& result)
         {

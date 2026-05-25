@@ -10,6 +10,7 @@
 #include <roar/detail/pimpl_special_functions.hpp>
 
 class SessionArea;
+class Settings;
 
 class Toolbar
 {
@@ -24,6 +25,7 @@ class Toolbar
     ROAR_PIMPL_SPECIAL_FUNCTIONS(Toolbar);
 
     void sessionArea(SessionArea& sessionArea);
+    void settings(Settings& settings);
 
     Nui::ElementRenderer operator()();
     std::string selectedLayout() const;
