@@ -139,6 +139,8 @@
     --script-nui-components-button-color: var(--color);
     --script-nui-components-button-color-regular: var(--background-color-fields);
     --script-nui-components-button-border-color-regular: #5F5E5A;
+    --script-nui-components-button-color-primary: color-mix(in srgb, var(--theme-color) 22%, black 78%);
+    --script-nui-components-button-border-color-primary: color-mix(in srgb, var(--theme-color) 55%, black 45%);
 
     --nui-file-grid-color: var(--color);
     --nui-file-grid-background-color: var(--background-color);
