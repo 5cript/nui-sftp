@@ -671,7 +671,8 @@ rootWarning:
   text: "nui-sftp is running with root privileges.\n\nThis is dangerous and unnecessary:\n  - Files transferred or created will be owned by root.\n  - A bug, a malicious server, or a compromised remote can damage your entire system.\n  - The user D-Bus session is unavailable, so opening files with external applications will not work.\n  - SSH keys, agents and configuration normally found in your real home directory will not be picked up.\n\nClose the application and restart it as your normal user. Use sudo only when you genuinely need to manipulate files that require it, and prefer changing file ownership over running the whole GUI as root."
 toolbar:
   cannotUpdateLayouts: "Cannot update layouts."
-  newSession: "New Session"
+  newSession: "Add Server"
+  connect: "Connect"
   endSession: "End Session"
   directConnect: "Direct Connect"
   settings: "Settings"
