@@ -1641,13 +1641,40 @@ void Session::registerRpcSftpExistsBatch()
                     Ids::makeChannelId(channelIdString),
                     [paths](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        // Group destinations by parent directory and list each parent once
-                        // (readdir) rather than issuing one stat round-trip per path. A bulk
-                        // drop targets a single directory, so this collapses N sequential
-                        // SFTP round-trips into a single listing — a shallow existence diff,
-                        // like sync does. A listing failure (e.g. the parent doesn't exist
-                        // yet) degrades to "nothing exists", matching the prior per-stat
-                        // fallback.
+                        // Small drops: a handful of stat round-trips is cheaper than reading
+                        // a potentially huge target directory in full. Above the threshold the
+                        // single readdir below wins (one round-trip instead of N).
+                        constexpr std::size_t listingThreshold = 10;
+                        if (paths.size() < listingThreshold)
+                        {
+                            std::vector<bool> results;
+                            results.reserve(paths.size());
+                            for (auto const& path : paths)
+                            {
+                                auto fut = channel->stat(Utility::pathFromUtf8(path));
+                                if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                                {
+                                    Log::warn(
+                                        "sftp::existsBatch: stat timeout for '{}' (treating as not-exists)", path
+                                    );
+                                    results.push_back(false);
+                                    continue;
+                                }
+                                const auto result = fut.get();
+                                results.push_back(result.has_value());
+                            }
+                            Log::info("sftp::existsBatch: probed {} paths via stat", paths.size());
+                            reply({{"success", true}, {"exists", results}});
+                            return;
+                        }
+
+                        // Larger drops: group destinations by parent directory and list each
+                        // parent once (readdir) rather than issuing one stat round-trip per
+                        // path. A bulk drop targets a single directory, so this collapses N
+                        // sequential SFTP round-trips into a single listing — a shallow
+                        // existence diff, like sync does. A listing failure (e.g. the parent
+                        // doesn't exist yet) degrades to "nothing exists", matching the
+                        // per-stat fallback.
                         std::unordered_map<std::string, std::optional<std::unordered_set<std::string>>> listingByParent;
 
                         auto listParent = [&channel](
