@@ -985,7 +985,10 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
         Log::error("Received delete progress for unknown operation id: {}", progress.operationId.value());
         return;
     }
-    if (operation->type() != SharedData::OperationType::Delete)
+    // Both Delete (per-directory recursive) and BulkDelete (the file/empty-dir
+    // aggregate) cards render via DisplayedDeleteOperation and emit onDeleteProgress.
+    if (operation->type() != SharedData::OperationType::Delete &&
+        operation->type() != SharedData::OperationType::BulkDelete)
     {
         Log::error("Received delete progress for operation id: {} which is not a delete", progress.operationId.value());
         return;
