@@ -1230,7 +1230,11 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 entry.src,
                 request.allowOverwrite,
                 /*isBigFile*/ false,
-                /*insertRefresh*/ false,
+                // Propagate the request's flag so manual folder downloads refresh
+                // the local panel. Sync passes false to avoid refresh spam; a
+                // manual bulk download passes true and expects one refresh per
+                // top-level directory on completion.
+                /*insertRefresh*/ request.insertRefresh,
                 /*createMissingDirectories*/ true,
                 request.mode
             );
@@ -1506,7 +1510,11 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 entry.dst,
                 request.allowOverwrite,
                 /*isBigFile*/ false,
-                /*insertRefresh*/ false,
+                // Propagate the request's flag so manual folder uploads refresh
+                // the remote panel. Sync passes false to avoid refresh spam; a
+                // manual bulk upload passes true and expects one refresh per
+                // top-level directory on completion.
+                /*insertRefresh*/ request.insertRefresh,
                 /*createMissingDirectories*/ true,
                 request.mode
             );
