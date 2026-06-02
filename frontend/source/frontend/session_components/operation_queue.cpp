@@ -788,6 +788,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedDeleteOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
+                added.type,
                 added.remotePath ? *added.remotePath : std::filesystem::path{},
                 [this](OperationCard<DisplayedDeleteOperation> const& operation)
                 {

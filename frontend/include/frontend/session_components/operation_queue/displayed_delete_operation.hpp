@@ -10,13 +10,14 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     DisplayedDeleteOperation(
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
+        SharedData::OperationType type,
         std::filesystem::path removePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction
     )
         : OperationCard{
-              SharedData::OperationType::Delete,
+              type,
               confirmDialog,
               std::move(operationId),
               std::move(doRemoveSelf),
@@ -104,10 +105,11 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                     }(
                         observe(currentFile),
                         [this](){
-                            return fmt::format(
-                                "Deleting: '{}'",
-                                currentFile.value().empty() ? removePath_.generic_string() : currentFile.value()
-                            );
+                            if (type_ == SharedData::OperationType::BulkDelete)
+                                return fmt::format("Deleting selected items in {}", removePath_.generic_string());
+                            if (currentFile.value().empty())
+                                return fmt::format("Deleting: '{}'", removePath_.generic_string());
+                            return fmt::format("Deleting: '{}'", currentFile.value());
                         }
                     )
                 ),
