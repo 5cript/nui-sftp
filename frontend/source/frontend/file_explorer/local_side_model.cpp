@@ -528,10 +528,6 @@ void LocalSideModel::onTransfer(
     }
 
     Log::info("Upload items requested: {}", items.size());
-    for (const auto& item : items)
-    {
-        Log::debug("Item: {}", item.path.generic_string());
-    }
 
     auto destinationDir = remoteModel_->currentPath().value();
     if (subDir)
@@ -604,14 +600,13 @@ void LocalSideModel::onTransfer(
 
                 fileEngine_->existsBatchRemote(
                     remoteDestPaths,
-                    [this, uploadItems = std::move(uploadItems)](std::vector<bool> exists, std::string const& info) mutable
+                    [this,
+                        uploadItems = std::move(uploadItems)](std::vector<bool> exists, std::string const& info) mutable
                     {
                         auto existsResults = std::make_shared<std::vector<bool>>();
                         if (exists.empty() && !uploadItems.empty())
                         {
-                            Log::warn(
-                                "sftp::existsBatch failed: {}; assuming nothing exists yet", info
-                            );
+                            Log::warn("sftp::existsBatch failed: {}; assuming nothing exists yet", info);
                             existsResults->assign(uploadItems.size(), false);
                         }
                         else
@@ -729,7 +724,8 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
         "RpcFilesystem::properties",
         [this, fallback = std::move(fallback)](Nui::val val) mutable
         {
-            const auto useFallback = [this, &fallback]() {
+            const auto useFallback = [this, &fallback]()
+            {
                 filePropertyDialog_->open(fallback);
             };
 
@@ -745,8 +741,10 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                 return;
             }
 
-            const auto extractFull = [](Nui::val const& source) -> SharedData::DirectoryEntry {
-                const auto pickU64 = [&source](char const* key) -> std::uint64_t {
+            const auto extractFull = [](Nui::val const& source) -> SharedData::DirectoryEntry
+            {
+                const auto pickU64 = [&source](char const* key) -> std::uint64_t
+                {
                     if (!source.hasOwnProperty(key))
                         return 0;
                     const auto field = source[key];
@@ -754,7 +752,8 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                         return 0;
                     return field.template as<std::uint64_t>();
                 };
-                const auto pickU32 = [&source](char const* key) -> std::uint32_t {
+                const auto pickU32 = [&source](char const* key) -> std::uint32_t
+                {
                     if (!source.hasOwnProperty(key))
                         return 0;
                     const auto field = source[key];
@@ -762,7 +761,8 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                         return 0;
                     return field.template as<std::uint32_t>();
                 };
-                const auto pickString = [&source](char const* key) -> std::string {
+                const auto pickString = [&source](char const* key) -> std::string
+                {
                     if (!source.hasOwnProperty(key))
                         return {};
                     const auto field = source[key];
@@ -898,8 +898,10 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 return;
             }
 
-            const auto extractEntry = [](Nui::val const& source) -> SharedData::DirectoryEntry {
-                const auto pickU64 = [&source](char const* key) -> std::uint64_t {
+            const auto extractEntry = [](Nui::val const& source) -> SharedData::DirectoryEntry
+            {
+                const auto pickU64 = [&source](char const* key) -> std::uint64_t
+                {
                     if (!source.hasOwnProperty(key))
                         return 0;
                     const auto field = source[key];
@@ -907,7 +909,8 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                         return 0;
                     return field.template as<std::uint64_t>();
                 };
-                const auto pickU32 = [&source](char const* key) -> std::uint32_t {
+                const auto pickU32 = [&source](char const* key) -> std::uint32_t
+                {
                     if (!source.hasOwnProperty(key))
                         return 0;
                     const auto field = source[key];
@@ -915,7 +918,8 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                         return 0;
                     return field.template as<std::uint32_t>();
                 };
-                const auto pickString = [&source](char const* key) -> std::string {
+                const auto pickString = [&source](char const* key) -> std::string
+                {
                     if (!source.hasOwnProperty(key))
                         return {};
                     const auto field = source[key];
@@ -964,8 +968,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                     const auto target = file["resolvedTarget"];
                     if (!target.isNull() && !target.isUndefined())
                     {
-                        entry.resolvedTarget =
-                            std::make_shared<SharedData::DirectoryEntry>(extractEntry(target));
+                        entry.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(extractEntry(target));
                     }
                 }
                 directoryEntries.push_back(std::move(entry));
@@ -993,26 +996,28 @@ void LocalSideModel::uploadItemsConfirmed(
     if (!accepted)
         accepted = std::make_shared<std::vector<SharedData::BulkAddEntry>>();
 
-    auto pushEntry = [](
-        std::vector<SharedData::BulkAddEntry>& bucket,
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem
-    ) {
-        bucket.push_back(SharedData::BulkAddEntry{
-            // For uploads, src is local and dst is remote — opposite of
-            // download (the bulk RPC is symmetric on field naming).
-            .src = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
-            .dst = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
-            .sizeBytes = localItem.size,
-            .isDirectory = localItem.isDirectory(),
-        });
+    auto pushEntry = [](std::vector<SharedData::BulkAddEntry>& bucket,
+                         NuiFileExplorer::Item const& remoteItem,
+                         NuiFileExplorer::Item const& localItem)
+    {
+        bucket.push_back(
+            SharedData::BulkAddEntry{
+                // For uploads, src is local and dst is remote — opposite of
+                // download (the bulk RPC is symmetric on field naming).
+                .src = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
+                .dst = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
+                .sizeBytes = localItem.size,
+                .isDirectory = localItem.isDirectory(),
+            }
+        );
     };
 
     // Every entry in `accepted` is either a non-existing destination or an
     // item the user explicitly approved for overwrite (Yes / All); the "No"
     // and "None" branches skip the push.  So allowOverwrite=true at flush
     // time is semantically correct regardless of the overwriteAlways flag.
-    auto flushAccepted = [this, &accepted]() {
+    auto flushAccepted = [this, &accepted]()
+    {
         if (accepted->empty())
             return;
         // Single-file fast path: a one-entry flush skips the bulk machinery
@@ -1048,7 +1053,8 @@ void LocalSideModel::uploadItemsConfirmed(
             /*insertRefresh*/ true,
             SharedData::OperationMode::Queued,
             /*onEachComplete*/ {},
-            [this](bool success, std::string const& info) {
+            [this](bool success, std::string const& info)
+            {
                 if (!success)
                 {
                     Log::error("Bulk upload failed: {}", info);
@@ -1126,19 +1132,24 @@ void LocalSideModel::uploadItemsConfirmed(
                 {
                     pushEntry(*accepted, uploadItems[index].first, uploadItems[index].second);
                     uploadItemsConfirmed(
-                        std::move(uploadItems), std::move(existsResults), index + 1,
-                        overwriteNever, overwriteAlways, std::move(accepted)
+                        std::move(uploadItems),
+                        std::move(existsResults),
+                        index + 1,
+                        overwriteNever,
+                        overwriteAlways,
+                        std::move(accepted)
                     );
                 }
                 else if (button && *button == ConfirmDialog::Button::No)
                 {
-                    Log::info(
-                        "Skipping upload of existing file: {}",
-                        uploadItems[index].second.path.generic_string()
-                    );
+                    Log::info("Skipping upload of existing file: {}", uploadItems[index].second.path.generic_string());
                     uploadItemsConfirmed(
-                        std::move(uploadItems), std::move(existsResults), index + 1,
-                        overwriteNever, overwriteAlways, std::move(accepted)
+                        std::move(uploadItems),
+                        std::move(existsResults),
+                        index + 1,
+                        overwriteNever,
+                        overwriteAlways,
+                        std::move(accepted)
                     );
                 }
                 else if (button && *button == ConfirmDialog::Button::All)
@@ -1146,24 +1157,36 @@ void LocalSideModel::uploadItemsConfirmed(
                     Log::info("Overwriting all existing files from now on.");
                     pushEntry(*accepted, uploadItems[index].first, uploadItems[index].second);
                     uploadItemsConfirmed(
-                        std::move(uploadItems), std::move(existsResults), index + 1,
-                        overwriteNever, /*overwriteAlways*/ true, std::move(accepted)
+                        std::move(uploadItems),
+                        std::move(existsResults),
+                        index + 1,
+                        overwriteNever,
+                        /*overwriteAlways*/ true,
+                        std::move(accepted)
                     );
                 }
                 else if (button && *button == ConfirmDialog::Button::None)
                 {
                     Log::info("Skipping all existing files from now on.");
                     uploadItemsConfirmed(
-                        std::move(uploadItems), std::move(existsResults), index + 1,
-                        /*overwriteNever*/ true, overwriteAlways, std::move(accepted)
+                        std::move(uploadItems),
+                        std::move(existsResults),
+                        index + 1,
+                        /*overwriteNever*/ true,
+                        overwriteAlways,
+                        std::move(accepted)
                     );
                 }
                 else
                 {
                     const auto terminalIndex = uploadItems.size();
                     uploadItemsConfirmed(
-                        std::move(uploadItems), std::move(existsResults), terminalIndex,
-                        overwriteNever, overwriteAlways, std::move(accepted)
+                        std::move(uploadItems),
+                        std::move(existsResults),
+                        terminalIndex,
+                        overwriteNever,
+                        overwriteAlways,
+                        std::move(accepted)
                     );
                 }
             }}
@@ -1421,11 +1444,16 @@ namespace
     {
         switch (codec)
         {
-            case ArchiveCodec::None:  return 1;
-            case ArchiveCodec::Gzip:  return 2;
-            case ArchiveCodec::Bzip2: return 3;
-            case ArchiveCodec::Zstd:  return 4;
-            case ArchiveCodec::Xz:    return 5;
+            case ArchiveCodec::None:
+                return 1;
+            case ArchiveCodec::Gzip:
+                return 2;
+            case ArchiveCodec::Bzip2:
+                return 3;
+            case ArchiveCodec::Zstd:
+                return 4;
+            case ArchiveCodec::Xz:
+                return 5;
         }
         return 2;
     }
@@ -1462,18 +1490,15 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
     if (localPaths.empty())
         return;
 
-    const auto defaultStem = items.size() == 1
-        ? items.front().path.filename().generic_string()
-        : std::string{"archive"};
+    const auto defaultStem =
+        items.size() == 1 ? items.front().path.filename().generic_string() : std::string{"archive"};
 
     archiveTransferDialog_->open({
         .headerText = "Upload as Archive",
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
-        .onConfirm = [this, paths = std::move(localPaths)](
-                         std::optional<ArchiveTransferResult> const& result
-                     ) mutable
+        .onConfirm = [this, paths = std::move(localPaths)](std::optional<ArchiveTransferResult> const& result) mutable
         {
             if (!result)
             {
@@ -1483,8 +1508,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
             if (!remoteModel_)
                 return;
 
-            const std::string filename =
-                result->fileStem + ".tar" + archiveCodecExtension(result->codec);
+            const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
             const auto remotePath = remoteModel_->currentPath().value() / filename;
 
             operationQueue_->enqueueArchiveUpload(
@@ -1508,9 +1532,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
                         return;
                     }
                     Log::info(
-                        "Archive upload queued as {} (destination {})",
-                        opId->value(),
-                        remotePath.generic_string()
+                        "Archive upload queued as {} (destination {})", opId->value(), remotePath.generic_string()
                     );
                 }
             );

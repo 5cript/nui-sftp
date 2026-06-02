@@ -507,21 +507,25 @@ void RemoteSideModel::enqueueDeletes(
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
     for (auto const& path : filesAndEmptyDirs)
     {
-        entries.push_back(SharedData::BulkAddEntry{
-            .src = path,
-            .dst = {},
-            .sizeBytes = 0,
-            .isDirectory = false,
-        });
+        entries.push_back(
+            SharedData::BulkAddEntry{
+                .src = path,
+                .dst = {},
+                .sizeBytes = 0,
+                .isDirectory = false,
+            }
+        );
     }
     for (auto const& path : nonEmpties)
     {
-        entries.push_back(SharedData::BulkAddEntry{
-            .src = path,
-            .dst = {},
-            .sizeBytes = 0,
-            .isDirectory = true,
-        });
+        entries.push_back(
+            SharedData::BulkAddEntry{
+                .src = path,
+                .dst = {},
+                .sizeBytes = 0,
+                .isDirectory = true,
+            }
+        );
     }
 
     if (entries.empty())
@@ -532,7 +536,8 @@ void RemoteSideModel::enqueueDeletes(
         /*insertRefresh*/ true,
         SharedData::OperationMode::Queued,
         /*onBulkComplete*/ {},
-        [this](bool success, std::string const& info) {
+        [this](bool success, std::string const& info)
+        {
             if (!success)
             {
                 Log::error("Bulk delete failed: {}", info);
@@ -556,10 +561,6 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     using namespace std::string_literals;
 
     Log::info("Delete items requested: {}", items.size());
-    for (const auto& item : items)
-    {
-        Log::info("Item: {}", item.path.generic_string());
-    }
 
     if (items.empty())
     {
@@ -690,26 +691,28 @@ void RemoteSideModel::downloadItemsConfirmed(
     if (!accepted)
         accepted = std::make_shared<std::vector<SharedData::BulkAddEntry>>();
 
-    auto pushEntry = [](
-        std::vector<SharedData::BulkAddEntry>& bucket,
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem
-    ) {
-        bucket.push_back(SharedData::BulkAddEntry{
-            .src = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
-            .dst = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
-            .sizeBytes = remoteItem.size,
-            .isDirectory = remoteItem.isDirectory(),
-            .mtime = remoteItem.mtime,
-            .mtimeNsec = remoteItem.mtimeNsec,
-        });
+    auto pushEntry = [](std::vector<SharedData::BulkAddEntry>& bucket,
+                         NuiFileExplorer::Item const& remoteItem,
+                         NuiFileExplorer::Item const& localItem)
+    {
+        bucket.push_back(
+            SharedData::BulkAddEntry{
+                .src = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
+                .dst = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
+                .sizeBytes = remoteItem.size,
+                .isDirectory = remoteItem.isDirectory(),
+                .mtime = remoteItem.mtime,
+                .mtimeNsec = remoteItem.mtimeNsec,
+            }
+        );
     };
 
     // Every entry in `accepted` is either a non-existing destination or an
     // item the user explicitly approved for overwrite (Yes / All); the "No"
     // and "None" branches skip the push.  So allowOverwrite=true at flush
     // time is semantically correct regardless of the overwriteAlways flag.
-    auto flushAccepted = [this, &accepted]() {
+    auto flushAccepted = [this, &accepted]()
+    {
         if (accepted->empty())
             return;
         // Single-file fast path: a one-entry flush skips the bulk machinery
@@ -747,7 +750,8 @@ void RemoteSideModel::downloadItemsConfirmed(
             /*insertRefresh*/ true,
             SharedData::OperationMode::Queued,
             /*onEachComplete*/ {},
-            [this](bool success, std::string const& info) {
+            [this](bool success, std::string const& info)
+            {
                 if (!success)
                 {
                     Log::error("Bulk download failed: {}", info);
@@ -844,19 +848,26 @@ void RemoteSideModel::downloadItemsConfirmed(
                     {
                         pushEntry(*accepted, downloadItems[index].first, downloadItems[index].second);
                         downloadItemsConfirmed(
-                            std::move(downloadItems), std::move(existsResults), index + 1,
-                            overwriteNever, overwriteAlways, std::move(accepted)
+                            std::move(downloadItems),
+                            std::move(existsResults),
+                            index + 1,
+                            overwriteNever,
+                            overwriteAlways,
+                            std::move(accepted)
                         );
                     }
                     else if (button && button == ConfirmDialog::Button::No)
                     {
                         Log::info(
-                            "Skipping download of existing file: {}",
-                            downloadItems[index].second.path.generic_string()
+                            "Skipping download of existing file: {}", downloadItems[index].second.path.generic_string()
                         );
                         downloadItemsConfirmed(
-                            std::move(downloadItems), std::move(existsResults), index + 1,
-                            overwriteNever, overwriteAlways, std::move(accepted)
+                            std::move(downloadItems),
+                            std::move(existsResults),
+                            index + 1,
+                            overwriteNever,
+                            overwriteAlways,
+                            std::move(accepted)
                         );
                     }
                     else if (button && button == ConfirmDialog::Button::All)
@@ -864,16 +875,24 @@ void RemoteSideModel::downloadItemsConfirmed(
                         Log::info("Overwriting all existing files from now on.");
                         pushEntry(*accepted, downloadItems[index].first, downloadItems[index].second);
                         downloadItemsConfirmed(
-                            std::move(downloadItems), std::move(existsResults), index + 1,
-                            overwriteNever, /*overwriteAlways*/ true, std::move(accepted)
+                            std::move(downloadItems),
+                            std::move(existsResults),
+                            index + 1,
+                            overwriteNever,
+                            /*overwriteAlways*/ true,
+                            std::move(accepted)
                         );
                     }
                     else if (button && button == ConfirmDialog::Button::None)
                     {
                         Log::info("Skipping all existing files from now on.");
                         downloadItemsConfirmed(
-                            std::move(downloadItems), std::move(existsResults), index + 1,
-                            /*overwriteNever*/ true, overwriteAlways, std::move(accepted)
+                            std::move(downloadItems),
+                            std::move(existsResults),
+                            index + 1,
+                            /*overwriteNever*/ true,
+                            overwriteAlways,
+                            std::move(accepted)
                         );
                     }
                     else
@@ -882,8 +901,12 @@ void RemoteSideModel::downloadItemsConfirmed(
                         // accepted so far and stop iterating.
                         const auto terminalIndex = downloadItems.size();
                         downloadItemsConfirmed(
-                            std::move(downloadItems), std::move(existsResults), terminalIndex,
-                            overwriteNever, overwriteAlways, std::move(accepted)
+                            std::move(downloadItems),
+                            std::move(existsResults),
+                            terminalIndex,
+                            overwriteNever,
+                            overwriteAlways,
+                            std::move(accepted)
                         );
                     }
                 }}
@@ -911,10 +934,6 @@ void RemoteSideModel::onTransfer(
     CHECK_COMPLETE();
 
     Log::info("Download items requested: {}", items.size());
-    for (const auto& item : items)
-    {
-        Log::debug("Item: {}", item.path.generic_string());
-    }
 
     if (items.empty())
     {
@@ -1003,9 +1022,7 @@ void RemoteSideModel::onTransfer(
                         if (!response.hasOwnProperty("success") || !response["success"].as<bool>() ||
                             !response.hasOwnProperty("exists"))
                         {
-                            Log::warn(
-                                "RpcFilesystem::existsBatch failed; assuming nothing exists yet"
-                            );
+                            Log::warn("RpcFilesystem::existsBatch failed; assuming nothing exists yet");
                             existsResults->assign(downloadItems.size(), false);
                         }
                         else
@@ -1041,11 +1058,16 @@ namespace
     {
         switch (codec)
         {
-            case ArchiveCodec::None:  return 1;
-            case ArchiveCodec::Gzip:  return 2;
-            case ArchiveCodec::Bzip2: return 3;
-            case ArchiveCodec::Zstd:  return 4;
-            case ArchiveCodec::Xz:    return 5;
+            case ArchiveCodec::None:
+                return 1;
+            case ArchiveCodec::Gzip:
+                return 2;
+            case ArchiveCodec::Bzip2:
+                return 3;
+            case ArchiveCodec::Zstd:
+                return 4;
+            case ArchiveCodec::Xz:
+                return 5;
         }
         return 2;
     }
@@ -1092,18 +1114,16 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
     if (rootEntries.empty())
         return;
 
-    const auto defaultStem = items.size() == 1
-        ? items.front().path.filename().generic_string()
-        : std::string{"archive"};
+    const auto defaultStem =
+        items.size() == 1 ? items.front().path.filename().generic_string() : std::string{"archive"};
 
     archiveTransferDialog_->open({
         .headerText = "Download as Archive",
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
-        .onConfirm = [this, entries = std::move(rootEntries)](
-                         std::optional<ArchiveTransferResult> const& result
-                     ) mutable
+        .onConfirm =
+            [this, entries = std::move(rootEntries)](std::optional<ArchiveTransferResult> const& result) mutable
         {
             if (!result)
             {
@@ -1113,8 +1133,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
             if (!localModel_)
                 return;
 
-            const std::string filename =
-                result->fileStem + ".tar" + archiveCodecExtension(result->codec);
+            const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
             const auto localPath = localModel_->currentPath().value() / filename;
 
             operationQueue_->enqueueArchiveDownload(
@@ -1138,9 +1157,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                         return;
                     }
                     Log::info(
-                        "Archive download queued as {} (destination {})",
-                        opId->value(),
-                        localPath.generic_string()
+                        "Archive download queued as {} (destination {})", opId->value(), localPath.generic_string()
                     );
                 }
             );
@@ -1473,13 +1490,13 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
 {
     const std::string home = "/home/" + remoteUsername_;
     const std::vector<std::pair<std::string, std::string>> defaults = {
-        {"Home",      home},
-        {"Desktop",   home + "/Desktop"},
+        {"Home", home},
+        {"Desktop", home + "/Desktop"},
         {"Downloads", home + "/Downloads"},
         {"Documents", home + "/Documents"},
-        {"Pictures",  home + "/Pictures"},
-        {"Videos",    home + "/Videos"},
-        {"Music",     home + "/Music"},
+        {"Pictures", home + "/Pictures"},
+        {"Videos", home + "/Videos"},
+        {"Music", home + "/Music"},
     };
 
     std::vector<PlaceEntry> entries;
