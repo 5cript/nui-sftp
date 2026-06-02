@@ -113,14 +113,7 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
                 if (!prescannedPathOverride_.empty())
                 {
                     options_.overallProgressCallback(
-                        options_.remotePath,
-                        currentIndex_,
-                        entries_.size(),
-                        0,
-                        0,
-                        currentBytes_,
-                        totalBytes_,
-                        bulkBytesPerSecond_
+                        options_.remotePath, currentIndex_, entries_.size(), 0, 0, currentBytes_, totalBytes_, 0
                     );
                 }
                 Log::info("BulkUploadOperation: Bulk upload completed.");
@@ -368,13 +361,17 @@ std::vector<std::pair<std::filesystem::path, BulkUploadOperation::Error>> BulkUp
 
 void BulkUploadOperation::completeCurrentUpload()
 {
-    currentBytes_ += currentUpload_->totalSize();
+    // Advance by the entry's reported size, not UploadOperation::totalSize()
+    // (the actual on-disk size from tellg). totalBytes_ is summed from the same
+    // reported sizes, so accumulating the reported size keeps currentBytes_
+    // converging exactly to totalBytes_, matching BulkDownloadOperation.
+    currentBytes_ += entries_[currentIndex_].size;
     currentUpload_.reset();
     ++currentIndex_;
     if (!prescannedPathOverride_.empty() && currentIndex_ == entries_.size())
     {
         options_.overallProgressCallback(
-            options_.remotePath, currentIndex_, entries_.size(), 0, 0, currentBytes_, totalBytes_, bulkBytesPerSecond_
+            options_.remotePath, currentIndex_, entries_.size(), 0, 0, currentBytes_, totalBytes_, 0
         );
     }
 }

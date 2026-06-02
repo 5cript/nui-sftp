@@ -153,6 +153,17 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         OperationCard::state(newState);
         if (isCompletedState())
         {
+            // Pin both bars to their max and zero the speed. A dropped or late
+            // terminal progress tick can otherwise leave the bars short of 100%
+            // and the speed frozen at its last sample. Mirrors the count-pin in
+            // body().
+            if (newState == SharedData::OperationState::Completed ||
+                newState == SharedData::OperationState::PartialSuccess)
+            {
+                bytesPerSecond = 0;
+                totalProgressBar_.setProgress(totalProgressBar_.max());
+                fileProgressBar_.setProgress(fileProgressBar_.max());
+            }
             fileProgressBar_.setZeroAsComplete();
             totalProgressBar_.setZeroAsComplete();
         }
