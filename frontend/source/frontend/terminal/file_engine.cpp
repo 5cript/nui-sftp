@@ -199,13 +199,19 @@ void FileEngine::openSyncSession(
 )
 {
     Log::info(
-        "Requesting openSyncSession: local='{}' remote='{}'",
-        localPath.generic_string(),
-        remotePath.generic_string()
+        "Requesting openSyncSession: local='{}' remote='{}'", localPath.generic_string(), remotePath.generic_string()
     );
     lazyOpen(
-        [this, localPath, remotePath, syncSessionId, remoteScanId, localScanId, respectIgnoreFiles, recursive,
-            ignoreHidden, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        [this,
+            localPath,
+            remotePath,
+            syncSessionId,
+            remoteScanId,
+            localScanId,
+            respectIgnoreFiles,
+            recursive,
+            ignoreHidden,
+            onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
         {
             if (!channelId)
             {
@@ -483,18 +489,13 @@ void FileEngine::addArchiveDownload(
                 entriesJson.push_back(entry);
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format(
-                    "Session::{}::sftp::addArchiveDownload", impl_->engine->sshSessionId().value()
-                ),
+                fmt::format("Session::{}::sftp::addArchiveDownload", impl_->engine->sshSessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
                     if (val.hasOwnProperty("error"))
                     {
-                        Log::error(
-                            "(Frontend) Failed to add archive download: {}",
-                            val["error"].as<std::string>()
-                        );
+                        Log::error("(Frontend) Failed to add archive download: {}", val["error"].as<std::string>());
                         onOperationCreated(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
@@ -556,18 +557,13 @@ void FileEngine::addArchiveUpload(
                 localPathStrings.push_back(localPath.generic_string());
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format(
-                    "Session::{}::sftp::addArchiveUpload", impl_->engine->sshSessionId().value()
-                ),
+                fmt::format("Session::{}::sftp::addArchiveUpload", impl_->engine->sshSessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
                     if (val.hasOwnProperty("error"))
                     {
-                        Log::error(
-                            "(Frontend) Failed to add archive upload: {}",
-                            val["error"].as<std::string>()
-                        );
+                        Log::error("(Frontend) Failed to add archive upload: {}", val["error"].as<std::string>());
                         onOperationCreated(std::nullopt, val["error"].as<std::string>());
                         return;
                     }
@@ -883,8 +879,7 @@ void FileEngine::remove(
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::preDeleteChecks", impl_->engine->sshSessionId().value()),
-                [this,
-                    onComplete = std::move(onComplete),
+                [onComplete = std::move(onComplete),
                     files = std::move(files),
                     directories = std::move(directories),
                     onNonEmptyDirectoriesFound = std::move(onNonEmptyDirectoriesFound)](Nui::val val) mutable
@@ -906,36 +901,22 @@ void FileEngine::remove(
                     std::vector<std::filesystem::path> nonEmpties;
                     Nui::convertFromVal(val["nonEmptyDirectories"], nonEmpties);
 
-                    if (nonEmpties.empty())
+                    std::vector<std::filesystem::path> filesAndEmptyDirs;
+                    filesAndEmptyDirs.reserve(files.size() + (directories.size() - nonEmpties.size()));
+                    for (const auto& file : files)
+                        filesAndEmptyDirs.push_back(file.path);
+                    for (const auto& dir : directories)
                     {
-                        std::vector<std::filesystem::path> transformedDirectories;
-                        transformedDirectories.resize(directories.size());
-                        std::transform(
-                            directories.begin(),
-                            directories.end(),
-                            transformedDirectories.begin(),
-                            [](auto const& item)
-                            {
-                                return item.path;
-                            }
-                        );
-                        performDelete(std::move(files), std::move(transformedDirectories), std::move(onComplete));
+                        if (std::find(nonEmpties.begin(), nonEmpties.end(), dir.path) == nonEmpties.end())
+                            filesAndEmptyDirs.push_back(dir.path);
                     }
-                    else
-                    {
-                        std::vector<std::filesystem::path> filesAndEmptyDirs;
-                        filesAndEmptyDirs.reserve(files.size() + (directories.size() - nonEmpties.size()));
-                        for (const auto& file : files)
-                            filesAndEmptyDirs.push_back(file.path);
-                        for (const auto& dir : directories)
-                        {
-                            if (std::find(nonEmpties.begin(), nonEmpties.end(), dir.path) == nonEmpties.end())
-                                filesAndEmptyDirs.push_back(dir.path);
-                        }
 
-                        // Dont actually perform delete here immediately, this is something for the queue!
-                        onNonEmptyDirectoriesFound(std::move(filesAndEmptyDirs), std::move(nonEmpties));
-                    }
+                    // Always route through the queue (bulk delete), never a synchronous
+                    // deleteFiles RPC: a large selection blows the single futureTimeout
+                    // even though the server keeps deleting, surfacing a spurious
+                    // "Failed to delete files: timeout". nonEmpties may be empty, in which
+                    // case the caller enqueues the file/empty-dir batch immediately.
+                    onNonEmptyDirectoriesFound(std::move(filesAndEmptyDirs), std::move(nonEmpties));
                 },
                 channelId.value().value(),
                 transformedDirectories
@@ -1179,8 +1160,7 @@ void FileEngine::existsBatchRemote(
                         onComplete({}, val["error"].as<std::string>());
                         return;
                     }
-                    if (!val.hasOwnProperty("success") || !val["success"].as<bool>() ||
-                        !val.hasOwnProperty("exists"))
+                    if (!val.hasOwnProperty("success") || !val["success"].as<bool>() || !val.hasOwnProperty("exists"))
                     {
                         onComplete({}, "Malformed sftp::existsBatch response");
                         return;
