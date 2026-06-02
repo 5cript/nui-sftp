@@ -9,6 +9,10 @@
 
 #include <nui/utility/scope_exit.hpp>
 
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+
 using namespace std::chrono_literals;
 
 Session::Session(
@@ -189,8 +193,7 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
             if (!sftp)
             {
                 Log::warn(
-                    "Session::adoptBulkResumes: no sftp channel open yet — deferring {} resume(s)",
-                    operationIds.size()
+                    "Session::adoptBulkResumes: no sftp channel open yet — deferring {} resume(s)", operationIds.size()
                 );
                 return;
             }
@@ -201,8 +204,7 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                 if (!entry)
                 {
                     Log::info(
-                        "Session::adoptBulkResumes: no backup for operation '{}' (already evicted?)",
-                        opId.value()
+                        "Session::adoptBulkResumes: no backup for operation '{}' (already evicted?)", opId.value()
                     );
                     continue;
                 }
@@ -806,8 +808,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 std::vector<SharedData::DirectoryEntry> entries;
                 try
                 {
-                    entries = nlohmann::json::parse(entriesJson)
-                        .get<std::vector<SharedData::DirectoryEntry>>();
+                    entries = nlohmann::json::parse(entriesJson).get<std::vector<SharedData::DirectoryEntry>>();
                 }
                 catch (std::exception const& exc)
                 {
@@ -929,14 +930,10 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                                 remoteArchivePath,
                                 result.error().toString()
                             );
-                            return reply.error(
-                                "Failed to add archive-upload operation: " + result.error().toString()
-                            );
+                            return reply.error("Failed to add archive-upload operation: " + result.error().toString());
                         }
                         Log::info(
-                            "Added archive-upload operation '{}' → '{}'",
-                            newOperationIdString,
-                            remoteArchivePath
+                            "Added archive-upload operation '{}' → '{}'", newOperationIdString, remoteArchivePath
                         );
                         self->resetQueueThrottle();
                         reply({{"success", true}});
@@ -967,9 +964,7 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
 
                 // Expect N per-entry ids + 1 dedicated aggregate-bulk-card id at the end.
                 if (operationIdStrings.size() != request.entries.size() + 1)
-                    return reply.error(
-                        "addBulkDownload: operationIds and entries length mismatch"
-                    );
+                    return reply.error("addBulkDownload: operationIds and entries length mismatch");
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
@@ -985,17 +980,14 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
                         const auto enqueued = self->operationQueue_->addBulkDownloadOperation(
                             *channel,
                             request,
-                            [&operationIdStrings](std::size_t idx) {
+                            [&operationIdStrings](std::size_t idx)
+                            {
                                 return Ids::makeOperationId(operationIdStrings[idx]);
                             },
                             bulkCardId
                         );
 
-                        Log::info(
-                            "addBulkDownload: queued {}/{} entries",
-                            enqueued,
-                            request.entries.size()
-                        );
+                        Log::info("addBulkDownload: queued {}/{} entries", enqueued, request.entries.size());
 
                         self->resetQueueThrottle();
                         reply({{"success", true}, {"enqueued", enqueued}});
@@ -1039,7 +1031,8 @@ void Session::registerRpcSftpAddBulkUploadOperation()
                         const auto enqueued = self->operationQueue_->addBulkUploadOperation(
                             *channel,
                             request,
-                            [&operationIdStrings](std::size_t idx) {
+                            [&operationIdStrings](std::size_t idx)
+                            {
                                 return Ids::makeOperationId(operationIdStrings[idx]);
                             },
                             bulkCardId
@@ -1315,10 +1308,7 @@ void Session::registerRpcSftpRecomputeSyncDiff()
                                         // Matches the OperationQueue::rpcName scheme
                                         // the frontend OperationQueue listens on.
                                         parent->hub_->callRemote(
-                                            fmt::format(
-                                                "OperationQueue::{}::onSyncDiffProgress",
-                                                parent->id_.value()
-                                            ),
+                                            fmt::format("OperationQueue::{}::onSyncDiffProgress", parent->id_.value()),
                                             syncSessionId,
                                             std::to_string(compared)
                                         );
@@ -1617,9 +1607,7 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                             return reply({{"error", "Session no longer exists"}});
 
                         const auto enqueued = self->operationQueue_->addBulkDeleteOperation(
-                            *channel,
-                            request,
-                            Ids::makeOperationId(bulkOperationIdString)
+                            *channel, request, Ids::makeOperationId(bulkOperationIdString)
                         );
 
                         Log::info("addBulkDelete: queued {} entries", enqueued);
@@ -1642,9 +1630,7 @@ void Session::registerRpcSftpExistsBatch()
     on(fmt::format("Session::{}::sftp::existsBatch", id_.value()))
         .perform(
             [weak = weak_from_this()](
-                RpcHelper::RpcOnce&& reply,
-                std::string const& channelIdString,
-                std::vector<std::string> const& paths
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::vector<std::string> const& paths
             )
             {
                 auto self = weak.lock();
@@ -1655,23 +1641,59 @@ void Session::registerRpcSftpExistsBatch()
                     Ids::makeChannelId(channelIdString),
                     [paths](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
+                        // Group destinations by parent directory and list each parent once
+                        // (readdir) rather than issuing one stat round-trip per path. A bulk
+                        // drop targets a single directory, so this collapses N sequential
+                        // SFTP round-trips into a single listing — a shallow existence diff,
+                        // like sync does. A listing failure (e.g. the parent doesn't exist
+                        // yet) degrades to "nothing exists", matching the prior per-stat
+                        // fallback.
+                        std::unordered_map<std::string, std::optional<std::unordered_set<std::string>>> listingByParent;
+
+                        auto listParent = [&channel](
+                                              std::filesystem::path const& parent
+                                          ) -> std::optional<std::unordered_set<std::string>>
+                        {
+                            auto fut = channel->listDirectory(parent);
+                            if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            {
+                                Log::warn(
+                                    "sftp::existsBatch: listing timed out for '{}' (treating contents as not-exists)",
+                                    parent.generic_string()
+                                );
+                                return std::nullopt;
+                            }
+                            const auto result = fut.get();
+                            if (!result.has_value())
+                                return std::nullopt;
+                            std::unordered_set<std::string> names;
+                            names.reserve(result->size());
+                            for (auto const& entry : *result)
+                                names.insert(entry.path.filename().generic_string());
+                            return names;
+                        };
+
                         std::vector<bool> results;
                         results.reserve(paths.size());
                         for (auto const& path : paths)
                         {
-                            auto fut = channel->stat(Utility::pathFromUtf8(path));
-                            if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            {
-                                Log::warn(
-                                    "sftp::existsBatch: stat timeout for '{}' (treating as not-exists)", path
-                                );
-                                results.push_back(false);
-                                continue;
-                            }
-                            const auto result = fut.get();
-                            results.push_back(result.has_value());
+                            const auto fsPath = Utility::pathFromUtf8(path);
+                            const auto parentKey = fsPath.parent_path().generic_string();
+                            auto it = listingByParent.find(parentKey);
+                            if (it == listingByParent.end())
+                                it = listingByParent.emplace(parentKey, listParent(fsPath.parent_path())).first;
+
+                            auto const& listing = it->second;
+                            results.push_back(
+                                listing.has_value() &&
+                                listing->find(fsPath.filename().generic_string()) != listing->end()
+                            );
                         }
-                        Log::info("sftp::existsBatch: probed {} paths", paths.size());
+                        Log::info(
+                            "sftp::existsBatch: probed {} paths across {} dir listing(s)",
+                            paths.size(),
+                            listingByParent.size()
+                        );
                         reply({{"success", true}, {"exists", results}});
                     },
                     std::move(reply)
