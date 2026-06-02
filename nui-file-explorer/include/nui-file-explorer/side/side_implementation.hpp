@@ -18,6 +18,7 @@
 
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
+#include <utility/algorithm/case_convert.hpp>
 
 #include <unordered_map>
 #include <vector>
@@ -155,7 +156,9 @@ namespace NuiFileExplorer
                 sortByPredicate(
                     [](auto const& lhs, auto const& rhs)
                     {
-                        return lhs.item.path.filename() < rhs.item.path.filename();
+                        return Utility::Algorithm::caseInsensitiveCompare(
+                                   lhs.item.path.filename().string(),
+                                   rhs.item.path.filename().string()) < 0;
                     }
                 );
             }
@@ -164,7 +167,9 @@ namespace NuiFileExplorer
                 sortByPredicate(
                     [](auto const& lhs, auto const& rhs)
                     {
-                        return lhs.item.path.filename() > rhs.item.path.filename();
+                        return Utility::Algorithm::caseInsensitiveCompare(
+                                   lhs.item.path.filename().string(),
+                                   rhs.item.path.filename().string()) > 0;
                     }
                 );
             }
