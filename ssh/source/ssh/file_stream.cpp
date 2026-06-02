@@ -1,12 +1,40 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <utility>
 #include <chrono>
 
 namespace SecureShell
 {
+    namespace
+    {
+        /** @brief Number of buffer-sized transfers to run per strand turn.
+         *
+         *  Batching amortizes the strand task overhead, but each turn blocks
+         *  progress polling, so the bytes moved per turn are capped: servers
+         *  that negotiate small buffers get more cycles, large ones get fewer.
+         *  Also bounded by what is left so we don't overshoot near EOF.
+         *
+         *  @param bufferSize     Per-transfer chunk size (server-clamped).
+         *  @param remainingBytes Bytes still to transfer.
+         */
+        IFileStream::SignedSizeType transferCyclesPerTurn(
+            IFileStream::SignedSizeType bufferSize,
+            IFileStream::SignedSizeType remainingBytes
+        )
+        {
+            using SignedSizeType = IFileStream::SignedSizeType;
+            constexpr SignedSizeType targetBytesPerTurn = 256 * 1024;
+            if (bufferSize <= 0)
+                return SignedSizeType{1};
+            const auto byTarget = std::max(SignedSizeType{1}, targetBytesPerTurn / bufferSize);
+            const auto byRemaining = (remainingBytes / bufferSize) + SignedSizeType{1};
+            return std::min(byTarget, byRemaining);
+        }
+    }
+
 #define VERIFY_FILE_STREAM() \
     if (!file_) \
     return std::unexpected(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull})
@@ -424,8 +452,7 @@ namespace SecureShell
                 }
 
                 auto remainingRead = totalFileSize - context->bytesTransferred_.load();
-                const auto readCycles =
-                    std::min(SignedSizeType{10}, (remainingRead / bufferSize) + SignedSizeType{1});
+                const auto readCycles = transferCyclesPerTurn(bufferSize, remainingRead);
 
                 for (SignedSizeType i = 0; i != readCycles; ++i)
                 {
@@ -509,8 +536,7 @@ namespace SecureShell
                 }
 
                 auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
-                const auto writeCycles =
-                    std::min(SignedSizeType{10}, (remainingWrite / bufferSize) + SignedSizeType{1});
+                const auto writeCycles = transferCyclesPerTurn(bufferSize, remainingWrite);
 
                 for (SignedSizeType i = 0; i != writeCycles; ++i)
                 {
