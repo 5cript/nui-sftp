@@ -16,6 +16,10 @@
 #include <nui/frontend/dom/basic_element.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
 
+#include <fmt/format.h>
+
+#include <algorithm>
+
 using namespace std::string_literals;
 namespace Snc = ScriptNuiComponents;
 
@@ -78,10 +82,17 @@ void ConfirmDialog::open(OpenOptions const& options)
 
     impl_->listItemsPresent = !options.listItems.empty();
     impl_->table.clear();
-    for (const auto& item : options.listItems)
-    {
-        impl_->table.addRow({item.text});
-    }
+    // Each row is a nested reactive range plus DOM nodes, so a multi-thousand
+    // item drop (bulk transfer confirmation) would build that many rows on the
+    // WASM thread and stall. The list is purely informational; the action still
+    // runs on the full set, so cap the rendered rows and summarize the rest.
+    constexpr std::size_t maxListedRows = 200;
+    const auto totalRows = options.listItems.size();
+    const auto shownRows = std::min(totalRows, maxListedRows);
+    for (std::size_t idx = 0; idx < shownRows; ++idx)
+        impl_->table.addRow({options.listItems[idx].text});
+    if (totalRows > shownRows)
+        impl_->table.addRow({fmt::format("... and {} more", totalRows - shownRows)});
     impl_->text = options.text;
     impl_->dialog->open(
         {.styleVariant = options.styleVariant,
