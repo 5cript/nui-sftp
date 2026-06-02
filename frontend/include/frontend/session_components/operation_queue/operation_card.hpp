@@ -175,7 +175,8 @@ class OperationCard : public OperationCardInterface
                     {
                         return Ui5Icons::edit();
                     }
-                    else if (type_ == SharedData::OperationType::Delete)
+                    else if (type_ == SharedData::OperationType::Delete ||
+                        type_ == SharedData::OperationType::BulkDelete)
                     {
                         return Ui5Icons::delete_();
                     }

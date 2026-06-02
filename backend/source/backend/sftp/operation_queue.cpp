@@ -1737,6 +1737,10 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     if (!fileEntries.empty())
     {
         const auto fileCount = fileEntries.size();
+        // Parent of the batch, surfaced on the card so it can read "Deleting
+        // items in <dir>" before any per-file progress arrives. Captured before
+        // fileEntries is moved into the operation below.
+        const auto commonParent = fileEntries.front().path.parent_path();
         // recursive=true so DeleteOperation walks the prefilled entries_
         // (its non-recursive branch ignores entries_ and only deletes the
         // top-level remotePath).  remotePath is left empty; not used in
@@ -1778,6 +1782,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
                 .mode = request.mode,
                 .insertRefresh = request.insertRefresh,
                 .totalBytes = static_cast<std::uint64_t>(fileCount),
+                .remotePath = commonParent,
             }
         );
     }
