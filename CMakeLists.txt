@@ -137,6 +137,7 @@ else()
 
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
     add_subdirectory("${CMAKE_SOURCE_DIR}/tar-archive/source/tar_archive")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/command-store/source/command-store")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
 
     # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
@@ -164,6 +165,7 @@ else()
         add_subdirectory(utility/test/utility)
         add_subdirectory(shared_data/test/shared_data)
         add_subdirectory(tar-archive/test/tar_archive)
+        add_subdirectory(command-store/test/command-store)
     endif()
 
     if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)
