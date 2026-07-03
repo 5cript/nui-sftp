@@ -66,6 +66,19 @@ namespace CommandStore::Sqlite
     Error makeError(sqlite3* database, std::string_view what);
 
     /**
+     * @brief Whether an extended sqlite code is one of the SQLITE_READONLY family.
+     */
+    bool isReadOnly(int extendedCode);
+
+    /**
+     * @brief Tells the user which files have to be writable for the connection's database.
+     *
+     * sqlite creates the -wal and -shm files with the permissions of the database file, so fixing the
+     * database file alone is not enough.
+     */
+    std::string readOnlyHint(sqlite3* database);
+
+    /**
      * @brief Shorthand for building the unexpected side of a Result.
      */
     Utility::Unexpected<Error> failure(Error error);
