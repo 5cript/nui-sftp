@@ -1,6 +1,7 @@
 add_library(
     utility
     STATIC
+        command_template.cpp
         temporary_directory.cpp
 )
 

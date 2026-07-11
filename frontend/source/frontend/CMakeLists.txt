@@ -122,6 +122,7 @@ target_sources(
         settings/layout_setting.cpp
         settings/log_options.cpp
         session/session_helpers.cpp
+        command_store/command_store_client.cpp
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
@@ -303,6 +304,8 @@ target_include_directories(
     PRIVATE
         "${CMAKE_SOURCE_DIR}/frontend/include"
         "${CMAKE_BINARY_DIR}/include"
+        # Only command-store/types.hpp is used here; the library itself is backend/native only.
+        "${CMAKE_SOURCE_DIR}/command-store/include"
 )
 
 target_compile_definitions(

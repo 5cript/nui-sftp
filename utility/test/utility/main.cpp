@@ -1,3 +1,4 @@
+#include "test_command_template.hpp"
 #include "test_directory_traversal.hpp"
 
 #include <gtest/gtest.h>

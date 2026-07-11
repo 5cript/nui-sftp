@@ -294,6 +294,19 @@
     },
     {
       "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/sqlite3",
+      "creationInfo": "_:creationInfo",
+      "name": "sqlite3",
+      "software_packageVersion": "system",
+      "software_downloadLocation": "https://www.sqlite.org/download.html",
+      "software_homePage": "https://www.sqlite.org/",
+      "software_copyrightText": "The authors disclaim copyright to the SQLite source code.",
+      "simplelicensing_declaredLicense": "blessing",
+      "extension_licenseTextFile": "texts/sqlite3-LICENSE.txt",
+      "extension_role": "system"
+    },
+    {
+      "type": "software_Package",
       "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/zstd",
       "creationInfo": "_:creationInfo",
       "name": "zstd",
