@@ -24,6 +24,7 @@ namespace Persistence
             fillDefaults(session.terminalOptions, resolved.terminalOptions);
             fillDefaults(session.termios, resolved.termios);
             fillDefaults(session.queueOptions, resolved.queueOptions);
+            fillDefaults(session.historyOptions, resolved.historyOptions);
 
             Utility::visitOverloaded(
                 session.engine,
