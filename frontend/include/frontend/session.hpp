@@ -13,6 +13,7 @@
 #include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/command_store/command_store_client.hpp>
 #include <frontend/session_snapshot.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <ids/ids.hpp>
@@ -37,6 +38,8 @@ class Session
         ConfirmDialog* confirmDialog = nullptr;
         FilePropertyDialog* filePropertyDialog = nullptr;
         ArchiveTransferDialog* archiveTransferDialog = nullptr;
+        /** @brief The process global command store; commands executed in this session are recorded there. */
+        CommandStoreClient* commandStoreClient = nullptr;
 
         /* Configuration captured at add-time */
         Persistence::SessionOptions sessionOptions{};
@@ -172,6 +175,12 @@ class Session
 
     void createExecutingEngine();
     void createSshEngine();
+
+    /**
+     * @brief Points the session manager at the command store: capture mode and the sink that records
+     *        what was executed. Call once the manager exists, before any channel is created.
+     */
+    void wireCommandCapture();
 
     NuiFileExplorer::Side& localFileGridSide();
     NuiFileExplorer::Side* remoteFileGridSide();

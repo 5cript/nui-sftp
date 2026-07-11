@@ -2,6 +2,9 @@ add_library(
     utility
     STATIC
         command_template.cpp
+        echo_suppressor.cpp
+        shell_integration.cpp
+        typed_line_buffer.cpp
         temporary_directory.cpp
 )
 
