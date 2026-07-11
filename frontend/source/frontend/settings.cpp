@@ -7,6 +7,7 @@
 #include <frontend/state_holder_with_dialog.hpp>
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/queue_options.hpp>
+#include <frontend/settings/history_options.hpp>
 #include <frontend/settings/general_settings.hpp>
 #include <frontend/settings/session_options.hpp>
 #include <frontend/settings/ssh_options.hpp>
@@ -61,6 +62,7 @@ struct Settings::Implementation
         Nui::Observed<bool> termios{true};
         Nui::Observed<bool> terminalOptions{true};
         Nui::Observed<bool> queueOptions{true};
+        Nui::Observed<bool> historyOptions{true};
 
         struct SessionCollapsibles
         {
@@ -70,6 +72,7 @@ struct Settings::Implementation
             Nui::Observed<bool> terminalOptions{true};
             Nui::Observed<bool> termios{true};
             Nui::Observed<bool> queueOptions{true};
+            Nui::Observed<bool> historyOptions{true};
         } sessionCollapsibles{};
     } collapsibleStates{};
 
@@ -94,6 +97,7 @@ struct Settings::Implementation
     SftpOptions sftpOptions;
     TerminalOptions terminalOptions;
     QueueOptions queueOptions;
+    HistoryOptions historyOptions;
 
     // Values exchange here when switching, we dont have X session option uis, also because performance wise
     // impractical.
@@ -184,6 +188,11 @@ struct Settings::Implementation
                   reloadInheritance();
               }}
         , queueOptions{[onChange, reloadInheritance]()
+              {
+                  onChange();
+                  reloadInheritance();
+              }}
+        , historyOptions{[onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
@@ -450,6 +459,15 @@ void Settings::applySettingsToState(Persistence::State& state)
         state.queueOptions[*impl_->queueOptions.groupKey.value()] = std::move(queueOptionsEntry);
     }
 
+    // History Options:
+    if (impl_->historyOptions.groupKey.value())
+    {
+        Persistence::HistoryOptions historyOptionsEntry{};
+        impl_->historyOptions.applyToState(historyOptionsEntry);
+        synchronizeGroupKeys(state.historyOptions, impl_->historyOptions.groupKeys.value());
+        state.historyOptions[*impl_->historyOptions.groupKey.value()] = std::move(historyOptionsEntry);
+    }
+
     // Session Options:
     applySessionOptionsToState();
 }
@@ -527,6 +545,12 @@ void Settings::applySettingsToUi()
             impl_->queueOptions.groupKeys = groupKeys(impl_->stateHolder->stateCache().queueOptions);
             loadQueueOptionsFromStateByKey(impl_->queueOptions.groupKey.value(), impl_->stateHolder->stateCache());
 
+            impl_->historyOptions.groupKey = initialKey(impl_->stateHolder->stateCache().historyOptions);
+            impl_->historyOptions.groupKeys = groupKeys(impl_->stateHolder->stateCache().historyOptions);
+            loadHistoryOptionsFromStateByKey(
+                impl_->historyOptions.groupKey.value(), impl_->stateHolder->stateCache()
+            );
+
             if (*impl_->activeSection == Section::Session && *impl_->activeSession)
             {
                 const auto sessionId = **impl_->activeSession;
@@ -579,6 +603,13 @@ void Settings::loadQueueOptionsFromStateByKey(std::optional<std::string> const& 
     impl_->queueOptions.loadFromState(state.queueOptions.at(*key));
 }
 
+void Settings::loadHistoryOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state)
+{
+    if (!key || !state.historyOptions.contains(*key))
+        return;
+    impl_->historyOptions.loadFromState(state.historyOptions.at(*key));
+}
+
 void Settings::applySessionOptionsToState()
 {
     if (*impl_->activeSection != Section::Session || !*impl_->activeSession)
@@ -595,6 +626,7 @@ void Settings::reloadInheritables()
     impl_->currentSessionOptions.termios.groupKeys = *impl_->termiosSettings.groupKeys;
     impl_->currentSessionOptions.terminalOptions.groupKeys = *impl_->terminalOptions.groupKeys;
     impl_->currentSessionOptions.queueOptions.groupKeys = *impl_->queueOptions.groupKeys;
+    impl_->currentSessionOptions.historyOptions.groupKeys = *impl_->historyOptions.groupKeys;
 
     bool anyKeyChanged = false;
     if (impl_->sshOptions.groupKeys->empty())
@@ -627,12 +659,19 @@ void Settings::reloadInheritables()
         impl_->currentSessionOptions.queueOptions.groupKey = std::nullopt;
         anyKeyChanged = true;
     }
+    if (impl_->historyOptions.groupKeys->empty())
+    {
+        Log::debug("History Options group keys empty, resetting session history options group key to nullopt.");
+        impl_->currentSessionOptions.historyOptions.groupKey = std::nullopt;
+        anyKeyChanged = true;
+    }
 
     loadTermiosSettingsFromStateByKey(impl_->termiosSettings.groupKey.value(), impl_->stateHolder->stateCache());
     loadSshSettingsFromStateByKey(impl_->sshOptions.groupKey.value(), impl_->stateHolder->stateCache());
     loadSftpOptionsFromStateByKey(impl_->sftpOptions.groupKey.value(), impl_->stateHolder->stateCache());
     loadTerminalOptionsFromStateByKey(impl_->terminalOptions.groupKey.value(), impl_->stateHolder->stateCache());
     loadQueueOptionsFromStateByKey(impl_->queueOptions.groupKey.value(), impl_->stateHolder->stateCache());
+    loadHistoryOptionsFromStateByKey(impl_->historyOptions.groupKey.value(), impl_->stateHolder->stateCache());
 
     if (anyKeyChanged)
         impl_->throttledReloadInheritance();
@@ -656,6 +695,7 @@ void Settings::reloadInheritance()
     impl_->currentSessionOptions.termios.groupKeys = *impl_->termiosSettings.groupKeys;
     impl_->currentSessionOptions.terminalOptions.groupKeys = *impl_->terminalOptions.groupKeys;
     impl_->currentSessionOptions.queueOptions.groupKeys = *impl_->queueOptions.groupKeys;
+    impl_->currentSessionOptions.historyOptions.groupKeys = *impl_->historyOptions.groupKeys;
 
     assumeDefaultsFrom(
         impl_->currentSessionOptions.sshSessionOptions.sshOptions,
@@ -681,6 +721,11 @@ void Settings::reloadInheritance()
         impl_->currentSessionOptions.queueOptions,
         impl_->stateHolder->stateCache().queueOptions,
         *impl_->currentSessionOptions.queueOptions.groupKey
+    );
+    assumeDefaultsFrom(
+        impl_->currentSessionOptions.historyOptions,
+        impl_->stateHolder->stateCache().historyOptions,
+        *impl_->currentSessionOptions.historyOptions.groupKey
     );
 }
 
@@ -1234,6 +1279,23 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 }
             }),
             group({
+                .isCollapsed = impl_->collapsibleStates.historyOptions,
+                .content = impl_->historyOptions.render(),
+                .headerTitle = language->getObserved("settings", "historyOptionsGroupName"),
+                .currentGroupKey = &impl_->historyOptions.groupKey,
+                .groupKeys = &impl_->historyOptions.groupKeys,
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
+            }),
+            group({
                 .isCollapsed = impl_->collapsibleStates.termios,
                 .content = impl_->termiosSettings.render(),
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
@@ -1656,6 +1718,23 @@ Nui::ElementRenderer Settings::currentSession()
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.queueOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.queueOptions.groupKeys,
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
+                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    addGroup(currentGroupKey, groupKeys);
+                },
+                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
+                    removeGroup(currentGroupKey, groupKeys);
+                },
+                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
+                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+                }
+            }),
+            group({
+                .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.historyOptions,
+                .content = impl_->currentSessionOptions.historyOptions.render(),
+                .headerTitle = language->getObserved("settings", "historyOptionsGroupName"),
+                .currentGroupKey = &impl_->currentSessionOptions.historyOptions.groupKey,
+                .groupKeys = &impl_->currentSessionOptions.historyOptions.groupKeys,
                 .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
                     addGroup(currentGroupKey, groupKeys);

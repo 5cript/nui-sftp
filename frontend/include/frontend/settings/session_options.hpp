@@ -3,6 +3,7 @@
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/terminal_options.hpp>
 #include <frontend/settings/queue_options.hpp>
+#include <frontend/settings/history_options.hpp>
 #include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/executing_session_options.hpp>
 #include <frontend/settings/ssh_session_options.hpp>
@@ -24,6 +25,7 @@ struct SessionOptions
     TerminalOptions terminalOptions;
     TermiosSettings termios;
     QueueOptions queueOptions;
+    HistoryOptions historyOptions;
 
     // Either may be unused, but we dont want to switch between them by actually destroying
     // the ui. Because of the performance and user feel:

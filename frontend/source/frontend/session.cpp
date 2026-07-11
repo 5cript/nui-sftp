@@ -43,6 +43,7 @@ struct Session::Implementation
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
+    CommandStoreClient* commandStoreClient;
 
     // Tab identity
     std::string initialName;
@@ -101,6 +102,7 @@ struct Session::Implementation
         : stateHolder{params.stateHolder}
         , events{params.events}
         , confirmDialog{params.confirmDialog}
+        , commandStoreClient{params.commandStoreClient}
         , initialName{std::move(params.initialName)}
         , tabTitle{std::make_shared<Nui::Observed<std::string>>(this->initialName)}
         , sessionLayoutId{Nui::val::global("generateId")().as<std::string>()}
@@ -449,6 +451,10 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         sshEngine->setOnConnectionLoss([this]() { onTerminalConnectionLoss(); });
     }
 
+    // The proto only probed the transport, it never created a channel — so the capture wiring
+    // arrives in time for every channel this session opens.
+    wireCommandCapture();
+
     // SSH is the only path through ProtoSession today, but build the file
     // grid regardless so the remote side is ready for snapshot application.
     setupFileGrid();
@@ -488,6 +494,40 @@ void Session::setupFileGrid()
     );
 }
 
+namespace
+{
+    /// What the history shows a command was run on: the ssh target, or the shell for local sessions.
+    std::string makeHostLabel(Persistence::SessionOptions const& engineOptions)
+    {
+        if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&engineOptions.engine))
+            return ssh->user ? fmt::format("{}@{}", *ssh->user, ssh->host) : ssh->host;
+        if (const auto* executing = std::get_if<Persistence::ExecutingSessionOptions>(&engineOptions.engine))
+            return executing->command.string();
+        return {};
+    }
+}
+
+void Session::wireCommandCapture()
+{
+    if (!impl_->frontendSessionManager.value())
+        return;
+
+    const auto captureMode =
+        impl_->engineOptions.historyOptions.value().captureMode.value_or(Persistence::HistoryCaptureMode::smart);
+
+    auto* const manager = impl_->frontendSessionManager.value().get();
+    manager->setCaptureMode(captureMode);
+
+    if (captureMode == Persistence::HistoryCaptureMode::off || !impl_->commandStoreClient)
+        return;
+
+    manager->setOnCommandExecuted(
+        [this, host = makeHostLabel(impl_->engineOptions)](Ids::ChannelId const&, std::string const& command) {
+            impl_->commandStoreClient->recordExecution(host, command);
+        }
+    );
+}
+
 void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");
@@ -505,6 +545,8 @@ void Session::createSshEngine()
         },
         /*eagerAuxEngine=*/true
     );
+
+    wireCommandCapture();
 
     impl_->frontendSessionManager.value()->open(
         std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
@@ -530,6 +572,8 @@ void Session::createExecutingEngine()
             impl_->terminalPanel->onLockedModeUserInput(channelId, input);
         }
     );
+
+    wireCommandCapture();
 
     impl_->frontendSessionManager.value()->open(
         std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)

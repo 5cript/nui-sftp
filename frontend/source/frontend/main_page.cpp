@@ -14,6 +14,7 @@
 #include <frontend/dialog/direct_connect_dialog.hpp>
 #include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/onboarding/onboarding.hpp>
+#include <frontend/command_store/command_store_client.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -34,6 +35,9 @@ struct MainPage::Implementation
     MultiInputDialog multiInputDialog;
     Sidebar sidebar;
     Toolbar toolbar;
+    /// One store client for the whole process; every session records into it and both command panels
+    /// read from it.
+    CommandStoreClient commandStoreClient;
     SessionArea sessionArea;
     Settings settings;
     Licenses licenses;
@@ -54,7 +58,8 @@ struct MainPage::Implementation
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar}
+        , commandStoreClient{}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar, &commandStoreClient}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog, newSessionDialog}

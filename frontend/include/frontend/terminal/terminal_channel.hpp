@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/terminal/terminal_engine.hpp>
+#include <persistence/state/history_options.hpp>
 #include <persistence/state/terminal_options.hpp>
 #include <ids/ids.hpp>
 
@@ -13,10 +14,15 @@
 class TerminalChannel
 {
   public:
+    /**
+     * @param captureMode How commands run in this terminal are picked up for the command history.
+     *                    Selected once here, the strategy never changes for the life of the channel.
+     */
     TerminalChannel(
         TerminalEngine* engine,
         Ids::ChannelId channelId,
-        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput,
+        Persistence::HistoryCaptureMode captureMode = Persistence::HistoryCaptureMode::off
     );
     virtual ~TerminalChannel();
     TerminalChannel(TerminalChannel const&) = delete;
@@ -45,6 +51,25 @@ class TerminalChannel
      * @param serializedDump The xterm serializeAddon output to replay.
      */
     void replayContent(std::string const& serializedDump);
+
+    /**
+     * @brief Sets the sink for commands executed in this terminal.
+     *
+     * Fed by the OSC 633 handler in smart mode and by the keystroke line buffer in simple mode; in
+     * off mode nothing ever calls it. Set it before open(), the handlers are registered there.
+     */
+    void setOnCommandExecuted(std::function<void(std::string const&)> onCommandExecuted);
+
+    /**
+     * @brief Writes a shell integration bootstrap line into the shell's stdin.
+     *
+     * Only does something in smart mode and only on a freshly opened channel; an adopted or replayed
+     * channel already has its hook. An empty line is a no-op, which is what an unknown local shell
+     * gets.
+     *
+     * @param bootstrapLine One of the lines from the ShellIntegration namespace, without a newline.
+     */
+    void installShellIntegration(std::string const& bootstrapLine);
 
   private:
     struct Implementation;

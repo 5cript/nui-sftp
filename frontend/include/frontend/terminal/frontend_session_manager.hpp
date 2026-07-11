@@ -3,6 +3,7 @@
 #include <frontend/terminal/terminal_channel.hpp>
 #include <frontend/terminal/terminal_engine.hpp>
 #include <frontend/terminal/executing_engine.hpp>
+#include <persistence/state/history_options.hpp>
 #include <persistence/state/terminal_options.hpp>
 #include <ids/ids.hpp>
 
@@ -250,6 +251,21 @@ class FrontendSessionManager
      *        this call — existing channels copy the handler at construction.
      */
     void setLockedUserInputHandler(std::function<void(Ids::ChannelId, std::string const&)> handler);
+
+    /**
+     * @brief Selects how commands are captured for the command history.
+     *
+     * Only affects channels created after this call, the mode is copied into each TerminalChannel at
+     * construction. Set it before the first channel is created.
+     */
+    void setCaptureMode(Persistence::HistoryCaptureMode captureMode);
+
+    /**
+     * @brief Sets the sink for commands executed in any channel of this session.
+     *
+     * @param onCommandExecuted Receives the channel the command ran in and the command itself.
+     */
+    void setOnCommandExecuted(std::function<void(Ids::ChannelId const&, std::string const&)> onCommandExecuted);
 
     /**
      * @brief Enables or disables connection-loss mode.

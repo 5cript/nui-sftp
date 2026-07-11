@@ -42,6 +42,7 @@ namespace Persistence
                 .terminalOptions = Reference{"default"},
                 .termios = Reference{"default"},
                 .queueOptions = Reference{"default"},
+                .historyOptions = Reference{"default"},
             };
         }
         return SessionOptions{
@@ -55,6 +56,7 @@ namespace Persistence
             .terminalOptions = Reference{"default"},
             .termios = Reference{"default"},
             .queueOptions = Reference{"default"},
+            .historyOptions = Reference{"default"},
         };
     }
 }

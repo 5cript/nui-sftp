@@ -1,7 +1,20 @@
 #include <frontend/terminal/frontend_session_manager.hpp>
+#include <frontend/terminal/shell_integration.hpp>
 #include <log/log.hpp>
 
 #include <unordered_map>
+
+namespace
+{
+    /// The bootstrap that fits the channel: a local process announces its shell in the options, a
+    /// remote one only reveals it at runtime.
+    std::string bootstrapFor(ChannelCreationOptions const& channelOptions)
+    {
+        if (const auto* executing = dynamic_cast<ExecutingChannelCreationOptions const*>(&channelOptions))
+            return ShellIntegration::bootstrap(ShellIntegration::detectShellKind(executing->executingOptions.command));
+        return ShellIntegration::remoteBootstrap();
+    }
+}
 
 struct FrontendSessionManager::Implementation
 {
@@ -16,6 +29,8 @@ struct FrontendSessionManager::Implementation
     bool disposeComplete{false};
     bool isInLockedMode{false};
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
+    Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
+    std::function<void(Ids::ChannelId const&, std::string const&)> onCommandExecuted;
 
     /// Looks up the channel pointed to by a pending shared creation id.
     /// Returns nullptr if the id is not yet assigned or the channel is not found.
@@ -25,6 +40,16 @@ struct FrontendSessionManager::Implementation
             return nullptr;
         auto found = channels.find(*chId);
         return found != channels.end() ? found->second.get() : nullptr;
+    }
+
+    /// Routes the commands of one channel to the session-wide sink. Called for every channel, also
+    /// for adopted ones: their shell already carries the hook from before the reconnect.
+    void bindCommandCapture(Ids::ChannelId const& channelId, TerminalChannel& channel)
+    {
+        channel.setOnCommandExecuted([this, channelId](std::string const& command) {
+            if (onCommandExecuted)
+                onCommandExecuted(channelId, command);
+        });
     }
 
     Implementation(
@@ -73,6 +98,18 @@ void FrontendSessionManager::setLockedUserInputHandler(
 )
 {
     impl_->onLockedUserInput = std::move(handler);
+}
+
+void FrontendSessionManager::setCaptureMode(Persistence::HistoryCaptureMode captureMode)
+{
+    impl_->captureMode = captureMode;
+}
+
+void FrontendSessionManager::setOnCommandExecuted(
+    std::function<void(Ids::ChannelId const&, std::string const&)> onCommandExecuted
+)
+{
+    impl_->onCommandExecuted = std::move(onCommandExecuted);
 }
 
 void FrontendSessionManager::forEachChannel(
@@ -197,7 +234,7 @@ void FrontendSessionManager::createChannel(
             if (auto* channel = impl_->findChannel(*channelId))
                 channel->writeStderr(data, false);
         },
-        [this, channelId, onChannelCreated, host, options, primary](
+        [this, channelId, onChannelCreated, host, options, primary, bootstrap = bootstrapFor(channelOptions)](
             std::optional<Ids::ChannelId> const& creationResult, std::string const& info
         )
         {
@@ -212,7 +249,9 @@ void FrontendSessionManager::createChannel(
 
             [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
                 **channelId,
-                std::make_unique<TerminalChannel>(primary, **channelId, impl_->onLockedUserInput)
+                std::make_unique<TerminalChannel>(
+                    primary, **channelId, impl_->onLockedUserInput, impl_->captureMode
+                )
             );
             if (channelIter == impl_->channels.end())
             {
@@ -221,12 +260,15 @@ void FrontendSessionManager::createChannel(
                 return;
             }
             impl_->channelEngine[**channelId] = primary;
+            impl_->bindCommandCapture(**channelId, *channelIter->second);
 
             Log::info("Opening channel");
             channelIter->second->open(
                 host,
                 options,
-                [onChannelCreated, chId = **channelId, host](bool success, std::string const& info) mutable
+                [this, onChannelCreated, chId = **channelId, host, bootstrap](
+                    bool success, std::string const& info
+                ) mutable
                 {
                     if (!success)
                     {
@@ -234,6 +276,10 @@ void FrontendSessionManager::createChannel(
                         return;
                     }
                     host.call<void>("setAttribute", "data-channelid"s, chId.value());
+                    // A fresh shell has no preexec hook yet; installShellIntegration is a no-op
+                    // unless the capture mode is smart.
+                    if (auto* channel = impl_->findChannel(chId))
+                        channel->installShellIntegration(bootstrap);
                     onChannelCreated(chId, info);
                 }
             );
@@ -306,7 +352,7 @@ void FrontendSessionManager::createLocalShellChannel(
             if (auto* channel = impl_->findChannel(*channelId))
                 channel->writeStderr(data, false);
         },
-        [this, channelId, onChannelCreated, host, terminalOptions, aux](
+        [this, channelId, onChannelCreated, host, terminalOptions, aux, bootstrap = bootstrapFor(execOptions)](
             std::optional<Ids::ChannelId> const& creationResult, std::string const& info
         )
         {
@@ -321,7 +367,7 @@ void FrontendSessionManager::createLocalShellChannel(
 
             [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
                 **channelId,
-                std::make_unique<TerminalChannel>(aux, **channelId, impl_->onLockedUserInput)
+                std::make_unique<TerminalChannel>(aux, **channelId, impl_->onLockedUserInput, impl_->captureMode)
             );
             if (channelIter == impl_->channels.end())
             {
@@ -330,12 +376,15 @@ void FrontendSessionManager::createLocalShellChannel(
                 return;
             }
             impl_->channelEngine[**channelId] = aux;
+            impl_->bindCommandCapture(**channelId, *channelIter->second);
 
             Log::info("Opening local-shell channel");
             channelIter->second->open(
                 host,
                 terminalOptions,
-                [onChannelCreated, chId = **channelId, host](bool success, std::string const& info) mutable
+                [this, onChannelCreated, chId = **channelId, host, bootstrap](
+                    bool success, std::string const& info
+                ) mutable
                 {
                     if (!success)
                     {
@@ -343,6 +392,8 @@ void FrontendSessionManager::createLocalShellChannel(
                         return;
                     }
                     host.call<void>("setAttribute", "data-channelid"s, chId.value());
+                    if (auto* channel = impl_->findChannel(chId))
+                        channel->installShellIntegration(bootstrap);
                     onChannelCreated(chId, info);
                 }
             );
@@ -494,7 +545,8 @@ void FrontendSessionManager::adoptLocalShellChannel(
     }
 
     [[maybe_unused]] auto [channelIter, _] = impl_->channels.emplace(
-        channelId, std::make_unique<TerminalChannel>(aux, channelId, impl_->onLockedUserInput)
+        channelId,
+        std::make_unique<TerminalChannel>(aux, channelId, impl_->onLockedUserInput, impl_->captureMode)
     );
     if (channelIter == impl_->channels.end())
     {
@@ -503,6 +555,9 @@ void FrontendSessionManager::adoptLocalShellChannel(
         return;
     }
     impl_->channelEngine[channelId] = aux;
+    // No bootstrap here: the process kept running through the reconnect, so its shell still carries
+    // the hook that was installed when the channel was originally created.
+    impl_->bindCommandCapture(channelId, *channelIter->second);
 
     channelIter->second->open(
         host,

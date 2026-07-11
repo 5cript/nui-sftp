@@ -77,6 +77,7 @@ SessionOptions::SessionOptions(
     , terminalOptions{onChange}
     , termios{onChange}
     , queueOptions{onChange}
+    , historyOptions{onChange}
     , executingSessionOptions{onChange, newItemDialog, multiInputDialog}
     , sshSessionOptions{onChange, newItemDialog, multiInputDialog}
 {}
@@ -91,6 +92,7 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     terminalOptions.applyToState(state.terminalOptions.value());
     termios.applyToState(state.termios.value());
     queueOptions.applyToState(state.queueOptions.value());
+    historyOptions.applyToState(state.historyOptions.value());
 
     if (std::holds_alternative<Persistence::SshSessionOptions>(state.engine))
     {
@@ -110,6 +112,10 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     state.termios.ref(*termios.groupKey);
     Log::debug("QueueOptions group key: {}", queueOptions.groupKey->has_value() ? **queueOptions.groupKey : "nullopt");
     state.queueOptions.ref(*queueOptions.groupKey);
+    Log::debug(
+        "HistoryOptions group key: {}", historyOptions.groupKey->has_value() ? **historyOptions.groupKey : "nullopt"
+    );
+    state.historyOptions.ref(*historyOptions.groupKey);
 }
 
 void SessionOptions::loadFromState(Persistence::SessionOptions const& state, bool loadRefs)
@@ -122,6 +128,7 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state, boo
     terminalOptions.loadFromState(state.terminalOptions.value());
     termios.loadFromState(state.termios.value());
     queueOptions.loadFromState(state.queueOptions.value());
+    historyOptions.loadFromState(state.historyOptions.value());
 
     if (std::holds_alternative<Persistence::SshSessionOptions>(state.engine))
     {
@@ -145,6 +152,8 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state, boo
             state.termios.hasReference() ? std::optional<std::string>{state.termios.ref()} : std::nullopt;
         queueOptions.groupKey =
             state.queueOptions.hasReference() ? std::optional<std::string>{state.queueOptions.ref()} : std::nullopt;
+        historyOptions.groupKey =
+            state.historyOptions.hasReference() ? std::optional<std::string>{state.historyOptions.ref()} : std::nullopt;
     }
 }
 
@@ -153,6 +162,7 @@ void SessionOptions::assumeDefaultsFrom(Persistence::SessionOptions const& state
     terminalOptions.assumeDefaultsFrom(state.terminalOptions.value());
     termios.assumeDefaultsFrom(state.termios.value());
     queueOptions.assumeDefaultsFrom(state.queueOptions.value());
+    historyOptions.assumeDefaultsFrom(state.historyOptions.value());
     if (std::holds_alternative<Persistence::ExecutingSessionOptions>(state.engine))
     {
         executingSessionOptions.assumeDefaultsFrom(std::get<Persistence::ExecutingSessionOptions>(state.engine));

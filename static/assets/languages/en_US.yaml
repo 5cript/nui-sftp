@@ -216,6 +216,7 @@ settings:
   sftpOptionsGroupName: "SFTP Options"
   terminalOptionsGroupName: "Terminal Options"
   queueOptionsGroupName: "Queue Options"
+  historyOptionsGroupName: "Command History"
   groupKey: "Inheritance ID"
   enterGroupKeyPlaceholder: "Enter Inheritance ID"
   confirmDeleteGroupKeyHeader: "Do you want to delete this group?"
@@ -453,6 +454,12 @@ settings:
     startInPausedStateHelpText: "When enabled, the SFTP queue starts in a paused state."
     liveQueuePageSize: "Live Queue Page Size"
     liveQueuePageSizeHelpText: "Maximum number of operations visible on the live page. When exceeded, the oldest entries move into a paginated history. Hard limit: 1000."
+  historyOptions:
+    captureMode: "Capture Mode"
+    captureModeHelpText: "How commands typed in a terminal are recorded into the command history. Smart installs a hook in the shell (bash, zsh, fish) and records exactly what the shell runs. Simple reconstructs the command from your keystrokes, which needs no shell support but misreads editors, pagers and history recall. Off records nothing. The mode is read when a session is opened, so it only affects sessions started afterwards."
+    captureModeOff: "Off"
+    captureModeSimple: "Simple (keystrokes)"
+    captureModeSmart: "Smart (shell integration)"
   terminalOptions:
     fontFamily: "Font Family"
     fontFamilyHelpText: "Choose the font family used to render text in the terminal."

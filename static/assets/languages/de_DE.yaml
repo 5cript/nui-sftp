@@ -218,6 +218,7 @@ settings:
   sftpOptionsGroupName: "SFTP Optionen"
   terminalOptionsGroupName: "Terminal Optionen"
   queueOptionsGroupName: "Warteschlangen Optionen"
+  historyOptionsGroupName: "Befehlsverlauf"
   groupKey: "Vererbungs ID"
   enterGroupKeyPlaceholder: "Geben Sie die Vererbungs ID ein"
   confirmDeleteGroupKeyHeader: "Möchten Sie diese Gruppe löschen?"
@@ -451,6 +452,12 @@ settings:
     startInPausedStateHelpText: "Wenn aktiviert, startet die SFTP Warteschlange im pausierten Zustand."
     liveQueuePageSize: "Seitengröße der Live-Warteschlange"
     liveQueuePageSizeHelpText: "Maximale Anzahl von Operationen auf der Live-Seite. Bei Überschreitung wandern ältere Einträge in eine paginierte Historie. Harte Grenze: 1000."
+  historyOptions:
+    captureMode: "Aufzeichnungsmodus"
+    captureModeHelpText: "Wie im Terminal eingegebene Befehle in den Befehlsverlauf aufgenommen werden. Smart installiert einen Hook in der Shell (bash, zsh, fish) und zeichnet genau das auf, was die Shell ausführt. Einfach rekonstruiert den Befehl aus Ihren Tastenanschlägen, benötigt keine Shell-Unterstützung, verliest sich aber bei Editoren, Pagern und dem Zurückholen alter Befehle. Aus zeichnet nichts auf. Der Modus wird beim Öffnen einer Sitzung gelesen und wirkt daher nur auf danach gestartete Sitzungen."
+    captureModeOff: "Aus"
+    captureModeSimple: "Einfach (Tastenanschläge)"
+    captureModeSmart: "Smart (Shell-Integration)"
   terminalOptions:
     fontFamily: "Schriftart"
     fontFamilyHelpText: "Wählen Sie die Schriftart, mit der Text im Terminal dargestellt wird."

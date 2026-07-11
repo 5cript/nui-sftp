@@ -22,7 +22,8 @@ class SessionArea
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
-        Toolbar* toolbar
+        Toolbar* toolbar,
+        CommandStoreClient* commandStoreClient
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SessionArea);
 

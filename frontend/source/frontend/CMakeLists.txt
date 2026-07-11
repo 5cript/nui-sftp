@@ -115,6 +115,7 @@ target_sources(
         settings/termios_settings.cpp
         settings/terminal_options.cpp
         settings/queue_options.cpp
+        settings/history_options.cpp
         settings/executing_session_options.cpp
         settings/ssh_session_options.cpp
         settings/session_options.cpp
@@ -141,6 +142,7 @@ target_sources(
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
+        terminal/shell_integration.cpp
         components/progress_bar.cpp
         onboarding/onboarding.cpp
         file_explorer/side_model.cpp
