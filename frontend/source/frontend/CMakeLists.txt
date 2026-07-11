@@ -115,6 +115,7 @@ target_sources(
         settings/termios_settings.cpp
         settings/terminal_options.cpp
         settings/queue_options.cpp
+        settings/history_options.cpp
         settings/executing_session_options.cpp
         settings/ssh_session_options.cpp
         settings/session_options.cpp

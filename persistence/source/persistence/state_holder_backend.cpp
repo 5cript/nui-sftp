@@ -371,6 +371,29 @@ namespace Persistence
             hasMissingDefaults = true;
         }
 
+        auto historyOptionsDefault = stateCache_.historyOptions.find("default");
+        if (historyOptionsDefault == stateCache_.historyOptions.end())
+        {
+            Log::warn("Config file misses history options, adding defaults.");
+            stateCache_.historyOptions["default"] = HistoryOptions{
+                .captureMode = HistoryCaptureMode::smart,
+            };
+            extendWarning("Added default history options.");
+            mustSave = true;
+            hasMissingDefaults = true;
+
+            // Sessions written before the command history existed carry no reference, so the global
+            // history settings would not reach them. Point them at the default profile, only now that
+            // it is created: later a missing reference is the user's choice.
+            for (auto& [sessionName, session] : stateCache_.sessions)
+            {
+                if (session.historyOptions.hasReference())
+                    continue;
+                Log::warn("Session '{}' misses a history options reference, pointing it at the default.", sessionName);
+                session.historyOptions.ref("default");
+            }
+        }
+
         //         if (stateCache_.sessions.empty())
         //         {
         //             Log::warn("Config file misses terminal engines, adding defaults.");

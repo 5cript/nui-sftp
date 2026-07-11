@@ -1,5 +1,8 @@
 #include <frontend/terminal/terminal_channel.hpp>
 #include <frontend/terminal/channel_interface.hpp>
+#include <utility/echo_suppressor.hpp>
+#include <utility/shell_integration.hpp>
+#include <utility/typed_line_buffer.hpp>
 #include <log/log.hpp>
 #include <frontend/nlohmann_compat.hpp>
 
@@ -150,6 +153,18 @@ globalThis.terminalUtility.get = (id) => {
         return undefined;
     return globalThis.terminalUtility.terminals.get(id);
 };
+// Shell integration: xterm's own parser is a correct, chunk safe OSC parser, so the sequences the
+// preexec hooks emit are picked up here instead of scanning the byte stream ourselves. Returning
+// true swallows the sequence so it never reaches the screen.
+globalThis.terminalUtility.registerOscHandler = (id, code, cb) => {
+    const terminal = globalThis.terminalUtility.getTerminal(id);
+    if (!terminal)
+        return undefined;
+    return terminal.parser.registerOscHandler(code, (payload) => {
+        cb(payload);
+        return true;
+    });
+};
 // @endinline
 
 // @inline(css, xterm-js-css)
@@ -160,6 +175,11 @@ globalThis.terminalUtility.get = (id) => {
 
 namespace
 {
+    /**
+     * @brief How long the output has to be quiet before the echo filter lets go of what it holds.
+     */
+    constexpr int echoReleaseDelayMilliseconds = 100;
+
     Nui::val terminalUtility()
     {
         return Nui::val::global("terminalUtility");
@@ -209,6 +229,17 @@ struct TerminalChannel::Implementation
     std::function<void(std::string const&, bool)> doWrite{};
     bool isLocked{false};
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
+    Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
+    std::function<void(std::string const&)> onCommandExecuted{};
+    /// Hides the echo of the shell integration bootstrap from the user.
+    Utility::EchoSuppressor echoSuppressor{};
+    /// Releases what the echo filter holds once the output went quiet; undefined while none is set.
+    Nui::val echoReleaseTimer{Nui::val::undefined()};
+    /// Simple mode only: the line the user is typing, assembled from their own keystrokes.
+    Utility::TypedLineBuffer typedLineBuffer{[this](std::string const& line) {
+        if (onCommandExecuted)
+            onCommandExecuted(line);
+    }};
     // Lifetime sentinel: xterm onData/onResize callbacks capture a weak_ptr to this.
     // When the TerminalChannel is destroyed (e.g. by closeChannel after connection loss),
     // the shared_ptr is released and weak_ptr::lock() returns nullptr, so stale callbacks
@@ -221,6 +252,8 @@ struct TerminalChannel::Implementation
     // (e.g. a queued resize during widget detach) reaches a freed `this`.
     Nui::val onDataDisposable{Nui::val::undefined()};
     Nui::val onResizeDisposable{Nui::val::undefined()};
+    /// Same story for the OSC 633 handler of the smart capture mode.
+    Nui::val oscHandlerDisposable{Nui::val::undefined()};
     TerminalEngine* engine;
 
     Nui::val terminal() const
@@ -249,14 +282,41 @@ struct TerminalChannel::Implementation
 
     void writeRespectingCache(std::string const& data, bool isUserInput);
     void writeAfterCache(std::string const& data, bool isUserInput);
+    void writeToTerminal(std::string const& output);
+
+    void cancelEchoRelease()
+    {
+        if (echoReleaseTimer.isUndefined())
+            return;
+        Nui::val::global("clearTimeout")(echoReleaseTimer);
+        echoReleaseTimer = Nui::val::undefined();
+    }
+
+    /// The echo arrives in one burst, so bytes the filter still holds when the output goes quiet
+    /// are real output, typically the space ending the prompt (the bootstrap starts with a space).
+    void scheduleEchoRelease()
+    {
+        cancelEchoRelease();
+        echoReleaseTimer = Nui::val::global("setTimeout")(
+            Nui::bind([this, aliveWeak = std::weak_ptr<bool>(alive)]() {
+                if (!aliveWeak.lock())
+                    return;
+                echoReleaseTimer = Nui::val::undefined();
+                writeToTerminal(echoSuppressor.release());
+            }),
+            Nui::val{echoReleaseDelayMilliseconds}
+        );
+    }
 
     Implementation(
         TerminalEngine* engine,
         Ids::ChannelId channelId,
-        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+        std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput,
+        Persistence::HistoryCaptureMode captureMode
     )
         : channelId{std::move(channelId)}
         , onLockedUserInput{std::move(onLockedUserInput)}
+        , captureMode{captureMode}
         , engine{engine}
     {
         doWrite = [this](std::string const& data, bool isUserInput)
@@ -304,41 +364,55 @@ void TerminalChannel::Implementation::writeAfterCache(std::string const& data, b
     }
     else
     {
-        std::string nlFixedData;
-        bool previousWasCR = false;
-        for (auto c : data)
-        {
-            if (c == '\n')
-            {
-                if (!previousWasCR)
-                {
-                    nlFixedData += '\r';
-                }
-                previousWasCR = false;
-            }
-            else if (c == '\r')
-            {
-                previousWasCR = true;
-            }
-            nlFixedData += c;
-        }
-        debugPrintTerminalWrite(nlFixedData, isUserInput);
-        auto term = terminal();
-        if (term.isUndefined())
-        {
-            Log::error("Failed to get terminal with id to write to it: '{}", termId);
-            return;
-        }
-        term.call<void>("write", nlFixedData);
+        cancelEchoRelease();
+        writeToTerminal(echoSuppressor.filter(data));
+        if (echoSuppressor.holding())
+            scheduleEchoRelease();
     }
+}
+
+void TerminalChannel::Implementation::writeToTerminal(std::string const& output)
+{
+    if (output.empty())
+        return;
+
+    std::string nlFixedData;
+    bool previousWasCR = false;
+    for (auto c : output)
+    {
+        if (c == '\n')
+        {
+            if (!previousWasCR)
+            {
+                nlFixedData += '\r';
+            }
+            previousWasCR = false;
+        }
+        else if (c == '\r')
+        {
+            previousWasCR = true;
+        }
+        nlFixedData += c;
+    }
+    debugPrintTerminalWrite(nlFixedData, false);
+    auto term = terminal();
+    if (term.isUndefined())
+    {
+        Log::error("Failed to get terminal with id to write to it: '{}", termId);
+        return;
+    }
+    term.call<void>("write", nlFixedData);
 }
 
 TerminalChannel::TerminalChannel(
     TerminalEngine* engine,
     Ids::ChannelId channelId,
-    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput
+    std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput,
+    Persistence::HistoryCaptureMode captureMode
 )
-    : impl_{std::make_unique<Implementation>(engine, std::move(channelId), std::move(onLockedUserInput))}
+    : impl_{
+          std::make_unique<Implementation>(engine, std::move(channelId), std::move(onLockedUserInput), captureMode)
+      }
 {}
 TerminalChannel::~TerminalChannel() = default;
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(TerminalChannel);
@@ -413,11 +487,36 @@ void TerminalChannel::open(
             {
                 if (!aliveWeak.lock())
                     return;
-                write(data.as<std::string>(), true);
+                const auto asString = data.as<std::string>();
+                if (impl_->captureMode == Persistence::HistoryCaptureMode::simple)
+                    impl_->typedLineBuffer.feed(asString);
+                write(asString, true);
             },
             std::placeholders::_1
         )
     );
+
+    if (impl_->captureMode == Persistence::HistoryCaptureMode::smart)
+    {
+        impl_->oscHandlerDisposable = terminalUtility().call<Nui::val>(
+            "registerOscHandler",
+            impl_->termId,
+            ShellIntegration::oscCode,
+            Nui::bind(
+                [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val payload)
+                {
+                    if (!aliveWeak.lock())
+                        return;
+                    if (!payload.isString())
+                        return;
+                    const auto command = ShellIntegration::commandFromOscPayload(payload.as<std::string>());
+                    if (command && impl_->onCommandExecuted)
+                        impl_->onCommandExecuted(*command);
+                },
+                std::placeholders::_1
+            )
+        );
+    }
 
     impl_->onResizeDisposable = term.call<Nui::val>(
         "onResize",
@@ -468,6 +567,7 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
 
     auto cleanupFrontendChannel = [this, onComplete = std::move(onComplete)]()
     {
+        impl_->cancelEchoRelease();
         // Deregister our Nui::bind onData / onResize listeners FIRST so xterm
         // can't fire them during its own dispose and so the JS emitter drops
         // its last reference to the C++ std::function — otherwise the functor
@@ -483,6 +583,11 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
         {
             impl_->onResizeDisposable.call<void>("dispose");
             impl_->onResizeDisposable = Nui::val::undefined();
+        }
+        if (!impl_->oscHandlerDisposable.isUndefined() && !impl_->oscHandlerDisposable.isNull())
+        {
+            impl_->oscHandlerDisposable.call<void>("dispose");
+            impl_->oscHandlerDisposable = Nui::val::undefined();
         }
 
         auto term = impl_->terminal();
@@ -520,4 +625,27 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
 bool TerminalChannel::isOpen() const
 {
     return !impl_->termId.empty();
+}
+
+void TerminalChannel::setOnCommandExecuted(std::function<void(std::string const&)> onCommandExecuted)
+{
+    impl_->onCommandExecuted = std::move(onCommandExecuted);
+}
+
+void TerminalChannel::installShellIntegration(std::string const& bootstrapLine, std::size_t echoes)
+{
+    if (impl_->captureMode != Persistence::HistoryCaptureMode::smart)
+        return;
+    if (bootstrapLine.empty())
+        return;
+
+    // Goes through the same path a keystroke takes, so it reaches the shell's stdin no matter
+    // whether the transport is ssh or a local pty. The leading space keeps the line out of the
+    // shell's own history where the shell is configured to ignore space prefixed commands.
+    const auto line = " " + bootstrapLine;
+
+    // Arm the echo filter before writing, the tty may answer faster than the next statement runs.
+    impl_->echoSuppressor.arm(line, echoes);
+
+    write(line + "\n", true);
 }

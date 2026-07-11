@@ -56,6 +56,7 @@ struct SessionArea::Implementation
     FilePropertyDialog* filePropertyDialog;
     ArchiveTransferDialog* archiveTransferDialog;
     Toolbar* toolbar;
+    CommandStoreClient* commandStoreClient;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
     ScriptNuiComponents::Tabs tabs;
@@ -74,7 +75,8 @@ struct SessionArea::Implementation
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
-        Toolbar* toolbar
+        Toolbar* toolbar,
+        CommandStoreClient* commandStoreClient
     )
         : stateHolder{stateHolder}
         , events{events}
@@ -83,6 +85,7 @@ struct SessionArea::Implementation
         , filePropertyDialog{filePropertyDialog}
         , archiveTransferDialog{archiveTransferDialog}
         , toolbar{toolbar}
+        , commandStoreClient{commandStoreClient}
         , sessions{}
         , dropHandlerUnregister_{}
         , tabs{}
@@ -102,7 +105,8 @@ SessionArea::SessionArea(
     ConfirmDialog* confirmDialog,
     FilePropertyDialog* filePropertyDialog,
     ArchiveTransferDialog* archiveTransferDialog,
-    Toolbar* toolbar
+    Toolbar* toolbar,
+    CommandStoreClient* commandStoreClient
 )
     : impl_{std::make_unique<Implementation>(
           stateHolder,
@@ -111,7 +115,8 @@ SessionArea::SessionArea(
           confirmDialog,
           filePropertyDialog,
           archiveTransferDialog,
-          toolbar
+          toolbar,
+          commandStoreClient
       )}
 {
     impl_->tabs.onClose(
@@ -301,6 +306,7 @@ Session::Params SessionArea::makeSessionParams(
     params.confirmDialog = impl_->confirmDialog;
     params.filePropertyDialog = impl_->filePropertyDialog;
     params.archiveTransferDialog = impl_->archiveTransferDialog;
+    params.commandStoreClient = impl_->commandStoreClient;
     params.sessionOptions = std::move(engineOptions);
     params.uiOptions = std::move(uiOptions);
     params.initialName = std::move(displayName);
