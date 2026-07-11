@@ -10,6 +10,8 @@
 #include <backend/theme_finder.hpp>
 #include <backend/program_options.hpp>
 #include <backend/opener.hpp>
+#include <command-store/command_store.hpp>
+#include <command-store/command_store_rpc.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
 #include <nui-file-explorer/support/default_places.hpp>
@@ -26,7 +28,9 @@
 
 #include <filesystem>
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <optional>
 
 class ForkPool;
 
@@ -47,6 +51,7 @@ class Main
 
   private:
     void registerInitialWarningGetter();
+    void registerCommandStore();
     void onRpcAlive();
 
   private:
@@ -65,6 +70,8 @@ class Main
     ProcessStore processes_;
     PasswordPrompter prompter_;
     std::unique_ptr<FileTracking::TempDirInstanceManager> tempDirInstanceManager_;
+    std::optional<CommandStore::Store> commandStore_;
+    std::unique_ptr<CommandStore::StoreRpc> commandStoreRpc_;
 
     std::shared_ptr<SessionManager> sshSessionManager_;
     boost::asio::steady_timer childSignalTimer_;

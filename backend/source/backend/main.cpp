@@ -252,6 +252,7 @@ void Main::registerRpc()
     processes_.registerRpc(window_, hub_);
     sshSessionManager_->registerRpc();
     registerInitialWarningGetter();
+    registerCommandStore();
 
     defaultPlacesProvider_ = std::make_unique<NuiFileExplorer::DefaultPlacesProvider>(hub_);
 #ifdef _WIN32
@@ -320,6 +321,19 @@ void Main::show()
     window_.navigate("nui://app.example/index.html");
     window_.setConsoleOutput(false);
     window_.run();
+}
+
+void Main::registerCommandStore()
+{
+    auto store = CommandStore::Store::open(window_.getExecutor(), programDir_ / "command_store.db");
+    if (!store)
+    {
+        Log::error("Failed to open the command store, history and snippets are unavailable: {}", store.error().message);
+        return;
+    }
+
+    commandStore_.emplace(std::move(*store));
+    commandStoreRpc_ = std::make_unique<CommandStore::StoreRpc>(window_.getExecutor(), window_, hub_, *commandStore_);
 }
 
 void Main::registerInitialWarningGetter()

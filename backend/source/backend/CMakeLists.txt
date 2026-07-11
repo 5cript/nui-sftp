@@ -103,6 +103,7 @@ target_link_libraries(
         ids
         events
         tar-archive
+        command-store
 )
 
 target_link_libraries(

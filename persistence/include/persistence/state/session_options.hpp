@@ -5,6 +5,7 @@
 #include <persistence/state/termios.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <persistence/state/queue_options.hpp>
+#include <persistence/state/history_options.hpp>
 #include <persistence/reference.hpp>
 #include <nlohmann/json.hpp>
 #include <persistence/state/terminal_options.hpp>
@@ -102,6 +103,7 @@ namespace Persistence
         Referenceable<TerminalOptions> terminalOptions{};
         Referenceable<Termios> termios{};
         Referenceable<QueueOptions> queueOptions{};
+        Referenceable<HistoryOptions> historyOptions{};
 
         void variantDecide(nlohmann::json const& j)
         {
@@ -129,7 +131,7 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         SessionOptions,
         (),
-        (type, icon, orderBy, startupSession, terminalOptions, termios, engine, layouts, queueOptions)
+        (type, icon, orderBy, startupSession, terminalOptions, termios, engine, layouts, queueOptions, historyOptions)
     )
 
     ExecutingSessionOptions defaultMsys2SessionOption();
