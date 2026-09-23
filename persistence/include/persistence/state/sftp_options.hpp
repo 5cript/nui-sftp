@@ -54,6 +54,9 @@ namespace Persistence
     {};
     BOOST_DESCRIBE_STRUCT(UploadOptions, (CommonTransferOptions), ())
 
+    // Default number of queue operations worked on in parallel.
+    inline constexpr int defaultSftpConcurrency = 4;
+
     struct SftpOptions
     {
         std::optional<DownloadOptions> downloadOptions{};
