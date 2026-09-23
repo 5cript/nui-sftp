@@ -29,7 +29,7 @@ Session::Session(
     , id_{std::move(id)}
     , session_{std::move(session)}
     , operationQueue_{std::make_shared<
-          OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(1))}
+          OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency))}
     , bulkResumeRegistry_{bulkResumeRegistry}
 {}
 

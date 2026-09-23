@@ -349,7 +349,7 @@ namespace Persistence
                             .failFast = false
                         },
                     },
-                .concurrency = 1,
+                .concurrency = defaultSftpConcurrency,
                 .operationTimeout = 5s
             };
 #pragma clang diagnostic pop
