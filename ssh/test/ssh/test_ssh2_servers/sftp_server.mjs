@@ -154,6 +154,10 @@ const server = new Server({
     }
 }, (client) => {
     logMessage('Client connected!');
+    // SFTP is strictly request/response with one write in flight per file on the client
+    // side. With Nagle enabled every 32 KiB write stalls for a delayed-ACK period, which
+    // capped the mock at roughly 300 KB/s and made larger transfers hit the kill timer.
+    client.setNoDelay(true);
 
     client.on('authentication', (ctx) => {
         let allowed = true;
