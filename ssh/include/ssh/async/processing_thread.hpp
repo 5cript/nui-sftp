@@ -128,6 +128,13 @@ namespace SecureShell
         int permanentTaskCount() const;
 
         /**
+         * @brief Number of permanent tasks being run in the current cycle. Unlike
+         *        permanentTaskCount this is valid from inside a permanent task, where the task
+         *        set is temporarily moved out for processing.
+         */
+        int activePermanentTaskCount() const noexcept;
+
+        /**
          * @brief Removes all permanent tasks.
          */
         void clearPermanentTasks();
@@ -171,6 +178,7 @@ namespace SecureShell
         std::atomic<int> permanentTaskIdCounter_ = 0;
         std::atomic<std::thread::id> processingThreadId_{};
         std::atomic_bool processingPermanents_{false};
+        std::atomic<int> activePermanentTasks_{0};
         std::vector<std::function<void()>> deferredTaskModification_{};
 
         std::deque<std::function<void()>> tasks_{};

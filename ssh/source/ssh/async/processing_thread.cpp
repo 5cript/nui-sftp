@@ -19,7 +19,9 @@ namespace SecureShell
     void ProcessingThread::start(std::chrono::milliseconds const& minimumCycleWait)
     {
         if (thread_.joinable())
-            throw std::logic_error("ProcessingThread::start called while a previous thread is still joinable; call stop() first.");
+            throw std::logic_error(
+                "ProcessingThread::start called while a previous thread is still joinable; call stop() first."
+            );
         {
             std::lock_guard lock{taskMutex_};
             running_ = true;
@@ -175,6 +177,7 @@ namespace SecureShell
                     auto permaTasksMoved = std::move(permanentTasks_);
                     permanentTasks_ = {};
                     processingPermanents_ = true;
+                    activePermanentTasks_ = static_cast<int>(permaTasksMoved.size());
                     lock.unlock();
 
                     for (auto const& [id, task] : permaTasksMoved)
@@ -279,6 +282,10 @@ namespace SecureShell
             std::lock_guard lock{taskMutex_};
             running_ = false;
         }
+    }
+    int ProcessingThread::activePermanentTaskCount() const noexcept
+    {
+        return activePermanentTasks_.load();
     }
     int ProcessingThread::permanentTaskCount() const
     {
