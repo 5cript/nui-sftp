@@ -445,15 +445,17 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
     auto* processingStrand = sftp_->strand();
     if (!slots_.empty() && processingStrand && !processingStrand->withinProcessingThread())
     {
-        std::ignore = sftp_
-                          ->performPromise(
-                              [this, adoptCancelState]() -> bool
-                              {
-                                  cancelChildrenInStrand(adoptCancelState);
-                                  return true;
-                              }
-                          )
-                          .get();
+        // Only wait, never get(): a finalized strand hands back an exceptional future and this
+        // runs from the destructor too.
+        auto fut = sftp_->performPromise(
+            [this, adoptCancelState]() -> bool
+            {
+                cancelChildrenInStrand(adoptCancelState);
+                return true;
+            }
+        );
+        if (fut.wait_for(common_.futureTimeout) != std::future_status::ready)
+            Log::error("{}: cancel umbrella timed out, children stay with the processing thread.", logName());
     }
     else
     {
