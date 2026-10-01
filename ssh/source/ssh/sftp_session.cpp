@@ -40,30 +40,45 @@ namespace SecureShell
             )
             .get();
     }
-    void SftpSession::reportThroughput(std::int64_t bytesPerSecond) noexcept
+    void SftpSession::recordDataCall(std::int64_t bytes, std::chrono::steady_clock::duration took) noexcept
     {
-        if (bytesPerSecond <= 0)
+        if (bytes <= 0)
             return;
-        // EWMA with a short memory so a link that slows down is noticed quickly.
-        const auto previous = throughputEstimate_.load();
-        throughputEstimate_ = previous == 0 ? bytesPerSecond : (previous * 3 + bytesPerSecond) / 4;
+        const auto tookNanos =
+            std::max<std::int64_t>(1, std::chrono::duration_cast<std::chrono::nanoseconds>(took).count());
+
+        // Round trip floor: drops immediately, rises slowly so a changing link is followed.
+        auto roundTrip = roundTripNanos_.load();
+        if (roundTrip == 0 || tookNanos < roundTrip)
+            roundTrip = tookNanos;
+        else
+            roundTrip += (tookNanos - roundTrip) / 32;
+        roundTripNanos_ = roundTrip;
+
+        constexpr std::int64_t minimumChunk = 4 * 1024;
+        constexpr std::int64_t maximumChunk = 4 * 1024 * 1024;
+        const auto targetNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(targetCallDuration()).count();
+        const auto ideal = bytes * targetNanos / tookNanos;
+        const auto current = chunkBytes_.load();
+        chunkBytes_ = std::clamp((current + ideal) / 2, minimumChunk, maximumChunk);
     }
 
-    std::int64_t SftpSession::throughputEstimate() const noexcept
+    std::chrono::steady_clock::duration SftpSession::targetCallDuration() const noexcept
     {
-        return throughputEstimate_.load();
+        using namespace std::chrono_literals;
+        constexpr auto minimum = 50ms;
+        constexpr auto maximum = 250ms;
+        constexpr std::int64_t roundTripsPerCall = 4;
+        const auto roundTrip = std::chrono::nanoseconds{roundTripNanos_.load()};
+        if (roundTrip.count() == 0)
+            return minimum;
+        return std::clamp<std::chrono::steady_clock::duration>(roundTrip * roundTripsPerCall, minimum, maximum);
     }
 
     std::int64_t SftpSession::preferredTransferChunk(std::int64_t upperBound) const noexcept
     {
-        constexpr std::int64_t unknownLinkChunk = 16 * 1024;
         constexpr std::int64_t minimumChunk = 4 * 1024;
-        constexpr std::int64_t targetChunkMilliseconds = 50;
-        const auto bound = std::max(minimumChunk, upperBound);
-        const auto estimate = throughputEstimate_.load();
-        if (estimate <= 0)
-            return std::min(unknownLinkChunk, bound);
-        return std::clamp(estimate * targetChunkMilliseconds / 1000, minimumChunk, bound);
+        return std::clamp(chunkBytes_.load(), minimumChunk, std::max(minimumChunk, upperBound));
     }
 
     std::size_t SftpSession::preferredBufferSize(std::size_t fileSize) const noexcept
