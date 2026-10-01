@@ -5,6 +5,7 @@
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/async/processing_strand.hpp>
+#include <ssh/async/transfer_chunk_controller.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_error.hpp>
@@ -297,42 +298,21 @@ namespace SecureShell
         }
 
         /**
+         * @brief Sizes this session's blocking data calls from measured round trips.
+         */
+        TransferChunkController& chunkController() noexcept
+        {
+            return chunkController_;
+        }
+
+        TransferChunkController const& chunkController() const noexcept
+        {
+            return chunkController_;
+        }
+
+        /**
          * @brief Shared buffer pool for this session's file transfers.
          */
-        /**
-         * @brief Feeds the duration of one blocking data call (sftp_read / sftp_write) into the
-         *        chunk controller. The chunk is scaled so the next call takes about
-         *        @ref targetCallDuration, which converges no matter how many transfers share the
-         *        link. Throughput must not drive this: on a link with latency a small chunk
-         *        lowers throughput, which would shrink the chunk further.
-         *
-         * @param bytes Bytes the call moved.
-         * @param took Wall time the call blocked.
-         */
-        void recordDataCall(std::int64_t bytes, std::chrono::steady_clock::duration took) noexcept;
-
-        /**
-         * @brief How long one blocking data call should take: a few round trips so the call
-         *        stays efficient, clamped to 50..250 ms so the processing thread stays responsive.
-         */
-        std::chrono::steady_clock::duration targetCallDuration() const noexcept;
-
-        /**
-         * @brief Bytes a single sftp read or write should move on this link right now,
-         *        pessimistic (16 KiB) until calls have been measured.
-         *
-         * @param upperBound Buffer size or server limit the result must not exceed.
-         */
-        std::int64_t preferredTransferChunk(std::int64_t upperBound) const noexcept;
-
-        /**
-         * @brief Size hint for leasing a transfer buffer on this link. Small on slow links so the
-         *        big pool slots stay free for transfers that can use them.
-         *
-         * @param fileSize The transfer size; the hint never exceeds it.
-         */
-        std::size_t preferredBufferSize(std::size_t fileSize) const noexcept;
-
         IBufferProvider& bufferProvider() noexcept
         {
             return *bufferProvider_;
@@ -371,9 +351,7 @@ namespace SecureShell
         sftp_session session_;
         std::shared_ptr<IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
-        std::atomic<std::int64_t> chunkBytes_{16 * 1024};
-        // Smallest data-call duration seen, drifting up slowly; approximates the round trip.
-        std::atomic<std::int64_t> roundTripNanos_{0};
+        TransferChunkController chunkController_{};
     };
 
     constexpr inline auto operator|(SftpSession::OpenType a, SftpSession::OpenType b)

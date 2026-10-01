@@ -545,9 +545,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
     if (options_.entry->isSymlink())
         return {};
 
-    buffer_ = sftp_->bufferProvider().leaseForTransfer(
-        sftp_->preferredBufferSize(options_.entry->size), stream->readLengthLimit()
-    );
+    buffer_ = sftp_->bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
     if (buffer_.empty())
     {
         Log::error("DownloadOperation: No transfer buffer available from pool.");

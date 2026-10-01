@@ -32,7 +32,7 @@ namespace SecureShell
             using SignedSizeType = IFileStream::SignedSizeType;
             const auto maxChunk =
                 std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
-            return std::min(maxChunk, static_cast<SignedSizeType>(sftp.preferredTransferChunk(maxChunk)));
+            return std::min(maxChunk, static_cast<SignedSizeType>(sftp.chunkController().preferredTransferChunk(maxChunk)));
         }
 
         bool turnExpired(std::chrono::steady_clock::time_point turnStart, std::chrono::steady_clock::duration limit)
@@ -484,7 +484,7 @@ namespace SecureShell
                     context->cancel();
                     return false;
                 }
-                const auto target = sftp->targetCallDuration();
+                const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return true;
 
@@ -499,8 +499,9 @@ namespace SecureShell
                 )
                 {
                     const auto chunk = transferChunkBytes(*sftp, bufferSize, lengthLimit);
+                    const auto requested = std::min(remainingRead, chunk);
                     const auto callStart = std::chrono::steady_clock::now();
-                    const auto result = sftp_read(stream->file_.get(), buffer, std::min(remainingRead, chunk));
+                    const auto result = sftp_read(stream->file_.get(), buffer, requested);
                     if (result < 0)
                     {
                         context->cancel();
@@ -508,7 +509,7 @@ namespace SecureShell
                     }
                     if (result == 0)
                         break;
-                    sftp->recordDataCall(result, std::chrono::steady_clock::now() - callStart);
+                    sftp->chunkController().recordDataCall(result, requested, std::chrono::steady_clock::now() - callStart);
                     remainingRead -= result;
                     if (!onRead(result))
                     {
@@ -585,7 +586,7 @@ namespace SecureShell
                     context->cancel();
                     return false;
                 }
-                const auto target = sftp->targetCallDuration();
+                const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return true;
 
@@ -606,14 +607,15 @@ namespace SecureShell
                         context->cancel();
                         return false;
                     }
+                    const auto requested = std::min(remainingWrite, amountRead);
                     const auto callStart = std::chrono::steady_clock::now();
-                    const auto result = sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
+                    const auto result = sftp_write(stream->file_.get(), buffer, requested);
                     if (result < 0)
                     {
                         context->cancel();
                         return false;
                     }
-                    sftp->recordDataCall(result, std::chrono::steady_clock::now() - callStart);
+                    sftp->chunkController().recordDataCall(result, requested, std::chrono::steady_clock::now() - callStart);
                     remainingWrite -= result;
                     context->bytesTransferred_ += result;
                     turnBytes += result;
