@@ -433,6 +433,8 @@ header.opq-controls {
 .opq-bulk {
     display: flex;
     flex-direction: column;
+    /* .opq-body centers its children; in a column that would shrink every row to its content. */
+    align-items: stretch;
     gap: 2px;
     min-width: 0;
 
