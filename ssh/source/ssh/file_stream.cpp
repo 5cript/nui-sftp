@@ -10,28 +10,44 @@ namespace SecureShell
 {
     namespace
     {
+        /** @brief Upper bound on the wall time one transfer may block the processing thread per
+         *         turn. Queue steps, progress polling and pause requests all wait for the current
+         *         cycle, so this bounds their latency on slow links.
+         */
+        constexpr auto maxTurnDuration = std::chrono::milliseconds{100};
+
         /** @brief Number of buffer-sized transfers to run per strand turn.
          *
          *  Batching amortizes the strand task overhead, but each turn blocks
          *  progress polling, so the bytes moved per turn are capped: servers
          *  that negotiate small buffers get more cycles, large ones get fewer.
+         *  The cap is shared between all transfers running on the thread, so a
+         *  cycle does not grow with the number of concurrent transfers.
          *  Also bounded by what is left so we don't overshoot near EOF.
          *
-         *  @param bufferSize     Per-transfer chunk size (server-clamped).
-         *  @param remainingBytes Bytes still to transfer.
+         *  @param bufferSize      Per-transfer chunk size (server-clamped).
+         *  @param remainingBytes  Bytes still to transfer.
+         *  @param activeTransfers Transfers currently sharing the processing thread.
          */
         IFileStream::SignedSizeType transferCyclesPerTurn(
             IFileStream::SignedSizeType bufferSize,
-            IFileStream::SignedSizeType remainingBytes
+            IFileStream::SignedSizeType remainingBytes,
+            int activeTransfers
         )
         {
             using SignedSizeType = IFileStream::SignedSizeType;
-            constexpr SignedSizeType targetBytesPerTurn = 256 * 1024;
+            constexpr SignedSizeType targetBytesPerCycle = 256 * 1024;
             if (bufferSize <= 0)
                 return SignedSizeType{1};
-            const auto byTarget = std::max(SignedSizeType{1}, targetBytesPerTurn / bufferSize);
+            const auto perTransfer = targetBytesPerCycle / std::max(1, activeTransfers);
+            const auto byTarget = std::max(SignedSizeType{1}, perTransfer / bufferSize);
             const auto byRemaining = (remainingBytes / bufferSize) + SignedSizeType{1};
             return std::min(byTarget, byRemaining);
+        }
+
+        bool turnExpired(std::chrono::steady_clock::time_point turnStart)
+        {
+            return std::chrono::steady_clock::now() - turnStart > maxTurnDuration;
         }
     }
 
@@ -82,13 +98,14 @@ namespace SecureShell
         {
             if (!sftp->strand_->withinProcessingThread())
             {
-                (void)sftp->performPromise(
-                        [this, isBackElement, sftp]() -> bool
-                        {
-                            closeInStrand(isBackElement);
-                            return true;
-                        }
-                ).get();
+                (void)
+                    sftp->performPromise(
+                            [this, isBackElement, sftp]() -> bool
+                            {
+                                closeInStrand(isBackElement);
+                                return true;
+                            }
+                    ).get();
             }
             else
             {
@@ -142,7 +159,12 @@ namespace SecureShell
     }
     std::future<std::expected<void, SftpError>> FileStream::seek(std::size_t pos)
     {
-        return performPromise([this, pos]() { return seekInStrand(pos); });
+        return performPromise(
+            [this, pos]()
+            {
+                return seekInStrand(pos);
+            }
+        );
     }
     std::expected<FileInformation, SftpError> FileStream::statInStrand()
     {
@@ -158,7 +180,12 @@ namespace SecureShell
     }
     std::future<std::expected<FileInformation, SftpError>> FileStream::stat()
     {
-        return performPromise([this]() { return statInStrand(); });
+        return performPromise(
+            [this]()
+            {
+                return statInStrand();
+            }
+        );
     }
     std::expected<std::size_t, SftpError> FileStream::tellInStrand()
     {
@@ -169,7 +196,12 @@ namespace SecureShell
     }
     std::future<std::expected<std::size_t, SftpError>> FileStream::tell()
     {
-        return performPromise([this]() { return tellInStrand(); });
+        return performPromise(
+            [this]()
+            {
+                return tellInStrand();
+            }
+        );
     }
     std::expected<void, SftpError> FileStream::rewindInStrand()
     {
@@ -181,7 +213,12 @@ namespace SecureShell
     }
     std::future<std::expected<void, SftpError>> FileStream::rewind()
     {
-        return performPromise([this]() { return rewindInStrand(); });
+        return performPromise(
+            [this]()
+            {
+                return rewindInStrand();
+            }
+        );
     }
     SftpError FileStream::lastError() const
     {
@@ -209,7 +246,12 @@ namespace SecureShell
     }
     std::future<std::expected<std::size_t, SftpError>> FileStream::readSome(char* buffer, std::size_t bufferSize)
     {
-        return performPromise([this, buffer, bufferSize]() { return readSomeInStrand(buffer, bufferSize); });
+        return performPromise(
+            [this, buffer, bufferSize]()
+            {
+                return readSomeInStrand(buffer, bufferSize);
+            }
+        );
     }
 
     std::future<std::expected<std::size_t, SftpError>>
@@ -432,12 +474,7 @@ namespace SecureShell
             assert(sftp->strand_->withinProcessingThread());
         auto context = std::make_shared<AsyncTransferContext>();
         const auto [success, id] = strand()->pushPermanentTask(
-            [weakStream = weak_from_this(),
-                buffer,
-                bufferSize,
-                onRead = std::move(onRead),
-                context,
-                totalFileSize]()
+            [weakStream = weak_from_this(), buffer, bufferSize, onRead = std::move(onRead), context, totalFileSize]()
             {
                 if (context->hasEnded())
                     return false;
@@ -452,10 +489,14 @@ namespace SecureShell
                 }
 
                 auto remainingRead = totalFileSize - context->bytesTransferred_.load();
-                const auto readCycles = transferCyclesPerTurn(bufferSize, remainingRead);
+                const auto readCycles =
+                    transferCyclesPerTurn(bufferSize, remainingRead, stream->strand()->activePermanentTaskCount());
+                const auto turnStart = std::chrono::steady_clock::now();
 
                 for (SignedSizeType i = 0; i != readCycles; ++i)
                 {
+                    if (i != 0 && turnExpired(turnStart))
+                        break;
                     const auto result = sftp_read(stream->file_.get(), buffer, std::min(remainingRead, bufferSize));
                     if (result < 0)
                     {
@@ -499,7 +540,8 @@ namespace SecureShell
     )
     {
         return performPromise(
-            [this, totalFileSize, buffer, bufferSize, onRead = std::move(onRead)]() mutable {
+            [this, totalFileSize, buffer, bufferSize, onRead = std::move(onRead)]() mutable
+            {
                 return readAsyncInStrand(totalFileSize, buffer, bufferSize, std::move(onRead));
             }
         );
@@ -516,12 +558,7 @@ namespace SecureShell
             assert(sftp->strand_->withinProcessingThread());
         auto context = std::make_shared<AsyncTransferContext>();
         const auto [success, id] = strand()->pushPermanentTask(
-            [weakStream = weak_from_this(),
-                buffer,
-                bufferSize,
-                doRead = std::move(doRead),
-                context,
-                totalFileSize]()
+            [weakStream = weak_from_this(), buffer, bufferSize, doRead = std::move(doRead), context, totalFileSize]()
             {
                 if (context->hasEnded())
                     return false;
@@ -536,18 +573,21 @@ namespace SecureShell
                 }
 
                 auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
-                const auto writeCycles = transferCyclesPerTurn(bufferSize, remainingWrite);
+                const auto writeCycles =
+                    transferCyclesPerTurn(bufferSize, remainingWrite, stream->strand()->activePermanentTaskCount());
+                const auto turnStart = std::chrono::steady_clock::now();
 
                 for (SignedSizeType i = 0; i != writeCycles; ++i)
                 {
+                    if (i != 0 && turnExpired(turnStart))
+                        break;
                     const auto amountRead = doRead(remainingWrite);
                     if (amountRead <= 0)
                     {
                         context->cancel();
                         return false;
                     }
-                    const auto result =
-                        sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
+                    const auto result = sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
                     if (result < 0)
                     {
                         context->cancel();
@@ -585,7 +625,8 @@ namespace SecureShell
     )
     {
         return performPromise(
-            [this, totalFileSize, buffer, bufferSize, doRead = std::move(doRead)]() mutable {
+            [this, totalFileSize, buffer, bufferSize, doRead = std::move(doRead)]() mutable
+            {
                 return writeAsyncInStrand(totalFileSize, buffer, bufferSize, std::move(doRead));
             }
         );

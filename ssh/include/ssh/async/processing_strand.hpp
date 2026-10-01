@@ -164,6 +164,14 @@ namespace SecureShell
             return processingThread_->pushPromiseTask(std::forward<Func>(func));
         }
 
+        /**
+         * @brief Permanent tasks running in the processing thread's current cycle.
+         */
+        int activePermanentTaskCount() const noexcept
+        {
+            return processingThread_->activePermanentTaskCount();
+        }
+
         bool withinProcessingThread() const noexcept
         {
             return processingThread_->withinProcessingThread();
