@@ -180,14 +180,19 @@ namespace SecureShell
                     processingPermanents_ = true;
                     lock.unlock();
 
-                    const auto rotation = permaTasksMoved.empty() ? 0 : (permanentRotation_++ % permaTasksMoved.size());
+                    const auto taskCount = permaTasksMoved.size();
+                    const auto rotation = taskCount == 0 ? 0 : (permanentRotation_ % taskCount);
                     const auto rotatedBegin = std::next(permaTasksMoved.begin(), static_cast<std::ptrdiff_t>(rotation));
+                    std::size_t position = 0;
+                    std::size_t longestPosition = 0;
+                    std::chrono::steady_clock::duration longest{0};
                     auto runTask = [&](auto const& entry)
                     {
                         auto const& [id, task] = entry;
                         // Throwing tasks are removed (not re-run) and the exception is
                         // captured for rethrow at end of cycle so cleanup below still runs.
                         bool keep = false;
+                        const auto taskStart = std::chrono::steady_clock::now();
                         try
                         {
                             keep = task(id);
@@ -197,15 +202,28 @@ namespace SecureShell
                             if (!pendingException)
                                 pendingException = std::current_exception();
                         }
+                        const auto taskTook = std::chrono::steady_clock::now() - taskStart;
+                        if (taskTook > longest)
+                        {
+                            longest = taskTook;
+                            longestPosition = position;
+                        }
+                        ++position;
                         if (!keep)
                             toRemove.push_back(id);
                         return running_ && !shuttingDown_;
                     };
                     bool keepGoing = true;
-                    for (auto it = rotatedBegin; keepGoing && it != permaTasksMoved.end(); ++it)
-                        keepGoing = runTask(*it);
-                    for (auto it = permaTasksMoved.begin(); keepGoing && it != rotatedBegin; ++it)
-                        keepGoing = runTask(*it);
+                    for (auto task = rotatedBegin; keepGoing && task != permaTasksMoved.end(); ++task)
+                        keepGoing = runTask(*task);
+                    for (auto task = permaTasksMoved.begin(); keepGoing && task != rotatedBegin; ++task)
+                        keepGoing = runTask(*task);
+                    // Start the next cycle after the task that spent this one, so tasks that block
+                    // take turns no matter how many cheap tasks sit between them in the map.
+                    // Without a blocking task, advance one slot.
+                    constexpr auto blockingTask = std::chrono::milliseconds{1};
+                    if (taskCount != 0)
+                        permanentRotation_ = (rotation + (longest >= blockingTask ? longestPosition + 1 : 1)) % taskCount;
                     if (!toRemove.empty())
                     {
                         for (auto const& id : toRemove)
