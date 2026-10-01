@@ -677,6 +677,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
 
 void UploadOperation::cleanup()
 {
+    if (asyncTransferContext_)
+        asyncTransferContext_->cancel();
+
     localFile_.close();
 
     if (auto stream = fileStream_.lock(); stream)
