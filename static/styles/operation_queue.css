@@ -431,11 +431,10 @@ header.opq-controls {
 }
 
 .opq-bulk {
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
-    column-gap: 12px;
-    row-gap: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
 
     /* text row */
     &>div:first-child {
@@ -447,21 +446,36 @@ header.opq-controls {
         min-width: 0;
     }
 
-    /* progress bars row — fixed grid so bars never shift */
-    &>div:last-child {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 4px;
+    /* total bar spans the full card width */
+    &>.opq-bulk-total>.progress-bar {
+        width: 100%;
+        border-radius: 8px;
         font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
         font-variant-numeric: tabular-nums;
+    }
 
-        &>.progress-bar:first-child {
-            border-radius: 8px 0 0 8px;
-        }
+    /* one row per file currently in flight */
+    &>.opq-bulk-files {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+}
 
-        &>.progress-bar:last-child {
-            border-radius: 0 8px 8px 0;
-        }
+.opq-bulk-file-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2fr;
+    gap: 4px;
+    align-items: center;
+    min-width: 0;
+    font-size: 0.85em;
+
+    &>.progress-bar {
+        width: 100%;
+        border-radius: 6px;
+        font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
+        font-variant-numeric: tabular-nums;
     }
 }
 

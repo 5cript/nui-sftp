@@ -6,6 +6,12 @@
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <utility/format_bytes.hpp>
 
+#include <algorithm>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <vector>
+
 struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
 {
   public:
@@ -29,13 +35,6 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
           }
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
-        , fileProgressBar_({
-              .height = std::string{progressHeight},
-              .min = 0,
-              .max = 1,
-              .showMinMax = true,
-              .byteMode = true,
-          })
         , totalProgressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -52,13 +51,36 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
 
     void setProgress(SharedData::BulkProgress const& progress)
     {
-        if (currentFile.value() != progress.currentFile)
-            currentFile = progress.currentFile;
+        // A row keeps its file until that file leaves the in-flight set; new files take the
+        // first free row, so nothing shifts when an earlier file finishes.
+        const auto inFlight = [&progress](std::uint64_t entryIndex)
+        {
+            return std::ranges::any_of(
+                progress.inFlight,
+                [entryIndex](SharedData::BulkFileProgress const& file)
+                {
+                    return file.entryIndex == entryIndex;
+                }
+            );
+        };
+        for (auto const& row : inFlightRows_.value())
+        {
+            if (row->entryIndex.has_value() && !inFlight(*row->entryIndex))
+                row->entryIndex.reset();
+        }
+        for (auto const& file : progress.inFlight)
+        {
+            auto row = rowFor(file.entryIndex);
+            if (!row)
+                row = claimFreeRow(file.entryIndex);
+            if (row->name.value() != file.file)
+                row->name = file.file;
+            row->bar.max(static_cast<long long>(file.totalBytes));
+            row->bar.setProgress(static_cast<long long>(file.bytes));
+        }
+        trimFreeTailRows();
 
-        fileProgressBar_.setProgress(progress.currentFileBytes);
-        fileProgressBar_.max(static_cast<long long>(progress.currentFileTotalBytes));
-
-        totalProgressBar_.setProgress(progress.bytesCurrent);
+        totalProgressBar_.setProgress(static_cast<long long>(progress.bytesCurrent));
         totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
 
         bytesPerSecond = progress.bytesPerSecond;
@@ -84,31 +106,24 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                 div{
                     style = "flex-grow: 1; overflow: hidden; min-width: 0;"
                 }(
-                    observe(currentFile),
                     [this]() -> Nui::ElementRenderer {
                         const auto& srcPath = type_ == SharedData::OperationType::BulkUpload ? localPath_ : remotePath_;
                         const auto& dstPath = type_ == SharedData::OperationType::BulkUpload ? remotePath_ : localPath_;
-                        if (currentFile.value().empty())
-                        {
-                            return div{
-                                class_ = "opq-transfer-route",
-                                alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
-                            }(
-                                span{
-                                    class_ = "opq-route-segment"
-                                }(srcPath.generic_string()),
-                                span{
-                                    class_ = "opq-route-arrow"
-                                }(Svgs::arrowRight()),
-                                span{
-                                    class_ = "opq-route-segment"
-                                }(dstPath.generic_string())
-                            );
-                        }
-                        return span{
-                            class_ = "opq-route-segment"
-                        }(currentFile.value());
-                    }
+                        return div{
+                            class_ = "opq-transfer-route",
+                            alt = fmt::format("{} → {}", srcPath.generic_string(), dstPath.generic_string())
+                        }(
+                            span{
+                                class_ = "opq-route-segment"
+                            }(srcPath.generic_string()),
+                            span{
+                                class_ = "opq-route-arrow"
+                            }(Svgs::arrowRight()),
+                            span{
+                                class_ = "opq-route-segment"
+                            }(dstPath.generic_string())
+                        );
+                    }()
                 ),
                 span{
                     class_ = "opq-status-text opq-status-count"
@@ -140,9 +155,18 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                     }
                 )
             ),
-            div{}(
-                totalProgressBar_(),
-                fileProgressBar_()
+            div{
+                class_ = "opq-bulk-total"
+            }(
+                totalProgressBar_()
+            ),
+            div{
+                class_ = "opq-bulk-files"
+            }(
+                Nui::range(inFlightRows_),
+                [](long long, auto const& row) -> Nui::ElementRenderer {
+                    return row->render();
+                }
             )
         );
         // clang-format on
@@ -153,19 +177,18 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         OperationCard::state(newState);
         if (isCompletedState())
         {
-            // Pin both bars to their max and zero the speed. A dropped or late
-            // terminal progress tick can otherwise leave the bars short of 100%
+            // Pin the total bar to its max and zero the speed. A dropped or late
+            // terminal progress tick can otherwise leave the bar short of 100%
             // and the speed frozen at its last sample. Mirrors the count-pin in
-            // body().
+            // body(). In-flight rows are gone by then; clear any leftovers.
             if (newState == SharedData::OperationState::Completed ||
                 newState == SharedData::OperationState::PartialSuccess)
             {
                 bytesPerSecond = 0;
                 totalProgressBar_.setProgress(totalProgressBar_.max());
-                fileProgressBar_.setProgress(fileProgressBar_.max());
             }
-            fileProgressBar_.setZeroAsComplete();
             totalProgressBar_.setZeroAsComplete();
+            resizeInFlightRows(0);
         }
     }
 
@@ -192,13 +215,122 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
     }
 
   private:
+    struct InFlightRow
+    {
+        std::optional<std::uint64_t> entryIndex{};
+        Nui::Observed<std::string> name{""};
+        Components::ProgressBar bar{{
+            .height = std::string{progressHeight},
+            .min = 0,
+            .max = 1,
+            .showMinMax = true,
+            .byteMode = true,
+        }};
+
+        Nui::ElementRenderer render() const
+        {
+            using namespace Nui::Elements;
+            using namespace Nui::Attributes;
+            using Nui::Elements::div;
+            using Nui::Elements::span;
+
+            // clang-format off
+            return div{
+                class_ = "opq-bulk-file-row"
+            }(
+                span{
+                    class_ = "opq-route-segment"
+                }(
+                    observe(name),
+                    [this]() -> std::string {
+                        return name.value();
+                    }
+                ),
+                bar()
+            );
+            // clang-format on
+        }
+    };
+
+    std::shared_ptr<InFlightRow> rowFor(std::uint64_t entryIndex) const
+    {
+        auto const& rows = inFlightRows_.value();
+        const auto found = std::ranges::find_if(
+            rows,
+            [entryIndex](std::shared_ptr<InFlightRow> const& row)
+            {
+                return row->entryIndex == entryIndex;
+            }
+        );
+        return found == rows.end() ? nullptr : *found;
+    }
+
+    /**
+     * @brief Hands out the first row without a file, appending one when all are taken.
+     */
+    std::shared_ptr<InFlightRow> claimFreeRow(std::uint64_t entryIndex)
+    {
+        auto const& rows = inFlightRows_.value();
+        auto found = std::ranges::find_if(
+            rows,
+            [](std::shared_ptr<InFlightRow> const& row)
+            {
+                return !row->entryIndex.has_value();
+            }
+        );
+        if (found == rows.end())
+        {
+            resizeInFlightRows(rows.size() + 1);
+            found = std::prev(inFlightRows_.value().end());
+        }
+        (*found)->entryIndex = entryIndex;
+        return *found;
+    }
+
+    /**
+     * @brief Drops free rows from the end so the list shrinks once files finish.
+     */
+    void trimFreeTailRows()
+    {
+        auto const& rows = inFlightRows_.value();
+        auto keep = rows.size();
+        while (keep > 0 && !rows[keep - 1]->entryIndex.has_value())
+            --keep;
+        resizeInFlightRows(keep);
+    }
+
+    /**
+     * @brief Grows or shrinks the row list to @p wanted entries in a single insert or erase.
+     */
+    void resizeInFlightRows(std::size_t wanted)
+    {
+        auto const& rows = inFlightRows_.value();
+        if (wanted > rows.size())
+        {
+            std::vector<std::shared_ptr<InFlightRow>> fresh(wanted - rows.size());
+            std::ranges::generate(
+                fresh,
+                []
+                {
+                    return std::make_shared<InFlightRow>();
+                }
+            );
+            inFlightRows_.insert(rows.end(), fresh.begin(), fresh.end());
+        }
+        else if (wanted < rows.size())
+        {
+            inFlightRows_.erase(rows.begin() + static_cast<std::ptrdiff_t>(wanted), rows.end());
+        }
+    }
+
+  private:
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;
-    Nui::Observed<std::string> currentFile{""};
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};
 
-    Components::ProgressBar fileProgressBar_;
     Components::ProgressBar totalProgressBar_;
+    // Mutable because Nui::range only binds to a non-const Observed and body() is const.
+    mutable Nui::Observed<std::vector<std::shared_ptr<InFlightRow>>> inFlightRows_{};
 };

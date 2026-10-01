@@ -49,6 +49,7 @@
 #include <any>
 #include <chrono>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -73,8 +74,7 @@ namespace
      *         of a @ref DiffTreeNode.  @p hasSide gates visibility; when false the
      *         cell renders as the spacer that keeps the grid columns aligned.
      */
-    Nui::ElementRenderer
-    renderCellFromNode(DiffTreeNode const& node, bool isRemote, bool alignRight)
+    Nui::ElementRenderer renderCellFromNode(DiffTreeNode const& node, bool isRemote, bool alignRight)
     {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
@@ -99,12 +99,14 @@ namespace
             "title"_attr = node.relKey
         }(
             span{class_ = "name"}(node.name),
-            [&]() -> Nui::ElementRenderer {
+            [&]() -> Nui::ElementRenderer
+            {
                 if (sizeStr.empty())
                     return Nui::nil();
                 return span{class_ = "meta"}(sizeStr);
             }(),
-            [&]() -> Nui::ElementRenderer {
+            [&]() -> Nui::ElementRenderer
+            {
                 if (mtimeStr.empty())
                     return Nui::nil();
                 return span{class_ = "meta date"}(mtimeStr);
@@ -130,10 +132,7 @@ namespace
      *         them is present in @p set.  "Effective selection" in the sparse
      *         model: an entry X in the set implies every descendant of X.
      */
-    bool sparseAnyAncestorInSet(
-        std::string const& relKey,
-        std::unordered_set<std::string> const& set
-    )
+    bool sparseAnyAncestorInSet(std::string const& relKey, std::unordered_set<std::string> const& set)
     {
         std::string_view view{relKey};
         while (true)
@@ -150,10 +149,7 @@ namespace
     /** @brief Same walk, but returns the covering ancestor's relKey (or empty
      *         when none is found).  Used for fill-out on uncheck.
      */
-    std::string sparseFindCoveringAncestor(
-        std::string const& relKey,
-        std::unordered_set<std::string> const& set
-    )
+    std::string sparseFindCoveringAncestor(std::string const& relKey, std::unordered_set<std::string> const& set)
     {
         std::string_view view{relKey};
         while (true)
@@ -172,10 +168,7 @@ namespace
      *         Linear in |set|.  Used only to flip an Unchecked directory row
      *         into Indeterminate when a descendant was selected individually.
      */
-    bool sparseAnyDescendantInSet(
-        std::string const& relKey,
-        std::unordered_set<std::string> const& set
-    )
+    bool sparseAnyDescendantInSet(std::string const& relKey, std::unordered_set<std::string> const& set)
     {
         const std::string prefix = relKey + "/";
         for (auto const& key : set)
@@ -250,11 +243,14 @@ struct SyncDialog::Implementation
     // descendants).  Shared with the Tree via Options::selected so the tree
     // toolbar buttons manipulate the same storage.
     std::shared_ptr<Nui::Observed<std::unordered_set<std::string>>> uploadSelected_{
-        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()};
+        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()
+    };
     std::shared_ptr<Nui::Observed<std::unordered_set<std::string>>> downloadSelected_{
-        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()};
+        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()
+    };
     std::shared_ptr<Nui::Observed<std::unordered_set<std::string>>> deleteSelected_{
-        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()};
+        std::make_shared<Nui::Observed<std::unordered_set<std::string>>>()
+    };
 
     ScriptNuiComponents::Tree uploadTree_{};
     ScriptNuiComponents::Tree downloadTree_{};
@@ -282,8 +278,10 @@ struct SyncDialog::Implementation
         static const DiffSection upload = DiffSection::Upload;
         static const DiffSection download = DiffSection::Download;
         static const DiffSection del = DiffSection::Delete;
-        if (isUpload) return upload;
-        if (isDownload) return download;
+        if (isUpload)
+            return upload;
+        if (isDownload)
+            return download;
         return del;
     }
 
@@ -386,7 +384,8 @@ struct SyncDialog::Implementation
     std::function<ScriptNuiComponents::Tree::SelectionState(ScriptNuiComponents::Tree::NodeId const&)>
     makeStateResolver(DiffSection section)
     {
-        return [this, section](ScriptNuiComponents::Tree::NodeId const& id) {
+        return [this, section](ScriptNuiComponents::Tree::NodeId const& id)
+        {
             using State = ScriptNuiComponents::Tree::SelectionState;
             auto const& set = selectionFor(section)->value();
             if (set.contains(id))
@@ -402,24 +401,21 @@ struct SyncDialog::Implementation
     /** @brief Builds the sparse toggle callback.  See the design note in
      *         @c toggleSparseSelection for the algorithm.
      */
-    std::function<void(
-        ScriptNuiComponents::Tree::NodeId const&,
-        bool,
-        std::unordered_set<std::string>&)>
+    std::function<void(ScriptNuiComponents::Tree::NodeId const&, bool, std::unordered_set<std::string>&)>
     makeToggleSelection(DiffSection section)
     {
         return [this, section](
-                   ScriptNuiComponents::Tree::NodeId const& id,
-                   bool nowSelected,
-                   std::unordered_set<std::string>& set) {
+                   ScriptNuiComponents::Tree::NodeId const& id, bool nowSelected, std::unordered_set<std::string>& set
+               )
+        {
             toggleSparseSelection(section, id, nowSelected, set);
         };
     }
 
-    std::function<void(std::unordered_set<std::string>&)>
-    makeSelectAllAction(DiffSection section)
+    std::function<void(std::unordered_set<std::string>&)> makeSelectAllAction(DiffSection section)
     {
-        return [this, section](std::unordered_set<std::string>& set) {
+        return [this, section](std::unordered_set<std::string>& set)
+        {
             set.clear();
             auto const roots = treeFor(section).childrenOf(std::string{});
             for (auto const& rootId : roots)
@@ -429,7 +425,8 @@ struct SyncDialog::Implementation
 
     std::function<void(std::unordered_set<std::string>&)> makeDeselectAllAction()
     {
-        return [](std::unordered_set<std::string>& set) {
+        return [](std::unordered_set<std::string>& set)
+        {
             set.clear();
         };
     }
@@ -455,7 +452,7 @@ struct SyncDialog::Implementation
         if (nowSelected)
         {
             if (sparseAnyAncestorInSet(id, set))
-                return;  // already effectively selected
+                return; // already effectively selected
             const std::string prefix = id + "/";
             std::vector<std::string> toRemove;
             for (auto const& key : set)
@@ -500,25 +497,25 @@ struct SyncDialog::Implementation
      *         sibling groups with their parent.  Stops at the top level —
      *         root-level entries are the sparsest "all selected" representation.
      */
-    void collapseUpSparse(
-        DiffSection section,
-        std::string id,
-        std::unordered_set<std::string>& set
-    )
+    void collapseUpSparse(DiffSection section, std::string id, std::unordered_set<std::string>& set)
     {
         auto& tree = treeFor(section);
         while (!id.empty())
         {
             const auto parent = sparseParentOf(id);
             if (parent.empty())
-                return;  // don't collapse top-level into synthetic root
+                return; // don't collapse top-level into synthetic root
             const auto siblings = tree.childrenOf(parent);
             if (siblings.empty())
                 return;
-            const bool allIn =
-                std::all_of(siblings.begin(), siblings.end(), [&](auto const& s) {
+            const bool allIn = std::all_of(
+                siblings.begin(),
+                siblings.end(),
+                [&](auto const& s)
+                {
                     return set.contains(s);
-                });
+                }
+            );
             if (!allIn)
                 return;
             for (auto const& s : siblings)
@@ -545,13 +542,10 @@ struct SyncDialog::Implementation
         std::string current = ancestor;
         while (current != target)
         {
-            const std::string remainder =
-                current.empty() ? target : target.substr(current.size() + 1);
+            const std::string remainder = current.empty() ? target : target.substr(current.size() + 1);
             const auto slash = remainder.find('/');
-            const std::string nextSeg =
-                slash == std::string::npos ? remainder : remainder.substr(0, slash);
-            const std::string nextChildId =
-                current.empty() ? nextSeg : current + "/" + nextSeg;
+            const std::string nextSeg = slash == std::string::npos ? remainder : remainder.substr(0, slash);
+            const std::string nextChildId = current.empty() ? nextSeg : current + "/" + nextSeg;
 
             const auto siblings = tree.childrenOf(current);
             for (auto const& sib : siblings)
@@ -568,7 +562,9 @@ struct SyncDialog::Implementation
         return [this, section](
                    ScriptNuiComponents::Tree::NodeId const& parentId,
                    std::function<void(std::vector<ScriptNuiComponents::Tree::Node>)> resolve,
-                   std::function<void(std::string)> reject) {
+                   std::function<void(std::string)> reject
+               )
+        {
             if (!provider_)
             {
                 reject("no provider");
@@ -577,14 +573,16 @@ struct SyncDialog::Implementation
             provider_->loadChildren(
                 section,
                 parentId,
-                [resolve](std::vector<DiffTreeNode> nodes) {
+                [resolve](std::vector<DiffTreeNode> nodes)
+                {
                     std::vector<ScriptNuiComponents::Tree::Node> result;
                     result.reserve(nodes.size());
                     for (auto& node : nodes)
                         result.push_back(toTreeNode(std::move(node)));
                     resolve(std::move(result));
                 },
-                [reject](std::string const& msg) {
+                [reject](std::string const& msg)
+                {
                     reject(msg);
                 }
             );
@@ -597,8 +595,7 @@ struct SyncDialog::Implementation
         const bool isDir = node.isDirectory;
         return ScriptNuiComponents::Tree::Node{
             .id = id,
-            .kind = isDir ? ScriptNuiComponents::Tree::NodeKind::Directory
-                          : ScriptNuiComponents::Tree::NodeKind::Leaf,
+            .kind = isDir ? ScriptNuiComponents::Tree::NodeKind::Directory : ScriptNuiComponents::Tree::NodeKind::Leaf,
             .children = {},
             .hasChildren = node.directChildCount > 0,
             .userData = std::move(node),
@@ -630,9 +627,8 @@ struct SyncDialog::Implementation
         if (collapseZero)
         {
             const auto prev = summary_.value();
-            auto reconcile = [](Nui::Observed<bool>& collapsed,
-                                std::uint64_t prevCount,
-                                std::uint64_t newCount) {
+            auto reconcile = [](Nui::Observed<bool>& collapsed, std::uint64_t prevCount, std::uint64_t newCount)
+            {
                 if (prevCount > 0 && newCount == 0)
                     collapsed = true;
                 else if (prevCount == 0 && newCount > 0)
@@ -663,11 +659,13 @@ struct SyncDialog::Implementation
     {
         if (!provider_)
             return;
-        auto seedOne = [this](DiffSection section) {
+        auto seedOne = [this](DiffSection section)
+        {
             provider_->loadChildren(
                 section,
                 std::string{},
-                [this, section](std::vector<DiffTreeNode> nodes) {
+                [this, section](std::vector<DiffTreeNode> nodes)
+                {
                     std::vector<ScriptNuiComponents::Tree::Node> roots;
                     roots.reserve(nodes.size());
                     for (auto& node : nodes)
@@ -681,7 +679,8 @@ struct SyncDialog::Implementation
                     selectedPtr->modify();
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 },
-                [](std::string const& msg) {
+                [](std::string const& msg)
+                {
                     Log::error("Sync seedRootNodes failed: {}", msg);
                 }
             );
@@ -690,7 +689,6 @@ struct SyncDialog::Implementation
         seedOne(DiffSection::Download);
         seedOne(DiffSection::Delete);
     }
-
 
     SharedData::Sync::DiffOptions buildDiffOptions() const
     {
@@ -714,7 +712,8 @@ struct SyncDialog::Implementation
             return;
         provider_->recompute(
             buildDiffOptions(),
-            [this](SharedData::Sync::DiffSummary summary) {
+            [this](SharedData::Sync::DiffSummary summary)
+            {
                 applySummaryAndReseed(std::move(summary), /*collapseZero=*/true);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
@@ -750,10 +749,9 @@ struct SyncDialog::Implementation
      */
     ProgressObserver progressForRow(DiffSection section, std::string const& relKey) const
     {
-        auto const& progMap =
-            section == DiffSection::Upload ? uploadProgress_ :
-            section == DiffSection::Download ? downloadProgress_ :
-                                               deleteProgress_;
+        auto const& progMap = section == DiffSection::Upload ? uploadProgress_
+            : section == DiffSection::Download               ? downloadProgress_
+                                                             : deleteProgress_;
         if (auto iter = progMap.find(relKey); iter != progMap.end())
             return iter->second;
         // Walk ancestor prefixes.
@@ -783,25 +781,35 @@ struct SyncDialog::Implementation
         Nui::globalEventContext.executeActiveEventsImmediately();
 
         const bool dirOnly = !recursive_.value() && node.isDirectory;
-        auto onDirCreated = [progress](bool success, std::string const&) {
+        auto onDirCreated = [progress](bool success, std::string const&)
+        {
             *progress = success ? 1.1 : -1.0;
             Nui::globalEventContext.executeActiveEventsImmediately();
         };
-        auto onComplete = [this, progress](std::optional<Ids::OperationId> const& opId, std::string const&) {
+        auto onComplete = [this, progress](std::optional<Ids::OperationId> const& opId, std::string const&)
+        {
             if (!opId)
             {
                 *progress = -1.0;
                 Nui::globalEventContext.executeActiveEventsImmediately();
                 return;
             }
-            operationQueue_->addTransferProgressCallback(*opId, [progress](double fraction) {
-                *progress = fraction;
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            });
-            operationQueue_->addCompletionCallback(*opId, [progress](bool) {
-                *progress = 1.1;
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            });
+            operationQueue_->addTransferProgressCallback(
+                *opId,
+                [progress](double fraction)
+                {
+                    *progress = fraction;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
+            operationQueue_->addCompletionCallback(
+                *opId,
+                [progress](bool)
+                {
+                    *progress = 1.1;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            );
         };
 
         const auto localAbs = localPath_ / node.relKey;
@@ -869,7 +877,8 @@ struct SyncDialog::Implementation
                 operationQueue_->enqueueDelete(
                     paths,
                     recursive_.value(),
-                    [progress](auto const& opIds, std::string const&) {
+                    [progress](auto const& opIds, std::string const&)
+                    {
                         *progress = opIds ? 1.1 : -1.0;
                         Nui::globalEventContext.executeActiveEventsImmediately();
                     },
@@ -905,11 +914,13 @@ struct SyncDialog::Implementation
         provider_->buildEnqueuePlan(
             section,
             std::move(selected),
-            [this, section](std::vector<SharedData::Sync::EnqueuePlanEntry> plan) {
+            [this, section](std::vector<SharedData::Sync::EnqueuePlanEntry> plan)
+            {
                 dispatchPlan(section, std::move(plan));
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
-            [](std::string const& msg) {
+            [](std::string const& msg)
+            {
                 Log::error("buildSyncEnqueuePlan failed: {}", msg);
             }
         );
@@ -923,8 +934,10 @@ struct SyncDialog::Implementation
         using ProgressObserverVec = std::vector<ProgressObserver>;
 
         const bool nonRecursive = !recursive_.value();
-        auto onDirCreatedFor = [](ProgressObserver prog) {
-            return [prog](bool success, std::string const&) {
+        auto onDirCreatedFor = [](ProgressObserver prog)
+        {
+            return [prog](bool success, std::string const&)
+            {
                 *prog = success ? 1.1 : -1.0;
                 Nui::globalEventContext.executeActiveEventsImmediately();
             };
@@ -952,14 +965,16 @@ struct SyncDialog::Implementation
                         );
                         continue;
                     }
-                    uploadEntries.push_back(SharedData::BulkAddEntry{
-                        .src = entry.localAbsPath,
-                        .dst = entry.remoteAbsPath,
-                        .sizeBytes = entry.sizeBytes,
-                        .isDirectory = entry.isDirectory,
-                        .mtime = entry.mtime,
-                        .mtimeNsec = entry.mtimeNsec,
-                    });
+                    uploadEntries.push_back(
+                        SharedData::BulkAddEntry{
+                            .src = entry.localAbsPath,
+                            .dst = entry.remoteAbsPath,
+                            .sizeBytes = entry.sizeBytes,
+                            .isDirectory = entry.isDirectory,
+                            .mtime = entry.mtime,
+                            .mtimeNsec = entry.mtimeNsec,
+                        }
+                    );
                     uploadObservers.push_back(progress);
                     break;
                 }
@@ -972,36 +987,42 @@ struct SyncDialog::Implementation
                         );
                         continue;
                     }
-                    downloadEntries.push_back(SharedData::BulkAddEntry{
-                        .src = entry.remoteAbsPath,
-                        .dst = entry.localAbsPath,
-                        .sizeBytes = entry.sizeBytes,
-                        .isDirectory = entry.isDirectory,
-                        .mtime = entry.mtime,
-                        .mtimeNsec = entry.mtimeNsec,
-                    });
+                    downloadEntries.push_back(
+                        SharedData::BulkAddEntry{
+                            .src = entry.remoteAbsPath,
+                            .dst = entry.localAbsPath,
+                            .sizeBytes = entry.sizeBytes,
+                            .isDirectory = entry.isDirectory,
+                            .mtime = entry.mtime,
+                            .mtimeNsec = entry.mtimeNsec,
+                        }
+                    );
                     downloadObservers.push_back(progress);
                     break;
                 }
                 case SharedData::Sync::Action::DeleteLocal:
                 {
-                    deleteEntries.push_back(SharedData::BulkAddEntry{
-                        .src = entry.localAbsPath,
-                        .dst = {},
-                        .sizeBytes = 0,
-                        .isDirectory = entry.isDirectory,
-                    });
+                    deleteEntries.push_back(
+                        SharedData::BulkAddEntry{
+                            .src = entry.localAbsPath,
+                            .dst = {},
+                            .sizeBytes = 0,
+                            .isDirectory = entry.isDirectory,
+                        }
+                    );
                     deleteObservers.push_back(progress);
                     break;
                 }
                 case SharedData::Sync::Action::DeleteRemote:
                 {
-                    deleteEntries.push_back(SharedData::BulkAddEntry{
-                        .src = entry.remoteAbsPath,
-                        .dst = {},
-                        .sizeBytes = 0,
-                        .isDirectory = entry.isDirectory,
-                    });
+                    deleteEntries.push_back(
+                        SharedData::BulkAddEntry{
+                            .src = entry.remoteAbsPath,
+                            .dst = {},
+                            .sizeBytes = 0,
+                            .isDirectory = entry.isDirectory,
+                        }
+                    );
                     deleteObservers.push_back(progress);
                     break;
                 }
@@ -1023,12 +1044,15 @@ struct SyncDialog::Implementation
                 std::move(deleteEntries),
                 /*insertRefresh=*/false,
                 SharedData::OperationMode::Queued,
-                [observersShared](bool success) {
+                [observersShared](bool success)
+                {
                     for (auto& obs : *observersShared)
-                        if (obs) *obs = success ? 1.1 : -1.0;
+                        if (obs)
+                            *obs = success ? 1.1 : -1.0;
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 },
-                [](bool success, std::string const& info) {
+                [](bool success, std::string const& info)
+                {
                     if (!success)
                         Log::error("Sync bulk delete failed: {}", info);
                 }
@@ -1059,54 +1083,64 @@ struct SyncDialog::Implementation
             entryIsDir->push_back(entry.isDirectory);
         auto observersShared = std::make_shared<std::vector<ProgressObserver>>(std::move(observers));
 
-        auto markFilesCompletedBefore =
-            [observersShared, fileEntryIndices](std::uint64_t upTo) {
-                const auto limit = std::min<std::uint64_t>(upTo, fileEntryIndices->size());
-                for (std::uint64_t pos = 0; pos < limit; ++pos)
+        // Files can finish in any order now that bulks transfer several at once, so track
+        // which entries we have seen in flight and mark them done once they drop out. Entries
+        // the backend gave up on are marked failed first so they never count as done.
+        auto seenInFlight = std::make_shared<std::set<std::uint64_t>>();
+        auto onBulkProgress = [observersShared, fileEntryIndices, seenInFlight](SharedData::BulkProgress const& prog)
+        {
+            for (const auto entryIndex : prog.failedEntryIndices)
+            {
+                if (entryIndex >= fileEntryIndices->size())
+                    continue;
+                auto& obs = (*observersShared)[(*fileEntryIndices)[entryIndex]];
+                if (obs && obs->value() >= 0.0)
+                    *obs = -1.0;
+            }
+            std::set<std::uint64_t> stillInFlight;
+            for (auto const& file : prog.inFlight)
+            {
+                if (file.entryIndex >= fileEntryIndices->size())
+                    continue;
+                stillInFlight.insert(file.entryIndex);
+                seenInFlight->insert(file.entryIndex);
+                auto& obs = (*observersShared)[(*fileEntryIndices)[file.entryIndex]];
+                if (obs && file.totalBytes > 0)
+                    *obs = static_cast<double>(file.bytes) / static_cast<double>(file.totalBytes);
+            }
+            std::erase_if(
+                *seenInFlight,
+                [&](std::uint64_t entryIndex)
                 {
-                    auto& obs = (*observersShared)[(*fileEntryIndices)[pos]];
-                    if (!obs)
-                        continue;
-                    const double value = obs->value();
-                    if (value >= 1.0 || value < 0.0)
-                        continue;
-                    *obs = 1.1;
+                    if (stillInFlight.contains(entryIndex))
+                        return false;
+                    auto& obs = (*observersShared)[(*fileEntryIndices)[entryIndex]];
+                    if (obs && obs->value() >= 0.0 && obs->value() < 1.0)
+                        *obs = 1.1;
+                    return true;
                 }
-            };
+            );
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        };
 
-        auto onBulkProgress =
-            [observersShared, fileEntryIndices, markFilesCompletedBefore](SharedData::BulkProgress const& prog) {
-                markFilesCompletedBefore(prog.fileCurrentIndex);
-                if (prog.fileCurrentIndex >= fileEntryIndices->size())
-                {
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                    return;
-                }
-                auto& obs = (*observersShared)[(*fileEntryIndices)[prog.fileCurrentIndex]];
-                if (obs && prog.currentFileTotalBytes > 0)
-                {
-                    *obs = static_cast<double>(prog.currentFileBytes)
-                        / static_cast<double>(prog.currentFileTotalBytes);
-                }
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            };
-
-        auto onEnqueued = [this,
-                           onBulkProgress = std::move(onBulkProgress),
-                           observersShared,
-                           entryIsDir](std::vector<Ids::OperationId> const& opIds) {
+        auto onEnqueued = [this, onBulkProgress = std::move(onBulkProgress), observersShared, entryIsDir](
+                              std::vector<Ids::OperationId> const& opIds
+                          )
+        {
             if (opIds.empty())
                 return;
             operationQueue_->addBulkProgressCallback(opIds.back(), onBulkProgress);
             operationQueue_->addCompletionCallback(
                 opIds.back(),
-                [observersShared, entryIsDir](bool success) {
+                [observersShared, entryIsDir](bool success)
+                {
                     for (std::size_t idx = 0; idx < observersShared->size(); ++idx)
                     {
                         if (idx < entryIsDir->size() && (*entryIsDir)[idx])
                             continue;
                         auto& obs = (*observersShared)[idx];
-                        if (obs)
+                        // Rows already marked failed stay failed on an otherwise successful bulk.
+                        if (obs && !(success && obs->value() < 0.0))
                             *obs = success ? 1.1 : -1.0;
                     }
                     Nui::globalEventContext.executeActiveEventsImmediately();
@@ -1121,7 +1155,8 @@ struct SyncDialog::Implementation
                     continue;
                 operationQueue_->addCompletionCallback(
                     opIds[idx],
-                    [observer](bool success) {
+                    [observer](bool success)
+                    {
                         *observer = success ? 1.1 : -1.0;
                         Nui::globalEventContext.executeActiveEventsImmediately();
                     }
@@ -1129,7 +1164,8 @@ struct SyncDialog::Implementation
             }
         };
 
-        auto onBulkAck = [kind](bool success, std::string const& info) {
+        auto onBulkAck = [kind](bool success, std::string const& info)
+        {
             if (!success)
                 Log::error("Sync bulk {} failed: {}", kind, info);
         };
@@ -1137,17 +1173,25 @@ struct SyncDialog::Implementation
         if (isUpload)
         {
             operationQueue_->enqueueBulkUpload(
-                std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ false,
+                std::move(entries),
+                /*allowOverwrite*/ true,
+                /*insertRefresh*/ false,
                 SharedData::OperationMode::Queued,
-                /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
+                /*onEachComplete*/ {},
+                std::move(onBulkAck),
+                std::move(onEnqueued)
             );
         }
         else
         {
             operationQueue_->enqueueBulkDownload(
-                std::move(entries), /*allowOverwrite*/ true, /*insertRefresh*/ false,
+                std::move(entries),
+                /*allowOverwrite*/ true,
+                /*insertRefresh*/ false,
                 SharedData::OperationMode::Queued,
-                /*onEachComplete*/ {}, std::move(onBulkAck), std::move(onEnqueued)
+                /*onEachComplete*/ {},
+                std::move(onBulkAck),
+                std::move(onEnqueued)
             );
         }
     }
@@ -1157,7 +1201,8 @@ struct SyncDialog::Implementation
 
 ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTreeRowRenderer(DiffSection section)
 {
-    return [this, section](ScriptNuiComponents::Tree::RowContext const& ctx) -> Nui::ElementRenderer {
+    return [this, section](ScriptNuiComponents::Tree::RowContext const& ctx) -> Nui::ElementRenderer
+    {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
@@ -1174,13 +1219,11 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
                 view.remove_suffix(1);
             const auto slash = view.rfind('/');
             const auto basename = (slash == std::string_view::npos) ? view : view.substr(slash + 1);
-            return div{class_ = "sync-diff-row sync-diff-row--directory"}(
-                span{class_ = "sync-diff-cell sync-diff-cell--directory"}(
-                    span{class_ = "name"}(std::string{basename})
-                ),
+            return div{
+                class_ = "sync-diff-row sync-diff-row--directory"
+            }(span{class_ = "sync-diff-cell sync-diff-cell--directory"}(span{class_ = "name"}(std::string{basename})),
                 div{class_ = "sync-diff-arrow"}(),
-                span{class_ = "sync-diff-cell sync-diff-cell--directory"}()
-            );
+                span{class_ = "sync-diff-cell sync-diff-cell--directory"}());
         }
 
         DiffTreeNode const& node = *nodePtr;
@@ -1189,13 +1232,11 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
         // and no transfer of their own — render a pure folder label with no arrow.
         if (node.isStructural)
         {
-            return div{class_ = "sync-diff-row sync-diff-row--directory"}(
-                span{class_ = "sync-diff-cell sync-diff-cell--directory"}(
-                    span{class_ = "name"}(node.name)
-                ),
+            return div{
+                class_ = "sync-diff-row sync-diff-row--directory"
+            }(span{class_ = "sync-diff-cell sync-diff-cell--directory"}(span{class_ = "name"}(node.name)),
                 div{class_ = "sync-diff-arrow"}(),
-                span{class_ = "sync-diff-cell sync-diff-cell--directory"}()
-            );
+                span{class_ = "sync-diff-cell sync-diff-cell--directory"}());
         }
 
         std::string arrowClass;
@@ -1218,11 +1259,13 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
         }
 
         const DiffTreeNode nodeCopy = node; // captured into arrow click handler
-        auto makeArrow = [&, nodeCopy]() {
+        auto makeArrow = [&, nodeCopy]()
+        {
             return div{
                 class_ = fmt::format("sync-diff-arrow sync-diff-arrow--clickable {}", arrowClass),
                 "title"_attr = language->get("syncDialog", "syncItemNowTitle"),
-                onClick = [this, section, nodeCopy](Nui::val event) {
+                onClick = [this, section, nodeCopy](Nui::val event)
+                {
                     event.call<void>("stopPropagation");
                     enqueueSingleNode(section, nodeCopy);
                 },
@@ -1235,24 +1278,19 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
         {
             const bool labelRight = actionContentOnRight(node.action);
             auto labelCell = span{
-                class_ = labelRight
-                    ? "sync-diff-cell sync-diff-cell-right sync-diff-cell--directory"
-                    : "sync-diff-cell sync-diff-cell--directory"
+                class_ = labelRight ? "sync-diff-cell sync-diff-cell-right sync-diff-cell--directory"
+                                    : "sync-diff-cell sync-diff-cell--directory"
             }(span{class_ = "name"}(node.name));
             auto emptyCell = span{class_ = "sync-diff-cell sync-diff-cell--directory"}();
             if (labelRight)
             {
-                return div{class_ = "sync-diff-row sync-diff-row--directory"}(
-                    std::move(emptyCell),
-                    makeArrow(),
-                    std::move(labelCell)
-                );
+                return div{
+                    class_ = "sync-diff-row sync-diff-row--directory"
+                }(std::move(emptyCell), makeArrow(), std::move(labelCell));
             }
-            return div{class_ = "sync-diff-row sync-diff-row--directory"}(
-                std::move(labelCell),
-                makeArrow(),
-                std::move(emptyCell)
-            );
+            return div{
+                class_ = "sync-diff-row sync-diff-row--directory"
+            }(std::move(labelCell), makeArrow(), std::move(emptyCell));
         }
 
         // Leaf row — progress gradient driven by whichever observer matches this
@@ -1263,31 +1301,34 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
             auto prog = progress;
             return div{
                 class_ = "sync-diff-row",
-                style = Nui::observe(*prog).generate([prog]() -> std::string {
-                    const double val = prog->value();
-                    if (val > 1.0)
-                        return "--sync-row-bg: var(--sync-done-color, rgba(76,175,80,0.18));";
-                    if (val < 0.0)
-                        return "--sync-row-bg: var(--sync-error-color, rgba(231,76,60,0.18));";
-                    const int pct = static_cast<int>(val * 100.0);
-                    return fmt::format(
-                        "--sync-row-bg: linear-gradient(to right,"
-                        " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
-                        " transparent {}%);",
-                        pct, pct);
-                })
-            }(
-                renderCellFromNode(node, /*isRemote=*/false, /*alignRight=*/false),
+                style = Nui::observe(*prog).generate(
+                    [prog]() -> std::string
+                    {
+                        const double val = prog->value();
+                        if (val > 1.0)
+                            return "--sync-row-bg: var(--sync-done-color, rgba(76,175,80,0.18));";
+                        if (val < 0.0)
+                            return "--sync-row-bg: var(--sync-error-color, rgba(231,76,60,0.18));";
+                        const int pct = static_cast<int>(val * 100.0);
+                        return fmt::format(
+                            "--sync-row-bg: linear-gradient(to right,"
+                            " var(--sync-progress-color, rgba(76,175,80,0.25)) {}%,"
+                            " transparent {}%);",
+                            pct,
+                            pct
+                        );
+                    }
+                )
+            }(renderCellFromNode(node, /*isRemote=*/false, /*alignRight=*/false),
                 makeArrow(),
-                renderCellFromNode(node, /*isRemote=*/true, /*alignRight=*/true)
-            );
+                renderCellFromNode(node, /*isRemote=*/true, /*alignRight=*/true));
         }
 
-        return div{class_ = "sync-diff-row"}(
-            renderCellFromNode(node, /*isRemote=*/false, /*alignRight=*/false),
+        return div{
+            class_ = "sync-diff-row"
+        }(renderCellFromNode(node, /*isRemote=*/false, /*alignRight=*/false),
             makeArrow(),
-            renderCellFromNode(node, /*isRemote=*/true, /*alignRight=*/true)
-        );
+            renderCellFromNode(node, /*isRemote=*/true, /*alignRight=*/true));
     };
 }
 
@@ -1354,7 +1395,8 @@ Nui::ElementRenderer SyncDialog::operator()()
     const std::string directionUploadOnly = directionOptions[1];
     const std::string directionDownloadOnly = directionOptions[2];
 
-    auto onSettingChange = [this]() {
+    auto onSettingChange = [this]()
+    {
         impl_->recomputeDiff();
         Nui::globalEventContext.executeActiveEventsImmediately();
     };
