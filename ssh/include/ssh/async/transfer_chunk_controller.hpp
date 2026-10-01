@@ -50,11 +50,13 @@ namespace SecureShell
                 return;
             const auto tookNanos = nanos(took);
 
-            auto roundTrip = roundTripNanos_.load();
-            if (roundTrip == 0 || tookNanos < roundTrip)
+            const auto roundTrip = roundTripNanos_.load();
+            if (roundTrip == 0 || tookNanos <= roundTrip)
             {
-                roundTrip = tookNanos;
-                roundTripNanos_ = roundTrip;
+                // The call is the fastest round trip seen, so its payload portion is not
+                // measurable and must not size the chunk.
+                roundTripNanos_ = tookNanos;
+                return;
             }
 
             if (bytes < requested)

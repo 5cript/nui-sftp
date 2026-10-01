@@ -104,6 +104,19 @@ namespace SecureShell::Test
         EXPECT_EQ(controller.roundTripNanos(), 5'000'000);
     }
 
+    TEST_F(TransferChunkControllerTests, CallBelowTheRoundTripDoesNotSizeTheChunk)
+    {
+        TransferChunkController controller;
+        controller.recordRoundTrip(20ms);
+        const auto before = controller.preferredTransferChunk(serverLimit);
+
+        // Jitter below the estimate leaves no measurable payload time.
+        controller.recordDataCall(16 * 1024, 16 * 1024, 19500us);
+
+        EXPECT_EQ(controller.roundTripNanos(), 19'500'000);
+        EXPECT_EQ(controller.preferredTransferChunk(serverLimit), before);
+    }
+
     TEST_F(TransferChunkControllerTests, MetadataCallsFollowASlowerLink)
     {
         TransferChunkController controller;
