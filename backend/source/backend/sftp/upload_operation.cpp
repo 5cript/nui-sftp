@@ -23,7 +23,9 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
 UploadOperation::~UploadOperation()
 {
     std::ignore = cancel(false);
-    if (auto* stra = strand(); stra)
+    // Wait for in-flight strand tasks unless we already run on the processing thread, where
+    // waiting would deadlock (tasks only get queued, never executed inline).
+    if (auto* stra = strand(); stra && !stra->withinProcessingThread())
         stra->pushPromiseTask([]() {}).get();
 }
 
@@ -42,7 +44,12 @@ void UploadOperation::pause(bool doPause)
 
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::work()
 {
-    auto fut = sftp_->performPromise([this]() { return workInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return workInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("UploadOperation: work umbrella timed out.");
@@ -97,17 +104,13 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 }
                 if (!std::filesystem::exists(options_.localPath))
                 {
-                    Log::error(
-                        "UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string()
-                    );
+                    Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileNotFound});
                 }
                 localFile_.open(options_.localPath, std::ios::binary);
                 if (!localFile_.is_open())
                 {
-                    Log::error(
-                        "UploadOperation: Failed to open local file: {}", options_.localPath.generic_string()
-                    );
+                    Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.generic_string());
                     return enterErrorState<WorkStatus>({.type = ErrorType::OpenFailure});
                 }
                 localFile_.seekg(0, std::ios::end);
@@ -278,7 +281,12 @@ UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType byt
 
 std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
 {
-    auto fut = sftp_->performPromise([this]() { return handleSymlinkInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return handleSymlinkInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("UploadOperation: handleSymlink umbrella timed out.");
@@ -338,7 +346,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 
 std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
 {
-    auto fut = sftp_->performPromise([this]() { return writeOnceInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return writeOnceInStrand();
+        }
+    );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("UploadOperation: writeOnce umbrella timed out.");
@@ -434,8 +447,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         {
             Log::debug("UploadOperation: Continuing upload to existing temp file.");
 
-            const auto openResult =
-                sftp_->openFileInStrand(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
+            const auto openResult = sftp_->openFileInStrand(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
             if (!openResult.has_value())
             {
                 Log::error("Failed to open remote sftp file for continue: {}", openResult.error().message);
@@ -466,8 +478,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(tempPath.parent_path());
-            !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(tempPath.parent_path()); !res.has_value())
             return std::unexpected(res.error());
     }
 
@@ -521,9 +532,8 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const
         return parent;
 
     const auto dirPerms = options_.directoryPermissions.value_or(
-        std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
-        std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
-        std::filesystem::perms::others_exec
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+        std::filesystem::perms::others_read | std::filesystem::perms::others_exec
     );
     const auto mkdirResult = sftp_->createDirectoryIfItDoesntExistInStrand(dir, dirPerms);
     if (!mkdirResult.has_value())
@@ -593,7 +603,12 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return enterErrorState({.type = ErrorType::FileSeekFailure});
     }
 
-    auto umbrellaFut = sftp_->performPromise([this]() { return prepareInStrand(); });
+    auto umbrellaFut = sftp_->performPromise(
+        [this]()
+        {
+            return prepareInStrand();
+        }
+    );
     if (umbrellaFut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("UploadOperation: prepare umbrella timed out.");
@@ -631,13 +646,15 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
     if (buffer_.empty())
     {
         Log::error("UploadOperation: No transfer buffer available from pool.");
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = SecureShell::SftpError{
-                .message = "No buffer available from pool",
-                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-            },
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = SecureShell::SftpError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
     return {};
 }
@@ -676,7 +693,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
 
     localFile_.close();
 
-    auto fut = sftp_->performPromise([this]() { return finalizeInStrand(); });
+    auto fut = sftp_->performPromise(
+        [this]()
+        {
+            return finalizeInStrand();
+        }
+    );
     // finalize has more work than a single call (stat + maybe removeFile + rename + setstat),
     // so allow a bit more slack than the per-call timeout.
     if (fut.wait_for(options_.futureTimeout * 4) != std::future_status::ready)
