@@ -10,6 +10,9 @@ on:
 env:
   BUILD_TYPE: Release
   BUILD_DIR: build/clang_release
+  # @swc/core >= 1.16 unpacks its addon into $HOME/.cache and rejects the
+  # container's /github/home because the host runner user can write to it.
+  SWC_NATIVE_BINDING_CACHE: /root/.cache/swc-native
 
 jobs:
   archlinux:
