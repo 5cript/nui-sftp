@@ -458,16 +458,10 @@ void OperationQueue::adoptBulkResume(
 
 void OperationQueue::deepPause(bool pause)
 {
-    if (pause)
-    {
-        for (const auto& eligible : collectEligibleOperations(operations_, parallelism_))
-            operations_[eligible.index].second->pause(true);
-        return;
-    }
-    // The queue may have been reordered while paused, so the slot window no longer tells
-    // which operations were paused; resume every one.
+    // Every operation, not just the slot window: a reorder can push an operation with
+    // running transfers out of the window, and it must still stop and start with the queue.
     for (auto& [id, operation] : operations_)
-        operation->pause(false);
+        operation->pause(pause);
 }
 
 bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue)
