@@ -1,4 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/sftp/parallel_budget.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
@@ -457,61 +458,29 @@ void OperationQueue::adoptBulkResume(
 
 void OperationQueue::deepPause(bool pause)
 {
-    const auto updateCount = std::min(operations_.size(), static_cast<std::size_t>(parallelism_));
-
-    if (updateCount == 0)
-        return;
-
-    bool previousWasBarrier = false;
-    for (std::size_t i = 0; i < updateCount; ++i)
-    {
-        if (previousWasBarrier)
-            break;
-
-        auto& [id, operation] = operations_[i];
-        previousWasBarrier = operation->isBarrier();
-        operation->pause(pause);
-    }
+    for (const auto& eligible : collectEligibleOperations(operations_, parallelism_))
+        operations_[eligible.index].second->pause(pause);
 }
 
 bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue)
 {
     // Assumed in (asio) strand.
 
-    const auto updateCount = std::min(queue.size(), static_cast<std::size_t>(parallelism_));
-
-    if (updateCount == 0)
-        return false;
-
-    // Collect the indices we are allowed to advance this cycle — barrier ops stop the run
-    // before the next iteration.
-    std::vector<std::size_t> eligible;
-    eligible.reserve(updateCount);
-    {
-        bool previousWasBarrier = false;
-        for (std::size_t idx = 0; idx < updateCount; ++idx)
-        {
-            if (previousWasBarrier)
-                break;
-            eligible.push_back(idx);
-            previousWasBarrier = queue[idx].second->isBarrier();
-        }
-    }
+    // Distribute the transfer-slot budget over the head of the queue; barrier ops stop the run.
+    const auto eligible = collectEligibleOperations(queue, parallelism_);
     if (eligible.empty())
         return false;
 
     // Any strand-using op lets us share a single SFTP processing-thread umbrella across
-    // every eligible op's workInStrand() call.  Pure-local ops run directly on the caller.
+    // every eligible op's workInStrand() call. Ops that do not use the strand run on the
+    // caller afterwards: their work() blocks on that very thread and would deadlock inside it.
     SecureShell::ProcessingStrand* strand = nullptr;
-    for (const auto idx : eligible)
+    for (const auto& item : eligible)
     {
-        auto* operation = queue[idx].second.get();
-        if (operation->usesStrand())
-        {
+        auto* operation = queue[item.index].second.get();
+        operation->setParallelBudget(item.slots);
+        if (operation->usesStrand() && !strand)
             strand = operation->strand();
-            if (strand)
-                break;
-        }
     }
 
     struct ItemResult
@@ -520,20 +489,27 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         std::expected<Operation::WorkStatus, Operation::Error> result;
     };
 
-    auto runBatch = [&queue, &eligible]()
+    const auto isTerminal = [](ItemResult const& item)
+    {
+        return !item.result.has_value() || item.result.value() == Operation::WorkStatus::Complete;
+    };
+
+    auto runBatch = [&queue, &eligible, &isTerminal](std::optional<bool> onlyUsesStrand)
     {
         std::vector<ItemResult> out;
         out.reserve(eligible.size());
-        for (const auto idx : eligible)
+        for (const auto& item : eligible)
         {
-            auto* operation = queue[idx].second.get();
+            const auto index = item.index;
+            auto* operation = queue[index].second.get();
+            if (onlyUsesStrand.has_value() && operation->usesStrand() != *onlyUsesStrand)
+                continue;
             auto res = operation->usesStrand() ? operation->workInStrand() : operation->work();
-            const bool terminal = !res.has_value() || res.value() == Operation::WorkStatus::Complete;
-            out.push_back({idx, std::move(res)});
+            out.push_back({index, std::move(res)});
             // Match the single-completion-per-workQueue-cycle semantics of the original
             // sequential driver: stop as soon as anybody completes or fails so subsequent
             // ops see the resulting queue mutation on the next cycle.
-            if (terminal)
+            if (isTerminal(out.back()))
                 break;
         }
         return out;
@@ -542,12 +518,22 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     std::vector<ItemResult> results;
     if (strand)
     {
-        auto fut = strand->pushPromiseTask(runBatch);
+        auto fut = strand->pushPromiseTask(
+            [&runBatch]()
+            {
+                return runBatch(true);
+            }
+        );
         results = fut.get();
+        if (std::ranges::none_of(results, isTerminal))
+        {
+            auto local = runBatch(false);
+            results.insert(results.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end()));
+        }
     }
     else
     {
-        results = runBatch();
+        results = runBatch(std::nullopt);
     }
 
     bool moreWork = false;
