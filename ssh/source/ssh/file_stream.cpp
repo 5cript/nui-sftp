@@ -13,23 +13,13 @@ namespace SecureShell
         /** @brief Bytes one transfer moves per turn at most; several turns make up a cycle. */
         constexpr IFileStream::SignedSizeType targetBytesPerTurn = 256 * 1024;
 
-        /** @brief Upper bound on the wall time one transfer may block the processing thread per
-         *         turn. Queue steps, progress polling and pause requests all wait for the current
-         *         cycle, so this bounds their latency on slow links.
-         */
-        constexpr auto maxTurnDuration = std::chrono::milliseconds{100};
-
-        /** @brief Once a cycle has run this long, remaining transfers skip their turn. The
-         *         processing thread rotates the starting task per cycle, so no transfer starves.
-         */
-        constexpr auto maxCycleDuration = std::chrono::milliseconds{100};
-
-        /** @brief Size of a single sftp read or write: the session's preferred chunk for the
-         *         current link speed, bounded by the leased buffer and the server limit. A call
-         *         cannot be interrupted, so slow links get small chunks and unknown links start
-         *         pessimistic; the session estimate grows as transfers report their rates.
+        /** @brief Size of a single sftp read or write: the session's preferred chunk, bounded
+         *         by the leased buffer and the server limit. A call cannot be interrupted, so the
+         *         session sizes it to take about one target call duration; the turn and the cycle
+         *         (after which remaining transfers skip, with the thread rotating who goes first)
+         *         are bounded by that same duration.
          *
-         *  @param sftp        Session owning the link estimate.
+         *  @param sftp        Session owning the chunk controller.
          *  @param bufferSize  Leased buffer size.
          *  @param lengthLimit Server-negotiated maximum per call, 0 if unknown.
          */
@@ -45,9 +35,9 @@ namespace SecureShell
             return std::min(maxChunk, static_cast<SignedSizeType>(sftp.preferredTransferChunk(maxChunk)));
         }
 
-        bool turnExpired(std::chrono::steady_clock::time_point turnStart)
+        bool turnExpired(std::chrono::steady_clock::time_point turnStart, std::chrono::steady_clock::duration limit)
         {
-            return std::chrono::steady_clock::now() - turnStart > maxTurnDuration;
+            return std::chrono::steady_clock::now() - turnStart > limit;
         }
     }
 
@@ -488,25 +478,28 @@ namespace SecureShell
                     return false;
                 }
 
-                if (stream->strand()->cycleElapsed() > maxCycleDuration)
-                    return true;
-
-                auto remainingRead = totalFileSize - context->bytesTransferred_.load();
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
                     context->cancel();
                     return false;
                 }
-                const auto chunk =
-                    transferChunkBytes(*sftp, bufferSize, static_cast<SignedSizeType>(stream->readLengthLimit()));
+                const auto target = sftp->targetCallDuration();
+                if (stream->strand()->cycleElapsed() > target)
+                    return true;
+
+                auto remainingRead = totalFileSize - context->bytesTransferred_.load();
+                const auto lengthLimit = static_cast<SignedSizeType>(stream->readLengthLimit());
                 const auto turnStart = std::chrono::steady_clock::now();
                 SignedSizeType turnBytes = 0;
 
                 while (
-                    remainingRead > 0 && turnBytes < targetBytesPerTurn && !(turnBytes > 0 && turnExpired(turnStart))
+                    remainingRead > 0 && turnBytes < targetBytesPerTurn &&
+                    !(turnBytes > 0 && turnExpired(turnStart, target))
                 )
                 {
+                    const auto chunk = transferChunkBytes(*sftp, bufferSize, lengthLimit);
+                    const auto callStart = std::chrono::steady_clock::now();
                     const auto result = sftp_read(stream->file_.get(), buffer, std::min(remainingRead, chunk));
                     if (result < 0)
                     {
@@ -515,6 +508,7 @@ namespace SecureShell
                     }
                     if (result == 0)
                         break;
+                    sftp->recordDataCall(result, std::chrono::steady_clock::now() - callStart);
                     remainingRead -= result;
                     if (!onRead(result))
                     {
@@ -526,7 +520,6 @@ namespace SecureShell
                 }
 
                 context->calculateBytesPerSecond();
-                sftp->reportThroughput(context->bytesPerSecond());
                 if (remainingRead == 0)
                 {
                     context->ended_ = true;
@@ -586,44 +579,47 @@ namespace SecureShell
                     return false;
                 }
 
-                if (stream->strand()->cycleElapsed() > maxCycleDuration)
-                    return true;
-
-                auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
                     context->cancel();
                     return false;
                 }
-                const auto chunk =
-                    transferChunkBytes(*sftp, bufferSize, static_cast<SignedSizeType>(stream->writeLengthLimit()));
+                const auto target = sftp->targetCallDuration();
+                if (stream->strand()->cycleElapsed() > target)
+                    return true;
+
+                auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
+                const auto lengthLimit = static_cast<SignedSizeType>(stream->writeLengthLimit());
                 const auto turnStart = std::chrono::steady_clock::now();
                 SignedSizeType turnBytes = 0;
 
                 while (
-                    remainingWrite > 0 && turnBytes < targetBytesPerTurn && !(turnBytes > 0 && turnExpired(turnStart))
+                    remainingWrite > 0 && turnBytes < targetBytesPerTurn &&
+                    !(turnBytes > 0 && turnExpired(turnStart, target))
                 )
                 {
+                    const auto chunk = transferChunkBytes(*sftp, bufferSize, lengthLimit);
                     const auto amountRead = doRead(std::min(remainingWrite, chunk));
                     if (amountRead <= 0)
                     {
                         context->cancel();
                         return false;
                     }
+                    const auto callStart = std::chrono::steady_clock::now();
                     const auto result = sftp_write(stream->file_.get(), buffer, std::min(remainingWrite, amountRead));
                     if (result < 0)
                     {
                         context->cancel();
                         return false;
                     }
+                    sftp->recordDataCall(result, std::chrono::steady_clock::now() - callStart);
                     remainingWrite -= result;
                     context->bytesTransferred_ += result;
                     turnBytes += result;
                 }
 
                 context->calculateBytesPerSecond();
-                sftp->reportThroughput(context->bytesPerSecond());
                 if (remainingWrite == 0)
                 {
                     context->ended_ = true;
