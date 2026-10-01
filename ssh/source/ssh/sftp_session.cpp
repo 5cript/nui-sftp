@@ -3,12 +3,11 @@
 #include <ssh/file_information.hpp>
 #include <ssh/u8_path.hpp>
 
-#include <cassert>
-#include <fcntl.h>
-
 #include <algorithm>
+#include <cassert>
+#include <chrono>
 
-#include <limits>
+#include <fcntl.h>
 
 namespace SecureShell
 {
@@ -40,55 +39,6 @@ namespace SecureShell
             )
             .get();
     }
-    void SftpSession::recordDataCall(std::int64_t bytes, std::chrono::steady_clock::duration took) noexcept
-    {
-        if (bytes <= 0)
-            return;
-        const auto tookNanos =
-            std::max<std::int64_t>(1, std::chrono::duration_cast<std::chrono::nanoseconds>(took).count());
-
-        // Round trip floor: drops immediately, rises slowly so a changing link is followed.
-        auto roundTrip = roundTripNanos_.load();
-        if (roundTrip == 0 || tookNanos < roundTrip)
-            roundTrip = tookNanos;
-        else
-            roundTrip += (tookNanos - roundTrip) / 32;
-        roundTripNanos_ = roundTrip;
-
-        constexpr std::int64_t minimumChunk = 4 * 1024;
-        constexpr std::int64_t maximumChunk = 4 * 1024 * 1024;
-        const auto targetNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(targetCallDuration()).count();
-        const auto ideal = bytes * targetNanos / tookNanos;
-        const auto current = chunkBytes_.load();
-        chunkBytes_ = std::clamp((current + ideal) / 2, minimumChunk, maximumChunk);
-    }
-
-    std::chrono::steady_clock::duration SftpSession::targetCallDuration() const noexcept
-    {
-        using namespace std::chrono_literals;
-        constexpr auto minimum = 50ms;
-        constexpr auto maximum = 250ms;
-        constexpr std::int64_t roundTripsPerCall = 4;
-        const auto roundTrip = std::chrono::nanoseconds{roundTripNanos_.load()};
-        if (roundTrip.count() == 0)
-            return minimum;
-        return std::clamp<std::chrono::steady_clock::duration>(roundTrip * roundTripsPerCall, minimum, maximum);
-    }
-
-    std::int64_t SftpSession::preferredTransferChunk(std::int64_t upperBound) const noexcept
-    {
-        constexpr std::int64_t minimumChunk = 4 * 1024;
-        return std::clamp(chunkBytes_.load(), minimumChunk, std::max(minimumChunk, upperBound));
-    }
-
-    std::size_t SftpSession::preferredBufferSize(std::size_t fileSize) const noexcept
-    {
-        // A few chunks of headroom so a link that speeds up can grow its calls without a new lease.
-        constexpr std::int64_t chunksPerBuffer = 4;
-        const auto chunk = preferredTransferChunk(std::numeric_limits<std::int64_t>::max() / chunksPerBuffer);
-        return std::min(fileSize, static_cast<std::size_t>(chunk * chunksPerBuffer));
-    }
-
     void SftpSession::fileStreamRemoveItself(FileStream* stream, bool isBackElement)
     {
         if (isBackElement && fileStreams_.back().get() == stream)
@@ -450,9 +400,11 @@ namespace SecureShell
     std::expected<FileInformation, SftpSession::Error> SftpSession::statInStrand(std::filesystem::path const& path)
     {
         assert(strand_->withinProcessingThread());
+        const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
             sftp_stat(session_, u8Path(path).c_str()), sftp_attributes_free
         };
+        chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
             return std::unexpected(lastError());
 
@@ -472,9 +424,11 @@ namespace SecureShell
     std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(std::filesystem::path const& path)
     {
         assert(strand_->withinProcessingThread());
+        const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
             sftp_lstat(session_, u8Path(path).c_str()), sftp_attributes_free
         };
+        chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
             return std::unexpected(lastError());
 
@@ -617,6 +571,7 @@ namespace SecureShell
     )
     {
         assert(strand_->withinProcessingThread());
+        const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
             sftp_open(
                 session_,
@@ -632,6 +587,7 @@ namespace SecureShell
                 }
             }
         };
+        chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
 
         if (!file)
             return std::unexpected(lastError());
