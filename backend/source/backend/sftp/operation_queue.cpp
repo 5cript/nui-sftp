@@ -236,61 +236,23 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
 }
 
 auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId)
-    -> std::function<void(
-        std::filesystem::path const&,
-        std::uint64_t,
-        std::uint64_t,
-        std::uint64_t,
-        std::uint64_t,
-        std::uint64_t,
-        std::uint64_t,
-        std::make_signed_t<std::size_t>
-    )>
+    -> BulkProgressCallback
 {
-    return [weak = weak_from_this(), name = rpcName(eventName), operationId](
-               std::filesystem::path const& currentFile,
-               std::uint64_t fileCurrentIndex,
-               std::uint64_t fileCount,
-               std::uint64_t currentFileBytes,
-               std::uint64_t currentFileTotalBytes,
-               std::uint64_t bytesCurrent,
-               std::uint64_t bytesTotal,
-               std::make_signed_t<std::size_t> bytesPerSecond
-           )
+    return [weak = weak_from_this(), name = rpcName(eventName), operationId](SharedData::BulkProgress progress)
     {
         auto self = weak.lock();
         if (!self)
             return;
+        // Invoked from the SFTP processing strand, marshal the RPC call back onto the asio
+        // strand that owns the hub.
+        progress.operationId = operationId;
         self->within_strand_do(
-            [weak,
-                name,
-                operationId,
-                currentFile,
-                fileCurrentIndex,
-                fileCount,
-                currentFileBytes,
-                currentFileTotalBytes,
-                bytesCurrent,
-                bytesTotal,
-                bytesPerSecond]()
+            [weak, name, progress = std::move(progress)]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
-                    name,
-                    SharedData::BulkProgress{
-                        .operationId = operationId,
-                        .currentFile = currentFile.string(),
-                        .fileCurrentIndex = fileCurrentIndex,
-                        .fileCount = fileCount,
-                        .currentFileBytes = currentFileBytes,
-                        .currentFileTotalBytes = currentFileTotalBytes,
-                        .bytesCurrent = bytesCurrent,
-                        .bytesTotal = bytesTotal,
-                        .bytesPerSecond = bytesPerSecond,
-                    }
-                );
+                self->hub_->callRemote(name, progress);
             }
         );
     };
@@ -858,6 +820,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout),
                 .failFast = transferOptions.failFast.value_or(false),
+                .concurrency = bulkConcurrency_,
             }
         );
 
@@ -1291,6 +1254,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 .localPath = firstDst.parent_path(),
                 .individualOptions = std::move(downloadOpts),
                 .failFast = transferOptions.failFast.value_or(false),
+                .concurrency = bulkConcurrency_,
             }
         );
         bulk->setPrescannedFileList(std::move(files));
@@ -1437,6 +1401,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .localPath = localPath,
                 .individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout),
                 .failFast = transferOptions.failFast.value_or(false),
+                .concurrency = bulkConcurrency_,
             }
         );
 
@@ -1566,6 +1531,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 .localPath = firstSrc.parent_path(),
                 .individualOptions = std::move(uploadOpts),
                 .failFast = transferOptions.failFast.value_or(false),
+                .concurrency = bulkConcurrency_,
             }
         );
         bulk->setPrescannedFileList(std::move(files));

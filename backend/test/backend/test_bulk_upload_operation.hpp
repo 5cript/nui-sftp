@@ -372,18 +372,14 @@ namespace Test
             *sftp,
             {
                 .overallProgressCallback =
-                    [&callbackInvocations](
-                        std::filesystem::path const&,
-                        std::uint64_t,
-                        std::uint64_t,
-                        std::uint64_t,
-                        std::uint64_t,
-                        std::uint64_t,
-                        std::uint64_t,
-                        std::make_signed_t<std::size_t>) { ++callbackInvocations; },
+                    [&callbackInvocations](SharedData::BulkProgress const&)
+                {
+                    ++callbackInvocations;
+                },
                 .remotePath = "/home/test/progress_bulk",
                 .localPath = uploadSrc_.path(),
-            }};
+            }
+        };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);

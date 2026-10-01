@@ -298,17 +298,7 @@ class OperationQueue
     auto makeScanProgressCallback(std::string_view eventName, Ids::OperationId operationId)
         -> std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>;
 
-    auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId)
-        -> std::function<void(
-            std::filesystem::path const&,
-            std::uint64_t,
-            std::uint64_t,
-            std::uint64_t,
-            std::uint64_t,
-            std::uint64_t,
-            std::uint64_t,
-            std::make_signed_t<std::size_t>
-        )>;
+    auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId) -> BulkProgressCallback;
 
   private:
     bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
