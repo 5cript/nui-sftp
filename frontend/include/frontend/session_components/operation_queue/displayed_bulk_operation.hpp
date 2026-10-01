@@ -80,8 +80,20 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         }
         trimFreeTailRows();
 
-        totalProgressBar_.setProgress(static_cast<long long>(progress.bytesCurrent));
-        totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
+        // Without a byte total (empty files, unknown sizes) the byte bar would sit at 0 B
+        // forever; fall back to counting entries so the bar still moves.
+        if (progress.bytesTotal > 0)
+        {
+            totalProgressBar_.byteMode(true);
+            totalProgressBar_.setProgress(static_cast<long long>(progress.bytesCurrent));
+            totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
+        }
+        else
+        {
+            totalProgressBar_.byteMode(false);
+            totalProgressBar_.setProgress(static_cast<long long>(progress.fileCurrentIndex));
+            totalProgressBar_.max(static_cast<long long>(progress.fileCount));
+        }
 
         bytesPerSecond = progress.bytesPerSecond;
 

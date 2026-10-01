@@ -126,8 +126,13 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
         });
     }
 
+    const auto slotsBefore = slots_.size();
     if (const auto filled = fillSlots(); !filled.has_value())
         return enterErrorState<WorkStatus>(filled.error());
+    // Report newly started files before stepping them: small files finish within this very
+    // step and would otherwise never be seen in flight.
+    if (slots_.size() > slotsBefore)
+        emitProgress(true);
 
     if (const auto stepped = stepSlots(); !stepped.has_value())
         return enterErrorState<WorkStatus>(stepped.error());
@@ -433,13 +438,15 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
     auto* processingStrand = sftp_->strand();
     if (!slots_.empty() && processingStrand && !processingStrand->withinProcessingThread())
     {
-        std::ignore = sftp_->performPromise(
+        std::ignore = sftp_
+                          ->performPromise(
                               [this, adoptCancelState]() -> bool
                               {
                                   cancelChildrenInStrand(adoptCancelState);
                                   return true;
                               }
-        ).get();
+                          )
+                          .get();
     }
     else
     {

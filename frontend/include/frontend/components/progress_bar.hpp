@@ -50,6 +50,13 @@ namespace Components
          */
         void setZeroAsComplete();
 
+        /**
+         * @brief Switch between byte formatting and plain counts for the min/max text.
+         *
+         * @param enabled True formats values as bytes, false shows them as plain numbers.
+         */
+        void byteMode(bool enabled);
+
       private:
         void updateText();
         void recalculate();
