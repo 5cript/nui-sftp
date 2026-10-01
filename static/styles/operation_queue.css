@@ -133,6 +133,8 @@ header.opq-controls {
     grid-template-columns: 0 min-content 1fr 1fr max-content max-content max-content;
     /* Cards grow with their content (bulk cards list in-flight files) but never shrink below one row. */
     grid-auto-rows: minmax(36px, auto);
+    /* Keep auto rows content-sized: the default align-content: stretch would spread a few cards over the whole list height. */
+    align-content: start;
 }
 
 .operation-queue[data-paused] .opq-list {
