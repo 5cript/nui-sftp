@@ -159,6 +159,10 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlots()
 {
+    // Directories are created inline and each blocks the strand (a round trip or two on
+    // upload), so a step creates only a few before yielding to the queue.
+    constexpr std::size_t directoriesPerStep = 8;
+    std::size_t directoriesCreated = 0;
     while (static_cast<int>(slots_.size()) < budget_)
     {
         // While buffers are short, only probe with a deferred entry once nothing else runs;
@@ -171,6 +175,8 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         }
         else if (cursor_ < entries_.size() && retryDeferred_)
         {
+            if (entries_[cursor_].isDirectory() && directoriesCreated == directoriesPerStep)
+                break;
             index = cursor_++;
         }
         else
@@ -187,6 +193,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
             if (!result.has_value())
                 return std::unexpected(result.error());
             ++completedEntries_;
+            ++directoriesCreated;
             continue;
         }
         if (entry.isRegularFile() || entry.isSymlink())
