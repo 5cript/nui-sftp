@@ -131,7 +131,8 @@ header.opq-controls {
        unpaused surface, so layout is identical to the pre-feature state. The
        column width is rewritten to min-content under [data-paused] below. */
     grid-template-columns: 0 min-content 1fr 1fr max-content max-content max-content;
-    grid-auto-rows: 36px;
+    /* Cards grow with their content (bulk cards list in-flight files) but never shrink below one row. */
+    grid-auto-rows: minmax(36px, auto);
 }
 
 .operation-queue[data-paused] .opq-list {
@@ -176,7 +177,7 @@ header.opq-controls {
     transition: box-shadow .18s ease;
     font-size: 0.75rem;
     padding: 0 5px;
-    height: 36px;
+    min-height: 36px;
     fill: currentColor;
 
     /* second child — type icon (first child is the kick-to-top button which
@@ -212,7 +213,7 @@ header.opq-controls {
     grid-template-columns: subgrid;
     grid-column: span 7;
     align-items: center;
-    grid-template-rows: 36px;
+    grid-template-rows: minmax(36px, auto);
 }
 
 /* Kick-to-top button.  Always rendered (per-card cost = 1 click closure),
@@ -437,6 +438,7 @@ header.opq-controls {
     align-items: stretch;
     gap: 2px;
     min-width: 0;
+    padding: 3px 0;
 
     /* text row */
     &>div:first-child {
