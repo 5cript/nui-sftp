@@ -21,9 +21,10 @@ DownloadOperation::~DownloadOperation()
 {
     std::ignore = cancel(false);
 
-    if (auto stream = fileStream_.lock(); stream)
+    if (auto stream = fileStream_.lock(); stream && !stream->strand()->withinProcessingThread())
     {
-        // wait for all tasks of the operation to finish
+        // Wait for all tasks of the operation to finish. Skipped on the processing thread itself,
+        // where the wait could never be satisfied.
         stream->strand()->pushPromiseTask([]() {}).get();
     }
 }
@@ -548,13 +549,15 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
     if (buffer_.empty())
     {
         Log::error("DownloadOperation: No transfer buffer available from pool.");
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = SecureShell::SftpError{
-                .message = "No buffer available from pool",
-                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-            },
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = SecureShell::SftpError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
 
     if (options_.reserveSpace && options_.entry->size != 0)
