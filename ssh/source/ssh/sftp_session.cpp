@@ -6,6 +6,10 @@
 #include <cassert>
 #include <fcntl.h>
 
+#include <algorithm>
+
+#include <limits>
+
 namespace SecureShell
 {
     SftpSession::SftpSession(Session* owner, std::unique_ptr<ProcessingStrand> strand, sftp_session session)
@@ -36,6 +40,40 @@ namespace SecureShell
             )
             .get();
     }
+    void SftpSession::reportThroughput(std::int64_t bytesPerSecond) noexcept
+    {
+        if (bytesPerSecond <= 0)
+            return;
+        // EWMA with a short memory so a link that slows down is noticed quickly.
+        const auto previous = throughputEstimate_.load();
+        throughputEstimate_ = previous == 0 ? bytesPerSecond : (previous * 3 + bytesPerSecond) / 4;
+    }
+
+    std::int64_t SftpSession::throughputEstimate() const noexcept
+    {
+        return throughputEstimate_.load();
+    }
+
+    std::int64_t SftpSession::preferredTransferChunk(std::int64_t upperBound) const noexcept
+    {
+        constexpr std::int64_t unknownLinkChunk = 16 * 1024;
+        constexpr std::int64_t minimumChunk = 4 * 1024;
+        constexpr std::int64_t targetChunkMilliseconds = 50;
+        const auto bound = std::max(minimumChunk, upperBound);
+        const auto estimate = throughputEstimate_.load();
+        if (estimate <= 0)
+            return std::min(unknownLinkChunk, bound);
+        return std::clamp(estimate * targetChunkMilliseconds / 1000, minimumChunk, bound);
+    }
+
+    std::size_t SftpSession::preferredBufferSize(std::size_t fileSize) const noexcept
+    {
+        // A few chunks of headroom so a link that speeds up can grow its calls without a new lease.
+        constexpr std::int64_t chunksPerBuffer = 4;
+        const auto chunk = preferredTransferChunk(std::numeric_limits<std::int64_t>::max() / chunksPerBuffer);
+        return std::min(fileSize, static_cast<std::size_t>(chunk * chunksPerBuffer));
+    }
+
     void SftpSession::fileStreamRemoveItself(FileStream* stream, bool isBackElement)
     {
         if (isBackElement && fileStreams_.back().get() == stream)
@@ -140,7 +178,12 @@ namespace SecureShell
     std::future<std::expected<std::vector<FileInformation>, SftpSession::Error>>
     SftpSession::listDirectory(std::filesystem::path const& path)
     {
-        return performPromise([this, path]() { return listDirectoryInStrand(path); });
+        return performPromise(
+            [this, path]()
+            {
+                return listDirectoryInStrand(path);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -148,9 +191,7 @@ namespace SecureShell
     {
         assert(strand_->withinProcessingThread());
         auto result = sftp_mkdir(
-            session_,
-            u8Path(path).c_str(),
-            static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+            session_, u8Path(path).c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
         );
         if (result != SSH_OK)
             return std::unexpected(lastError());
@@ -160,7 +201,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::createDirectory(std::filesystem::path const& path, std::filesystem::perms permissions)
     {
-        return performPromise([this, path, permissions]() { return createDirectoryInStrand(path, permissions); });
+        return performPromise(
+            [this, path, permissions]()
+            {
+                return createDirectoryInStrand(path, permissions);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error> SftpSession::createDirectoryIfItDoesntExistInStrand(
@@ -175,9 +221,7 @@ namespace SecureShell
         if (!attributes)
         {
             auto result = sftp_mkdir(
-                session_,
-                u8Path(path).c_str(),
-                static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+                session_, u8Path(path).c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             );
             if (result != SSH_OK)
                 return std::unexpected(lastError());
@@ -202,7 +246,10 @@ namespace SecureShell
     SftpSession::createDirectoryIfItDoesntExist(std::filesystem::path const& path, std::filesystem::perms permissions)
     {
         return performPromise(
-            [this, path, permissions]() { return createDirectoryIfItDoesntExistInStrand(path, permissions); }
+            [this, path, permissions]()
+            {
+                return createDirectoryIfItDoesntExistInStrand(path, permissions);
+            }
         );
     }
 
@@ -235,7 +282,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::createFile(std::filesystem::path const& path, std::filesystem::perms permissions)
     {
-        return performPromise([this, path, permissions]() { return createFileInStrand(path, permissions); });
+        return performPromise(
+            [this, path, permissions]()
+            {
+                return createFileInStrand(path, permissions);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error> SftpSession::removeFileInStrand(std::filesystem::path const& path)
@@ -249,7 +301,12 @@ namespace SecureShell
 
     std::future<std::expected<void, SftpSession::Error>> SftpSession::removeFile(std::filesystem::path const& path)
     {
-        return performPromise([this, path]() { return removeFileInStrand(path); });
+        return performPromise(
+            [this, path]()
+            {
+                return removeFileInStrand(path);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error> SftpSession::removeDirectoryInStrand(std::filesystem::path const& path)
@@ -263,7 +320,12 @@ namespace SecureShell
 
     std::future<std::expected<void, SftpSession::Error>> SftpSession::removeDirectory(std::filesystem::path const& path)
     {
-        return performPromise([this, path]() { return removeDirectoryInStrand(path); });
+        return performPromise(
+            [this, path]()
+            {
+                return removeDirectoryInStrand(path);
+            }
+        );
     }
 
     std::future<std::expected<std::vector<std::filesystem::path>, SftpSession::Error>>
@@ -384,7 +446,12 @@ namespace SecureShell
 
     std::future<std::expected<FileInformation, SftpSession::Error>> SftpSession::stat(std::filesystem::path const& path)
     {
-        return performPromise([this, path]() { return statInStrand(path); });
+        return performPromise(
+            [this, path]()
+            {
+                return statInStrand(path);
+            }
+        );
     }
 
     std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(std::filesystem::path const& path)
@@ -402,7 +469,12 @@ namespace SecureShell
     std::future<std::expected<FileInformation, SftpSession::Error>>
     SftpSession::lstat(std::filesystem::path const& path)
     {
-        return performPromise([this, path]() { return lstatInStrand(path); });
+        return performPromise(
+            [this, path]()
+            {
+                return lstatInStrand(path);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -418,7 +490,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::stat(std::filesystem::path const& path, sftp_attributes attributes)
     {
-        return performPromise([this, path, attributes]() { return statInStrand(path, attributes); });
+        return performPromise(
+            [this, path, attributes]()
+            {
+                return statInStrand(path, attributes);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -439,7 +516,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::rename(std::filesystem::path const& source, std::filesystem::path const& destination)
     {
-        return performPromise([this, source, destination]() { return renameInStrand(source, destination); });
+        return performPromise(
+            [this, source, destination]()
+            {
+                return renameInStrand(source, destination);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -455,7 +537,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::chown(std::filesystem::path const& path, uid_t owner, gid_t group)
     {
-        return performPromise([this, path, owner, group]() { return chownInStrand(path, owner, group); });
+        return performPromise(
+            [this, path, owner, group]()
+            {
+                return chownInStrand(path, owner, group);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -471,7 +558,12 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::chmod(std::filesystem::path const& path, std::filesystem::perms perms)
     {
-        return performPromise([this, path, perms]() { return chmodInStrand(path, perms); });
+        return performPromise(
+            [this, path, perms]()
+            {
+                return chmodInStrand(path, perms);
+            }
+        );
     }
 
     SftpError SftpSession::lastError() const
@@ -495,11 +587,19 @@ namespace SecureShell
 
     std::future<std::expected<sftp_limits_struct, SftpSession::Error>> SftpSession::limits()
     {
-        return performPromise([this]() { return limitsInStrand(); });
+        return performPromise(
+            [this]()
+            {
+                return limitsInStrand();
+            }
+        );
     }
 
-    std::expected<std::weak_ptr<FileStream>, SftpSession::Error>
-    SftpSession::openFileInStrand(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions)
+    std::expected<std::weak_ptr<FileStream>, SftpSession::Error> SftpSession::openFileInStrand(
+        std::filesystem::path const& path,
+        OpenType openType,
+        std::filesystem::perms permissions
+    )
     {
         assert(strand_->withinProcessingThread());
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
@@ -535,7 +635,10 @@ namespace SecureShell
     SftpSession::openFile(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions)
     {
         return performPromise(
-            [this, path, openType, permissions]() { return openFileInStrand(path, openType, permissions); }
+            [this, path, openType, permissions]()
+            {
+                return openFileInStrand(path, openType, permissions);
+            }
         );
     }
 
@@ -591,7 +694,12 @@ namespace SecureShell
     std::future<std::expected<SftpSession::DeepLinkResult, SftpSession::Error>>
     SftpSession::readLinkDeep(std::filesystem::path const& path, int maxDepth)
     {
-        return performPromise([this, path, maxDepth]() { return readLinkDeepInStrand(path, maxDepth); });
+        return performPromise(
+            [this, path, maxDepth]()
+            {
+                return readLinkDeepInStrand(path, maxDepth);
+            }
+        );
     }
 
     std::expected<void, SftpSession::Error>
@@ -607,6 +715,11 @@ namespace SecureShell
     std::future<std::expected<void, SftpSession::Error>>
     SftpSession::createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath)
     {
-        return performPromise([this, target, linkPath]() { return createSymLinkInStrand(target, linkPath); });
+        return performPromise(
+            [this, target, linkPath]()
+            {
+                return createSymLinkInStrand(target, linkPath);
+            }
+        );
     }
 }

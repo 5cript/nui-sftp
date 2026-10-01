@@ -204,13 +204,8 @@ namespace SecureShell
         /**
          * @brief Helper for derived classes to construct leases.
          */
-        BufferLease makeLease(
-            BufferCategory category,
-            std::size_t slotIndex,
-            char* data,
-            std::size_t size,
-            std::size_t capacity
-        );
+        BufferLease
+        makeLease(BufferCategory category, std::size_t slotIndex, char* data, std::size_t size, std::size_t capacity);
     };
 
     namespace Detail
@@ -298,6 +293,16 @@ namespace SecureShell
 
         static constexpr std::size_t maxCategoryThresholdBytes = MaxCategoryThresholdBytes;
 
+        /**
+         * @brief Number of slots configured for @p category.
+         */
+        static constexpr std::size_t slotCount(BufferCategory category) noexcept
+        {
+            std::size_t result = 0;
+            ((Slots::category == category ? (result = Slots::count) : result), ...);
+            return result;
+        }
+
         BufferLease lease(std::size_t sizeHint) override
         {
             const auto category = pickCategory(sizeHint);
@@ -324,8 +329,8 @@ namespace SecureShell
 
         BufferCategory pickCategory(std::size_t sizeHint) const noexcept
         {
-            const BufferCategory cap = (sizeHint >= MaxCategoryThresholdBytes) ? BufferCategory::Max
-                                                                               : BufferCategory::Large;
+            const BufferCategory cap =
+                (sizeHint >= MaxCategoryThresholdBytes) ? BufferCategory::Max : BufferCategory::Large;
 
             constexpr std::array<BufferCategory, 5> ordered{
                 BufferCategory::Tiny,
@@ -422,13 +427,14 @@ namespace SecureShell
     };
 
     /**
-     * @brief Default pool: 8/8/8 small-to-medium slots, 4/4 large slots, Max gated at 1 MiB.
+     * @brief Default pool: plenty of small-to-medium slots because slow links lease small
+     *        buffers for every transfer, 8/4 large slots, Max gated at 1 MiB.
      */
     using DefaultBufferProvider = BufferProvider<
         1ull * 1024ull * 1024ull,
         CategorySlots<BufferCategory::Tiny, 8>,
-        CategorySlots<BufferCategory::Small, 8>,
-        CategorySlots<BufferCategory::Medium, 8>,
-        CategorySlots<BufferCategory::Large, 4>,
+        CategorySlots<BufferCategory::Small, 16>,
+        CategorySlots<BufferCategory::Medium, 16>,
+        CategorySlots<BufferCategory::Large, 8>,
         CategorySlots<BufferCategory::Max, 4>>;
 }

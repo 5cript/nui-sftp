@@ -10,6 +10,7 @@
 #include <ssh/sftp_error.hpp>
 #include <ssh/session.hpp>
 
+#include <atomic>
 #include <memory>
 #include <future>
 #include <expected>
@@ -297,6 +298,33 @@ namespace SecureShell
         /**
          * @brief Shared buffer pool for this session's file transfers.
          */
+        /**
+         * @brief Feeds a transfer's measured rate into the session-wide throughput estimate.
+         *        Per-transfer rates are shares of the link, so the estimate errs on the slow side.
+         */
+        void reportThroughput(std::int64_t bytesPerSecond) noexcept;
+
+        /**
+         * @brief Smoothed bytes/second seen on this channel, 0 while nothing has been measured.
+         */
+        std::int64_t throughputEstimate() const noexcept;
+
+        /**
+         * @brief Bytes a single sftp read or write should move on this link right now: about
+         *        50 ms of link time, pessimistic (16 KiB) while the link speed is unknown.
+         *
+         * @param upperBound Buffer size or server limit the result must not exceed.
+         */
+        std::int64_t preferredTransferChunk(std::int64_t upperBound) const noexcept;
+
+        /**
+         * @brief Size hint for leasing a transfer buffer on this link. Small on slow links so the
+         *        big pool slots stay free for transfers that can use them.
+         *
+         * @param fileSize The transfer size; the hint never exceeds it.
+         */
+        std::size_t preferredBufferSize(std::size_t fileSize) const noexcept;
+
         IBufferProvider& bufferProvider() noexcept
         {
             return *bufferProvider_;
@@ -314,8 +342,7 @@ namespace SecureShell
         /**
          * @brief In-strand variant of readLinkDeep. Must be called from within the processing thread.
          */
-        std::expected<DeepLinkResult, Error>
-        readLinkDeepInStrand(std::filesystem::path const& path, int maxDepth = 10);
+        std::expected<DeepLinkResult, Error> readLinkDeepInStrand(std::filesystem::path const& path, int maxDepth = 10);
 
         std::future<std::expected<void, Error>>
         createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath);
@@ -336,6 +363,7 @@ namespace SecureShell
         sftp_session session_;
         std::shared_ptr<IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
+        std::atomic<std::int64_t> throughputEstimate_{0};
     };
 
     constexpr inline auto operator|(SftpSession::OpenType a, SftpSession::OpenType b)

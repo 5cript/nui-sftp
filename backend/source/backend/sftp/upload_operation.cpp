@@ -642,7 +642,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
-    buffer_ = sftp_->bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
+    buffer_ =
+        sftp_->bufferProvider().leaseForTransfer(sftp_->preferredBufferSize(totalSize_), stream->writeLengthLimit());
     if (buffer_.empty())
     {
         Log::error("UploadOperation: No transfer buffer available from pool.");
