@@ -38,8 +38,10 @@ namespace SharedData
         std::int64_t bytesPerSecond;
         // Files being transferred or waiting for a transfer buffer right now.
         std::vector<BulkFileProgress> inFlight;
-        // Entries that failed with a skippable error and were left out; cumulative.
-        std::vector<std::uint64_t> failedEntryIndices;
+        // Entries that failed with a skippable error and were left out; cumulative. 32-bit
+        // because the frontend converts integer vectors through a typed array, and a 64-bit
+        // view rejects the plain numbers the backend sends.
+        std::vector<std::uint32_t> failedEntryIndices;
     };
     BOOST_DESCRIBE_STRUCT(
         BulkProgress,

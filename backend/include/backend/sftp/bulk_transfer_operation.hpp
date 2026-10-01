@@ -218,7 +218,7 @@ class BulkTransferOperation : public Operation
     std::uint64_t totalBytes_{0};
     int budget_{1};
     std::vector<std::pair<std::filesystem::path, Error>> failedEntries_{};
-    std::vector<std::uint64_t> failedEntryIndices_{};
+    std::vector<std::uint32_t> failedEntryIndices_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number
     // flicker; sampling the cumulative byte count keeps one coherent rate per bulk.
     std::chrono::steady_clock::time_point lastBpsSampleTime_{};
