@@ -131,9 +131,12 @@ header.opq-controls {
        unpaused surface, so layout is identical to the pre-feature state. The
        column width is rewritten to min-content under [data-paused] below. */
     grid-template-columns: 0 min-content 1fr 1fr max-content max-content max-content;
-    /* Cards grow with their content (bulk cards list in-flight files) but never shrink below one row. */
-    grid-auto-rows: minmax(36px, auto);
-    /* Keep auto rows content-sized: the default align-content: stretch would spread a few cards over the whole list height. */
+    /* Rows take their content height (bulk cards list in-flight files); .opq-card's min-height
+       keeps ordinary cards at one row. max-content rather than minmax(36px, auto): an auto
+       maximum only grows while the list has free space, so cards would snap back to 36px as
+       soon as the list scrolls. align-content: start stops the rows from stretching to fill the
+       list when there are only a few cards. */
+    grid-auto-rows: max-content;
     align-content: start;
 }
 
@@ -215,7 +218,7 @@ header.opq-controls {
     grid-template-columns: subgrid;
     grid-column: span 7;
     align-items: center;
-    grid-template-rows: minmax(36px, auto);
+    grid-template-rows: max-content;
 }
 
 /* Kick-to-top button.  Always rendered (per-card cost = 1 click closure),
