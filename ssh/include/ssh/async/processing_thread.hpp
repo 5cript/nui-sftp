@@ -128,11 +128,11 @@ namespace SecureShell
         int permanentTaskCount() const;
 
         /**
-         * @brief Number of permanent tasks being run in the current cycle. Unlike
-         *        permanentTaskCount this is valid from inside a permanent task, where the task
-         *        set is temporarily moved out for processing.
+         * @brief Time spent in the current processing cycle. Permanent tasks that block (file
+         *        transfers) use it to skip their turn once the cycle has run long, which keeps
+         *        one-shot tasks responsive. Only meaningful from within the processing thread.
          */
-        int activePermanentTaskCount() const noexcept;
+        std::chrono::steady_clock::duration cycleElapsed() const noexcept;
 
         /**
          * @brief Removes all permanent tasks.
@@ -178,7 +178,11 @@ namespace SecureShell
         std::atomic<int> permanentTaskIdCounter_ = 0;
         std::atomic<std::thread::id> processingThreadId_{};
         std::atomic_bool processingPermanents_{false};
-        std::atomic<int> activePermanentTasks_{0};
+        // Written by the processing thread at the start of each cycle, read by tasks on it.
+        std::chrono::steady_clock::time_point cycleStart_{};
+        // Permanent tasks start at a different position each cycle so tasks late in the map
+        // are not starved when earlier ones exhaust the cycle.
+        std::size_t permanentRotation_{0};
         std::vector<std::function<void()>> deferredTaskModification_{};
 
         std::deque<std::function<void()>> tasks_{};

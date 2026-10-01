@@ -170,6 +170,7 @@ namespace SecureShell
             while (running_)
             {
                 timePoint = std::chrono::steady_clock::now();
+                cycleStart_ = timePoint;
 
                 if (permanentTasksAvailable_)
                 {
@@ -177,11 +178,13 @@ namespace SecureShell
                     auto permaTasksMoved = std::move(permanentTasks_);
                     permanentTasks_ = {};
                     processingPermanents_ = true;
-                    activePermanentTasks_ = static_cast<int>(permaTasksMoved.size());
                     lock.unlock();
 
-                    for (auto const& [id, task] : permaTasksMoved)
+                    const auto rotation = permaTasksMoved.empty() ? 0 : (permanentRotation_++ % permaTasksMoved.size());
+                    const auto rotatedBegin = std::next(permaTasksMoved.begin(), static_cast<std::ptrdiff_t>(rotation));
+                    auto runTask = [&](auto const& entry)
                     {
+                        auto const& [id, task] = entry;
                         // Throwing tasks are removed (not re-run) and the exception is
                         // captured for rethrow at end of cycle so cleanup below still runs.
                         bool keep = false;
@@ -196,10 +199,13 @@ namespace SecureShell
                         }
                         if (!keep)
                             toRemove.push_back(id);
-
-                        if (!running_ || shuttingDown_)
-                            break;
-                    }
+                        return running_ && !shuttingDown_;
+                    };
+                    bool keepGoing = true;
+                    for (auto it = rotatedBegin; keepGoing && it != permaTasksMoved.end(); ++it)
+                        keepGoing = runTask(*it);
+                    for (auto it = permaTasksMoved.begin(); keepGoing && it != rotatedBegin; ++it)
+                        keepGoing = runTask(*it);
                     if (!toRemove.empty())
                     {
                         for (auto const& id : toRemove)
@@ -283,9 +289,9 @@ namespace SecureShell
             running_ = false;
         }
     }
-    int ProcessingThread::activePermanentTaskCount() const noexcept
+    std::chrono::steady_clock::duration ProcessingThread::cycleElapsed() const noexcept
     {
-        return activePermanentTasks_.load();
+        return std::chrono::steady_clock::now() - cycleStart_;
     }
     int ProcessingThread::permanentTaskCount() const
     {

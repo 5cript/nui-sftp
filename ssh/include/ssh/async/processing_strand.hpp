@@ -165,11 +165,11 @@ namespace SecureShell
         }
 
         /**
-         * @brief Permanent tasks running in the processing thread's current cycle.
+         * @brief Time spent in the processing thread's current cycle. See ProcessingThread::cycleElapsed.
          */
-        int activePermanentTaskCount() const noexcept
+        std::chrono::steady_clock::duration cycleElapsed() const noexcept
         {
-            return processingThread_->activePermanentTaskCount();
+            return processingThread_->cycleElapsed();
         }
 
         bool withinProcessingThread() const noexcept
