@@ -830,4 +830,41 @@ namespace SecureShell::Test
         processingThread.start(std::chrono::milliseconds{1});
         EXPECT_THROW(processingThread.start(std::chrono::milliseconds{1}), std::logic_error);
     }
+
+    TEST_F(ProcessingThreadTest, PermanentTasksStartAtARotatingPositionEachCycle)
+    {
+        // Tasks that skip their turn once a cycle ran long rely on the start position moving,
+        // otherwise the last tasks in the map would never run.
+        std::mutex orderMutex;
+        std::vector<int> order;
+        ProcessingThread processingThread;
+        for (int index = 0; index < 3; ++index)
+        {
+            const auto result = processingThread.pushPermanentTask(
+                [index, &order, &orderMutex](auto)
+                {
+                    std::lock_guard lock{orderMutex};
+                    order.push_back(index);
+                    return true;
+                }
+            );
+            ASSERT_TRUE(result.first);
+        }
+        processingThread.start(std::chrono::milliseconds{1});
+        for (int attempt = 0; attempt < 500; ++attempt)
+        {
+            {
+                std::lock_guard lock{orderMutex};
+                if (order.size() >= 9)
+                    break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        }
+        processingThread.stop();
+
+        std::lock_guard lock{orderMutex};
+        ASSERT_GE(order.size(), 9u);
+        const std::vector<int> expected{0, 1, 2, 1, 2, 0, 2, 0, 1};
+        EXPECT_EQ(std::vector<int>(order.begin(), order.begin() + 9), expected);
+    }
 }
