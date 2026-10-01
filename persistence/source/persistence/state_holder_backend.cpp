@@ -350,6 +350,7 @@ namespace Persistence
                         },
                     },
                 .concurrency = defaultSftpConcurrency,
+                .bulkConcurrency = defaultBulkConcurrency,
                 .operationTimeout = 5s
             };
 #pragma clang diagnostic pop

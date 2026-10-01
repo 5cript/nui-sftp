@@ -319,7 +319,10 @@ class OperationQueue
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
+    // Transfer slots handed out per queue tick.
     int parallelism_{1};
+    // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.
+    int bulkConcurrency_{1};
     // Keyed by operationId.value(). Called when a sync-only scan completes and
     // hands off its ScanNode tree. The scan is known to be build-tree mode so
     // @ref ScanOperation::ejectScanTree() has the payload.

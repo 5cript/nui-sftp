@@ -57,17 +57,24 @@ namespace Persistence
     // Default number of queue operations worked on in parallel.
     inline constexpr int defaultSftpConcurrency = 4;
 
+    // Default number of files a single bulk transfer may move at once. Draws from the
+    // concurrency budget above, so it is clamped to it at runtime.
+    inline constexpr int defaultBulkConcurrency = 2;
+
     struct SftpOptions
     {
         std::optional<DownloadOptions> downloadOptions{};
         std::optional<UploadOptions> uploadOptions{};
         std::optional<std::filesystem::path> defaultDirectory{std::nullopt};
-        std::optional<int> concurrency{std::nullopt}; // How many parallel transfers are allowed?
+        // How many parallel transfers are allowed?
+        std::optional<int> concurrency{std::nullopt};
+        // How many of those a single bulk transfer may occupy.
+        std::optional<int> bulkConcurrency{std::nullopt};
         std::optional<std::chrono::seconds> operationTimeout{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         SftpOptions,
         (),
-        (downloadOptions, uploadOptions, defaultDirectory, concurrency, operationTimeout)
+        (downloadOptions, uploadOptions, defaultDirectory, concurrency, bulkConcurrency, operationTimeout)
     )
 }

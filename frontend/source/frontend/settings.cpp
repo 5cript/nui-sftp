@@ -114,6 +114,7 @@ struct Settings::Implementation
         bool disableFileLogging{false};
         std::optional<std::filesystem::path> temporaryDownloadsDirectory;
         std::optional<int> concurrency;
+        std::optional<int> bulkConcurrency;
     };
     Nui::Observed<bool> requiresRestart{false};
     RestartCriticalBaseline restartBaseline{};
@@ -129,6 +130,7 @@ struct Settings::Implementation
             .disableFileLogging = generalSettings.logOptions.disableFileLogging.value(),
             .temporaryDownloadsDirectory = generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value(),
             .concurrency = sftpOptions.concurrency.value(),
+            .bulkConcurrency = sftpOptions.bulkConcurrency.value(),
         };
         requiresRestart = false;
     }
@@ -142,7 +144,8 @@ struct Settings::Implementation
             generalSettings.logOptions.disableFileLogging.value() != restartBaseline.disableFileLogging ||
             generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value() !=
                 restartBaseline.temporaryDownloadsDirectory ||
-            sftpOptions.concurrency.value() != restartBaseline.concurrency;
+            sftpOptions.concurrency.value() != restartBaseline.concurrency ||
+            sftpOptions.bulkConcurrency.value() != restartBaseline.bulkConcurrency;
     }
 
     Implementation(
