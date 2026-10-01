@@ -56,7 +56,6 @@ struct OperationQueue::Implementation
     RemoteSideModel* remoteModel;
 
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
-    Nui::Observed<std::string> pausedText{language->get("operationQueue", "continue")};
     Nui::Observed<bool> paused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
@@ -98,12 +97,11 @@ struct OperationQueue::Implementation
     // streams to the provider.  Cleared via @ref clearSyncSessionRouting.
     struct SyncSessionRouting
     {
-        std::array<Ids::OperationId, 2> scanIds{};   // [0]=remote, [1]=local
+        std::array<Ids::OperationId, 2> scanIds{}; // [0]=remote, [1]=local
         std::function<void(bool isLocal)> onScanPhaseDone;
         std::function<void(std::uint64_t)> onDiffProgress;
     };
     std::unordered_map<std::string, SyncSessionRouting> syncSessionRouting;
-    Nui::ListenRemover<decltype(paused)> pausedListener{};
 
     // Minimized-sync restore button state.  `minimizedSyncVisible` drives
     // display; `minimizedSyncShine` is bumped each time we (re)minimize the
@@ -133,8 +131,8 @@ struct OperationQueue::Implementation
 
     void setDragHover(Nui::val targetEl, bool below)
     {
-        if (!currentHoverEl.isNull() && !currentHoverEl.isUndefined() &&
-            currentHoverEl.equals(targetEl) && currentHoverBelow == below)
+        if (!currentHoverEl.isNull() && !currentHoverEl.isUndefined() && currentHoverEl.equals(targetEl) &&
+            currentHoverBelow == below)
             return;
         clearDragHover();
         if (targetEl.isNull() || targetEl.isUndefined())
@@ -240,9 +238,7 @@ struct OperationQueue::Implementation
         if (pageCount.value() != newPageCount)
             pageCount = newPageCount;
 
-        const int desiredPage = followLive
-            ? newPageCount - 1
-            : std::clamp(currentPage.value(), 0, newPageCount - 1);
+        const int desiredPage = followLive ? newPageCount - 1 : std::clamp(currentPage.value(), 0, newPageCount - 1);
         if (currentPage.value() != desiredPage)
             currentPage = desiredPage;
     }
@@ -288,22 +284,7 @@ struct OperationQueue::Implementation
         , onUpdate{}
         , operations{}
         , autoCleanTimer{}
-    {
-        pausedListener = Nui::smartListen(
-            paused,
-            [this](bool paused)
-            {
-                this->paused.eventContext().delayToAfterProcessing(
-                    [this, paused]()
-                    {
-                        pausedText = paused ? language->get("operationQueue", "continue")
-                                            : language->get("operationQueue", "pause");
-                        pausedText.eventContext().sync();
-                    }
-                );
-            }
-        );
-    }
+    {}
 };
 
 OperationQueue::OperationQueue(
@@ -766,10 +747,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean
             );
         }
-        else if (
-            added.type == SharedData::OperationType::Delete ||
-            added.type == SharedData::OperationType::BulkDelete
-        )
+        else if (added.type == SharedData::OperationType::Delete || added.type == SharedData::OperationType::BulkDelete)
         {
             using namespace std::string_literals;
             // BulkDelete reuses the DisplayedDeleteOperation card — its body
@@ -948,7 +926,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     if (added.mode != SharedData::OperationMode::PriorityQueued)
     {
         card->setKickToTopHandler(
-            [this, opId = added.operationId]() {
+            [this, opId = added.operationId]()
+            {
                 requestMoveOperation(opId, 0);
             }
         );
@@ -1339,8 +1318,7 @@ std::vector<ResumableOp> OperationQueue::snapshotInFlight()
     std::vector<ResumableOp> out;
     using Map = ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map>;
     out.reserve(
-        impl_->priorityOperations.observedValues().value().size() +
-        impl_->operations.observedValues().value().size()
+        impl_->priorityOperations.observedValues().value().size() + impl_->operations.observedValues().value().size()
     );
     std::size_t scanned = 0;
     std::size_t skippedCompleted = 0;
@@ -1493,12 +1471,7 @@ void OperationQueue::buildSyncEnqueuePlan(
     if (!impl_->fileEngine)
         return;
     impl_->fileEngine->buildSyncEnqueuePlan(
-        syncSessionId,
-        section,
-        std::move(selectedRelKeys),
-        generation,
-        std::move(onResolved),
-        std::move(onRejected)
+        syncSessionId, section, std::move(selectedRelKeys), generation, std::move(onResolved), std::move(onRejected)
     );
 }
 
@@ -1720,7 +1693,8 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
     // Resolve the card element (and its op id) for an arbitrary event target
     // by walking up through `closest("[data-op-id]")`.  Mirrors the resolver
     // in flavor_implementation.cpp:79-88.
-    auto resolveCard = [](Nui::val target) -> std::pair<Nui::val, std::string> {
+    auto resolveCard = [](Nui::val target) -> std::pair<Nui::val, std::string>
+    {
         if (target.isNull() || target.isUndefined())
             return {Nui::val::null(), {}};
         auto node = target.call<Nui::val>("closest", std::string{"[data-op-id]"});
@@ -1734,7 +1708,8 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
 
     // Look up an op's current index in the live regular queue.  Returns -1
     // if the op completed/was removed between drag start and drop.
-    auto findIndex = [this](std::string const& opId) -> int {
+    auto findIndex = [this](std::string const& opId) -> int
+    {
         auto const& deque = impl_->operations.observedValues().value();
         for (std::size_t idx = 0; idx < deque.size(); ++idx)
         {
@@ -1754,7 +1729,9 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
         // of card count.  Each handler resolves the affected card via
         // resolveCard().  This is the "many items" optimization the user
         // pointed at in icon_flavor.cpp.
-        "dragstart"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+        "dragstart"_event =
+            [this, resolveCard](Nui::WebApi::DragEvent event)
+        {
             if (!impl_->paused.value())
             {
                 event.val().call<void>("preventDefault");
@@ -1774,14 +1751,18 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
             // Visual cue on the dragged card itself (separate from drop target).
             el["classList"].call<void>("add", std::string{"opq-dragging"});
         },
-        "dragend"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+        "dragend"_event =
+            [this, resolveCard](Nui::WebApi::DragEvent event)
+        {
             // Always clear visuals — fires whether the drop succeeded or not.
             auto [el, _opId] = resolveCard(event.val()["target"]);
             if (!el.isNull() && !el.isUndefined())
                 el["classList"].call<void>("remove", std::string{"opq-dragging"});
             impl_->clearDragHover();
         },
-        "dragover"_event = [this, resolveCard](Nui::WebApi::DragEvent event) {
+        "dragover"_event =
+            [this, resolveCard](Nui::WebApi::DragEvent event)
+        {
             if (!impl_->paused.value())
                 return;
             // Always preventDefault on dragover or the drop event will not fire.
@@ -1799,21 +1780,24 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
             const bool below = (y - top) > (height * 0.5);
             impl_->setDragHover(std::move(el), below);
         },
-        "dragleave"_event = [this](Nui::WebApi::DragEvent event) {
+        "dragleave"_event =
+            [this](Nui::WebApi::DragEvent event)
+        {
             // Only clear when leaving the list container as a whole (not when
             // moving between cards inside it).  Same guard as
             // flavor_implementation.cpp:144-153.
             auto related = event.val()["relatedTarget"];
             auto current = event.val()["currentTarget"];
-            if (!related.isNull() && !related.isUndefined() &&
-                !current.isNull() && !current.isUndefined() &&
+            if (!related.isNull() && !related.isUndefined() && !current.isNull() && !current.isUndefined() &&
                 current.call<bool>("contains", related))
             {
                 return;
             }
             impl_->clearDragHover();
         },
-        "drop"_event = [this, resolveCard, findIndex](Nui::WebApi::DragEvent event) {
+        "drop"_event =
+            [this, resolveCard, findIndex](Nui::WebApi::DragEvent event)
+        {
             if (!impl_->paused.value())
                 return;
             event.val().call<void>("preventDefault");
@@ -1856,11 +1840,12 @@ Nui::ElementRenderer OperationQueue::makeRegularLiveList()
 
             requestMoveOperation(Ids::makeOperationId(draggedId), static_cast<std::size_t>(newIndex));
         },
-    }(
-        impl_->operations.observedValues().map(
-            [](auto, auto const& element) { return (*element)(); }
-        )
-    );
+    }(impl_->operations.observedValues().map(
+        [](auto, auto const& element)
+        {
+            return (*element)();
+        }
+    ));
 }
 
 Nui::ElementRenderer OperationQueue::operator()()
@@ -1877,8 +1862,7 @@ Nui::ElementRenderer OperationQueue::operator()()
             fmt::runtime(language->get("operationQueue", "totalOperations")),
             static_cast<int>(
                 impl_->operations.observedValues().value().size() +
-                impl_->priorityOperations.observedValues().value().size() +
-                impl_->history.size()
+                impl_->priorityOperations.observedValues().value().size() + impl_->history.size()
             )
         );
     };
@@ -1920,7 +1904,11 @@ Nui::ElementRenderer OperationQueue::operator()()
             class_ = "opq-controls"
         }(
             Snc::button({
-                .text = impl_->pausedText,
+                // Label and icon derive from the same observed so they flip in the same update.
+                .text = Nui::observe(impl_->paused).generate([](bool paused) -> std::string {
+                    return paused ? language->get("operationQueue", "continue")
+                                  : language->get("operationQueue", "pause");
+                }),
                 .icon = [this]() -> Nui::ElementRenderer {
                     return fragment(
                         observe(impl_->paused).generate([](bool paused)
@@ -2204,9 +2192,8 @@ void OperationQueue::enqueueArchiveDownload(
         compressionLevel,
         mayOverwrite,
         mode,
-        [onOperationCreated = std::move(onOperationCreated)](
-            std::optional<Ids::OperationId> opId, std::string const& info
-        )
+        [onOperationCreated =
+                std::move(onOperationCreated)](std::optional<Ids::OperationId> opId, std::string const& info)
         {
             onOperationCreated(opId, info);
         }
@@ -2244,9 +2231,8 @@ void OperationQueue::enqueueArchiveUpload(
         compressionLevel,
         mayOverwrite,
         mode,
-        [onOperationCreated = std::move(onOperationCreated)](
-            std::optional<Ids::OperationId> opId, std::string const& info
-        )
+        [onOperationCreated =
+                std::move(onOperationCreated)](std::optional<Ids::OperationId> opId, std::string const& info)
         {
             onOperationCreated(opId, info);
         }
@@ -2325,7 +2311,10 @@ void OperationQueue::enqueueBulkDownload(
             auto const& opId = operationIds[idx];
             impl_->completionCallbacks.emplace(
                 opId.value(),
-                [onEachComplete, opId](bool success) { onEachComplete(opId, success); }
+                [onEachComplete, opId](bool success)
+                {
+                    onEachComplete(opId, success);
+                }
             );
         }
     }
@@ -2333,17 +2322,9 @@ void OperationQueue::enqueueBulkDownload(
     if (onEnqueued)
         onEnqueued(operationIds);
 
-    Log::info(
-        "Frontend Operation Queue bulk download: {} entries, one RPC",
-        entries.size()
-    );
+    Log::info("Frontend Operation Queue bulk download: {} entries, one RPC", entries.size());
     impl_->fileEngine->addBulkDownload(
-        std::move(entries),
-        std::move(operationIds),
-        allowOverwrite,
-        insertRefresh,
-        mode,
-        std::move(onBulkAck)
+        std::move(entries), std::move(operationIds), allowOverwrite, insertRefresh, mode, std::move(onBulkAck)
     );
 }
 
@@ -2380,7 +2361,10 @@ void OperationQueue::enqueueBulkUpload(
             auto const& opId = operationIds[idx];
             impl_->completionCallbacks.emplace(
                 opId.value(),
-                [onEachComplete, opId](bool success) { onEachComplete(opId, success); }
+                [onEachComplete, opId](bool success)
+                {
+                    onEachComplete(opId, success);
+                }
             );
         }
     }
@@ -2390,12 +2374,7 @@ void OperationQueue::enqueueBulkUpload(
 
     Log::info("Frontend Operation Queue bulk upload: {} entries, one RPC", entries.size());
     impl_->fileEngine->addBulkUpload(
-        std::move(entries),
-        std::move(operationIds),
-        allowOverwrite,
-        insertRefresh,
-        mode,
-        std::move(onBulkAck)
+        std::move(entries), std::move(operationIds), allowOverwrite, insertRefresh, mode, std::move(onBulkAck)
     );
 }
 
@@ -2418,8 +2397,9 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
         op.dst.generic_string()
     );
 
-    auto reportSingle = [kind = op.kind, src = op.src, dst = op.dst](
-                            std::optional<Ids::OperationId> const& opId, std::string const& info)
+    auto reportSingle = [kind = op.kind,
+                            src = op.src,
+                            dst = op.dst](std::optional<Ids::OperationId> const& opId, std::string const& info)
     {
         if (opId)
         {
@@ -2446,7 +2426,8 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
     // Build a minimal Item from a path.  The size hint biases the backend
     // toward the streaming/big-file code path so a partial transfer can
     // resume; the small-file path doesn't honour tryContinue.
-    auto makeItem = [](std::filesystem::path const& path) {
+    auto makeItem = [](std::filesystem::path const& path)
+    {
         SharedData::DirectoryEntry entry{};
         entry.path = path;
         entry.type = SharedData::FileType::Regular;
@@ -2485,7 +2466,8 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
             enqueueDelete(
                 {op.src},
                 op.recursive,
-                [src = op.src](std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info) {
+                [src = op.src](std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info)
+                {
                     if (ids)
                         Log::info("Resumed delete of {} ({} op(s) created)", src.generic_string(), ids->size());
                     else
@@ -2531,7 +2513,10 @@ void OperationQueue::enqueueBulkDelete(
     {
         impl_->completionCallbacks.emplace(
             bulkOperationId.value(),
-            [onBulkComplete](bool success) { onBulkComplete(success); }
+            [onBulkComplete](bool success)
+            {
+                onBulkComplete(success);
+            }
         );
     }
 
@@ -2539,11 +2524,5 @@ void OperationQueue::enqueueBulkDelete(
         onEnqueued(bulkOperationId);
 
     Log::info("Frontend Operation Queue bulk delete: {} entries, one RPC", entries.size());
-    impl_->fileEngine->addBulkDelete(
-        std::move(entries),
-        bulkOperationId,
-        insertRefresh,
-        mode,
-        std::move(onBulkAck)
-    );
+    impl_->fileEngine->addBulkDelete(std::move(entries), bulkOperationId, insertRefresh, mode, std::move(onBulkAck));
 }
