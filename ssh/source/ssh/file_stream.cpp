@@ -508,7 +508,13 @@ namespace SecureShell
                         return false;
                     }
                     if (result == 0)
-                        break;
+                    {
+                        // The remote file is shorter than listed; treat it as the end like the
+                        // synchronous path does instead of polling the EOF forever.
+                        context->calculateBytesPerSecond();
+                        context->ended_ = true;
+                        return false;
+                    }
                     sftp->chunkController().recordDataCall(result, requested, std::chrono::steady_clock::now() - callStart);
                     remainingRead -= result;
                     if (!onRead(result))
