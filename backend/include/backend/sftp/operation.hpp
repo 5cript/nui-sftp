@@ -82,6 +82,17 @@ class Operation
      */
     virtual int parallelWorkDoable(int parallel) const noexcept = 0;
 
+    /**
+     * @brief Tells the operation how many transfer slots the queue granted it for the next work step.
+     *        Only operations that answer more than 1 in @ref parallelWorkDoable care.
+     *
+     * @param slots Granted slots, at least 1.
+     */
+    virtual void setParallelBudget(int)
+    {
+        /* noop */
+    }
+
     enum class WorkStatus
     {
         MoreWork,

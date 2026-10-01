@@ -7,34 +7,43 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace SharedData
 {
+    /**
+     * @brief One file currently being transferred by a bulk operation.
+     */
+    struct BulkFileProgress
+    {
+        std::string file;
+        // Position of the file in the bulk's entry list. Stable for the lifetime of the bulk.
+        std::uint64_t entryIndex;
+        std::uint64_t bytes;
+        std::uint64_t totalBytes;
+    };
+    BOOST_DESCRIBE_STRUCT(BulkFileProgress, (), (file, entryIndex, bytes, totalBytes))
+
     struct BulkProgress
     {
         Ids::OperationId operationId;
-        std::string currentFile;
+        // Entries (files and directories) the bulk has finished with.
         std::uint64_t fileCurrentIndex;
         std::uint64_t fileCount;
-        std::uint64_t currentFileBytes;
-        std::uint64_t currentFileTotalBytes;
         std::uint64_t bytesCurrent;
         std::uint64_t bytesTotal;
         // See TransferProgress::bytesPerSecond for the reason this is
         // pinned to int64 (describe-based split-u64 encoding symmetry).
         std::int64_t bytesPerSecond;
+        // Files being transferred or waiting for a transfer buffer right now.
+        std::vector<BulkFileProgress> inFlight;
+        // Entries that failed with a skippable error and were left out; cumulative.
+        std::vector<std::uint64_t> failedEntryIndices;
     };
     BOOST_DESCRIBE_STRUCT(
         BulkProgress,
         (),
-        (operationId,
-            currentFile,
-            fileCurrentIndex,
-            fileCount,
-            currentFileBytes,
-            currentFileTotalBytes,
-            bytesCurrent,
-            bytesTotal,
-            bytesPerSecond)
+        (operationId, fileCurrentIndex, fileCount, bytesCurrent, bytesTotal, bytesPerSecond, inFlight, failedEntryIndices)
     )
 }
