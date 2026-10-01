@@ -247,7 +247,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
             failedEntries_.emplace_back(SharedData::fullPath(entries_, entries_[slot.entryIndex]), error);
-            failedEntryIndices_.push_back(slot.entryIndex);
+            failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
             finishSlot(slot);
             if (common_.failFast)
             {
