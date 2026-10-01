@@ -209,6 +209,15 @@ SftpOptions::SftpOptions(std::function<void()> const& onChange)
             .maxValue = 20,
         }
     }
+    , bulkConcurrency{
+        language->getObserved("settings", "sftpOptions", "bulkConcurrencyHelpText"),
+        onChange,
+        nulloptReset(bulkConcurrency, onChange),
+        {
+            .minValue = 1,
+            .maxValue = 20,
+        }
+    }
     , operationTimeoutSeconds{
         language->getObserved("settings", "sftpOptions", "operationTimeoutSecondsHelpText"),
         onChange,
@@ -270,6 +279,7 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
     }
 
     assignIfValid(state.concurrency, concurrency);
+    assignIfValid(state.bulkConcurrency, bulkConcurrency);
     if (operationTimeoutSeconds.valueIsValid())
     {
         auto timeout = operationTimeoutSeconds.value();
@@ -346,6 +356,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
     }
 
     concurrency.value(state.concurrency);
+    bulkConcurrency.value(state.bulkConcurrency);
     operationTimeoutSeconds.value(
         state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
     );
@@ -413,6 +424,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
     }
 
     concurrency.inherit(state.concurrency);
+    bulkConcurrency.inherit(state.bulkConcurrency);
     defaultDirectory.inherit(state.defaultDirectory);
     operationTimeoutSeconds.inherit(
         state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
@@ -492,6 +504,7 @@ Nui::ElementRenderer SftpOptions::render()
         ),
         defaultDirectory(language->getObserved("settings", "sftpOptions", "defaultDirectory")),
         concurrency(language->getObserved("settings", "sftpOptions", "concurrency")),
+        bulkConcurrency(language->getObserved("settings", "sftpOptions", "bulkConcurrency")),
         operationTimeoutSeconds(language->getObserved("settings", "sftpOptions", "operationTimeoutSeconds"))
     );
 }

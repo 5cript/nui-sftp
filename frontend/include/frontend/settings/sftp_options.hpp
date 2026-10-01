@@ -43,7 +43,10 @@ struct SftpOptions : public GroupKeys
     Nui::Observed<bool> downloadOptionsEngaged{false};
     Nui::Observed<bool> uploadOptionsEngaged{false};
 
-    NumberSetting<int, true> concurrency; // How many parallel transfers are allowed?
+    // How many parallel transfers are allowed?
+    NumberSetting<int, true> concurrency;
+    // How many of those a single bulk transfer may occupy.
+    NumberSetting<int, true> bulkConcurrency;
     NumberSetting<int, true> operationTimeoutSeconds;
 
     SftpOptions(std::function<void()> const& onChange);

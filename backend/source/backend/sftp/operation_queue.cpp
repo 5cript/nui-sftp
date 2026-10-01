@@ -14,6 +14,10 @@
 #include <log/log.hpp>
 #include <utility/overloaded.hpp>
 
+#include <algorithm>
+#include <iterator>
+#include <optional>
+
 using namespace std::chrono_literals;
 
 namespace
@@ -186,7 +190,12 @@ OperationQueue::OperationQueue(
     : RpcHelper::StrandRpc{executor, strand, wnd, hub}
     , sftpOpts_{std::move(sftpOpts)}
     , sessionId_{std::move(sessionId)}
-    , parallelism_{parallelism}
+    , parallelism_{std::max(1, parallelism)}
+    , bulkConcurrency_{std::clamp(
+          sftpOpts_.bulkConcurrency.value_or(Persistence::defaultBulkConcurrency),
+          1,
+          std::max(1, parallelism_ - 1)
+      )}
 {}
 
 std::string OperationQueue::rpcName(std::string_view event) const
