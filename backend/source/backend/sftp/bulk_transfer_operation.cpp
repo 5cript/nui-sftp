@@ -303,9 +303,11 @@ std::uint64_t BulkTransferOperation::fileCount() const noexcept
 
 std::uint64_t BulkTransferOperation::bytesNow() const noexcept
 {
+    // Clamp to the listed size: completion adds that size, so a file that grew since the
+    // listing must not make the total step backwards.
     std::uint64_t inFlight = 0;
     for (auto const& slot : slots_)
-        inFlight += slot.bytes;
+        inFlight += std::min(slot.bytes, entries_[slot.entryIndex].size);
     return completedBytes_ + inFlight;
 }
 
