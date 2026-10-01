@@ -441,7 +441,7 @@ settings:
     concurrency: "Concurrency"
     concurrencyHelpText: "Number of concurrent transfers."
     bulkConcurrency: "Bulk Concurrency"
-    bulkConcurrencyHelpText: "Number of files a single bulk download or upload transfers at once. Capped by Concurrency so other operations keep their share. Values above 8 give no benefit because of the transfer buffer pool."
+    bulkConcurrencyHelpText: "Number of files a single bulk download or upload transfers at once. Capped to one below Concurrency so other operations keep a slot. Values above 8 give no benefit because of the transfer buffer pool."
 
     operationTimeoutSeconds: "Operation Timeout (Seconds)"
     operationTimeoutSecondsHelpText: "The time the server may take for responses before timing out."
