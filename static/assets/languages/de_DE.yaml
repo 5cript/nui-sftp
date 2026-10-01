@@ -439,7 +439,7 @@ settings:
     concurrency: "Nebenläufigkeit"
     concurrencyHelpText: "Anzahl der gleichzeitigen SFTP Operationen."
     bulkConcurrency: "Nebenläufigkeit von Massenübertragungen"
-    bulkConcurrencyHelpText: "Anzahl der Dateien, die ein einzelner Massen-Download oder -Upload gleichzeitig überträgt. Wird durch die Nebenläufigkeit begrenzt, damit andere Operationen ihren Anteil behalten. Werte über 8 bringen wegen des Übertragungspuffers keinen Vorteil."
+    bulkConcurrencyHelpText: "Anzahl der Dateien, die ein einzelner Massen-Download oder -Upload gleichzeitig überträgt. Wird auf eins unter der Nebenläufigkeit begrenzt, damit andere Operationen einen Platz behalten. Werte über 8 bringen wegen des Übertragungspuffers keinen Vorteil."
 
     operationTimeoutSeconds: "Timeout für Operationen (Sekunden)"
     operationTimeoutSecondsHelpText: "Timeout für einzelne SFTP Operationen in Sekunden."
