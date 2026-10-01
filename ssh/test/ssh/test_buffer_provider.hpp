@@ -223,9 +223,9 @@ namespace SecureShell::Test
     {
         // Sanity check that the Tiny and Small buckets occupy real storage inside the provider
         // object (not heap-indirected via std::vector). Total inline bytes must be at least
-        // (TinySize * TinyCount) + (SmallSize * SmallCount) = 8 KiB + 32 KiB = 40 KiB.
+        // (TinySize * TinyCount) + (SmallSize * SmallCount) = 8 KiB + 64 KiB = 72 KiB.
         constexpr std::size_t expectedInline =
-            (bufferCategorySize(BufferCategory::Tiny) * 8u) + (bufferCategorySize(BufferCategory::Small) * 8u);
+            (bufferCategorySize(BufferCategory::Tiny) * 8u) + (bufferCategorySize(BufferCategory::Small) * 16u);
         EXPECT_GE(sizeof(Provider), expectedInline);
     }
 

@@ -427,8 +427,7 @@ namespace SecureShell
     };
 
     /**
-     * @brief Default pool: plenty of small-to-medium slots because slow links lease small
-     *        buffers for every transfer, 8/4 large slots, Max gated at 1 MiB.
+     * @brief Default pool: 8/16/16 small-to-medium slots, 8/4 large slots, Max gated at 1 MiB.
      */
     using DefaultBufferProvider = BufferProvider<
         1ull * 1024ull * 1024ull,
