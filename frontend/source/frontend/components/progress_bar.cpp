@@ -127,6 +127,14 @@ namespace Components
         recalculate();
     }
 
+    void ProgressBar::byteMode(bool enabled)
+    {
+        if (impl_->byteMode == enabled)
+            return;
+        impl_->byteMode = enabled;
+        recalculate();
+    }
+
     Nui::ElementRenderer ProgressBar::operator()(std::string const& extraStyleOptions) const
     {
         using namespace Nui::Elements;
