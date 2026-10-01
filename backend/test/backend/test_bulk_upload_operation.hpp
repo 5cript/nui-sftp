@@ -74,8 +74,11 @@ namespace Test
             return last;
         }
 
-        static bool remoteHasEntry(SecureShell::SftpSession& sftp, std::filesystem::path const& remoteDir,
-                                   std::string const& filename)
+        static bool remoteHasEntry(
+            SecureShell::SftpSession& sftp,
+            std::filesystem::path const& remoteDir,
+            std::string const& filename
+        )
         {
             auto fut = sftp.listDirectory(remoteDir);
             if (fut.wait_for(5s) != std::future_status::ready)
@@ -83,9 +86,14 @@ namespace Test
             auto result = fut.get();
             if (!result.has_value())
                 return false;
-            return std::any_of(result.value().begin(), result.value().end(), [&](auto const& entry) {
-                return entry.path.filename().generic_string() == filename;
-            });
+            return std::any_of(
+                result.value().begin(),
+                result.value().end(),
+                [&](auto const& entry)
+                {
+                    return entry.path.filename().generic_string() == filename;
+                }
+            );
         }
 
       protected:
@@ -133,14 +141,15 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = "/home/test/bad_bulk", .localPath = uploadSrc_.path()}};
+        BulkUploadOperation operation{*sftp, {.remotePath = "/home/test/bad_bulk", .localPath = uploadSrc_.path()}};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path() / "file1.txt",
-            .type = SharedData::FileType::Regular,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path() / "file1.txt",
+                .type = SharedData::FileType::Regular,
+            }
+        );
         operation.setScanResult(std::move(entries), 0);
 
         auto workResult = operation.work();
@@ -176,21 +185,27 @@ namespace Test
         const auto remoteRoot = std::filesystem::path{"/home/test/nested_bulk"};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path(),
-            .type = SharedData::FileType::Directory,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "subdir",
-            .type = SharedData::FileType::Directory,
-            .parent = 0,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "file1.txt",
-            .type = SharedData::FileType::Regular,
-            .size = std::string{"Bulk upload file one"}.size(),
-            .parent = 1,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path(),
+                .type = SharedData::FileType::Directory,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "subdir",
+                .type = SharedData::FileType::Directory,
+                .parent = 0,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "file1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Bulk upload file one"}.size(),
+                .parent = 1,
+            }
+        );
 
         // Required local file at <localPath>/subdir/file1.txt
         std::filesystem::create_directory(uploadSrc_.path() / "subdir");
@@ -213,25 +228,32 @@ namespace Test
         const auto remoteRoot = std::filesystem::path{"/home/test/partial_bulk"};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path(),
-            .type = SharedData::FileType::Directory,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "does_not_exist_locally.txt",
-            .type = SharedData::FileType::Regular,
-            .size = 10,
-            .parent = 0,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "file1.txt",
-            .type = SharedData::FileType::Regular,
-            .size = std::string{"Bulk upload file one"}.size(),
-            .parent = 0,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path(),
+                .type = SharedData::FileType::Directory,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "does_not_exist_locally.txt",
+                .type = SharedData::FileType::Regular,
+                .size = 10,
+                .parent = 0,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "file1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Bulk upload file one"}.size(),
+                .parent = 0,
+            }
+        );
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = remoteRoot, .localPath = uploadSrc_.path(), .failFast = false}};
+        BulkUploadOperation operation{
+            *sftp, {.remotePath = remoteRoot, .localPath = uploadSrc_.path(), .failFast = false}
+        };
         operation.setScanResult(std::move(entries), 0);
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
@@ -252,29 +274,37 @@ namespace Test
         const auto remoteRoot = std::filesystem::path{"/home/test/failfast_bulk"};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path(),
-            .type = SharedData::FileType::Directory,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "does_not_exist_locally.txt",
-            .type = SharedData::FileType::Regular,
-            .size = 10,
-            .parent = 0,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "file1.txt",
-            .type = SharedData::FileType::Regular,
-            .size = std::string{"Bulk upload file one"}.size(),
-            .parent = 0,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path(),
+                .type = SharedData::FileType::Directory,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "does_not_exist_locally.txt",
+                .type = SharedData::FileType::Regular,
+                .size = 10,
+                .parent = 0,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "file1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Bulk upload file one"}.size(),
+                .parent = 0,
+            }
+        );
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = remoteRoot, .localPath = uploadSrc_.path(), .failFast = true}};
+        BulkUploadOperation operation{
+            *sftp, {.remotePath = remoteRoot, .localPath = uploadSrc_.path(), .failFast = true}
+        };
         operation.setScanResult(std::move(entries), 0);
 
         std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> workResult{
-            BulkUploadOperation::WorkStatus::MoreWork};
+            BulkUploadOperation::WorkStatus::MoreWork
+        };
         for (int iteration = 0; iteration < 500; ++iteration)
         {
             workResult = operation.work();
@@ -296,21 +326,27 @@ namespace Test
         const auto remoteRoot = std::filesystem::path{"/home/test/skip_unsupported_bulk"};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path(),
-            .type = SharedData::FileType::Directory,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "weird",
-            .type = SharedData::FileType::Fifo,
-            .parent = 0,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "file1.txt",
-            .type = SharedData::FileType::Regular,
-            .size = std::string{"Bulk upload file one"}.size(),
-            .parent = 0,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path(),
+                .type = SharedData::FileType::Directory,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "weird",
+                .type = SharedData::FileType::Fifo,
+                .parent = 0,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "file1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Bulk upload file one"}.size(),
+                .parent = 0,
+            }
+        );
 
         BulkUploadOperation operation{*sftp, {.remotePath = remoteRoot, .localPath = uploadSrc_.path()}};
         operation.setScanResult(std::move(entries), 0);
@@ -337,16 +373,20 @@ namespace Test
         const auto remoteRoot = std::filesystem::path{"/home/test/symlink_bulk"};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path(),
-            .type = SharedData::FileType::Directory,
-        });
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = "the_link",
-            .type = SharedData::FileType::Symlink,
-            .linkTarget = targetFile,
-            .parent = 0,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path(),
+                .type = SharedData::FileType::Directory,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = "the_link",
+                .type = SharedData::FileType::Symlink,
+                .linkTarget = targetFile,
+                .parent = 0,
+            }
+        );
 
         BulkUploadOperation operation{*sftp, {.remotePath = remoteRoot, .localPath = uploadSrc_.path()}};
         operation.setScanResult(std::move(entries), 0);
@@ -393,8 +433,9 @@ namespace Test
 
         auto scan = runLocalScan(uploadSrc_.path());
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = "/home/test/completed_bulk", .localPath = uploadSrc_.path()}};
+        BulkUploadOperation operation{
+            *sftp, {.remotePath = "/home/test/completed_bulk", .localPath = uploadSrc_.path()}
+        };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
@@ -409,14 +450,15 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = "/home/test/failed_bulk", .localPath = uploadSrc_.path()}};
+        BulkUploadOperation operation{*sftp, {.remotePath = "/home/test/failed_bulk", .localPath = uploadSrc_.path()}};
 
         std::vector<SharedData::DirectoryEntry> entries;
-        entries.push_back(SharedData::DirectoryEntry{
-            .path = uploadSrc_.path() / "file1.txt",
-            .type = SharedData::FileType::Regular,
-        });
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .path = uploadSrc_.path() / "file1.txt",
+                .type = SharedData::FileType::Regular,
+            }
+        );
         operation.setScanResult(std::move(entries), 0);
 
         auto firstResult = operation.work();
@@ -434,8 +476,7 @@ namespace Test
 
         auto scan = runLocalScan(uploadSrc_.path());
 
-        BulkUploadOperation operation{*sftp,
-                                      {.remotePath = "/home/test/cancel_bulk", .localPath = uploadSrc_.path()}};
+        BulkUploadOperation operation{*sftp, {.remotePath = "/home/test/cancel_bulk", .localPath = uploadSrc_.path()}};
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
         auto firstWork = operation.work();
@@ -446,5 +487,122 @@ namespace Test
         auto afterCancel = operation.work();
         ASSERT_FALSE(afterCancel.has_value());
         EXPECT_EQ(afterCancel.error().type, BulkUploadOperation::ErrorType::CannotWorkCanceledOperation);
+    }
+
+    TEST_F(BulkUploadOperationTests, ConcurrentPrescannedUploadsAllFiles)
+    {
+        // Six small files with three slots: everything must arrive and the bulk must drain.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // Above the big-file cutoff so each upload takes the async path and spans several work
+        // steps, otherwise a file starts and finishes within one step and never shows up as in
+        // flight.
+        constexpr std::size_t fileSize = 256u * 1024u;
+        std::vector<BulkUploadOperation::PrescannedFile> files;
+        for (int index = 0; index < 6; ++index)
+        {
+            const auto name = fmt::format("concurrent_{}.txt", index);
+            const std::string content(fileSize, static_cast<char>('a' + index));
+            writeFile(uploadSrc_.path() / name, content);
+            files.push_back({
+                .localSrc = uploadSrc_.path() / name,
+                .remoteDst = std::filesystem::path{"/home/test"} / name,
+                .sizeBytes = content.size(),
+            });
+        }
+
+        std::size_t maxInFlight = 0;
+        BulkUploadOperation operation{
+            *sftp,
+            {
+                .overallProgressCallback =
+                    [&maxInFlight](SharedData::BulkProgress const& update)
+                {
+                    maxInFlight = std::max(maxInFlight, update.inFlight.size());
+                },
+                .remotePath = "/home/test",
+                .localPath = uploadSrc_.path(),
+                .concurrency = 3,
+                .progressEmitInterval = std::chrono::milliseconds{0},
+            }
+        };
+        operation.setPrescannedFileList(std::move(files));
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
+
+        for (int index = 0; index < 6; ++index)
+            EXPECT_TRUE(remoteHasEntry(*sftp, "/home/test", fmt::format("concurrent_{}.txt", index)));
+        EXPECT_TRUE(operation.getFailed().empty());
+        EXPECT_EQ(operation.completedCount(), 6u);
+        EXPECT_EQ(operation.inFlightCount(), 0u);
+        EXPECT_EQ(maxInFlight, 3u);
+    }
+
+    TEST_F(BulkUploadOperationTests, DirectoriesAreCreatedBeforeTheirFilesWithConcurrency)
+    {
+        // Two-level local tree scanned for real, uploaded with more files than slots.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto nested = uploadSrc_.path() / "nested";
+        const auto deeper = nested / "deeper";
+        std::filesystem::create_directories(deeper);
+        writeFile(nested / "n1.txt", "nested one");
+        writeFile(nested / "n2.txt", "nested two");
+        writeFile(deeper / "d1.txt", "deeper one");
+        writeFile(deeper / "d2.txt", "deeper two");
+
+        auto scan = runLocalScan(uploadSrc_.path());
+        ASSERT_FALSE(scan.entries.empty());
+
+        const std::filesystem::path remoteRoot = "/home/test/tree_concurrent";
+        BulkUploadOperation operation{
+            *sftp, {.remotePath = remoteRoot, .localPath = uploadSrc_.path(), .concurrency = 3}
+        };
+        operation.setScanResult(std::move(scan.entries), scan.totalBytes);
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot, "file1.txt"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot, "file2.txt"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot, "nested"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot / "nested", "n1.txt"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot / "nested", "n2.txt"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot / "nested" / "deeper", "d1.txt"));
+        EXPECT_TRUE(remoteHasEntry(*sftp, remoteRoot / "nested" / "deeper", "d2.txt"));
+        EXPECT_TRUE(operation.getFailed().empty());
+    }
+
+    TEST_F(BulkUploadOperationTests, FailingEntryIsCollectedAndRestContinueWithConcurrency)
+    {
+        // A local source that does not exist fails its child; the sibling in flight must
+        // still complete and the failure must be recorded.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        std::vector<BulkUploadOperation::PrescannedFile> files;
+        files.push_back({
+            .localSrc = uploadSrc_.path() / "missing.txt",
+            .remoteDst = "/home/test/missing_concurrent.txt",
+            .sizeBytes = 10,
+        });
+        files.push_back({
+            .localSrc = uploadSrc_.path() / "file1.txt",
+            .remoteDst = "/home/test/present_concurrent.txt",
+            .sizeBytes = std::string{"Bulk upload file one"}.size(),
+        });
+
+        BulkUploadOperation operation{
+            *sftp, {.remotePath = "/home/test", .localPath = uploadSrc_.path(), .failFast = false, .concurrency = 2}
+        };
+        operation.setPrescannedFileList(std::move(files));
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(remoteHasEntry(*sftp, "/home/test", "present_concurrent.txt"));
+        const auto failed = operation.getFailed();
+        ASSERT_EQ(failed.size(), 1u);
+        EXPECT_EQ(failed.front().first.filename().generic_string(), "missing.txt");
     }
 }
