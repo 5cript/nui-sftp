@@ -106,7 +106,7 @@ namespace SecureShell::Test
     {
         auto provider = Provider::create();
         std::vector<BufferLease> medium{};
-        for (std::size_t i = 0; i < 8; ++i)
+        for (std::size_t i = 0; i < Provider::slotCount(BufferCategory::Medium); ++i)
         {
             auto lease = provider->lease(bufferCategorySize(BufferCategory::Medium));
             ASSERT_TRUE(lease) << "Medium slot " << i;
@@ -124,14 +124,14 @@ namespace SecureShell::Test
     {
         auto provider = Provider::create();
         std::vector<BufferLease> tinies{};
-        for (std::size_t i = 0; i < 8; ++i)
+        for (std::size_t i = 0; i < Provider::slotCount(BufferCategory::Tiny); ++i)
         {
             auto lease = provider->lease(0);
             ASSERT_TRUE(lease);
             tinies.push_back(std::move(lease));
         }
         std::vector<BufferLease> smalls{};
-        for (std::size_t i = 0; i < 8; ++i)
+        for (std::size_t i = 0; i < Provider::slotCount(BufferCategory::Small); ++i)
         {
             auto lease = provider->lease(bufferCategorySize(BufferCategory::Small));
             ASSERT_TRUE(lease);
@@ -149,7 +149,7 @@ namespace SecureShell::Test
     {
         auto provider = Provider::create();
         std::vector<BufferLease> held{};
-        for (std::size_t i = 0; i < 8; ++i)
+        for (std::size_t i = 0; i < Provider::slotCount(BufferCategory::Medium); ++i)
             held.push_back(provider->lease(bufferCategorySize(BufferCategory::Medium)));
 
         // Exhausted: next ask falls back to Small.
@@ -224,8 +224,8 @@ namespace SecureShell::Test
         // Sanity check that the Tiny and Small buckets occupy real storage inside the provider
         // object (not heap-indirected via std::vector). Total inline bytes must be at least
         // (TinySize * TinyCount) + (SmallSize * SmallCount) = 8 KiB + 32 KiB = 40 KiB.
-        constexpr std::size_t expectedInline = (bufferCategorySize(BufferCategory::Tiny) * 8u) +
-            (bufferCategorySize(BufferCategory::Small) * 8u);
+        constexpr std::size_t expectedInline =
+            (bufferCategorySize(BufferCategory::Tiny) * 8u) + (bufferCategorySize(BufferCategory::Small) * 8u);
         EXPECT_GE(sizeof(Provider), expectedInline);
     }
 
