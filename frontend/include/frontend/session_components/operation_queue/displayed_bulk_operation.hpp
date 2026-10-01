@@ -66,7 +66,12 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         for (auto const& row : inFlightRows_.value())
         {
             if (row->entryIndex.has_value() && !inFlight(*row->entryIndex))
+            {
+                // Blank it: a freed row that kept its file would look like a stalled transfer.
                 row->entryIndex.reset();
+                row->name = "";
+                row->bar.setProgress(0);
+            }
         }
         for (auto const& file : progress.inFlight)
         {
