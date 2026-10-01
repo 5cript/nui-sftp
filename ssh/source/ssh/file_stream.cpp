@@ -515,7 +515,9 @@ namespace SecureShell
                         context->ended_ = true;
                         return false;
                     }
-                    sftp->chunkController().recordDataCall(result, requested, std::chrono::steady_clock::now() - callStart);
+                    // Report against the unclamped chunk: a file tail asks for less and must not
+                    // size the chunk from a call whose payload portion is noise.
+                    sftp->chunkController().recordDataCall(result, chunk, std::chrono::steady_clock::now() - callStart);
                     remainingRead -= result;
                     if (!onRead(result))
                     {
@@ -621,7 +623,7 @@ namespace SecureShell
                         context->cancel();
                         return false;
                     }
-                    sftp->chunkController().recordDataCall(result, requested, std::chrono::steady_clock::now() - callStart);
+                    sftp->chunkController().recordDataCall(result, chunk, std::chrono::steady_clock::now() - callStart);
                     remainingWrite -= result;
                     context->bytesTransferred_ += result;
                     turnBytes += result;

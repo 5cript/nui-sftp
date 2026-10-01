@@ -41,7 +41,8 @@ namespace SecureShell
          * @brief Feeds the duration of one blocking data call (sftp_read / sftp_write).
          *
          * @param bytes Bytes the call moved.
-         * @param requested Bytes the call asked for; a short call (file tail) does not size the chunk.
+         * @param requested Chunk the controller proposed for the call; a call that moved less (file
+         *        tail, short read) does not size the chunk.
          * @param took Wall time the call blocked.
          */
         void recordDataCall(std::int64_t bytes, std::int64_t requested, std::chrono::steady_clock::duration took) noexcept
