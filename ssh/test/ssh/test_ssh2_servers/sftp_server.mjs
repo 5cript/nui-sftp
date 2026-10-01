@@ -269,11 +269,14 @@ const server = new Server({
                     // Keep content as Buffer end-to-end; converting to UTF-8 strings
                     // here would corrupt any byte > 0x7F (replacement char), which
                     // breaks every binary payload (gzip, bzip2, zstd, ...).
-                    result.content = Buffer.concat([
-                        result.content.slice(0, offset),
-                        data,
-                        result.content.slice(offset + data.length)
-                    ]);
+                    // Overwrite in place when the write fits; only grow the buffer
+                    // when the write extends past the current end.
+                    const end = offset + data.length;
+                    if (end <= result.content.length) {
+                        data.copy(result.content, offset);
+                    } else {
+                        result.content = Buffer.concat([result.content.slice(0, offset), data]);
+                    }
                     result.stat.size = result.content.length;
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
