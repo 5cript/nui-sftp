@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
 #include <latch>
 #include <thread>
 
@@ -834,37 +836,42 @@ namespace SecureShell::Test
     TEST_F(ProcessingThreadTest, PermanentTasksStartAtARotatingPositionEachCycle)
     {
         // Tasks that skip their turn once a cycle ran long rely on the start position moving,
-        // otherwise the last tasks in the map would never run.
-        std::mutex orderMutex;
-        std::vector<int> order;
+        // otherwise the last tasks in the map would never run. Recorded without a lock so no
+        // task can block long enough to count as the cycle's blocking task.
+        constexpr std::size_t recorded = 9;
+        std::array<std::atomic<int>, recorded> order{};
+        std::atomic<std::size_t> count{0};
         ProcessingThread processingThread;
         for (int index = 0; index < 3; ++index)
         {
             const auto result = processingThread.pushPermanentTask(
-                [index, &order, &orderMutex](auto)
+                [index, &order, &count](auto)
                 {
-                    std::lock_guard lock{orderMutex};
-                    order.push_back(index);
+                    const auto slot = count.fetch_add(1);
+                    if (slot < recorded)
+                        order[slot] = index;
                     return true;
                 }
             );
             ASSERT_TRUE(result.first);
         }
         processingThread.start(std::chrono::milliseconds{1});
-        for (int attempt = 0; attempt < 500; ++attempt)
-        {
-            {
-                std::lock_guard lock{orderMutex};
-                if (order.size() >= 9)
-                    break;
-            }
+        for (int attempt = 0; attempt < 500 && count.load() < recorded; ++attempt)
             std::this_thread::sleep_for(std::chrono::milliseconds{2});
-        }
         processingThread.stop();
 
-        std::lock_guard lock{orderMutex};
-        ASSERT_GE(order.size(), 9u);
-        const std::vector<int> expected{0, 1, 2, 1, 2, 0, 2, 0, 1};
-        EXPECT_EQ(std::vector<int>(order.begin(), order.begin() + 9), expected);
+        ASSERT_GE(count.load(), recorded);
+        // Each cycle runs all three tasks in map order from its start position, and the start
+        // position must not stay put. A preempted task may move it by more than one slot.
+        std::vector<int> starts;
+        for (std::size_t cycle = 0; cycle < recorded; cycle += 3)
+        {
+            const int start = order[cycle];
+            EXPECT_EQ(order[cycle + 1], (start + 1) % 3);
+            EXPECT_EQ(order[cycle + 2], (start + 2) % 3);
+            starts.push_back(start);
+        }
+        EXPECT_NE(starts[0], starts[1]);
+        EXPECT_NE(starts[1], starts[2]);
     }
 }
