@@ -1,0 +1,590 @@
+.command-snippets-panel {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    overflow: hidden;
+    box-sizing: border-box;
+    position: relative;
+    background-color: var(--background-color);
+    color: var(--color);
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.cmds-sidebar-host {
+    flex: 0 0 auto;
+    display: flex;
+    min-width: 140px;
+    max-width: 220px;
+    border-right: 1px solid var(--border-color-fields);
+}
+
+.cmds-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 8px 4px;
+    gap: 2px;
+    overflow-y: auto;
+}
+
+.cmds-folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cmds-folder {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.cmds-folder svg {
+    width: 14px;
+    height: 14px;
+    fill: var(--color-secondary);
+    flex: 0 0 auto;
+}
+
+.cmds-folder:hover {
+    background-color: color-mix(in srgb, var(--color) 7%, transparent);
+}
+
+.cmds-folder-selected {
+    background-color: color-mix(in srgb, var(--theme-color) 18%, transparent);
+}
+
+.cmds-folder-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Count and hover action stack in one fixed cell, so every row's count sits at the same edge. */
+.cmds-folder-trailing {
+    display: grid;
+    place-items: center end;
+    flex: 0 0 auto;
+    min-width: 20px;
+    height: 20px;
+}
+
+.cmds-folder-trailing > * {
+    grid-area: 1 / 1;
+}
+
+.cmds-folder-count {
+    color: var(--color-secondary);
+    font-size: 0.75rem;
+}
+
+.cmds-folder-trailing > .cmds-folder-delete {
+    width: 20px;
+    height: 20px;
+    visibility: hidden;
+}
+
+.cmds-folder:hover .cmds-folder-delete {
+    visibility: visible;
+}
+
+.cmds-folder:hover .cmds-folder-trailing:has(.cmds-folder-delete) > .cmds-folder-count {
+    visibility: hidden;
+}
+
+.cmds-sidebar-separator {
+    height: 1px;
+    margin: 4px 12px;
+    background-color: var(--border-color-fields);
+}
+
+.cmds-new-folder {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border: 1px dashed var(--border-color-fields);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.cmds-new-folder svg {
+    width: 12px;
+    height: 12px;
+    fill: var(--color-secondary);
+}
+
+.cmds-new-folder:hover {
+    color: var(--color);
+    border-color: var(--color-secondary);
+}
+
+.cmds-new-folder-input {
+    margin-top: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+    color: var(--color-fields);
+    font-size: 0.85rem;
+}
+
+/* ── Main column ─────────────────────────────────────────────────────────── */
+
+.cmds-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.cmds-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color-fields);
+}
+
+.cmds-search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+}
+
+.cmds-toolbar > .cmds-button {
+    height: 30px;
+    box-sizing: border-box;
+}
+
+.cmds-search-box svg {
+    width: 14px;
+    height: 14px;
+    fill: var(--color-secondary);
+    flex: 0 0 auto;
+}
+
+.cmds-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--color-fields);
+    font-size: 0.9rem;
+}
+
+.cmds-main > .script-nui-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.cmds-main > .script-nui-pill-list:empty {
+    display: none;
+}
+
+.cmds-grid-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+.cmds-grid {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 8px;
+    align-content: start;
+    padding: 8px;
+    overflow-y: auto;
+}
+
+.cmds-empty {
+    flex: 1 1 auto;
+    padding: 24px 8px;
+    text-align: center;
+    color: var(--subdued-text);
+    font-size: 0.9rem;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+
+.cmds-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--color) 3%, var(--background-color));
+}
+
+.cmds-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cmds-card-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cmds-card-name mark,
+.cmds-preview .cmds-variable {
+    border-radius: 2px;
+}
+
+.cmds-card-name mark {
+    background-color: color-mix(in srgb, var(--theme-color) 45%, transparent);
+    color: inherit;
+}
+
+.cmds-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    visibility: hidden;
+}
+
+.cmds-card:hover .cmds-card-actions,
+.cmds-card-actions:focus-within {
+    visibility: visible;
+}
+
+/* A favorite stays marked without hover, in place so nothing shifts when the rest appears. */
+.cmds-card-actions > .cmds-action-favorited {
+    visibility: visible;
+}
+
+.cmds-preview {
+    display: block;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 3.6em;
+    overflow: hidden;
+}
+
+.cmds-variable {
+    color: var(--theme-color);
+}
+
+/* Grid rows stretch cards to the tallest one; keep meta and buttons on the bottom edge. */
+.cmds-card-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: auto;
+}
+
+.cmds-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cmds-card-tags:empty {
+    display: none;
+}
+
+.cmds-tag {
+    padding: 1px 6px;
+    border-radius: 8px;
+    background-color: color-mix(in srgb, var(--color) 10%, transparent);
+    font-size: 0.7rem;
+    color: var(--color-secondary);
+}
+
+.cmds-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+}
+
+.cmds-variable-badge {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background-color: color-mix(in srgb, var(--theme-color) 18%, transparent);
+    color: var(--theme-color);
+    font-family: monospace;
+    font-size: 0.7rem;
+}
+
+.cmds-insert {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 2px 9px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.cmds-insert svg {
+    width: 12px;
+    height: 12px;
+    fill: var(--color-secondary);
+}
+
+.cmds-insert:hover {
+    color: var(--color);
+    border-color: var(--color-secondary);
+}
+
+.cmds-insert:hover svg {
+    fill: var(--color);
+}
+
+.cmds-run {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border: none;
+    border-radius: 4px;
+    background-color: var(--script-nui-components-button-color-primary);
+    color: var(--color);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.cmds-run svg {
+    width: 12px;
+    height: 12px;
+    fill: var(--color);
+}
+
+.cmds-run:hover {
+    filter: brightness(1.2);
+}
+
+/* ── Shared action buttons ───────────────────────────────────────────────── */
+
+.cmds-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.cmds-action svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--color-secondary);
+}
+
+.cmds-action:hover {
+    background-color: color-mix(in srgb, var(--color) 12%, transparent);
+}
+
+.cmds-action:hover svg {
+    fill: var(--color);
+}
+
+.cmds-action-active svg {
+    fill: var(--theme-color);
+}
+
+.cmds-action-danger:hover svg {
+    fill: var(--opq-red);
+}
+
+/* ── Editor and variable form overlays ───────────────────────────────────── */
+
+.cmds-editor-backdrop {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    background-color: color-mix(in srgb, black 35%, transparent);
+    z-index: 5;
+}
+
+.cmds-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: min(420px, 90%);
+    height: 100%;
+    padding: 12px;
+    overflow-y: auto;
+    background-color: var(--background-color);
+    border-left: 1px solid var(--border-color-fields);
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.35);
+}
+
+.cmds-editor-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.cmds-editor label {
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+    margin-top: 4px;
+}
+
+.cmds-editor input[type="text"],
+.cmds-editor textarea {
+    padding: 5px 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+    color: var(--color-fields);
+    font-size: 0.85rem;
+}
+
+.cmds-editor input[type="text"].cmds-field-invalid,
+.cmds-editor textarea.cmds-field-invalid {
+    border-color: var(--opq-red);
+    box-shadow: 0 0 0 1px var(--opq-red);
+}
+
+/* No box of its own, so an empty host adds no flex gap. */
+.cmds-field-error-host {
+    display: contents;
+}
+
+.cmds-field-error {
+    color: var(--opq-red);
+    font-size: 0.75rem;
+    word-break: break-all;
+}
+
+/* The folder select is a script-nui-select; only stretch it to the editor width. */
+.cmds-editor .script-nui-select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.cmds-editor-command {
+    font-family: monospace;
+    min-height: 90px;
+    resize: vertical;
+}
+
+.cmds-variable-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cmds-editor > .script-nui-checkbox {
+    align-self: flex-start;
+    margin-top: 6px;
+    font-size: 0.85rem;
+}
+
+.cmds-editor-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.cmds-button {
+    padding: 5px 14px;
+    border: 1px solid var(--script-nui-components-button-border-color-regular);
+    border-radius: 4px;
+    background-color: var(--script-nui-components-button-color-regular);
+    color: var(--script-nui-components-button-color);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.cmds-button-primary {
+    background-color: var(--script-nui-components-button-color-primary);
+    border-color: var(--script-nui-components-button-border-color-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cmds-button-primary svg {
+    width: 12px;
+    height: 12px;
+    fill: var(--color);
+}
+
+.cmds-button:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+
+.cmds-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.cmds-parameter-count {
+    cursor: help;
+}
+
+.cmds-variable-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cmds-variable-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cmds-variable-field input {
+    padding: 5px 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+    color: var(--color-fields);
+    font-size: 0.85rem;
+}
+
+.cmds-variable-preview {
+    font-family: monospace;
+    font-size: 0.8rem;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--darker-background);
+    white-space: pre-wrap;
+    word-break: break-all;
+}

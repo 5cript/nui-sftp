@@ -124,7 +124,9 @@ target_sources(
         settings/log_options.cpp
         session/session_helpers.cpp
         command_store/command_store_client.cpp
+        session_components/command_panel_helpers.cpp
         session_components/command_history_panel.cpp
+        session_components/command_snippets_panel.cpp
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
@@ -258,6 +260,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/terminal_toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/command_history_panel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/command_snippets_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretright.png"
@@ -305,6 +308,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/collapsible_section.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_history.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_snippets.ts"
 )
 
 target_include_directories(

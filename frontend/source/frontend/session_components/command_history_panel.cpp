@@ -1,4 +1,5 @@
 #include <frontend/session_components/command_history_panel.hpp>
+#include <frontend/session_components/command_panel_helpers.hpp>
 
 #include <utility/language.hpp>
 #include <log/log.hpp>
@@ -18,8 +19,6 @@
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/decline.hpp>
 
-#include <rapidfuzz/fuzz.hpp>
-
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/elements/nil.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -29,7 +28,6 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <cctype>
 #include <ctime>
 #include <map>
 #include <set>
@@ -40,46 +38,12 @@ using namespace std::string_literals;
 
 namespace
 {
-    constexpr double searchHitScore = 75.;
+    using CommandPanels::lowercased;
+    using CommandPanels::matchesSearch;
+    using CommandPanels::relativeTime;
+
     constexpr std::int64_t secondsPerDay = 86'400;
     constexpr int earlierBucketThresholdDays = 14;
-
-    std::string lowercased(std::string_view text)
-    {
-        std::string result{text};
-        std::ranges::transform(result, result.begin(), [](unsigned char character) {
-            return static_cast<char>(std::tolower(character));
-        });
-        return result;
-    }
-
-    bool matchesSearch(std::string const& loweredQuery, std::string const& command)
-    {
-        if (loweredQuery.empty())
-            return true;
-        const auto loweredCommand = lowercased(command);
-        if (loweredCommand.find(loweredQuery) != std::string::npos)
-            return true;
-        return rapidfuzz::fuzz::partial_ratio(loweredQuery, loweredCommand) >= searchHitScore;
-    }
-
-    std::string relativeTime(std::int64_t epochSeconds, std::int64_t nowEpoch)
-    {
-        const auto delta = std::max<std::int64_t>(0, nowEpoch - epochSeconds);
-        if (delta < 60)
-            return std::string{language->get("commandHistoryPanel", "justNow")};
-        if (delta < 3'600)
-            return fmt::format(
-                fmt::runtime(std::string{language->get("commandHistoryPanel", "minutesAgo")}), delta / 60
-            );
-        if (delta < secondsPerDay)
-            return fmt::format(
-                fmt::runtime(std::string{language->get("commandHistoryPanel", "hoursAgo")}), delta / 3'600
-            );
-        return fmt::format(
-            fmt::runtime(std::string{language->get("commandHistoryPanel", "daysAgo")}), delta / secondsPerDay
-        );
-    }
 
     /// Days since the epoch on the local calendar, so groups change at local midnight.
     std::int64_t localDay(std::int64_t epochSeconds)
@@ -115,28 +79,6 @@ namespace
     {
         const auto hash = std::hash<std::string>{}(host);
         return fmt::format("background-color: hsl({}, 60%, 55%);", hash % 360);
-    }
-
-    /// Command text with the matching part wrapped in a mark when the query is a plain substring.
-    Nui::ElementRenderer commandText(std::string const& command, std::string const& loweredQuery)
-    {
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::span;
-
-        if (!loweredQuery.empty())
-        {
-            const auto position = lowercased(command).find(loweredQuery);
-            if (position != std::string::npos)
-            {
-                return span{class_ = "cmdh-command"}(
-                    text{command.substr(0, position)}(),
-                    mark{}(command.substr(position, loweredQuery.size())),
-                    text{command.substr(position + loweredQuery.size())}()
-                );
-            }
-        }
-        return span{class_ = "cmdh-command"}(command);
     }
 
     void copyToClipboard(std::string const& textToCopy)
@@ -384,7 +326,7 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
             },
         }),
         div{class_ = "cmdh-row-main"}(
-            commandText(entry.command, loweredQuery),
+            CommandPanels::highlightedText(entry.command, loweredQuery, "cmdh-command"),
             div{class_ = "cmdh-row-meta"}(
                 div{class_ = "cmdh-row-hosts"}(
                     Nui::range(std::move(hostElements)),
