@@ -123,4 +123,34 @@ namespace Utility::Tests
     {
         EXPECT_EQ(CommandTemplate::substitute("", {{"name", "x"}}), "");
     }
+
+    TEST_F(CommandTemplateTests, MatchedBracesAreNotReported)
+    {
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace(""), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("ls -la"), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("scp {{source}} {{ user }}@{{host}}:"), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo {{{name}}}"), std::nullopt);
+    }
+
+    TEST_F(CommandTemplateTests, UnclosedOpeningBracesAreReported)
+    {
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo {{name"), 5u);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo {{name}"), 5u);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo {{"), 5u);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("cp {{a}} {{b} {{c}}"), 9u);
+    }
+
+    TEST_F(CommandTemplateTests, HalfOpenedVariablesAreReported)
+    {
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo {name}}"), 5u);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo { name }} {{ok}}"), 5u);
+    }
+
+    TEST_F(CommandTemplateTests, NonVariableBracesInCommonCommandsAreNotReported)
+    {
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("docker inspect -f '{{.State.Running}}' {{name}}"), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("curl -d '{\"a\":{\"b\":{}}}' {{url}}"), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("awk '{ if ($1 > 0) { print $1 }}'"), std::nullopt);
+        EXPECT_EQ(CommandTemplate::findUnmatchedBrace("echo ${HOME} {a,b} $(pwd)"), std::nullopt);
+    }
 }

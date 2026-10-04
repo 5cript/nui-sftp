@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +20,18 @@ namespace Utility::CommandTemplate
      * @return The variable names, without braces or surrounding whitespace.
      */
     std::vector<std::string> parseVariables(std::string_view command);
+
+    /**
+     * @brief Finds the first variable brace that has no counterpart.
+     *
+     * Reported are a "{{" that is never closed by a "}}" before the next "{{" or the end, and a
+     * half written variable like "{name}}". A closed "{{...}}" that is no variable (Go templates such
+     * as "{{.State}}") and stray "}}" elsewhere (JSON, awk) are plain text and not reported.
+     *
+     * @param command The command template.
+     * @return The index of the offending brace, or nothing when all variable braces match.
+     */
+    std::optional<std::size_t> findUnmatchedBrace(std::string_view command);
 
     /**
      * @brief Replaces every {{variable}} token of a command template with its value.

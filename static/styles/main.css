@@ -11,6 +11,7 @@
 @import "./licenses.css";
 @import "./file_tracking_panel.css";
 @import "./command_history_panel.css";
+@import "./command_snippets_panel.css";
 @import "./local_shell_tab.css";
 @import "./terminal_toolbar.css";
 @import "./sync_dialog.css";

@@ -100,6 +100,61 @@ namespace Utility::CommandTemplate
         return names;
     }
 
+    std::optional<std::size_t> findUnmatchedBrace(std::string_view const command)
+    {
+        // Index of the "{" opening a half written "{name}}" that ends right before the given "}}".
+        const auto halfOpenedBefore = [command](std::size_t closer) -> std::optional<std::size_t> {
+            auto position = closer;
+            while (position > 0 && isSpace(command[position - 1]))
+                --position;
+            const auto nameEnd = position;
+            while (position > 0 && isWordCharacter(command[position - 1]))
+                --position;
+            if (position == nameEnd)
+                return std::nullopt;
+            while (position > 0 && isSpace(command[position - 1]))
+                --position;
+            if (position == 0 || command[position - 1] != '{')
+                return std::nullopt;
+            return position - 1;
+        };
+
+        for (std::size_t position = 0; position + 1 < command.size();)
+        {
+            const auto pair = command.substr(position, 2);
+            if (pair == "}}")
+            {
+                if (const auto opener = halfOpenedBefore(position))
+                    return opener;
+                position += 2;
+                continue;
+            }
+            if (pair != "{{")
+            {
+                ++position;
+                continue;
+            }
+            // A leading extra brace is plain text, as in parseTokens.
+            if (position + 2 < command.size() && command[position + 2] == '{')
+            {
+                ++position;
+                continue;
+            }
+            if (const auto token = parseTokenAt(command, position))
+            {
+                position = token->end;
+                continue;
+            }
+
+            const auto closer = command.find("}}", position + 2);
+            const auto nextOpener = command.find("{{", position + 2);
+            if (closer == std::string_view::npos || nextOpener < closer)
+                return position;
+            position = closer + 2;
+        }
+        return std::nullopt;
+    }
+
     std::string
     substitute(std::string_view const command, std::map<std::string, std::string> const& values, bool const keepUnfilled)
     {

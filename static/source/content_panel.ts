@@ -5,6 +5,7 @@ import { OperationQueue } from './content_panels/operation_queue';
 import { SessionOptions } from './content_panels/session_options';
 import { FileTracking } from './content_panels/file_tracking';
 import { CommandHistory } from './content_panels/command_history';
+import { CommandSnippets } from './content_panels/command_snippets';
 import {
     BoxPanel,
     DockPanel,
@@ -36,6 +37,8 @@ export interface PanelFactories {
     fileTrackingDelete: () => any;
     commandHistoryFactory: () => HTMLElement | undefined;
     commandHistoryDelete: () => any;
+    commandSnippetsFactory: () => HTMLElement | undefined;
+    commandSnippetsDelete: () => any;
 }
 
 /**
@@ -135,6 +138,8 @@ export class ContentPanel {
                 return new FileTracking('File Tracking', this.factories.fileTrackingFactory, this.factories.fileTrackingDelete);
             case 'command-history':
                 return new CommandHistory('Command History', this.factories.commandHistoryFactory, this.factories.commandHistoryDelete);
+            case 'command-snippets':
+                return new CommandSnippets('Command Snippets', this.factories.commandSnippetsFactory, this.factories.commandSnippetsDelete);
             default:
                 return undefined;
         }

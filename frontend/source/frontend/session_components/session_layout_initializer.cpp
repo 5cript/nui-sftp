@@ -6,6 +6,7 @@
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/command_history_panel.hpp>
+#include <frontend/session_components/command_snippets_panel.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/icon_from_name.hpp>
@@ -55,6 +56,7 @@ struct SessionLayoutInitializer::Implementation
     FileTrackingPanel* fileTrackingPanel;
     SessionOptions* sessionOptions;
     CommandHistoryPanel* commandHistoryPanel;
+    CommandSnippetsPanel* commandSnippetsPanel;
     std::vector<LocalShellAdoption>* pendingLocalShellAdoptions;
     std::function<std::optional<nlohmann::json>()> takeResumeLayout;
     std::function<void()> onLayoutCreationFailed;
@@ -67,11 +69,13 @@ struct SessionLayoutInitializer::Implementation
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> commandHistoryElement{};
+    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> commandSnippetsElement{};
 
     Nui::ListenRemover<decltype(operationQueueElement)> operationQueueListener{};
     Nui::ListenRemover<decltype(fileTrackingElement)> fileTrackingListener{};
     Nui::ListenRemover<decltype(sessionOptionsElement)> sessionOptionsListener{};
     Nui::ListenRemover<decltype(commandHistoryElement)> commandHistoryListener{};
+    Nui::ListenRemover<decltype(commandSnippetsElement)> commandSnippetsListener{};
     Nui::ListenRemover<Nui::Observed<std::shared_ptr<Nui::Dom::Element>>> fileExplorerListener{};
 
     std::weak_ptr<Nui::Dom::BasicElement> layoutHost;
@@ -91,6 +95,7 @@ struct SessionLayoutInitializer::Implementation
         , fileTrackingPanel{params.fileTrackingPanel}
         , sessionOptions{params.sessionOptions}
         , commandHistoryPanel{params.commandHistoryPanel}
+        , commandSnippetsPanel{params.commandSnippetsPanel}
         , pendingLocalShellAdoptions{params.pendingLocalShellAdoptions}
         , takeResumeLayout{std::move(params.takeResumeLayout)}
         , onLayoutCreationFailed{std::move(params.onLayoutCreationFailed)}
@@ -180,6 +185,13 @@ SessionLayoutInitializer::SessionLayoutInitializer(Params params)
             modifyEntry(language->get("sessionFrontend", "commandHistory"), elem != nullptr);
         }
     );
+    impl_->commandSnippetsListener = Nui::smartListen(
+        impl_->commandSnippetsElement,
+        [modifyEntry](std::shared_ptr<Nui::Dom::Element> const& elem)
+        {
+            modifyEntry(language->get("sessionFrontend", "commandSnippets"), elem != nullptr);
+        }
+    );
 }
 SessionLayoutInitializer::~SessionLayoutInitializer() = default;
 SessionLayoutInitializer::SessionLayoutInitializer(SessionLayoutInitializer&&) = default;
@@ -231,6 +243,18 @@ void SessionLayoutInitializer::rebuildTabAddMenuInto(Implementation& impl)
                 Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "command-history"s);
             },
             impl.commandHistoryElement.value() != nullptr
+        ));
+        items.push_back(PopupMenu::item(
+            language->get("sessionFrontend", "commandSnippets"),
+            std::string{},
+            [&impl]()
+            {
+                impl.tabAddMenu.close();
+                if (impl.commandSnippetsElement.value())
+                    return;
+                Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "command-snippets"s);
+            },
+            impl.commandSnippetsElement.value() != nullptr
         ));
 
         if (isSsh)
@@ -604,6 +628,38 @@ void SessionLayoutInitializer::initialize()
                 }
                 impl_->commandHistoryElement.value().reset();
                 impl_->commandHistoryElement.modifyNow();
+                return Nui::val::undefined();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "commandSnippetsFactory",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (impl_->commandSnippetsElement.value())
+                {
+                    Log::warn("There is already a command snippets panel, cannot open another one");
+                    return Nui::val::undefined();
+                }
+                impl_->commandSnippetsElement = Nui::Dom::makeStandaloneElement((*impl_->commandSnippetsPanel)());
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return impl_->commandSnippetsElement.value()->val();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "commandSnippetsDelete",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (!impl_->commandSnippetsElement.value())
+                {
+                    Log::warn("There is no command snippets panel to remove");
+                    return Nui::val::undefined();
+                }
+                impl_->commandSnippetsElement.value().reset();
+                impl_->commandSnippetsElement.modifyNow();
                 return Nui::val::undefined();
             }
         )
