@@ -19,6 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
+      # The shell integration tests start bash, zsh and fish containers on the runner's docker
+      # daemon, next to this one. Without docker they fail on purpose.
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
 
     steps:
       - name: Install dependencies
@@ -47,7 +51,9 @@ jobs:
             zlib \
             bzip2 \
             zstd \
-            xz
+            xz \
+            docker \
+            docker-buildx
 
       - uses: actions/checkout@v6
         with:

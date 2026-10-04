@@ -10,6 +10,7 @@
 #include "test_archive_download_operation.hpp"
 #include "test_archive_upload_operation.hpp"
 #include "test_file_tracking.hpp"
+#include "test_shell_integration.hpp"
 
 #include <log/log.hpp>
 
