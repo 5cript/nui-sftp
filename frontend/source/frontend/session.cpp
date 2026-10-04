@@ -530,6 +530,17 @@ void Session::wireCommandCapture()
     );
 }
 
+void Session::runInTerminal(std::string const& command, bool execute)
+{
+    if (!impl_->frontendSessionManager.value())
+    {
+        Log::warn("Cannot run command, session has no terminal manager");
+        return;
+    }
+    if (!impl_->frontendSessionManager.value()->sendToLastInteracted(command, execute))
+        Log::warn("Cannot run command, session has no terminal channel");
+}
+
 void Session::createSshEngine()
 {
     Log::info("Creating SSH engine");

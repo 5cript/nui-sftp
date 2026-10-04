@@ -134,6 +134,15 @@ class Session
     /** @brief Update displayed countdown; <=0 switches to "firing now" wording. */
     void setReconnectUiCountdown(int seconds);
 
+    /**
+     * @brief Writes @p command into the terminal the user interacted with last.
+     *
+     * Entry point for the command history and snippet panels. When @p execute is true the
+     * command runs immediately; when false it is only inserted so the user can edit it before
+     * pressing enter.
+     */
+    void runInTerminal(std::string const& command, bool execute);
+
     /** @brief Handles files dropped onto the session area (Windows). */
     void
     onDrop(bool isLocalSide, std::vector<SharedData::DirectoryEntry> entries, std::optional<std::string> const& subdir);

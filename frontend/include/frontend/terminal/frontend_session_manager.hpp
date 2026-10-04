@@ -231,6 +231,18 @@ class FrontendSessionManager
     void focusFirst();
 
     /**
+     * @brief Writes @p data into the channel the user interacted with last.
+     *
+     * Falls back to the first channel when no interaction was recorded yet or the recorded
+     * channel is gone. The target is focused and the data is pasted, see TerminalChannel::pasteAsUser.
+     * When @p execute is true an Enter follows so the shell runs the command; when false the text is
+     * left on the prompt for the user to edit.
+     *
+     * @return False when the session has no channel to write to.
+     */
+    bool sendToLastInteracted(std::string const& data, bool execute);
+
+    /**
      * @brief Writes @p msg to matching channels as non-user-input data.
      *
      * Intended for system messages (e.g. "connection lost") — the filter
