@@ -32,3 +32,73 @@
     height: 78%;
     display: block;
 }
+
+/* Notification log button; the badge counts unread warnings and errors. */
+.toolbar-notifications {
+    --toolbar-notifications-warning: var(--script-nui-components-toast-warning, #e0a02e);
+    --toolbar-notifications-error: var(--script-nui-components-toast-error, #d9534f);
+
+    position: relative;
+    display: inline-flex;
+    border-radius: 6px;
+}
+
+.toolbar-notifications[data-attention="error"] {
+    box-shadow: 0 0 0 1px var(--toolbar-notifications-error), 0 0 12px color-mix(in srgb, var(--toolbar-notifications-error) 55%, transparent);
+}
+
+.toolbar-notifications[data-attention="error"] svg {
+    fill: var(--toolbar-notifications-error);
+}
+
+.toolbar-notifications-badge-host {
+    display: contents;
+}
+
+.toolbar-notifications-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #ffffff;
+    pointer-events: none;
+    animation: toolbar-notifications-pop 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.toolbar-notifications-badge[data-severity="warning"] {
+    background-color: var(--toolbar-notifications-warning);
+    color: #1a1a1a;
+}
+
+.toolbar-notifications-badge[data-severity="error"] {
+    background-color: var(--toolbar-notifications-error);
+}
+
+@keyframes toolbar-notifications-pop {
+    0% {
+        transform: scale(0.4);
+    }
+
+    55% {
+        transform: scale(1.35);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .toolbar-notifications-badge {
+        animation: none;
+    }
+}

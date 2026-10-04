@@ -97,6 +97,9 @@ target_sources(
         color.cpp
         icon_from_name.cpp
         theme_controller.cpp
+        notifications.cpp
+        notification_center.cpp
+        notification_log.cpp
         dialog/input_dialog.cpp
         dialog/multi_input_dialog.cpp
         dialog/password_prompter.cpp
@@ -253,6 +256,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
         "${CMAKE_SOURCE_DIR}/static/styles/licenses.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/notification_log.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sync_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/sidebar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/toolbar.css"

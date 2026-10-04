@@ -1,0 +1,303 @@
+/* Mirrors the settings page: blurred blocker, rounded page, header bar, side selector column. */
+.notification-log-background-blocker {
+    z-index: 9;
+
+    background-color: rgba(0, 0, 0, 0.5);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+
+    position: absolute;
+    box-sizing: border-box;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    outline: none;
+}
+
+.notification-log-page {
+    /* Same accents as the toasts, so an entry looks like the toast it came from. */
+    --notification-log-info: var(--script-nui-components-toast-info, #4a9eda);
+    --notification-log-success: var(--script-nui-components-toast-success, var(--theme-color));
+    --notification-log-warning: var(--script-nui-components-toast-warning, #e0a02e);
+    --notification-log-error: var(--script-nui-components-toast-error, #d9534f);
+
+    font-size: 14px;
+    margin: 40px;
+    position: relative;
+    border-radius: 12px;
+    flex-grow: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+
+    background-color: var(--background-color);
+    overflow: hidden;
+}
+
+.notification-log-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    padding: 12px 16px;
+    align-items: center;
+    font-size: 1.5rem;
+    background-color: var(--darker-background);
+
+    & .title {
+        margin-left: 16px;
+    }
+}
+
+.notification-log-content {
+    display: grid;
+    background-color: var(--background-color);
+    padding-top: 16px;
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow: hidden;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr;
+}
+
+.notification-log-side {
+    border-right: 1px solid var(--foreground-border-color);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.notification-log-caption {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    color: gray;
+    margin-bottom: 10px;
+    margin-left: 5px;
+
+    &>svg {
+        width: 24px;
+        height: 24px;
+        fill: var(--theme-color);
+    }
+}
+
+.notification-log-selector {
+    padding: 8px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 2px 8px;
+    cursor: pointer;
+    border: solid 1px transparent;
+
+    &:hover {
+        background-color: var(--darker-background);
+        box-shadow: 0 0 18px var(--darker-background);
+        border-radius: 6px;
+    }
+
+    &.active {
+        background-color: color-mix(in srgb, var(--theme-color) 20%, var(--brightness-mixin) 80%);
+        border: 1px solid var(--theme-color);
+        box-shadow: 0 0 18px color-mix(in srgb, var(--theme-color) 30%, transparent 70%);
+        transition: box-shadow 180ms ease;
+        border-radius: 6px;
+    }
+}
+
+.notification-log-selector[data-severity="error"] .icon-panel>svg {
+    fill: var(--notification-log-error);
+}
+
+.notification-log-selector[data-severity="warning"] .icon-panel>svg {
+    fill: var(--notification-log-warning);
+}
+
+.notification-log-selector[data-severity="info"] .icon-panel>svg {
+    fill: var(--notification-log-info);
+}
+
+.notification-log-selector-icon {
+    display: contents;
+}
+
+.notification-log-selector-label {
+    flex: 1 1 auto;
+}
+
+.notification-log-count {
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.notification-log-main {
+    padding: 0 16px 16px 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.notification-log-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--foreground-border-color);
+}
+
+.notification-log-summary {
+    margin-right: auto;
+    color: var(--color-secondary);
+}
+
+.notification-log-empty-host {
+    display: contents;
+}
+
+.notification-log-empty {
+    padding: 24px 8px;
+    text-align: center;
+    color: var(--subdued-text);
+}
+
+.notification-log-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    scrollbar-gutter: stable;
+}
+
+.notification-log-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-left: 3px solid var(--notification-log-accent);
+    border-radius: 6px;
+}
+
+.notification-log-entry:hover {
+    background-color: var(--darker-background);
+}
+
+.notification-log-entry[data-severity="info"] {
+    --notification-log-accent: var(--notification-log-info);
+}
+
+.notification-log-entry[data-severity="success"] {
+    --notification-log-accent: var(--notification-log-success);
+}
+
+.notification-log-entry[data-severity="warning"] {
+    --notification-log-accent: var(--notification-log-warning);
+}
+
+.notification-log-entry[data-severity="error"] {
+    --notification-log-accent: var(--notification-log-error);
+}
+
+/* The entry a clicked toast points to; the flash makes it findable, the border keeps it found. */
+.notification-log-entry-focused {
+    border-color: var(--theme-color);
+    border-left-color: var(--notification-log-accent);
+    animation: notification-log-flash 1.2s ease-out;
+}
+
+@keyframes notification-log-flash {
+    from {
+        background-color: color-mix(in srgb, var(--notification-log-accent) 35%, transparent);
+    }
+
+    to {
+        background-color: transparent;
+    }
+}
+
+.notification-log-entry-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+
+    & svg {
+        width: 100%;
+        height: 100%;
+        fill: var(--notification-log-accent);
+    }
+}
+
+.notification-log-entry-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.notification-log-entry-message {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.notification-log-entry-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.notification-log-entry-repeats {
+    color: var(--notification-log-accent);
+    cursor: help;
+}
+
+.notification-log-entry-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    visibility: hidden;
+
+    & svg {
+        width: 100%;
+        height: 100%;
+        fill: var(--color-secondary);
+    }
+
+    &:hover {
+        background-color: color-mix(in srgb, var(--color) 12%, transparent);
+    }
+
+    &:hover svg {
+        fill: var(--color);
+    }
+}
+
+.notification-log-entry:hover .notification-log-entry-copy,
+.notification-log-entry-copy:focus-visible {
+    visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .notification-log-entry-focused {
+        animation: none;
+    }
+}

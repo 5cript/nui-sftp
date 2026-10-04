@@ -2,6 +2,7 @@
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
 #include <frontend/settings.hpp>
+#include <frontend/notification_center.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
@@ -25,6 +26,7 @@
 #include <ui5-sap-icons/icons/connected.hpp>
 #include <ui5-sap-icons/icons/begin.hpp>
 #include <ui5-sap-icons/icons/signature.hpp>
+#include <ui5-sap-icons/icons/bell.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -36,6 +38,7 @@ struct Toolbar::Implementation
     FrontendEvents* events;
     SessionArea* sessionArea;
     Settings* settings{nullptr};
+    NotificationCenter* notificationCenter{nullptr};
     ConfirmDialog* confirmDialog;
     DirectConnectDialog* directConnectDialog;
     ThemeController* themeController;
@@ -66,6 +69,7 @@ struct Toolbar::Implementation
     }
 
     void updateSessionsList(std::function<void()> onDone);
+    Nui::ElementRenderer notificationsButton();
 };
 
 void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
@@ -185,6 +189,58 @@ void Toolbar::reloadLayouts()
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Toolbar);
+
+Nui::ElementRenderer Toolbar::Implementation::notificationsButton()
+{
+    using namespace Nui;
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::span;
+    namespace Snc = ScriptNuiComponents;
+
+    if (!notificationCenter)
+    {
+        Log::error("Toolbar: notificationCenter is not set.");
+        return Nui::nil();
+    }
+
+    const auto severityName = [](NotificationSeverity severity) -> std::string {
+        return severity == NotificationSeverity::Error ? "error" : "warning";
+    };
+
+    // The badge is rendered anew on every change, which replays its pop animation for each arrival.
+    // clang-format off
+    return span{
+        class_ = "toolbar-notifications",
+        "data-attention"_attr = observe(notificationCenter->attention()).generate([this, severityName]() -> std::string {
+            auto const& attention = notificationCenter->attention().value();
+            return attention.unread == 0 ? std::string{} : severityName(attention.worst);
+        }),
+    }(
+        Snc::button({
+            .icon = Ui5Icons::bell(),
+            .attributes = {
+                Nui::Attributes::title = language->get("notificationLog", "title"),
+                onClick = [this]() {
+                    notificationCenter->open();
+                },
+            },
+        }),
+        span{class_ = "toolbar-notifications-badge-host"}(
+            observe(notificationCenter->attention()),
+            [this, severityName]() -> Nui::ElementRenderer {
+                auto const& attention = notificationCenter->attention().value();
+                if (attention.unread == 0)
+                    return Nui::nil();
+                return span{
+                    class_ = "toolbar-notifications-badge",
+                    "data-severity"_attr = severityName(attention.worst),
+                }(attention.unread > 99 ? std::string{"99+"} : std::to_string(attention.unread));
+            }
+        )
+    );
+    // clang-format on
+}
 
 Nui::ElementRenderer Toolbar::operator()()
 {
@@ -347,6 +403,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 },
             },
         }),
+        impl_->notificationsButton(),
         Snc::button({
             .icon = Ui5Icons::signature(),
             .attributes = {
@@ -381,4 +438,9 @@ void Toolbar::sessionArea(SessionArea& sessionArea)
 void Toolbar::settings(Settings& settings)
 {
     impl_->settings = &settings;
+}
+
+void Toolbar::notificationCenter(NotificationCenter& center)
+{
+    impl_->notificationCenter = &center;
 }

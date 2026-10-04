@@ -36,4 +36,16 @@ namespace CommandStore
       private:
         Store* store_;
     };
+
+    /**
+     * @brief Stands in for StoreRpc when the store could not be opened.
+     *
+     * Registers the same "CommandStore::<method>" handlers, each replying {error: reason}, so the
+     * frontend can tell the user instead of waiting for a reply that never comes.
+     */
+    class UnavailableStoreRpc : public RpcHelper::StrandRpc
+    {
+      public:
+        UnavailableStoreRpc(boost::asio::any_io_executor executor, Nui::Window& wnd, Nui::RpcHub& hub, std::string reason);
+    };
 }

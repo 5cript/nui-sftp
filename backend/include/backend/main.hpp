@@ -71,7 +71,8 @@ class Main
     PasswordPrompter prompter_;
     std::unique_ptr<FileTracking::TempDirInstanceManager> tempDirInstanceManager_;
     std::optional<CommandStore::Store> commandStore_;
-    std::unique_ptr<CommandStore::StoreRpc> commandStoreRpc_;
+    /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
+    std::unique_ptr<RpcHelper::StrandRpc> commandStoreRpc_;
 
     std::shared_ptr<SessionManager> sshSessionManager_;
     boost::asio::steady_timer childSignalTimer_;
