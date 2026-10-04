@@ -25,6 +25,9 @@ endif()
 # For sftp_server.mjs bundled
 add_dependencies(nui-sftp-backend-test nui-sftp-ssh-test)
 
+# The shell integration tests build their zsh/fish image from here.
+target_compile_definitions(nui-sftp-backend-test PRIVATE NUI_SFTP_TEST_DOCKER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/docker")
+
 set_target_properties(nui-sftp-backend-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
 
 gtest_discover_tests(nui-sftp-backend-test)
