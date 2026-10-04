@@ -4,6 +4,7 @@ import { FileExplorer } from './content_panels/file_explorer';
 import { OperationQueue } from './content_panels/operation_queue';
 import { SessionOptions } from './content_panels/session_options';
 import { FileTracking } from './content_panels/file_tracking';
+import { CommandHistory } from './content_panels/command_history';
 import {
     BoxPanel,
     DockPanel,
@@ -33,6 +34,8 @@ export interface PanelFactories {
     sessionOptionsDelete: () => any;
     fileTrackingFactory: () => HTMLElement | undefined;
     fileTrackingDelete: () => any;
+    commandHistoryFactory: () => HTMLElement | undefined;
+    commandHistoryDelete: () => any;
 }
 
 /**
@@ -130,6 +133,8 @@ export class ContentPanel {
                 return new SessionOptions('SessionOptions', this.factories.sessionOptionsFactory, this.factories.sessionOptionsDelete);
             case 'file-tracking':
                 return new FileTracking('File Tracking', this.factories.fileTrackingFactory, this.factories.fileTrackingDelete);
+            case 'command-history':
+                return new CommandHistory('Command History', this.factories.commandHistoryFactory, this.factories.commandHistoryDelete);
             default:
                 return undefined;
         }
@@ -231,12 +236,16 @@ export class ContentPanel {
         const f = this.factories;
         const term = new Terminal('Terminal', f.terminalFactory, f.terminalDelete);
         const explorer = new FileExplorer('FileExplorer', f.fileExplorerFactory, f.fileExplorerDelete);
+        const history = new CommandHistory('Command History', f.commandHistoryFactory, f.commandHistoryDelete);
+        const snippets = new CommandSnippets('Command Snippets', f.commandSnippetsFactory, f.commandSnippetsDelete);
 
         const dock = new DockPanel({
             addButtonEnabled: true,
         });
         dock.addWidget(term);
         dock.addWidget(explorer, { mode: 'split-right', ref: term });
+        dock.addWidget(history, { mode: 'tab-after', ref: explorer });
+        dock.addWidget(snippets, { mode: 'tab-after', ref: history });
         if (this.engineType === 'ssh') {
             const queue = new OperationQueue('OperationQueue', f.operationQueueFactory, f.operationQueueDelete);
             const fileTracking = new FileTracking('File Tracking', f.fileTrackingFactory, f.fileTrackingDelete);
@@ -244,6 +253,8 @@ export class ContentPanel {
             dock.addWidget(fileTracking, { mode: 'tab-after', ref: queue });
         }
         this.applyDefaultSplit(dock);
+        // The file explorer stays the visible tab of its area.
+        dock.selectWidget(explorer);
         return dock;
     }
 

@@ -10,6 +10,7 @@
 @import "./settings.css";
 @import "./licenses.css";
 @import "./file_tracking_panel.css";
+@import "./command_history_panel.css";
 @import "./local_shell_tab.css";
 @import "./terminal_toolbar.css";
 @import "./sync_dialog.css";
@@ -39,6 +40,10 @@
 @import "../../../styles/5cript-nui-components/text_input.css";
 @import "../../../styles/5cript-nui-components/tree.css";
 @import "../../../styles/5cript-nui-components/message_strip.css";
+@import "../../../styles/5cript-nui-components/pill.css";
+@import "../../../styles/5cript-nui-components/tag_box.css";
+@import "../../../styles/5cript-nui-components/collapsible_section.css";
+@import "../../../styles/5cript-nui-components/checkbox.css";
 
 *,
 *::before,
@@ -95,6 +100,12 @@
     /* Switch */
     --script-nui-components-switch-color-inactive: #8e8e8e;
     --script-nui-components-switch-thumb-color: var(--color-fields);
+
+    /* Checkbox — border deliberately brighter than field borders so the box reads on very dark
+       themes. */
+    --script-nui-components-checkbox-background: var(--background-color-fields);
+    --script-nui-components-checkbox-border-color: #8e8e8e;
+    --script-nui-components-checkbox-check-color: var(--theme-color);
 
     /* Slider */
     --script-nui-components-slider-track-fill-color: var(--theme-color);
@@ -216,6 +227,7 @@
     }
 
     --script-nui-components-switch-color-inactive: var(--border-color-fields);
+    --script-nui-components-checkbox-border-color: var(--anti-brightness-mixin);
 
     --nui-file-grid-color: var(--color);
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));

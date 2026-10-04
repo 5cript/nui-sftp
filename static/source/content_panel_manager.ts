@@ -23,6 +23,8 @@ interface addPanelArguments {
     sessionOptionsDelete: () => any;
     fileTrackingFactory: () => HTMLElement;
     fileTrackingDelete: () => any;
+    commandHistoryFactory: () => HTMLElement;
+    commandHistoryDelete: () => any;
     openAddContextMenu: (id: string | undefined) => void;
 }
 
@@ -60,6 +62,7 @@ class ContentPanelManager {
             !args.operationQueueFactory || !args.operationQueueDelete ||
             !args.sessionOptionsFactory || !args.sessionOptionsDelete ||
             !args.fileTrackingFactory || !args.fileTrackingDelete ||
+            !args.commandHistoryFactory || !args.commandHistoryDelete ||
             !args.openAddContextMenu) {
             console.error("Missing one function argument to addPanel");
             return false;
@@ -78,6 +81,8 @@ class ContentPanelManager {
             sessionOptionsDelete: args.sessionOptionsDelete,
             fileTrackingFactory: args.fileTrackingFactory,
             fileTrackingDelete: args.fileTrackingDelete,
+            commandHistoryFactory: args.commandHistoryFactory,
+            commandHistoryDelete: args.commandHistoryDelete,
         };
 
         const panelId = args.id;

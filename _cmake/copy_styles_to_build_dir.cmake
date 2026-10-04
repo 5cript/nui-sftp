@@ -17,6 +17,10 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/pill.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tag_box.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/collapsible_section.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/checkbox.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/nui-file-explorer"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/5cript-nui-components"
@@ -37,6 +41,10 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/message_strip.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/pill.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/pill.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tag_box.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tag_box.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/collapsible_section.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/collapsible_section.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/checkbox.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         DEPENDS
             "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
@@ -55,6 +63,10 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/message_strip.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/pill.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tag_box.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/collapsible_section.css"
+            "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css"
     )
 
@@ -77,6 +89,10 @@ if (NOT OMIT_FRONTEND_BUILD)
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tabs.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tree.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/message_strip.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/pill.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/tag_box.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/collapsible_section.css"
+            "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/checkbox.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
     )
 endif()

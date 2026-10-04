@@ -124,6 +124,7 @@ target_sources(
         settings/log_options.cpp
         session/session_helpers.cpp
         command_store/command_store_client.cpp
+        session_components/command_history_panel.cpp
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
@@ -256,6 +257,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/local_shell_tab.css"
         "${CMAKE_SOURCE_DIR}/static/styles/terminal_toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/command_history_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretright.png"
@@ -298,6 +300,11 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tabs.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/text_input.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tree.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/pill.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tag_box.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/collapsible_section.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_history.ts"
 )
 
 target_include_directories(
@@ -330,6 +337,7 @@ target_link_libraries(
         events
         ids
         script-nui-components
+        rapidfuzz::rapidfuzz
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
