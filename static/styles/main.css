@@ -9,6 +9,7 @@
 @import "./icon_panel.css";
 @import "./settings.css";
 @import "./licenses.css";
+@import "./notification_log.css";
 @import "./file_tracking_panel.css";
 @import "./command_history_panel.css";
 @import "./command_snippets_panel.css";
@@ -45,6 +46,7 @@
 @import "../../../styles/5cript-nui-components/tag_box.css";
 @import "../../../styles/5cript-nui-components/collapsible_section.css";
 @import "../../../styles/5cript-nui-components/checkbox.css";
+@import "../../../styles/5cript-nui-components/toast.css";
 
 *,
 *::before,

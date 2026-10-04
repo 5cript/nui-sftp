@@ -1,6 +1,7 @@
 #include <frontend/command_store/command_store_client.hpp>
 
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <nui/rpc.hpp>
 
@@ -44,7 +45,7 @@ namespace
         if (response.hasOwnProperty("error"))
             return response["error"].as<std::string>();
         if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
-            return std::string{"malformed reply"};
+            return language->get("commandStore", "malformedReply");
         return std::nullopt;
     }
 
@@ -192,7 +193,7 @@ struct CommandStoreClient::Implementation
 
         Log::error("CommandStore: {} failed: {}", function, *reason);
         if (onError)
-            onError(fmt::format("Command store: {} failed: {}", function, *reason));
+            onError(fmt::format(fmt::runtime(language->get("commandStore", std::string{function}.c_str())), *reason));
 
         return false;
     }

@@ -11,6 +11,7 @@
 
 class SessionArea;
 class Settings;
+class NotificationCenter;
 
 class Toolbar
 {
@@ -26,6 +27,7 @@ class Toolbar
 
     void sessionArea(SessionArea& sessionArea);
     void settings(Settings& settings);
+    void notificationCenter(NotificationCenter& center);
 
     Nui::ElementRenderer operator()();
     std::string selectedLayout() const;

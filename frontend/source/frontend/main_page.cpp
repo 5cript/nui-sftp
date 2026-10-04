@@ -15,6 +15,9 @@
 #include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/onboarding/onboarding.hpp>
 #include <frontend/command_store/command_store_client.hpp>
+#include <frontend/notifications.hpp>
+#include <frontend/notification_center.hpp>
+#include <frontend/notification_log.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -34,6 +37,7 @@ struct MainPage::Implementation
     PasswordPrompter prompter;
     MultiInputDialog multiInputDialog;
     Sidebar sidebar;
+    NotificationCenter notificationCenter;
     Toolbar toolbar;
     /// One store client for the whole process; every session records into it and both command panels
     /// read from it.
@@ -44,6 +48,7 @@ struct MainPage::Implementation
     Frontend::Onboarding onboarding;
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
+    NotificationLog notificationLog;
 
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
         : stateHolder{stateHolder}
@@ -57,6 +62,7 @@ struct MainPage::Implementation
         , prompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
+        , notificationCenter{events}
         , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
         , commandStoreClient{}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar, &commandStoreClient}
@@ -67,15 +73,20 @@ struct MainPage::Implementation
         , onboarding{stateHolder, events}
         , darkMode{true}
         , setupWait{}
+        , notificationLog{events, &notificationCenter}
     {
         Log::info("MainPage::Implementation()");
         toolbar.sessionArea(sessionArea);
         toolbar.settings(settings);
+        toolbar.notificationCenter(notificationCenter);
+        Notifications::attach(&notificationCenter);
+        commandStoreClient.setOnError(&Notifications::error);
     }
 
     ~Implementation()
     {
         Log::info("MainPage::~Implementation()");
+        Notifications::attach(nullptr);
     }
 };
 
@@ -174,6 +185,8 @@ Nui::ElementRenderer MainPage::render()
         impl_->multiInputDialog(),
         impl_->settings(),
         impl_->licenses(),
+        impl_->notificationLog(),
+        impl_->notificationCenter.toasts(),
         div{
             class_ = "main-page",
         }(

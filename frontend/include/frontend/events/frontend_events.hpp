@@ -28,6 +28,8 @@ struct FrontendEvents : public AppWideEvents
     /// gate on this rather than polling the DOM.
     Nui::Observed<bool> settingsInitialLoadComplete{false};
     Nui::Observed<bool> licensesOpen{false};
+    /// Whether the notification log page is shown; opened from the toolbar or by clicking a toast.
+    Nui::Observed<bool> notificationLogOpen{false};
     /// Opens settings and scrolls to the rendered element whose DOM id equals
     /// this string. Settings walks up from the element to find its
     /// [data-settings-section] ancestor and activates that section first, so

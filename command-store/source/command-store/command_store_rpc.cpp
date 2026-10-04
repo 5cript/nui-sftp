@@ -1,8 +1,10 @@
 #include <command-store/command_store_rpc.hpp>
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace CommandStore
@@ -88,6 +90,24 @@ namespace CommandStore
             folder.position = json.value("position", std::int64_t{0});
             return folder;
         }
+
+        /**
+         * @brief Every handler StoreRpc registers; kept in sync with its register functions.
+         */
+        constexpr std::array<std::string_view, 12> methodNames{
+            "CommandStore::recordExecution",
+            "CommandStore::listHistory",
+            "CommandStore::setHistoryFlags",
+            "CommandStore::deleteHistory",
+            "CommandStore::clearHistory",
+            "CommandStore::listSnippets",
+            "CommandStore::upsertSnippet",
+            "CommandStore::deleteSnippet",
+            "CommandStore::bumpSnippetUse",
+            "CommandStore::listFolders",
+            "CommandStore::upsertFolder",
+            "CommandStore::deleteFolder",
+        };
 
         /**
          * @brief Wraps the move-only RpcOnce for capture in the store's copyable callbacks.
@@ -388,5 +408,24 @@ namespace CommandStore
                     );
                 }
             );
+    }
+
+    UnavailableStoreRpc::UnavailableStoreRpc(
+        boost::asio::any_io_executor executor,
+        Nui::Window& wnd,
+        Nui::RpcHub& hub,
+        std::string reason
+    )
+        : RpcHelper::StrandRpc{executor, wnd, hub}
+    {
+        for (auto const methodName : methodNames)
+        {
+            on(methodName).perform(
+                [reason](RpcHelper::RpcOnce&& reply, nlohmann::json const&)
+                {
+                    reply.error(reason);
+                }
+            );
+        }
     }
 }

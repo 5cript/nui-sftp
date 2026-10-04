@@ -329,6 +329,9 @@ void Main::registerCommandStore()
     if (!store)
     {
         Log::error("Failed to open the command store, history and snippets are unavailable: {}", store.error().message);
+        commandStoreRpc_ = std::make_unique<CommandStore::UnavailableStoreRpc>(
+            window_.getExecutor(), window_, hub_, store.error().message
+        );
         return;
     }
 
