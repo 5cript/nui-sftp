@@ -11,6 +11,7 @@
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/file_tracking.hpp>
+#include <frontend/session_components/command_history_panel.hpp>
 #include <frontend/session_components/terminal_panel.hpp>
 #include <frontend/session_components/file_explorer_panel.hpp>
 #include <frontend/session_components/connection_loss_overlay.hpp>
@@ -72,6 +73,7 @@ struct Session::Implementation
     std::unique_ptr<TerminalPanel> terminalPanel;
     SessionOptions sessionOptions;
     FileTrackingPanel fileTrackingPanel;
+    CommandHistoryPanel commandHistoryPanel;
     std::unique_ptr<SessionLayoutInitializer> layoutInitializer;
     SyncDialog syncDialog;
     SyncProgressDialog syncProgressDialog;
@@ -128,6 +130,22 @@ struct Session::Implementation
         , frontendSessionManager{}
         , sessionOptions{params.stateHolder, params.events, this->initialName, this->sessionLayoutId, params.confirmDialog}
         , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
+        , commandHistoryPanel{
+              params.commandStoreClient,
+              params.events,
+              params.confirmDialog,
+              // Routes panel actions into this session's last interacted terminal. Captures the
+              // Implementation, which outlives every mounted panel and never moves.
+              [this](std::string const& command, bool execute)
+              {
+                  if (!this->frontendSessionManager.value())
+                  {
+                      Log::warn("Cannot run command, session has no terminal manager");
+                      return;
+                  }
+                  if (!this->frontendSessionManager.value()->sendToLastInteracted(command, execute))
+                      Log::warn("Cannot run command, session has no terminal channel");
+              }}
         , syncDialog{params.confirmDialog, &this->operationQueue}
         , syncProgressDialog{&this->operationQueue}
         , disambiguateTitle{std::move(params.disambiguateTitle)}
@@ -330,6 +348,7 @@ Session::Session(Params params)
         .operationQueue = &impl_->operationQueue,
         .fileTrackingPanel = &impl_->fileTrackingPanel,
         .sessionOptions = &impl_->sessionOptions,
+        .commandHistoryPanel = &impl_->commandHistoryPanel,
         .pendingLocalShellAdoptions = impl_->snapshotManager->pendingLocalShellAdoptionsPtr(),
         .takeResumeLayout = [this]() -> std::optional<nlohmann::json> {
             return impl_->snapshotManager->takeResumeLayout();
@@ -418,6 +437,7 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
         .operationQueue = &impl_->operationQueue,
         .fileTrackingPanel = &impl_->fileTrackingPanel,
         .sessionOptions = &impl_->sessionOptions,
+        .commandHistoryPanel = &impl_->commandHistoryPanel,
         .pendingLocalShellAdoptions = impl_->snapshotManager->pendingLocalShellAdoptionsPtr(),
         .takeResumeLayout = [this]() -> std::optional<nlohmann::json> {
             return impl_->snapshotManager->takeResumeLayout();

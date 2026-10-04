@@ -1,0 +1,251 @@
+.command-history-panel {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    position: relative;
+    background-color: var(--background-color);
+    color: var(--color);
+}
+
+.cmdh-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color-fields);
+}
+
+.cmdh-search-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cmdh-search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+}
+
+.cmdh-search-box svg {
+    width: 14px;
+    height: 14px;
+    fill: var(--color-secondary);
+    flex: 0 0 auto;
+}
+
+.cmdh-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--color-fields);
+    font-size: 0.9rem;
+}
+
+/* The sort select is a script-nui-select; only size it to line up with the search box. */
+.cmdh-search-row > .script-nui-select {
+    height: 30px;
+    box-sizing: border-box;
+    font-size: 0.85rem;
+}
+
+.cmdh-search-row > .cmdh-action {
+    width: 30px;
+    height: 30px;
+}
+
+.cmdh-header > .script-nui-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+/* The bulk bar floats over the bottom of the panel so selecting rows never shifts the layout. */
+.cmdh-bulk-host {
+    height: 0;
+}
+
+.cmdh-bulk-bar {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: color-mix(in srgb, var(--theme-color) 12%, var(--background-color));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.cmdh-bulk-count {
+    font-size: 0.85rem;
+    color: var(--color-secondary);
+    margin-right: auto;
+}
+
+.cmdh-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 4px 8px 8px 8px;
+}
+
+.cmdh-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cmdh-group-rows {
+    display: flex;
+    flex-direction: column;
+}
+
+.cmdh-empty {
+    padding: 24px 8px;
+    text-align: center;
+    color: var(--subdued-text);
+    font-size: 0.9rem;
+}
+
+.cmdh-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+
+.cmdh-row:hover {
+    background-color: color-mix(in srgb, var(--color) 7%, transparent);
+}
+
+.cmdh-row-selected {
+    background-color: color-mix(in srgb, var(--theme-color) 14%, transparent);
+}
+
+.cmdh-row > .script-nui-checkbox {
+    flex: 0 0 auto;
+}
+
+.cmdh-row-hosts {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.cmdh-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cmdh-command {
+    font-family: monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.cmdh-command mark {
+    background-color: color-mix(in srgb, var(--theme-color) 45%, transparent);
+    color: inherit;
+    border-radius: 2px;
+}
+
+.cmdh-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+}
+
+.cmdh-host-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.cmdh-host {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cmdh-runs {
+    color: var(--theme-color);
+}
+
+/* Actions appear on hover to keep rows calm; always visible for keyboard focus. */
+.cmdh-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    visibility: hidden;
+}
+
+.cmdh-row:hover .cmdh-row-actions,
+.cmdh-row-actions:focus-within {
+    visibility: visible;
+}
+
+/* A favorite stays marked without hover, in place so nothing shifts when the rest appears. */
+.cmdh-row-actions > .cmdh-action-favorited {
+    visibility: visible;
+}
+
+.cmdh-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.cmdh-action svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--color-secondary);
+}
+
+.cmdh-action:hover {
+    background-color: color-mix(in srgb, var(--color) 12%, transparent);
+}
+
+.cmdh-action:hover svg {
+    fill: var(--color);
+}
+
+.cmdh-action-active svg {
+    fill: var(--theme-color);
+}
+
+.cmdh-action-danger:hover svg {
+    fill: var(--opq-red);
+}

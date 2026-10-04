@@ -29,6 +29,7 @@ class FileExplorerPanel;
 class OperationQueue;
 class FileTrackingPanel;
 class SessionOptions;
+class CommandHistoryPanel;
 
 /**
  * @brief Orchestrates Session's Lumino layout: the "+" tab-add context menu,
@@ -71,6 +72,7 @@ class SessionLayoutInitializer
         OperationQueue* operationQueue = nullptr;
         FileTrackingPanel* fileTrackingPanel = nullptr;
         SessionOptions* sessionOptions = nullptr;
+        CommandHistoryPanel* commandHistoryPanel = nullptr;
 
         /**
          * @brief Local-shell adoptions queued for consumption by

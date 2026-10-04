@@ -5,6 +5,7 @@
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/session_options.hpp>
+#include <frontend/session_components/command_history_panel.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/icon_from_name.hpp>
@@ -53,6 +54,7 @@ struct SessionLayoutInitializer::Implementation
     OperationQueue* operationQueue;
     FileTrackingPanel* fileTrackingPanel;
     SessionOptions* sessionOptions;
+    CommandHistoryPanel* commandHistoryPanel;
     std::vector<LocalShellAdoption>* pendingLocalShellAdoptions;
     std::function<std::optional<nlohmann::json>()> takeResumeLayout;
     std::function<void()> onLayoutCreationFailed;
@@ -64,10 +66,12 @@ struct SessionLayoutInitializer::Implementation
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> operationQueueElement{};
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileTrackingElement{};
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> sessionOptionsElement{};
+    Nui::Observed<std::shared_ptr<Nui::Dom::Element>> commandHistoryElement{};
 
     Nui::ListenRemover<decltype(operationQueueElement)> operationQueueListener{};
     Nui::ListenRemover<decltype(fileTrackingElement)> fileTrackingListener{};
     Nui::ListenRemover<decltype(sessionOptionsElement)> sessionOptionsListener{};
+    Nui::ListenRemover<decltype(commandHistoryElement)> commandHistoryListener{};
     Nui::ListenRemover<Nui::Observed<std::shared_ptr<Nui::Dom::Element>>> fileExplorerListener{};
 
     std::weak_ptr<Nui::Dom::BasicElement> layoutHost;
@@ -86,6 +90,7 @@ struct SessionLayoutInitializer::Implementation
         , operationQueue{params.operationQueue}
         , fileTrackingPanel{params.fileTrackingPanel}
         , sessionOptions{params.sessionOptions}
+        , commandHistoryPanel{params.commandHistoryPanel}
         , pendingLocalShellAdoptions{params.pendingLocalShellAdoptions}
         , takeResumeLayout{std::move(params.takeResumeLayout)}
         , onLayoutCreationFailed{std::move(params.onLayoutCreationFailed)}
@@ -168,6 +173,13 @@ SessionLayoutInitializer::SessionLayoutInitializer(Params params)
             modifyEntry(language->get("sessionFrontend", "fileTracking"), elem != nullptr);
         }
     );
+    impl_->commandHistoryListener = Nui::smartListen(
+        impl_->commandHistoryElement,
+        [modifyEntry](std::shared_ptr<Nui::Dom::Element> const& elem)
+        {
+            modifyEntry(language->get("sessionFrontend", "commandHistory"), elem != nullptr);
+        }
+    );
 }
 SessionLayoutInitializer::~SessionLayoutInitializer() = default;
 SessionLayoutInitializer::SessionLayoutInitializer(SessionLayoutInitializer&&) = default;
@@ -206,6 +218,19 @@ void SessionLayoutInitializer::rebuildTabAddMenuInto(Implementation& impl)
                 Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "file-explorer"s);
             },
             impl.fileExplorerPanel->elementObservable().value() != nullptr
+        ));
+
+        items.push_back(PopupMenu::item(
+            language->get("sessionFrontend", "commandHistory"),
+            std::string{},
+            [&impl]()
+            {
+                impl.tabAddMenu.close();
+                if (impl.commandHistoryElement.value())
+                    return;
+                Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "command-history"s);
+            },
+            impl.commandHistoryElement.value() != nullptr
         ));
 
         if (isSsh)
@@ -547,6 +572,38 @@ void SessionLayoutInitializer::initialize()
                 }
                 impl_->fileTrackingElement.value().reset();
                 impl_->fileTrackingElement.modifyNow();
+                return Nui::val::undefined();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "commandHistoryFactory",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (impl_->commandHistoryElement.value())
+                {
+                    Log::warn("There is already a command history panel, cannot open another one");
+                    return Nui::val::undefined();
+                }
+                impl_->commandHistoryElement = Nui::Dom::makeStandaloneElement((*impl_->commandHistoryPanel)());
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return impl_->commandHistoryElement.value()->val();
+            }
+        )
+    );
+    addPanelArgument.set(
+        "commandHistoryDelete",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                if (!impl_->commandHistoryElement.value())
+                {
+                    Log::warn("There is no command history panel to remove");
+                    return Nui::val::undefined();
+                }
+                impl_->commandHistoryElement.value().reset();
+                impl_->commandHistoryElement.modifyNow();
                 return Nui::val::undefined();
             }
         )
