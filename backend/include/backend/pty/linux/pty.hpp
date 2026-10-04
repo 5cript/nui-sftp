@@ -22,22 +22,23 @@ namespace PTY
           public:
             boost::system::error_code on_exec_setup(
                 boost::process::v2::posix::default_launcher& launcher,
-                const std::filesystem::path& executable,
+                const boost::process::v2::filesystem::path& executable,
                 const char* const* cmdLine);
 
             boost::system::error_code on_setup(
                 boost::process::v2::posix::default_launcher& launcher,
-                const std::filesystem::path& executable,
+                const boost::process::v2::filesystem::path& executable,
                 const char* const* cmdLine);
 
             void on_error(
                 boost::process::v2::posix::default_launcher& launcher,
-                const std::filesystem::path& executable,
-                const char* const* cmdLine);
+                const boost::process::v2::filesystem::path& executable,
+                const char* const* cmdLine,
+                const boost::system::error_code& error);
 
             void on_success(
                 boost::process::v2::posix::default_launcher& launcher,
-                const std::filesystem::path& executable,
+                const boost::process::v2::filesystem::path& executable,
                 const char* const* cmdLine);
 
             LauncherInit(PseudoTerminal* terminal)

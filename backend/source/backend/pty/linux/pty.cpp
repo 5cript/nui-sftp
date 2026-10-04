@@ -95,12 +95,12 @@ namespace PTY
 
     boost::system::error_code PseudoTerminal::LauncherInit::on_exec_setup(
         boost::process::v2::posix::default_launcher&,
-        const std::filesystem::path&,
+        const boost::process::v2::filesystem::path&,
         const char* const*
     )
     {
         // master is auto closed by boost::process
-        if (!login_tty(terminal_->impl_->slave))
+        if (login_tty(terminal_->impl_->slave) != 0)
         {
             return boost::system::error_code{errno, boost::system::system_category()};
         }
@@ -109,7 +109,7 @@ namespace PTY
 
     boost::system::error_code PseudoTerminal::LauncherInit::on_setup(
         boost::process::v2::posix::default_launcher& launcher,
-        const std::filesystem::path&,
+        const boost::process::v2::filesystem::path&,
         const char* const*
     )
     {
@@ -121,11 +121,12 @@ namespace PTY
 
     void PseudoTerminal::LauncherInit::on_error(
         boost::process::v2::posix::default_launcher&,
-        const std::filesystem::path&,
-        const char* const*
+        const boost::process::v2::filesystem::path&,
+        const char* const*,
+        const boost::system::error_code& error
     )
     {
-        Log::error("Failed to create pty");
+        Log::error("Failed to launch the process on the pty: {}", error.message());
 
         close(terminal_->impl_->master);
         close(terminal_->impl_->slave);
@@ -133,7 +134,7 @@ namespace PTY
 
     void PseudoTerminal::LauncherInit::on_success(
         boost::process::v2::posix::default_launcher&,
-        const std::filesystem::path&,
+        const boost::process::v2::filesystem::path&,
         const char* const*
     )
     {
