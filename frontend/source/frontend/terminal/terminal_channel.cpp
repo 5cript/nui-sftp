@@ -165,6 +165,35 @@ globalThis.terminalUtility.registerOscHandler = (id, code, cb) => {
         return true;
     });
 };
+// The textarea only exists once the terminal has opened on its host, which may still be pending
+// (createTerminal waits for the host to be connected), so attachment retries until then. The
+// returned disposable detaches the listener or cancels a pending attachment.
+globalThis.terminalUtility.registerFocusListener = (id, cb) => {
+    let disposed = false;
+    let attachedTo = undefined;
+    const attach = () => {
+        if (disposed)
+            return;
+        const terminal = globalThis.terminalUtility.getTerminal(id);
+        if (!terminal)
+            return;
+        if (!terminal.textarea) {
+            requestAnimationFrame(attach);
+            return;
+        }
+        attachedTo = terminal.textarea;
+        attachedTo.addEventListener("focus", cb);
+    };
+    attach();
+    return {
+        dispose: () => {
+            disposed = true;
+            if (attachedTo)
+                attachedTo.removeEventListener("focus", cb);
+            attachedTo = undefined;
+        }
+    };
+};
 // @endinline
 
 // @inline(css, xterm-js-css)
@@ -231,6 +260,8 @@ struct TerminalChannel::Implementation
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
     Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
     std::function<void(std::string const&)> onCommandExecuted{};
+    /// Fired on every keystroke and on focus; marks this channel as the last-interacted one.
+    std::function<void()> onInteracted{};
     /// Hides the echo of the shell integration bootstrap from the user.
     Utility::EchoSuppressor echoSuppressor{};
     /// Releases what the echo filter holds once the output went quiet; undefined while none is set.
@@ -254,6 +285,8 @@ struct TerminalChannel::Implementation
     Nui::val onResizeDisposable{Nui::val::undefined()};
     /// Same story for the OSC 633 handler of the smart capture mode.
     Nui::val oscHandlerDisposable{Nui::val::undefined()};
+    /// Same story for the focus listener that feeds onInteracted.
+    Nui::val onFocusDisposable{Nui::val::undefined()};
     TerminalEngine* engine;
 
     Nui::val terminal() const
@@ -487,6 +520,8 @@ void TerminalChannel::open(
             {
                 if (!aliveWeak.lock())
                     return;
+                if (impl_->onInteracted)
+                    impl_->onInteracted();
                 const auto asString = data.as<std::string>();
                 if (impl_->captureMode == Persistence::HistoryCaptureMode::simple)
                     impl_->typedLineBuffer.feed(asString);
@@ -518,6 +553,21 @@ void TerminalChannel::open(
         );
     }
 
+    impl_->onFocusDisposable = terminalUtility().call<Nui::val>(
+        "registerFocusListener",
+        impl_->termId,
+        Nui::bind(
+            [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val)
+            {
+                if (!aliveWeak.lock())
+                    return;
+                if (impl_->onInteracted)
+                    impl_->onInteracted();
+            },
+            std::placeholders::_1
+        )
+    );
+
     impl_->onResizeDisposable = term.call<Nui::val>(
         "onResize",
         Nui::bind(
@@ -547,6 +597,18 @@ void TerminalChannel::write(std::string const& data, bool isUserInput)
 void TerminalChannel::writeStderr(std::string const& data, bool isUserInput)
 {
     impl_->doWrite(data, isUserInput);
+}
+void TerminalChannel::pasteAsUser(std::string const& text, bool execute)
+{
+    auto term = impl_->terminal();
+    if (term.isUndefined())
+    {
+        Log::error("Failed to get terminal with id to paste into it: '{}", impl_->termId);
+        return;
+    }
+    term.call<void>("paste", text);
+    if (execute)
+        term.call<void>("input", std::string{"\r"}, true);
 }
 void TerminalChannel::focus()
 {
@@ -589,6 +651,11 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
             impl_->oscHandlerDisposable.call<void>("dispose");
             impl_->oscHandlerDisposable = Nui::val::undefined();
         }
+        if (!impl_->onFocusDisposable.isUndefined() && !impl_->onFocusDisposable.isNull())
+        {
+            impl_->onFocusDisposable.call<void>("dispose");
+            impl_->onFocusDisposable = Nui::val::undefined();
+        }
 
         auto term = impl_->terminal();
         if (term.isUndefined())
@@ -630,6 +697,11 @@ bool TerminalChannel::isOpen() const
 void TerminalChannel::setOnCommandExecuted(std::function<void(std::string const&)> onCommandExecuted)
 {
     impl_->onCommandExecuted = std::move(onCommandExecuted);
+}
+
+void TerminalChannel::setOnInteracted(std::function<void()> onInteracted)
+{
+    impl_->onInteracted = std::move(onInteracted);
 }
 
 void TerminalChannel::installShellIntegration(std::string const& bootstrapLine, std::size_t echoes)

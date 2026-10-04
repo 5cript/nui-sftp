@@ -41,6 +41,8 @@ struct FrontendSessionManager::Implementation
     Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
     std::function<void(Ids::ChannelId const&, std::optional<std::string> const&, std::string const&)>
         onCommandExecuted;
+    /// Target of sendToLastInteracted; updated on every keystroke or focus in any channel.
+    std::optional<Ids::ChannelId> lastInteractedChannel{};
 
     /// Looks up the channel pointed to by a pending shared creation id.
     /// Returns nullptr if the id is not yet assigned or the channel is not found.
@@ -64,6 +66,14 @@ struct FrontendSessionManager::Implementation
         channel.setOnCommandExecuted([this, channelId, localShell = std::move(localShell)](std::string const& command) {
             if (onCommandExecuted)
                 onCommandExecuted(channelId, localShell, command);
+        });
+    }
+
+    /// Remembers this channel as the one the user typed in or focused last.
+    void bindInteractionTracking(Ids::ChannelId const& channelId, TerminalChannel& channel)
+    {
+        channel.setOnInteracted([this, channelId]() {
+            lastInteractedChannel = channelId;
         });
     }
 
@@ -277,6 +287,7 @@ void FrontendSessionManager::createChannel(
             }
             impl_->channelEngine[**channelId] = primary;
             impl_->bindCommandCapture(**channelId, *channelIter->second);
+            impl_->bindInteractionTracking(**channelId, *channelIter->second);
 
             Log::info("Opening channel");
             channelIter->second->open(
@@ -400,6 +411,7 @@ void FrontendSessionManager::createLocalShellChannel(
             }
             impl_->channelEngine[**channelId] = aux;
             impl_->bindCommandCapture(**channelId, *channelIter->second, localShell);
+            impl_->bindInteractionTracking(**channelId, *channelIter->second);
 
             Log::info("Opening local-shell channel");
             channelIter->second->open(
@@ -473,6 +485,8 @@ void FrontendSessionManager::closeChannel(Ids::ChannelId const& channelId)
             {
                 impl_->channels.erase(channelId);
                 impl_->channelEngine.erase(channelId);
+                if (impl_->lastInteractedChannel == channelId)
+                    impl_->lastInteractedChannel.reset();
             },
             true // also close backend resources immediately
         );
@@ -581,6 +595,7 @@ void FrontendSessionManager::adoptLocalShellChannel(
     // No bootstrap here: the process kept running through the reconnect, so its shell still carries
     // the hook that was installed when the channel was originally created.
     impl_->bindCommandCapture(channelId, *channelIter->second, adoption.execOpts.command.string());
+    impl_->bindInteractionTracking(channelId, *channelIter->second);
 
     channelIter->second->open(
         host,
@@ -610,6 +625,22 @@ void FrontendSessionManager::focusFirst()
 
     if (!impl_->channels.empty())
         impl_->channels.begin()->second->focus();
+}
+
+bool FrontendSessionManager::sendToLastInteracted(std::string const& data, bool execute)
+{
+    if (guardDisposal())
+        return false;
+
+    auto* channel = impl_->findChannel(impl_->lastInteractedChannel);
+    if (!channel && !impl_->channels.empty())
+        channel = impl_->channels.begin()->second.get();
+    if (!channel)
+        return false;
+
+    channel->focus();
+    channel->pasteAsUser(data, execute);
+    return true;
 }
 
 void FrontendSessionManager::open(std::function<void(bool, std::string const&)> onOpen)

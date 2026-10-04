@@ -38,6 +38,16 @@ class TerminalChannel
     bool isOpen() const;
     void write(std::string const& data, bool isUserInput);
     void writeStderr(std::string const& data, bool isUserInput);
+
+    /**
+     * @brief Sends @p text to the shell as if the user pasted it, followed by an Enter when
+     *        @p execute is true.
+     *
+     * Takes the keystroke path, so history capture and interaction tracking see it. Where the shell
+     * has bracketed paste on, embedded newlines stay on the prompt instead of running anything.
+     */
+    void pasteAsUser(std::string const& text, bool execute);
+
     void focus();
     void dispose(std::function<void()> onComplete, bool closeBackendChannel = true);
     std::string stealTerminal();
@@ -59,6 +69,15 @@ class TerminalChannel
      * off mode nothing ever calls it. Set it before open(), the handlers are registered there.
      */
     void setOnCommandExecuted(std::function<void(std::string const&)> onCommandExecuted);
+
+    /**
+     * @brief Sets the callback fired when the user interacts with this terminal.
+     *
+     * Fired on every keystroke and whenever the xterm widget gains focus. Used to track the
+     * last-interacted terminal of a session. Set it before open(), the handlers are registered
+     * there.
+     */
+    void setOnInteracted(std::function<void()> onInteracted);
 
     /**
      * @brief Writes a shell integration bootstrap line into the shell's stdin.
