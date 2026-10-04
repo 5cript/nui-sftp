@@ -1,5 +1,8 @@
 #include "test_command_template.hpp"
 #include "test_directory_traversal.hpp"
+#include "test_echo_suppressor.hpp"
+#include "test_shell_integration.hpp"
+#include "test_typed_line_buffer.hpp"
 
 #include <gtest/gtest.h>
 
