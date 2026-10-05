@@ -840,24 +840,27 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(SnippetCar
                 snippet.uses > 0
                     ? Nui::ElementRenderer{span{class_ = "cmds-uses"}(fmt::format("×{}", snippet.uses))}
                     : Nui::nil(),
-                button{
-                    class_ = "cmds-insert",
-                    CommandPanels::connectionTooltip(
-                        *connectionLost, std::string{language->get("commandSnippetsPanel", "insertTooltip")}),
-                    CommandPanels::disabledWhileDisconnected(*connectionLost),
-                    onClick = [this, snippet](Nui::val) {
-                        sendSnippet(snippet, false);
-                    },
-                }(Ui5Icons::paste(), span{}(language->get("commandSnippetsPanel", "insert"))),
-                button{
-                    class_ = "cmds-run",
-                    CommandPanels::connectionTooltip(
-                        *connectionLost, std::string{language->get("commandSnippetsPanel", "runTooltip")}),
-                    CommandPanels::disabledWhileDisconnected(*connectionLost),
-                    onClick = [this, snippet](Nui::val) {
-                        sendSnippet(snippet, true);
-                    },
-                }(Ui5Icons::media_play(), span{}(language->get("commandSnippetsPanel", "run")))
+                // Grouped, so on a narrow card they wrap onto their own line together.
+                div{class_ = "cmds-card-buttons"}(
+                    button{
+                        class_ = "cmds-insert",
+                        CommandPanels::connectionTooltip(
+                            *connectionLost, std::string{language->get("commandSnippetsPanel", "insertTooltip")}),
+                        CommandPanels::disabledWhileDisconnected(*connectionLost),
+                        onClick = [this, snippet](Nui::val) {
+                            sendSnippet(snippet, false);
+                        },
+                    }(Ui5Icons::paste(), span{}(language->get("commandSnippetsPanel", "insert"))),
+                    button{
+                        class_ = "cmds-run",
+                        CommandPanels::connectionTooltip(
+                            *connectionLost, std::string{language->get("commandSnippetsPanel", "runTooltip")}),
+                        CommandPanels::disabledWhileDisconnected(*connectionLost),
+                        onClick = [this, snippet](Nui::val) {
+                            sendSnippet(snippet, true);
+                        },
+                    }(Ui5Icons::media_play(), span{}(language->get("commandSnippetsPanel", "run")))
+                )
             )
         )
     );

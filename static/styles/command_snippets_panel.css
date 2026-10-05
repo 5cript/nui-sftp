@@ -358,12 +358,28 @@
     color: var(--color-secondary);
 }
 
+/* Wraps on narrow cards or long translations: the buttons move to a line of their own. */
 .cmds-card-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 4px 8px;
     font-size: 0.75rem;
     color: var(--color-secondary);
+}
+
+.cmds-card-meta > span {
+    white-space: nowrap;
+}
+
+.cmds-card-buttons {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.cmds-card-buttons > button {
+    white-space: nowrap;
 }
 
 .cmds-variable-badge {
@@ -379,7 +395,6 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
     padding: 2px 9px;
     border: 1px solid var(--border-color-fields);
     border-radius: 4px;
