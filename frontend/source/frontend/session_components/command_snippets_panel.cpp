@@ -54,6 +54,16 @@ namespace
     constexpr char const* selectionFavorites = "favorites";
     constexpr char const* selectionUnfiled = "unfiled";
 
+    /// A card with everything it displays, so an unchanged card compares equal.
+    struct SnippetCard
+    {
+        CommandStore::Snippet snippet{};
+        std::string timeLabel{};
+        std::string loweredQuery{};
+
+        bool operator==(SnippetCard const&) const = default;
+    };
+
     std::string folderSelectionKey(std::string const& folderId)
     {
         return fmt::format("folder:{}", folderId);
@@ -184,7 +194,13 @@ struct CommandSnippetsPanel::Implementation
     std::shared_ptr<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>> tagPills{
         std::make_shared<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>>()
     };
+    /// What the grid shows, derived from the snippets and the filters by refreshCards.
+    Nui::Observed<std::vector<SnippetCard>> cards{};
     Nui::ListenRemover<Nui::Observed<std::vector<CommandStore::Snippet>>> snippetsListener{};
+    Nui::ListenRemover<Nui::Observed<std::vector<CommandStore::SnippetFolder>>> foldersListener{};
+    Nui::ListenRemover<Nui::Observed<std::string>> searchListener{};
+    Nui::ListenRemover<Nui::Observed<std::string>> folderSelectionListener{};
+    Nui::ListenRemover<Nui::Observed<std::set<std::string>>> tagsListener{};
 
     Implementation(
         CommandStoreClient* client,
@@ -281,6 +297,24 @@ struct CommandSnippetsPanel::Implementation
             visible.push_back(&snippet);
         }
         return visible;
+    }
+
+    void refreshCards()
+    {
+        const auto loweredQuery = lowercased(searchQuery.value());
+        const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
+        std::vector<SnippetCard> target{};
+        for (auto const* snippet : visibleSnippets())
+        {
+            target.push_back(SnippetCard{
+                .snippet = *snippet,
+                .timeLabel = snippet->lastUsed > 0 ? relativeTime(snippet->lastUsed, nowEpoch) : std::string{},
+                .loweredQuery = loweredQuery,
+            });
+        }
+        CommandPanels::updateKeyed(cards, std::move(target), [](SnippetCard const& card) -> std::string const& {
+            return card.snippet.id;
+        });
     }
 
     void openEditor(CommandStore::Snippet const& snippet)
@@ -555,8 +589,7 @@ struct CommandSnippetsPanel::Implementation
     }
 
     Nui::ElementRenderer renderSidebar();
-    Nui::ElementRenderer renderCard(CommandStore::Snippet const& snippet, std::string const& loweredQuery);
-    Nui::ElementRenderer renderGrid();
+    Nui::ElementRenderer renderCard(SnippetCard const& card);
     Nui::ElementRenderer renderEditor();
     Nui::ElementRenderer renderVariableForm();
 };
@@ -724,9 +757,7 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
     );
 }
 
-Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
-    CommandStore::Snippet const& snippet, std::string const& loweredQuery
-)
+Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(SnippetCard const& card)
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
@@ -734,7 +765,7 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
     using Nui::Elements::span;
     using Nui::Attributes::title;
 
-    const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
+    auto const& snippet = card.snippet;
     const auto variables = Utility::CommandTemplate::parseVariables(snippet.command);
 
     std::vector<Nui::ElementRenderer> tagPillElements{};
@@ -745,7 +776,7 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
     // clang-format off
     return div{class_ = "cmds-card"}(
         div{class_ = "cmds-card-header"}(
-            CommandPanels::highlightedText(snippet.name, loweredQuery, "cmds-card-name"),
+            CommandPanels::highlightedText(snippet.name, card.loweredQuery, "cmds-card-name"),
             div{class_ = "cmds-card-actions"}(
                 button{
                     class_ = "cmds-action",
@@ -803,9 +834,8 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
                           variables.size()
                       ))}
                     : Nui::nil(),
-                snippet.lastUsed > 0
-                    ? Nui::ElementRenderer{span{class_ = "cmds-last-used"}(
-                          relativeTime(snippet.lastUsed, nowEpoch))}
+                !card.timeLabel.empty()
+                    ? Nui::ElementRenderer{span{class_ = "cmds-last-used"}(card.timeLabel)}
                     : Nui::nil(),
                 snippet.uses > 0
                     ? Nui::ElementRenderer{span{class_ = "cmds-uses"}(fmt::format("×{}", snippet.uses))}
@@ -832,37 +862,6 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
         )
     );
     // clang-format on
-}
-
-Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderGrid()
-{
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-
-    const auto loweredQuery = lowercased(searchQuery.value());
-    const auto visible = visibleSnippets();
-
-    if (visible.empty())
-    {
-        return div{class_ = "cmds-empty"}(
-            language->get(
-                "commandSnippetsPanel", client->snippets().value().empty() ? "emptyText" : "noMatchesText"
-            )
-        );
-    }
-
-    std::vector<Nui::ElementRenderer> cards{};
-    cards.reserve(visible.size());
-    for (auto const* snippet : visible)
-        cards.push_back(renderCard(*snippet, loweredQuery));
-
-    return div{class_ = "cmds-grid"}(
-        Nui::range(std::move(cards)),
-        [](long long, auto const& card) -> Nui::ElementRenderer {
-            return card;
-        }
-    );
 }
 
 Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderEditor()
@@ -1092,13 +1091,21 @@ CommandSnippetsPanel::CommandSnippetsPanel(
     // A null client means the backend store failed to open; the panel then only shows a notice.
     if (impl_->client)
     {
-        impl_->snippetsListener = Nui::smartListen(
-            impl_->client->snippets(),
-            [implementation = impl_.get()](auto const&) {
-                implementation->rebuildTagPills();
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            }
-        );
+        auto* const implementation = impl_.get();
+        const auto refresh = [implementation](auto const&) {
+            implementation->refreshCards();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        };
+        impl_->snippetsListener = Nui::smartListen(impl_->client->snippets(), [implementation](auto const&) {
+            implementation->rebuildTagPills();
+            implementation->refreshCards();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        });
+        // Folders decide which snippets count as unfiled.
+        impl_->foldersListener = Nui::smartListen(impl_->client->folders(), refresh);
+        impl_->searchListener = Nui::smartListen(impl_->searchQuery, refresh);
+        impl_->folderSelectionListener = Nui::smartListen(impl_->folderSelection, refresh);
+        impl_->tagsListener = Nui::smartListen(impl_->selectedTags, refresh);
     }
 }
 CommandSnippetsPanel::~CommandSnippetsPanel() = default;
@@ -1122,6 +1129,7 @@ Nui::ElementRenderer CommandSnippetsPanel::operator()()
 
     impl_->client->reloadSnippets();
     impl_->client->reloadFolders();
+    impl_->refreshCards();
 
     // clang-format off
     return div{class_ = "command-snippets-panel"}(
@@ -1182,11 +1190,23 @@ Nui::ElementRenderer CommandSnippetsPanel::operator()()
                 .pills = impl_->tagPills,
             }),
             div{class_ = "cmds-grid-host"}(
-                Nui::observe(impl_->client->snippets(), impl_->client->folders(), impl_->searchQuery,
-                             impl_->selectedTags, impl_->folderSelection)
-                    .generate([this]() -> Nui::ElementRenderer {
-                        return impl_->renderGrid();
+                div{class_ = "cmds-empty-host"}(
+                    Nui::observe(impl_->cards, impl_->client->snippets()).generate([this]() -> Nui::ElementRenderer {
+                        if (!impl_->cards.value().empty())
+                            return Nui::nil();
+                        const bool noSnippets = impl_->client->snippets().value().empty();
+                        return div{class_ = "cmds-empty"}(
+                            language->get("commandSnippetsPanel", noSnippets ? "emptyText" : "noMatchesText")
+                        );
                     })
+                ),
+                // Bound to the observed cards: a change redraws only the cards it touched.
+                div{class_ = "cmds-grid"}(
+                    Nui::range(impl_->cards),
+                    [this](long long, SnippetCard const& card) -> Nui::ElementRenderer {
+                        return impl_->renderCard(card);
+                    }
+                )
             )
         ),
         div{class_ = "cmds-editor-host"}(
