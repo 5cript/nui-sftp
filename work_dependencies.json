@@ -32,8 +32,8 @@
         },
         {
             "url": "https://github.com/5cript/5cript-nui-components.git",
-            "rev": "fce194538379038f535a8ea68e7a25d8a96a9ae0",
-            "branch": "feat/snippets-components",
+            "rev": "6626840e4d49d47b437f21e68917edf46ec6568c",
+            "branch": "main",
             "name": "5cript-nui-components"
         },
         {
