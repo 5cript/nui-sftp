@@ -1,5 +1,6 @@
 #include <frontend/session_components/command_snippets_panel.hpp>
 #include <frontend/session_components/command_panel_helpers.hpp>
+#include <frontend/notifications.hpp>
 
 #include <utility/command_template.hpp>
 #include <utility/language.hpp>
@@ -31,6 +32,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <ctime>
@@ -106,6 +108,20 @@ namespace
         });
     }
 
+    /// Like focusWhenMounted, with the text selected so typing replaces it.
+    Nui::Attribute selectWhenMounted()
+    {
+        return Nui::Attributes::reference.onMaterialize([](Nui::val element) {
+            Nui::val::global("requestAnimationFrame")(Nui::bind(
+                [element](Nui::val) {
+                    element.call<void>("focus");
+                    element.call<void>("select");
+                },
+                std::placeholders::_1
+            ));
+        });
+    }
+
     std::string trimmed(std::string_view text)
     {
         const auto first = text.find_first_not_of(" \t\r\n");
@@ -133,6 +149,8 @@ struct CommandSnippetsPanel::Implementation
     Nui::Observed<std::string> folderSelection{selectionAll};
     Nui::Observed<std::set<std::string>> selectedTags{};
     Nui::Observed<bool> newFolderInputVisible{false};
+    /// The folder whose name is being edited in the sidebar; empty while none is.
+    Nui::Observed<std::string> renamingFolderId{};
 
     /// Editor state; the plain members seed the inputs when the editor subtree is generated.
     Nui::Observed<bool> editorVisible{false};
@@ -456,6 +474,86 @@ struct CommandSnippetsPanel::Implementation
         newFolderInputVisible = false;
     }
 
+    void startRename(std::string const& folderId)
+    {
+        const auto& folders = client->folders().value();
+        if (std::ranges::none_of(folders, [&folderId](CommandStore::SnippetFolder const& folder) {
+                return folder.id == folderId;
+            }))
+            return;
+        newFolderInputVisible = false;
+        renamingFolderId = folderId;
+    }
+
+    /// Enter and losing focus both commit; whichever comes second finds nothing left to do.
+    void commitRename(std::string const& folderId, std::string const& newName)
+    {
+        if (renamingFolderId.value() != folderId)
+            return;
+        renamingFolderId = std::string{};
+
+        const auto name = trimmed(newName);
+        const auto& folders = client->folders().value();
+        const auto folder = std::ranges::find_if(folders, [&folderId](CommandStore::SnippetFolder const& candidate) {
+            return candidate.id == folderId;
+        });
+        if (name.empty() || folder == folders.end() || folder->name == name)
+            return;
+        auto renamed = *folder;
+        renamed.name = name;
+        client->upsertFolder(std::move(renamed));
+    }
+
+    /// Copies the shown snippets as JSON, with folders by name so an import can recreate them.
+    void copyVisibleSnippets() const
+    {
+        const auto& folders = client->folders().value();
+        auto exported = nlohmann::ordered_json::array();
+        const auto visible = visibleSnippets();
+        for (auto const* snippet : visible)
+        {
+            const auto folder = std::ranges::find_if(folders, [snippet](CommandStore::SnippetFolder const& candidate) {
+                return candidate.id == snippet->folder;
+            });
+            auto entry = nlohmann::ordered_json::object();
+            entry["name"] = snippet->name;
+            entry["command"] = snippet->command;
+            entry["folder"] = folder != folders.end() ? folder->name : std::string{};
+            entry["tags"] = snippet->tags;
+            entry["favorite"] = snippet->favorite;
+            exported.push_back(std::move(entry));
+        }
+        auto document = nlohmann::ordered_json::object();
+        document["version"] = 1;
+        document["snippets"] = std::move(exported);
+
+        Nui::val::global("navigator")["clipboard"]
+            .call<Nui::val>("writeText", document.dump(2))
+            .call<void>(
+                "then",
+                Nui::bind(
+                    [count = visible.size()](Nui::val) {
+                        Notifications::success(fmt::format(
+                            fmt::runtime(language->get(
+                                "commandSnippetsPanel", count == 1 ? "snippetsCopiedOne" : "snippetsCopiedMany"
+                            )),
+                            count
+                        ));
+                    },
+                    std::placeholders::_1
+                ),
+                Nui::bind(
+                    [](Nui::val error) {
+                        Notifications::error(fmt::format(
+                            fmt::runtime(language->get("commandSnippetsPanel", "copySnippetsFailed")),
+                            error.call<std::string>("toString")
+                        ));
+                    },
+                    std::placeholders::_1
+                )
+            );
+    }
+
     Nui::ElementRenderer renderSidebar();
     Nui::ElementRenderer renderCard(CommandStore::Snippet const& snippet, std::string const& loweredQuery);
     Nui::ElementRenderer renderGrid();
@@ -530,21 +628,60 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
 
     for (auto const& folder : client->folders().value())
     {
+        if (renamingFolderId.value() == folder.id)
+        {
+            entries.push_back(div{class_ = "cmds-folder cmds-folder-renaming"}(
+                Ui5Icons::folder(),
+                input{
+                    type = "text",
+                    class_ = "cmds-folder-rename-input",
+                    value = folder.name,
+                    selectWhenMounted(),
+                    onKeyDown =
+                        [this, id = folder.id](Nui::val event) {
+                            // Keeps the sidebar's F2 handler and anything further up out of typing.
+                            event.call<void>("stopPropagation");
+                            const auto key = event["key"].as<std::string>();
+                            if (key == "Enter")
+                                commitRename(id, event["target"]["value"].as<std::string>());
+                            else if (key == "Escape")
+                                renamingFolderId = std::string{};
+                        },
+                    onBlur =
+                        [this, id = folder.id](Nui::val event) {
+                            commitRename(id, event["target"]["value"].as<std::string>());
+                        },
+                }()
+            ));
+            continue;
+        }
+
         const auto count = folderCounts.contains(folder.id) ? folderCounts.at(folder.id) : 0;
         entries.push_back(sidebarEntry(
             folderSelectionKey(folder.id),
             Ui5Icons::folder(),
             folder.name,
             count,
-            button{
-                class_ = "cmds-action cmds-action-danger cmds-folder-delete",
-                title = language->get("commandSnippetsPanel", "deleteFolderTooltip"),
-                onClick =
-                    [this, folder](Nui::val event) {
-                        event.call<void>("stopPropagation");
-                        deleteFolder(folder);
-                    },
-            }(Ui5Icons::delete_())
+            span{class_ = "cmds-folder-actions"}(
+                button{
+                    class_ = "cmds-action",
+                    title = language->get("commandSnippetsPanel", "renameFolderTooltip"),
+                    onClick =
+                        [this, id = folder.id](Nui::val event) {
+                            event.call<void>("stopPropagation");
+                            startRename(id);
+                        },
+                }(Ui5Icons::edit()),
+                button{
+                    class_ = "cmds-action cmds-action-danger",
+                    title = language->get("commandSnippetsPanel", "deleteFolderTooltip"),
+                    onClick =
+                        [this, folder](Nui::val event) {
+                            event.call<void>("stopPropagation");
+                            deleteFolder(folder);
+                        },
+                }(Ui5Icons::delete_())
+            )
         ));
     }
     entries.push_back(sidebarEntry(
@@ -891,8 +1028,9 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderVariableForm()
         ));
     }
 
-    // Running needs every parameter; inserting may leave some for editing in the terminal.
-    // The preview changes on every keystroke, so it doubles as the trigger for re-evaluation.
+    // Running needs every parameter; inserting may leave some for editing in the terminal. Neither
+    // works without the connection. The preview changes on every keystroke, so it doubles as the
+    // trigger for re-evaluation.
     const auto submitButton = [this](bool execute, std::string const& text) -> Nui::ElementRenderer {
         using Nui::Attributes::title;
         return button{
@@ -987,9 +1125,22 @@ Nui::ElementRenderer CommandSnippetsPanel::operator()()
 
     // clang-format off
     return div{class_ = "command-snippets-panel"}(
-        div{class_ = "cmds-sidebar-host"}(
+        // Focusable, so a click on a row (rows are regenerated) leaves the focus here for F2.
+        div{
+            class_ = "cmds-sidebar-host",
+            tabIndex = "-1",
+            onKeyDown = [this](Nui::val event) {
+                if (event["key"].as<std::string>() != "F2")
+                    return;
+                auto const& selection = impl_->folderSelection.value();
+                if (!selection.starts_with("folder:"))
+                    return;
+                event.call<void>("preventDefault");
+                impl_->startRename(selection.substr(7));
+            },
+        }(
             Nui::observe(impl_->client->snippets(), impl_->client->folders(), impl_->folderSelection,
-                         impl_->newFolderInputVisible)
+                         impl_->newFolderInputVisible, impl_->renamingFolderId)
                 .generate([this]() -> Nui::ElementRenderer {
                     return impl_->renderSidebar();
                 })
@@ -1007,6 +1158,13 @@ Nui::ElementRenderer CommandSnippetsPanel::operator()()
                         },
                     }()
                 ),
+                button{
+                    class_ = "cmds-button",
+                    title = language->get("commandSnippetsPanel", "copySnippetsTooltip"),
+                    onClick = [this](Nui::val) {
+                        impl_->copyVisibleSnippets();
+                    },
+                }(Ui5Icons::copy(), span{}(language->get("commandSnippetsPanel", "copySnippets"))),
                 button{
                     class_ = "cmds-button cmds-button-primary",
                     title = language->get("commandSnippetsPanel", "newSnippetTooltip"),
