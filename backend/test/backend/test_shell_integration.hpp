@@ -561,6 +561,9 @@ namespace Test
 
         EXPECT_EQ(commandsFor("\n"), Commands{}) << "bare Enter";
         EXPECT_EQ(commandsFor("   \n"), Commands{}) << "blank line";
+        // sync() returns at preexec, while the marker still runs. fish keeps isig on, so a Ctrl-C
+        // before its prompt is back is a SIGINT that skips the preexec hooks of the next command.
+        shell_->waitForQuiet(std::chrono::milliseconds{400});
         // Line editors flush typeahead on Ctrl-C, so the next line waits until the redraw is done.
         shell_->write("echo never\x03");
         shell_->waitForQuiet(std::chrono::milliseconds{400});
