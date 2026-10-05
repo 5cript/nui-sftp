@@ -390,6 +390,22 @@
     filter: brightness(1.2);
 }
 
+.cmds-run:disabled,
+.cmds-insert:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: none;
+}
+
+.cmds-insert:disabled {
+    color: var(--color-secondary);
+    border-color: var(--border-color-fields);
+}
+
+.cmds-insert:disabled svg {
+    fill: var(--color-secondary);
+}
+
 /* ── Shared action buttons ───────────────────────────────────────────────── */
 
 .cmds-action {

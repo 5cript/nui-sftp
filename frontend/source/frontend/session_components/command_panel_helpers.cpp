@@ -74,4 +74,21 @@ namespace CommandPanels
         }
         return span{class_ = cssClass}(text);
     }
+
+    Nui::Attribute disabledWhileDisconnected(Nui::Observed<bool>& connectionLost)
+    {
+        return Nui::Attributes::disabled = Nui::observe(connectionLost).generate([&connectionLost]() {
+            return connectionLost.value();
+        });
+    }
+
+    Nui::Attribute connectionTooltip(Nui::Observed<bool>& connectionLost, std::string tooltip)
+    {
+        return Nui::Attributes::title =
+                   Nui::observe(connectionLost).generate([&connectionLost, tooltip = std::move(tooltip)]() {
+                       if (connectionLost.value())
+                           return std::string{language->get("commandPanels", "disconnectedTooltip")};
+                       return tooltip;
+                   });
+    }
 }

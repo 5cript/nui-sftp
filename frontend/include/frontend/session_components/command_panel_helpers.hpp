@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nui/event_system/observed_value.hpp>
+#include <nui/frontend/attributes/impl/attribute.hpp>
 #include <nui/frontend/element_renderer.hpp>
 
 #include <cstdint>
@@ -37,4 +39,14 @@ namespace CommandPanels
      */
     Nui::ElementRenderer
     highlightedText(std::string const& text, std::string const& loweredQuery, std::string const& cssClass);
+
+    /**
+     * @brief Disables a button that acts on the terminal while the session's connection is lost.
+     */
+    Nui::Attribute disabledWhileDisconnected(Nui::Observed<bool>& connectionLost);
+
+    /**
+     * @brief The button's tooltip, replaced by the reason it is disabled while the connection is lost.
+     */
+    Nui::Attribute connectionTooltip(Nui::Observed<bool>& connectionLost, std::string tooltip);
 }

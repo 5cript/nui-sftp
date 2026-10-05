@@ -249,3 +249,13 @@
 .cmdh-action-danger:hover svg {
     fill: var(--opq-red);
 }
+
+.cmdh-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: transparent;
+}
+
+.cmdh-action:disabled svg {
+    fill: var(--color-secondary);
+}

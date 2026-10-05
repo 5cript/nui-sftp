@@ -4,6 +4,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 
+#include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
@@ -28,12 +29,15 @@ class CommandSnippetsPanel
      * @param runInTerminal Sends a command to the owning session's last interacted terminal.
      *                      The bool decides whether the command runs immediately (true) or is
      *                      only inserted for editing (false).
+     * @param connectionLost The owning session's lost connection state; disables everything that
+     *                       acts on the terminal while true. Not owned, outlives the panel.
      */
     CommandSnippetsPanel(
         CommandStoreClient* commandStoreClient,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
-        std::function<void(std::string const&, bool)> runInTerminal
+        std::function<void(std::string const&, bool)> runInTerminal,
+        Nui::Observed<bool>* connectionLost
     );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(CommandSnippetsPanel);
 

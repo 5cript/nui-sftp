@@ -168,12 +168,15 @@ sessionFrontend:
   dropNotImplementedText: "Das Ablegen von Dateien auf der lokalen Seite des Datei-Explorers ist nicht implementiert."
   channelCreationFailedHeader: "(SSH) Kanal Erstellung fehlgeschlagen"
   channelCreationFailedText: "Der Kanal konnte nicht erstellt werden:\n{}"
+  noTerminalToRunIn: "Diese Sitzung hat kein Terminal, in dem der Befehl laufen kann. Öffne zuerst ein Terminal."
+  disconnectedCannotRun: "Die Verbindung ist getrennt. Verbinde neu, um in dieser Sitzung Befehle auszuführen."
   externalDropWebkitWarningTitle: "Externer Drop ist fehlerhaft"
   externalDropWebkitWarningText: "Aufgrund technischer Einschränkungen der WebKitGTK-Engine funktioniert das Ablegen externer Elemente auf der Remote-Seite nur für einzelne Elemente."
 fileTrackingPanel:
   instanceCreationFailed: "Datei-Tracking Instanzerstellung fehlgeschlagen"
   instanceCreationFailedDesc: "Eine Datei-Tracking Instanz konnte im Backend nicht erstellt werden. Details finden Sie in den Logs."
 commandPanels:
+  disconnectedTooltip: "Nicht verfügbar, solange die Verbindung getrennt ist"
   justNow: "gerade eben"
   minutesAgo: "vor {} min"
   hoursAgo: "vor {} h"

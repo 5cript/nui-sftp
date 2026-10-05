@@ -19,6 +19,7 @@
 #include <frontend/session_components/session_layout_initializer.hpp>
 #include <frontend/session_components/session_snapshot_manager.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/notifications.hpp>
 #include <persistence/state/session_options.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
@@ -102,6 +103,22 @@ struct Session::Implementation
     std::function<void(Session const*)> onReconnectCancel;
     std::function<void(Session const*)> onReconnectNow;
 
+    /**
+     * @brief Sends a command to the last interacted terminal; tells the user when there is none or
+     *        the connection is lost.
+     */
+    void runInTerminal(std::string const& command, bool execute)
+    {
+        if (isInLostConnectionState.value())
+        {
+            Notifications::warning(std::string{language->get("sessionFrontend", "disconnectedCannotRun")});
+            return;
+        }
+        auto* const manager = frontendSessionManager.value().get();
+        if (!manager || !manager->sendToLastInteracted(command, execute))
+            Notifications::warning(std::string{language->get("sessionFrontend", "noTerminalToRunIn")});
+    }
+
     explicit Implementation(Session::Params params)
         : stateHolder{params.stateHolder}
         , events{params.events}
@@ -140,28 +157,18 @@ struct Session::Implementation
               // Implementation, which outlives every mounted panel and never moves.
               [this](std::string const& command, bool execute)
               {
-                  if (!this->frontendSessionManager.value())
-                  {
-                      Log::warn("Cannot run command, session has no terminal manager");
-                      return;
-                  }
-                  if (!this->frontendSessionManager.value()->sendToLastInteracted(command, execute))
-                      Log::warn("Cannot run command, session has no terminal channel");
-              }}
+                  runInTerminal(command, execute);
+              },
+              &this->isInLostConnectionState}
         , commandSnippetsPanel{
               params.commandStoreClient,
               params.events,
               params.confirmDialog,
               [this](std::string const& command, bool execute)
               {
-                  if (!this->frontendSessionManager.value())
-                  {
-                      Log::warn("Cannot run command, session has no terminal manager");
-                      return;
-                  }
-                  if (!this->frontendSessionManager.value()->sendToLastInteracted(command, execute))
-                      Log::warn("Cannot run command, session has no terminal channel");
-              }}
+                  runInTerminal(command, execute);
+              },
+              &this->isInLostConnectionState}
         , syncDialog{params.confirmDialog, &this->operationQueue}
         , syncProgressDialog{&this->operationQueue}
         , disambiguateTitle{std::move(params.disambiguateTitle)}
@@ -570,13 +577,7 @@ void Session::wireCommandCapture()
 
 void Session::runInTerminal(std::string const& command, bool execute)
 {
-    if (!impl_->frontendSessionManager.value())
-    {
-        Log::warn("Cannot run command, session has no terminal manager");
-        return;
-    }
-    if (!impl_->frontendSessionManager.value()->sendToLastInteracted(command, execute))
-        Log::warn("Cannot run command, session has no terminal channel");
+    impl_->runInTerminal(command, execute);
 }
 
 void Session::createSshEngine()
