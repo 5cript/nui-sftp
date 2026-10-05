@@ -183,7 +183,10 @@ struct CommandStoreClient::Implementation
     std::function<void(std::string const&)> onError{};
 
     /**
-     * @brief Whether the reply reports success; a failure is logged and reported to the user.
+     * @brief Whether the reply reports success; a failure is reported to the user.
+     *
+     * The error handler gets a localized message, and notifications are logged on their way. Without a
+     * handler the failure is logged as an error, which the log route turns into a notification.
      */
     bool succeeded(Nui::val const& response, std::string_view const function)
     {
@@ -191,10 +194,10 @@ struct CommandStoreClient::Implementation
         if (!reason)
             return true;
 
-        Log::error("CommandStore: {} failed: {}", function, *reason);
         if (onError)
             onError(fmt::format(fmt::runtime(language->get("commandStore", std::string{function}.c_str())), *reason));
-
+        else
+            Log::error("CommandStore: {} failed: {}", function, *reason);
         return false;
     }
 };
