@@ -153,8 +153,7 @@ struct CommandHistoryPanel::Implementation
     };
     Nui::Observed<std::string> sortLabel{sortLabels.front()};
 
-    /// Hosts seen in any load of this panel's lifetime; the filtered reload would otherwise
-    /// collapse the pill row to the filtered host alone.
+    /// Hosts seen in any load of this panel's lifetime.
     std::set<std::string> knownHosts{};
     std::shared_ptr<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>> hostPills{
         std::make_shared<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>>()
@@ -182,13 +181,11 @@ struct CommandHistoryPanel::Implementation
         , connectionLost{connectionLost}
     {}
 
+    /// The client's list is shared by every session, so it stays unfiltered; host filter and sort
+    /// apply to this panel alone, in visibleEntries.
     void reload()
     {
-        client->reloadHistory(CommandStore::HistoryQuery{
-            .hostFilter = hostFilter,
-            .sort = sort,
-            .limit = std::nullopt,
-        });
+        client->reloadHistory();
     }
 
     void rebuildHostPills()
@@ -207,14 +204,14 @@ struct CommandHistoryPanel::Implementation
                     [this, host]() {
                         hostFilter = hostFilter == host ? std::nullopt : std::optional<std::string>{host};
                         rebuildHostPills();
-                        reload();
+                        refreshRows();
                     },
             });
         }
         *hostPills = std::move(pills);
     }
 
-    /// The loaded entries passing the search and favorites filters, identical commands of
+    /// The loaded entries passing the host, search and favorites filters, identical commands of
     /// different hosts merged into one row, sorted by the active sort.
     std::vector<MergedHistoryEntry> visibleEntries() const
     {
@@ -224,6 +221,8 @@ struct CommandHistoryPanel::Implementation
         std::map<std::string, std::size_t> indexByCommand{};
         for (auto const& entry : client->history().value())
         {
+            if (hostFilter && entry.host != *hostFilter)
+                continue;
             if (favoritesOnly.value() && !entry.favorite)
                 continue;
             if (!matchesSearch(loweredQuery, entry.command))
@@ -681,7 +680,7 @@ Nui::ElementRenderer CommandHistoryPanel::operator()()
                                     impl_->sort = CommandStore::SortOrder::Name;
                                 else
                                     impl_->sort = CommandStore::SortOrder::Recent;
-                                impl_->reload();
+                                impl_->refreshRows();
                             },
                     }
                 )
