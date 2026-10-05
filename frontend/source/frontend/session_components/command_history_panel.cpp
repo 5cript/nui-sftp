@@ -105,6 +105,7 @@ struct CommandHistoryPanel::Implementation
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
     std::function<void(std::string const&, bool)> runInTerminal;
+    Nui::Observed<bool>* connectionLost;
 
     Nui::Observed<std::string> searchQuery{};
     Nui::Observed<bool> favoritesOnly{false};
@@ -132,12 +133,14 @@ struct CommandHistoryPanel::Implementation
         CommandStoreClient* client,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
-        std::function<void(std::string const&, bool)> runInTerminal
+        std::function<void(std::string const&, bool)> runInTerminal,
+        Nui::Observed<bool>* connectionLost
     )
         : client{client}
         , events{events}
         , confirmDialog{confirmDialog}
         , runInTerminal{std::move(runInTerminal)}
+        , connectionLost{connectionLost}
     {}
 
     void reload()
@@ -343,14 +346,18 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
         div{class_ = "cmdh-row-actions"}(
             button{
                 class_ = "cmdh-action",
-                title = language->get("commandHistoryPanel", "runTooltip"),
+                CommandPanels::connectionTooltip(
+                    *connectionLost, std::string{language->get("commandHistoryPanel", "runTooltip")}),
+                CommandPanels::disabledWhileDisconnected(*connectionLost),
                 onClick = [this, command = entry.command](Nui::val) {
                     runInTerminal(command, true);
                 },
             }(Ui5Icons::media_play()),
             button{
                 class_ = "cmdh-action",
-                title = language->get("commandHistoryPanel", "editAndRunTooltip"),
+                CommandPanels::connectionTooltip(
+                    *connectionLost, std::string{language->get("commandHistoryPanel", "editAndRunTooltip")}),
+                CommandPanels::disabledWhileDisconnected(*connectionLost),
                 onClick = [this, command = entry.command](Nui::val) {
                     runInTerminal(command, false);
                 },
@@ -513,9 +520,12 @@ CommandHistoryPanel::CommandHistoryPanel(
     CommandStoreClient* commandStoreClient,
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
-    std::function<void(std::string const&, bool)> runInTerminal
+    std::function<void(std::string const&, bool)> runInTerminal,
+    Nui::Observed<bool>* connectionLost
 )
-    : impl_{std::make_unique<Implementation>(commandStoreClient, events, confirmDialog, std::move(runInTerminal))}
+    : impl_{std::make_unique<Implementation>(
+          commandStoreClient, events, confirmDialog, std::move(runInTerminal), connectionLost
+      )}
 {
     // A null client means the backend store failed to open; the panel then only shows a notice.
     if (impl_->client)

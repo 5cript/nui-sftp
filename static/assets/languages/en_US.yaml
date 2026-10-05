@@ -169,10 +169,13 @@ sessionFrontend:
   externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
   channelCreationFailedHeader: "(SSH) Channel Creation Failed"
   channelCreationFailedText: "Failed to create channel:\n{}"
+  noTerminalToRunIn: "There is no terminal in this session to run the command in. Open a terminal first."
+  disconnectedCannotRun: "The connection is lost. Reconnect to run commands in this session."
 fileTrackingPanel:
   instanceCreationFailed: "File Tracking Instance Creation Failed"
   instanceCreationFailedDesc: "Failed to create a file tracking instance on the backend. Check the logs for details."
 commandPanels:
+  disconnectedTooltip: "Not available while the connection is lost"
   justNow: "just now"
   minutesAgo: "{} min ago"
   hoursAgo: "{} h ago"

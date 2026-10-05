@@ -127,6 +127,7 @@ struct CommandSnippetsPanel::Implementation
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
     std::function<void(std::string const&, bool)> runInTerminal;
+    Nui::Observed<bool>* connectionLost;
 
     Nui::Observed<std::string> searchQuery{};
     Nui::Observed<std::string> folderSelection{selectionAll};
@@ -171,12 +172,14 @@ struct CommandSnippetsPanel::Implementation
         CommandStoreClient* client,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
-        std::function<void(std::string const&, bool)> runInTerminal
+        std::function<void(std::string const&, bool)> runInTerminal,
+        Nui::Observed<bool>* connectionLost
     )
         : client{client}
         , events{events}
         , confirmDialog{confirmDialog}
         , runInTerminal{std::move(runInTerminal)}
+        , connectionLost{connectionLost}
     {}
 
     void rebuildTagPills()
@@ -376,7 +379,8 @@ struct CommandSnippetsPanel::Implementation
 
     void submitVariableForm(bool execute)
     {
-        if (execute && !variableFormComplete())
+        // Enter in a field submits too, so the disabled buttons alone do not cover it.
+        if (connectionLost->value() || (execute && !variableFormComplete()))
             return;
         runInTerminal(Utility::CommandTemplate::substitute(variableFormCommand, variableFormValues), execute);
         client->bumpSnippetUse(variableFormSnippetId);
@@ -671,14 +675,18 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(
                     : Nui::nil(),
                 button{
                     class_ = "cmds-insert",
-                    title = language->get("commandSnippetsPanel", "insertTooltip"),
+                    CommandPanels::connectionTooltip(
+                        *connectionLost, std::string{language->get("commandSnippetsPanel", "insertTooltip")}),
+                    CommandPanels::disabledWhileDisconnected(*connectionLost),
                     onClick = [this, snippet](Nui::val) {
                         sendSnippet(snippet, false);
                     },
                 }(Ui5Icons::paste(), span{}(language->get("commandSnippetsPanel", "insert"))),
                 button{
                     class_ = "cmds-run",
-                    title = language->get("commandSnippetsPanel", "runTooltip"),
+                    CommandPanels::connectionTooltip(
+                        *connectionLost, std::string{language->get("commandSnippetsPanel", "runTooltip")}),
+                    CommandPanels::disabledWhileDisconnected(*connectionLost),
                     onClick = [this, snippet](Nui::val) {
                         sendSnippet(snippet, true);
                     },
@@ -889,10 +897,12 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderVariableForm()
         using Nui::Attributes::title;
         return button{
             class_ = execute == variableFormExecute ? "cmds-button cmds-button-primary" : "cmds-button",
-            disabled = Nui::observe(variableFormPreview).generate([this, execute]() {
-                return execute && !variableFormComplete();
+            disabled = Nui::observe(variableFormPreview, *connectionLost).generate([this, execute]() {
+                return connectionLost->value() || (execute && !variableFormComplete());
             }),
-            title = Nui::observe(variableFormPreview).generate([this, execute]() {
+            title = Nui::observe(variableFormPreview, *connectionLost).generate([this, execute]() {
+                if (connectionLost->value())
+                    return std::string{language->get("commandPanels", "disconnectedTooltip")};
                 if (execute && !variableFormComplete())
                     return std::string{language->get("commandSnippetsPanel", "runNeedsAllParameters")};
                 return std::string{};
@@ -934,9 +944,12 @@ CommandSnippetsPanel::CommandSnippetsPanel(
     CommandStoreClient* commandStoreClient,
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
-    std::function<void(std::string const&, bool)> runInTerminal
+    std::function<void(std::string const&, bool)> runInTerminal,
+    Nui::Observed<bool>* connectionLost
 )
-    : impl_{std::make_unique<Implementation>(commandStoreClient, events, confirmDialog, std::move(runInTerminal))}
+    : impl_{std::make_unique<Implementation>(
+          commandStoreClient, events, confirmDialog, std::move(runInTerminal), connectionLost
+      )}
 {
     // A null client means the backend store failed to open; the panel then only shows a notice.
     if (impl_->client)
