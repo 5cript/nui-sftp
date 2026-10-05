@@ -17,6 +17,7 @@
     min-width: 140px;
     max-width: 220px;
     border-right: 1px solid var(--border-color-fields);
+    outline: none;
 }
 
 .cmds-sidebar {
@@ -84,18 +85,38 @@
     font-size: 0.75rem;
 }
 
-.cmds-folder-trailing > .cmds-folder-delete {
-    width: 20px;
-    height: 20px;
+.cmds-folder-actions {
+    display: flex;
+    gap: 2px;
     visibility: hidden;
 }
 
-.cmds-folder:hover .cmds-folder-delete {
+.cmds-folder-actions > .cmds-action {
+    width: 20px;
+    height: 20px;
+}
+
+.cmds-folder:hover .cmds-folder-actions {
     visibility: visible;
 }
 
-.cmds-folder:hover .cmds-folder-trailing:has(.cmds-folder-delete) > .cmds-folder-count {
+.cmds-folder:hover .cmds-folder-trailing:has(.cmds-folder-actions) > .cmds-folder-count {
     visibility: hidden;
+}
+
+.cmds-folder-renaming {
+    cursor: default;
+}
+
+.cmds-folder-rename-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 1px 4px;
+    border: 1px solid var(--theme-color);
+    border-radius: 3px;
+    background-color: var(--background-color-fields);
+    color: var(--color-fields);
+    font-size: 0.85rem;
 }
 
 .cmds-sidebar-separator {
@@ -169,8 +190,17 @@
 }
 
 .cmds-toolbar > .cmds-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     height: 30px;
     box-sizing: border-box;
+}
+
+.cmds-toolbar > .cmds-button svg {
+    width: 12px;
+    height: 12px;
+    fill: var(--color);
 }
 
 .cmds-search-box svg {
