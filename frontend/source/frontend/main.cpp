@@ -1,4 +1,5 @@
 #include <frontend/main_page.hpp>
+#include <frontend/notifications.hpp>
 #include <frontend/theme_controller.hpp>
 #include <utility/language.hpp>
 #include <persistence/state_holder.hpp>
@@ -126,6 +127,8 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 
 void setupLogger(std::shared_ptr<Nui::TimerHandle> setupWait)
 {
+    // Before the logger exists, so the backend's stashed startup errors are caught too.
+    Notifications::routeLogErrors();
     Log::setupFrontendLogger(
         [](std::chrono::system_clock::time_point const&, Log::Level, std::string const&) {},
         [once = false, setupWait](Log::Level) mutable

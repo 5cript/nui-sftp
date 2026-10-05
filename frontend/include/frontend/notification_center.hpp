@@ -41,7 +41,8 @@ struct NotificationAttention
  *
  * Every notification is shown as a toast and added to the log, newest first. A repeat of a message
  * that is still fresh does not toast again, it counts up the existing entry instead, so a failure
- * reported by every open session shows once. Use the Notifications functions to send; this class is
+ * reported by every open session shows once. A burst of different messages toasts only its first
+ * few; the rest go to the log alone and still count for the toolbar badge. Use the Notifications functions to send; this class is
  * for the main page, the toolbar and the log page.
  */
 class NotificationCenter

@@ -11,13 +11,64 @@
 
 #include <functional>
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace Log
 {
+    /**
+     * @brief Receives a log message, the backend's included (they arrive prefixed with "[MAIN] ").
+     */
+    using Hook = std::function<void(Log::Level, std::string const&)>;
+
+    /**
+     * @brief Keeps a hook installed while alive.
+     */
+    class HookRegistration
+    {
+      public:
+        HookRegistration() = default;
+        explicit HookRegistration(std::uint64_t id);
+        ~HookRegistration();
+        HookRegistration(HookRegistration const&) = delete;
+        HookRegistration& operator=(HookRegistration const&) = delete;
+        HookRegistration(HookRegistration&& other) noexcept;
+        HookRegistration& operator=(HookRegistration&& other) noexcept;
+
+      private:
+        std::uint64_t id_{0};
+    };
+
+    /**
+     * @brief Installs a hook for every message at or above @p minimumLevel.
+     *
+     * Hooks see messages the log level filters out, so turning the log down does not silence them.
+     * A message logged from inside a hook does not reach the hooks again.
+     */
+    [[nodiscard]] HookRegistration addHook(Log::Level minimumLevel, Hook hook);
+
+    /**
+     * @brief While alive, logged messages skip the hooks. For messages already shown to the user.
+     */
+    class HooksSuppressed
+    {
+      public:
+        HooksSuppressed();
+        ~HooksSuppressed();
+        HooksSuppressed(HooksSuppressed const&) = delete;
+        HooksSuppressed& operator=(HooksSuppressed const&) = delete;
+    };
+
     namespace Detail
     {
+        /**
+         * @brief Whether any hook would receive a message of this level right now.
+         */
+        bool hooksWant(Log::Level level);
+
+        void runHooks(Log::Level level, std::string const& message);
+
         template <typename T>
         struct AsFormattable
         {
@@ -85,6 +136,7 @@ namespace Log
         template <typename... Args>
         void log(Log::Level level, std::string const& message)
         {
+            Detail::runHooks(level, message);
             if (level < logLevel_)
                 return;
 
@@ -121,10 +173,16 @@ namespace Log
         template <typename... Args>
         void log(Log::Level level, std::string_view fmt, Args&&... args)
         {
-            if (level < logLevel_)
+            const bool logged = level >= logLevel_;
+            if (!logged && !Detail::hooksWant(level))
                 return;
 
-            onLog_(std::chrono::system_clock::now(), level, format(fmt, std::forward<Args>(args)...));
+            const auto message = format(fmt, std::forward<Args>(args)...);
+            Detail::runHooks(level, message);
+            if (!logged)
+                return;
+
+            onLog_(std::chrono::system_clock::now(), level, message);
 
             if (logOnConsole_)
             {

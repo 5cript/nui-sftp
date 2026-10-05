@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <iterator>
 #include <utility>
 
@@ -19,6 +20,13 @@ namespace
     constexpr std::int64_t repeatSuppressionMilliseconds = errorDurationMilliseconds;
 
     constexpr std::size_t maximumEntries = 200;
+
+    /**
+     * @brief At most this many toasts per burst window; further messages only go to the log, so a
+     *        failing loop cannot flood the screen.
+     */
+    constexpr std::size_t maximumToastsPerBurst = 4;
+    constexpr std::int64_t burstWindowMilliseconds = 3000;
 
     std::int64_t nowMilliseconds()
     {
@@ -61,6 +69,8 @@ struct NotificationCenter::Implementation
     Nui::Observed<NotificationAttention> attention{};
     Nui::Observed<std::optional<std::uint64_t>> focusedEntry{};
     std::uint64_t nextId{1};
+    /// When the toasts of the current burst window were shown.
+    std::deque<std::int64_t> recentToasts{};
 
     explicit Implementation(FrontendEvents* events)
         : events{events}
@@ -120,6 +130,12 @@ struct NotificationCenter::Implementation
         );
         while (entries.value().size() > maximumEntries)
             entries.erase(std::prev(entries.cend()));
+
+        while (!recentToasts.empty() && now - recentToasts.front() >= burstWindowMilliseconds)
+            recentToasts.pop_front();
+        if (recentToasts.size() >= maximumToastsPerBurst)
+            return;
+        recentToasts.push_back(now);
 
         toast.show({
             .message = std::move(message),
