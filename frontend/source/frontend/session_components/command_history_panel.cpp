@@ -5,7 +5,6 @@
 #include <log/log.hpp>
 
 #include <script-nui-components/pill_list.hpp>
-#include <script-nui-components/collapsible_section.hpp>
 #include <script-nui-components/checkbox.hpp>
 #include <script-nui-components/select.hpp>
 #include <ui5-sap-icons/icons/search.hpp>
@@ -22,6 +21,8 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/elements/nil.hpp>
 #include <nui/frontend/attributes.hpp>
+#include <nui/frontend/svg_elements.hpp>
+#include <nui/frontend/svg_attributes.hpp>
 #include <nui/event_system/listen.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
 
@@ -32,6 +33,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace std::string_literals;
@@ -96,6 +98,38 @@ namespace
         std::int64_t lastRun{0};
         bool pinned{false};
         bool favorite{false};
+
+        bool operator==(MergedHistoryEntry const&) const = default;
+    };
+
+    /// Header of the pinned strip or a day group; collapsing it leaves out the group's rows.
+    struct GroupHeader
+    {
+        std::string label{};
+        std::size_t count{0};
+        bool expanded{true};
+
+        bool operator==(GroupHeader const&) const = default;
+    };
+
+    /// A command row with everything it displays, so an unchanged row compares equal.
+    struct CommandRow
+    {
+        MergedHistoryEntry entry{};
+        std::string timeLabel{};
+        std::string loweredQuery{};
+        bool selected{false};
+
+        bool operator==(CommandRow const&) const = default;
+    };
+
+    /// One line of the list. The list is updated by key, so only lines that changed are redrawn.
+    struct HistoryRow
+    {
+        std::string key{};
+        std::variant<GroupHeader, CommandRow> content{};
+
+        bool operator==(HistoryRow const&) const = default;
     };
 }
 
@@ -125,9 +159,14 @@ struct CommandHistoryPanel::Implementation
     std::shared_ptr<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>> hostPills{
         std::make_shared<Nui::Observed<std::vector<ScriptNuiComponents::PillOptions>>>()
     };
-    /// Expansion state of the day groups, keyed by bucket label; survives list regeneration.
+    /// Expansion state of the day groups, keyed by bucket label.
     std::map<std::string, bool> expandedGroups{};
+    /// What the list shows, derived from the history and the filters by refreshRows.
+    Nui::Observed<std::vector<HistoryRow>> rows{};
     Nui::ListenRemover<Nui::Observed<std::vector<CommandStore::HistoryEntry>>> historyListener{};
+    Nui::ListenRemover<Nui::Observed<std::string>> searchListener{};
+    Nui::ListenRemover<Nui::Observed<bool>> favoritesListener{};
+    Nui::ListenRemover<Nui::Observed<std::set<std::int64_t>>> selectionListener{};
 
     Implementation(
         CommandStoreClient* client,
@@ -288,13 +327,120 @@ struct CommandHistoryPanel::Implementation
         selectedIds.modify();
     }
 
-    Nui::ElementRenderer renderRow(MergedHistoryEntry const& entry, std::string const& loweredQuery);
-    Nui::ElementRenderer renderGroups();
+    /// The pinned strip and the day groups, flattened into header and command rows.
+    std::vector<HistoryRow> computeRows() const
+    {
+        const auto loweredQuery = lowercased(searchQuery.value());
+        const auto visible = visibleEntries();
+        const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
+
+        std::vector<MergedHistoryEntry const*> pinned{};
+        // Bucket index to entries, ordered oldest bucket last; entries keep their sort order.
+        std::map<int, std::vector<MergedHistoryEntry const*>> groups{};
+        for (auto const& entry : visible)
+        {
+            if (entry.pinned)
+                pinned.push_back(&entry);
+            else
+                groups[dayBucket(entry.lastRun, nowEpoch)].push_back(&entry);
+        }
+
+        std::vector<HistoryRow> result{};
+        result.reserve(visible.size() + groups.size() + 1);
+        const auto appendGroup = [&](std::string const& label, std::vector<MergedHistoryEntry const*> const& entries) {
+            const auto found = expandedGroups.find(label);
+            const bool expanded = found == expandedGroups.end() || found->second;
+            result.push_back(HistoryRow{
+                .key = fmt::format("group:{}", label),
+                .content = GroupHeader{.label = label, .count = entries.size(), .expanded = expanded},
+            });
+            if (!expanded)
+                return;
+            for (auto const* entry : entries)
+            {
+                result.push_back(HistoryRow{
+                    .key = fmt::format("command:{}", entry->command),
+                    .content =
+                        CommandRow{
+                            .entry = *entry,
+                            .timeLabel = relativeTime(entry->lastRun, nowEpoch),
+                            .loweredQuery = loweredQuery,
+                            .selected = isSelected(entry->ids),
+                        },
+                });
+            }
+        };
+
+        if (!pinned.empty())
+            appendGroup(std::string{language->get("commandHistoryPanel", "pinned")}, pinned);
+        for (auto const& [bucket, entries] : groups)
+            appendGroup(dayBucketLabel(bucket), entries);
+        return result;
+    }
+
+    void refreshRows()
+    {
+        CommandPanels::updateKeyed(rows, computeRows(), [](HistoryRow const& row) -> std::string const& {
+            return row.key;
+        });
+    }
+
+    void toggleGroup(std::string const& label)
+    {
+        const auto found = expandedGroups.find(label);
+        expandedGroups[label] = found != expandedGroups.end() && !found->second;
+        refreshRows();
+    }
+
+    Nui::ElementRenderer renderRow(HistoryRow const& row);
+    Nui::ElementRenderer renderGroupHeader(GroupHeader const& header);
+    Nui::ElementRenderer renderCommand(CommandRow const& row);
     Nui::ElementRenderer renderBulkBar();
 };
 
-Nui::ElementRenderer
-CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, std::string const& loweredQuery)
+Nui::ElementRenderer CommandHistoryPanel::Implementation::renderRow(HistoryRow const& row)
+{
+    if (auto const* header = std::get_if<GroupHeader>(&row.content))
+        return renderGroupHeader(*header);
+    return renderCommand(std::get<CommandRow>(row.content));
+}
+
+Nui::ElementRenderer CommandHistoryPanel::Implementation::renderGroupHeader(GroupHeader const& header)
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+    namespace svgElements = Nui::Elements::Svg;
+    namespace svgAttributes = Nui::Attributes::Svg;
+
+    // Looks like the components library's collapsible section, whose body cannot hold rows of a
+    // flat list.
+    // clang-format off
+    return div{
+        class_ = header.expanded ? "cmdh-group-header cmdh-group-header-expanded" : "cmdh-group-header",
+        onClick = [this, label = header.label](Nui::val) {
+            toggleGroup(label);
+        },
+    }(
+        svgElements::svg{
+            class_ = "cmdh-group-chevron",
+            svgAttributes::viewBox = "0 0 16 16",
+        }(svgElements::path{
+            svgAttributes::d = "M6 3 L11 8 L6 13",
+            "fill"_attr = "none",
+            "stroke"_attr = "currentColor",
+            "stroke-width"_attr = "2",
+            "stroke-linecap"_attr = "round",
+            "stroke-linejoin"_attr = "round",
+        }()),
+        span{class_ = "cmdh-group-title"}(header.label),
+        span{class_ = "cmdh-group-badge"}(fmt::format("{}", header.count))
+    );
+    // clang-format on
+}
+
+Nui::ElementRenderer CommandHistoryPanel::Implementation::renderCommand(CommandRow const& row)
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
@@ -302,8 +448,8 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
     using Nui::Elements::span;
     using Nui::Attributes::title;
 
-    const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
-    const bool selected = isSelected(entry.ids);
+    auto const& entry = row.entry;
+    const bool selected = row.selected;
 
     std::vector<Nui::ElementRenderer> hostElements{};
     hostElements.reserve(entry.hosts.size() * 2);
@@ -329,7 +475,7 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
             },
         }),
         div{class_ = "cmdh-row-main"}(
-            CommandPanels::highlightedText(entry.command, loweredQuery, "cmdh-command"),
+            CommandPanels::highlightedText(entry.command, row.loweredQuery, "cmdh-command"),
             div{class_ = "cmdh-row-meta"}(
                 div{class_ = "cmdh-row-hosts"}(
                     Nui::range(std::move(hostElements)),
@@ -337,7 +483,7 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
                         return hostElement;
                     }
                 ),
-                span{class_ = "cmdh-time"}(relativeTime(entry.lastRun, nowEpoch)),
+                span{class_ = "cmdh-time"}(row.timeLabel),
                 entry.runs > 1
                     ? Nui::ElementRenderer{span{class_ = "cmdh-runs"}(fmt::format("×{}", entry.runs))}
                     : Nui::nil()
@@ -396,79 +542,6 @@ CommandHistoryPanel::Implementation::renderRow(MergedHistoryEntry const& entry, 
         )
     );
     // clang-format on
-}
-
-Nui::ElementRenderer CommandHistoryPanel::Implementation::renderGroups()
-{
-    using namespace Nui::Elements;
-    using namespace Nui::Attributes;
-    using Nui::Elements::div;
-
-    const auto loweredQuery = lowercased(searchQuery.value());
-    const auto visible = visibleEntries();
-    const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
-
-    if (visible.empty())
-    {
-        return div{class_ = "cmdh-empty"}(
-            language->get(
-                "commandHistoryPanel", client->history().value().empty() ? "emptyText" : "noMatchesText"
-            )
-        );
-    }
-
-    std::vector<MergedHistoryEntry const*> pinned{};
-    // Bucket index to entries, ordered oldest bucket last; entries keep their sort order.
-    std::map<int, std::vector<MergedHistoryEntry const*>> groups{};
-    for (auto const& entry : visible)
-    {
-        if (entry.pinned)
-            pinned.push_back(&entry);
-        else
-            groups[dayBucket(entry.lastRun, nowEpoch)].push_back(&entry);
-    }
-
-    const auto renderSection =
-        [this, &loweredQuery](std::string const& label, std::vector<MergedHistoryEntry const*> const& entries)
-    {
-        std::vector<Nui::ElementRenderer> rows{};
-        rows.reserve(entries.size());
-        for (auto const* entry : entries)
-            rows.push_back(renderRow(*entry, loweredQuery));
-
-        const auto expanded = expandedGroups.find(label);
-        return ScriptNuiComponents::collapsibleSection(
-            {
-                .title = label,
-                .badge = fmt::format("{}", entries.size()),
-                .initiallyExpanded = expanded == expandedGroups.end() ? true : expanded->second,
-                .onToggle =
-                    [this, label](bool isExpanded) {
-                        expandedGroups[label] = isExpanded;
-                    },
-            },
-            div{class_ = "cmdh-group-rows"}(
-                Nui::range(std::move(rows)),
-                [](long long, auto const& row) -> Nui::ElementRenderer {
-                    return row;
-                }
-            )
-        );
-    };
-
-    std::vector<Nui::ElementRenderer> sections{};
-    sections.reserve(groups.size() + 1);
-    if (!pinned.empty())
-        sections.push_back(renderSection(std::string{language->get("commandHistoryPanel", "pinned")}, pinned));
-    for (auto const& [bucket, entries] : groups)
-        sections.push_back(renderSection(dayBucketLabel(bucket), entries));
-
-    return div{class_ = "cmdh-groups"}(
-        Nui::range(std::move(sections)),
-        [](long long, auto const& section) -> Nui::ElementRenderer {
-            return section;
-        }
-    );
 }
 
 Nui::ElementRenderer CommandHistoryPanel::Implementation::renderBulkBar()
@@ -530,13 +603,19 @@ CommandHistoryPanel::CommandHistoryPanel(
     // A null client means the backend store failed to open; the panel then only shows a notice.
     if (impl_->client)
     {
-        impl_->historyListener = Nui::smartListen(
-            impl_->client->history(),
-            [implementation = impl_.get()](auto const&) {
-                implementation->rebuildHostPills();
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            }
-        );
+        auto* const implementation = impl_.get();
+        const auto refresh = [implementation](auto const&) {
+            implementation->refreshRows();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        };
+        impl_->historyListener = Nui::smartListen(impl_->client->history(), [implementation](auto const&) {
+            implementation->rebuildHostPills();
+            implementation->refreshRows();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        });
+        impl_->searchListener = Nui::smartListen(impl_->searchQuery, refresh);
+        impl_->favoritesListener = Nui::smartListen(impl_->favoritesOnly, refresh);
+        impl_->selectionListener = Nui::smartListen(impl_->selectedIds, refresh);
     }
 }
 CommandHistoryPanel::~CommandHistoryPanel() = default;
@@ -558,6 +637,7 @@ Nui::ElementRenderer CommandHistoryPanel::operator()()
     }
 
     impl_->reload();
+    impl_->refreshRows();
 
     // clang-format off
     return div{class_ = "command-history-panel"}(
@@ -616,10 +696,22 @@ Nui::ElementRenderer CommandHistoryPanel::operator()()
             })
         ),
         div{class_ = "cmdh-list"}(
-            Nui::observe(impl_->client->history(), impl_->searchQuery, impl_->favoritesOnly, impl_->selectedIds)
-                .generate([this]() -> Nui::ElementRenderer {
-                    return impl_->renderGroups();
+            div{class_ = "cmdh-empty-host"}(
+                Nui::observe(impl_->rows, impl_->client->history()).generate([this]() -> Nui::ElementRenderer {
+                    if (!impl_->rows.value().empty())
+                        return Nui::nil();
+                    return div{class_ = "cmdh-empty"}(language->get(
+                        "commandHistoryPanel", impl_->client->history().value().empty() ? "emptyText" : "noMatchesText"
+                    ));
                 })
+            ),
+            // Bound to the observed rows: a change redraws only the rows it touched.
+            div{class_ = "cmdh-rows"}(
+                Nui::range(impl_->rows),
+                [this](long long, HistoryRow const& row) -> Nui::ElementRenderer {
+                    return impl_->renderRow(row);
+                }
+            )
         )
     );
     // clang-format on

@@ -104,15 +104,69 @@
     padding: 4px 8px 8px 8px;
 }
 
-.cmdh-groups {
+.cmdh-rows {
     display: flex;
     flex-direction: column;
-    gap: 4px;
 }
 
-.cmdh-group-rows {
+.cmdh-rows > .cmdh-row {
+    margin: 0 0.25em;
+}
+
+/* Group headers follow the look of the components library's collapsible section. */
+.cmdh-group-header {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.4em 0.5em;
+    border-radius: 0.25rem;
+    color: var(--script-nui-components-collapsible-color, #dddddd);
+    font-size: var(--script-nui-components-collapsible-font-size, 0.85rem);
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+.cmdh-group-header:not(:first-child) {
+    margin-top: 0.5em;
+}
+
+.cmdh-group-header:hover {
+    background-color: var(
+        --script-nui-components-collapsible-hover-background,
+        color-mix(in srgb, var(--script-nui-components-collapsible-color, #dddddd) 8%, transparent)
+    );
+}
+
+.cmdh-group-chevron {
+    flex: 0 0 auto;
+    width: 0.85em;
+    height: 0.85em;
+    color: var(--script-nui-components-collapsible-muted-color, color-mix(in srgb, currentColor 55%, transparent));
+    transition: transform 150ms ease-in-out;
+}
+
+.cmdh-group-header-expanded .cmdh-group-chevron {
+    transform: rotate(90deg);
+}
+
+.cmdh-group-title {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cmdh-group-badge {
+    flex: 0 0 auto;
+    min-width: 1.4em;
+    padding: 0.05em 0.5em;
+    border-radius: 999px;
+    background-color: var(--script-nui-components-collapsible-badge-background, #2f2f2f);
+    color: var(--script-nui-components-collapsible-badge-color, #c8c8c8);
+    font-size: 0.78em;
+    font-weight: 600;
+    text-align: center;
 }
 
 .cmdh-empty {
