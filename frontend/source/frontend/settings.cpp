@@ -1192,6 +1192,14 @@ Nui::ElementRenderer Settings::side()
                     .icon = item.icon,
                 });
             })
+        ),
+        div{class_ = "settings-version"}(
+            span{}(language->getObserved("settings", "version")),
+            span{class_ = "settings-version-value"}(
+                observe(impl_->events->appVersion).generate([this]() {
+                    return impl_->events->appVersion.value().version;
+                })
+            )
         )
     );
     // clang-format on

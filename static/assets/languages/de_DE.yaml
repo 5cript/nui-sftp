@@ -302,6 +302,7 @@ fileTracking:
   headerCleanupButton: "Verwaiste bereinigen"
   headerCleanupRunning: "Bereinige…"
 settings:
+  version: "Version"
   settingsRestartRequiredHeader: "Neustart erforderlich"
   settingsRestartRequiredText: "Sie haben eine Einstellung geändert, die erst nach einem Neustart der Anwendung wirksam wird.\nBitte starten Sie die Anwendung neu, um die Änderungen anzuwenden."
   restartRequiredMessage: "Eine Einstellung wurde geändert, die erst nach einem Neustart der Anwendung wirksam wird."
@@ -822,3 +823,9 @@ onboarding:
   next: "Weiter"
   finish: "Fertig"
   skip: "Überspringen"
+licenses:
+  title: "Über & Lizenzen"
+  licensesTab: "Lizenzen"
+  aboutTab: "Über"
+  gitTag: "Tag"
+  gitBranch: "Branch"

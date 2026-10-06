@@ -51,6 +51,7 @@ class Main
 
   private:
     void registerInitialWarningGetter();
+    void registerVersionGetter();
     void registerCommandStore();
     void onRpcAlive();
 

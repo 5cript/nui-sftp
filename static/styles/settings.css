@@ -85,10 +85,9 @@
     flex-grow: 1;
     background-color: var(--background-color);
     padding-top: 16px;
-    padding-left: 8px;
     padding-right: 8px;
     overflow: hidden;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 288px 1fr;
     grid-template-rows: 1fr;
 
     & .side {
@@ -97,6 +96,26 @@
         flex-direction: column;
         height: 100%;
         overflow-y: auto;
+        padding-left: 8px;
+
+        & .settings-version {
+            position: sticky;
+            bottom: 0;
+            margin-top: auto;
+            margin-left: -8px;
+            padding: 8px 10px 8px 18px;
+            border-top: 1px solid var(--foreground-border-color);
+            background-color: var(--background-color);
+            color: gray;
+            font-size: 0.85rem;
+
+            & .settings-version-value {
+                margin-left: 6px;
+                font-family: monospace;
+                -webkit-user-select: text;
+                user-select: text;
+            }
+        }
 
         & .configuration-text {
             display: flex;

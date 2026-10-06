@@ -407,6 +407,7 @@ Nui::ElementRenderer Toolbar::operator()()
         Snc::button({
             .icon = Ui5Icons::signature(),
             .attributes = {
+                Nui::Attributes::title = language->get("licenses", "title"),
                 onClick = [this]() {
                     impl_->events->licensesOpen = true;
                 },
