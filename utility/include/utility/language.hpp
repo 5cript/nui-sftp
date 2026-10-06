@@ -40,6 +40,11 @@ inline std::string formatWithArguments(std::string const& pattern, std::vector<s
     }
 }
 
+/**
+ * @brief Keeps a language change listener alive; the listener is removed when this is destroyed.
+ */
+using LanguageChangeListener = Nui::ListenRemover<decltype(AppWideEvents::onLanguageChanged)>;
+
 class LanguageProvider
 {
   public:
@@ -150,7 +155,7 @@ class LanguageProvider
         return formatWithArguments(*translation, parsed.arguments);
     }
 
-    auto listenToLanguageChange(std::function<void(std::string const&)> onChange) const
+    [[nodiscard]] LanguageChangeListener listenToLanguageChange(std::function<void(std::string const&)> onChange) const
     {
         return Nui::smartListen(
             events_->onLanguageChanged,
