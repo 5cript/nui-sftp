@@ -148,7 +148,7 @@ void RpcFilesystem::registerRemove()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                if (!options_.preventDeletion)
+                if (options_.preventDeletion)
                 {
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
                     return reply.error("backend.rpcFilesystem.deletionPrevented");
