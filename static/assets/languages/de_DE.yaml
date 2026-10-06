@@ -71,6 +71,7 @@ localSideModel:
   externalDropWebkitWarningText: "Aufgrund technischer Einschränkungen der WebKitGTK-Engine funktioniert das Ablegen externer Elemente auf der Remote-Seite nur für einzelne Elemente."
   uploadFailed: "Hochladen fehlgeschlagen"
   uploadSingleConfirmText: "Sind Sie sicher, dass Sie dieses Element '{}' nach {} hochladen möchten?"
+  uploadMultipleConfirmText: "Sind Sie sicher, dass Sie die folgenden {} Elemente nach {} hochladen möchten?"
   uploadConfirmTitle: "Elemente hochladen?"
   deleteFilesFailedTitle: "Dateien löschen fehlgeschlagen"
   createFileFailedTitle: "Dateierstellung fehlgeschlagen"
