@@ -305,8 +305,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(result);
         auto joiner = Nui::ScopeExit{[&]() noexcept
             {
-                // result->command("exit");
-                result->terminate();
+                result->command("exit");
                 if (processThread.joinable())
                     processThread.join();
             }};
