@@ -91,6 +91,7 @@ struct Licenses::Implementation
     int licensesTabId{-1};
     int aboutTabId{-1};
     Nui::Observed<int> activeTabId{-1};
+    LanguageChangeListener languageListener{};
 
     explicit Implementation(FrontendEvents* events)
         : events{events}
@@ -359,7 +360,7 @@ Nui::ElementRenderer Licenses::operator()()
         impl_->selectTab(impl_->licensesTabId);
     });
 
-    Nui::listen(impl_->events->onLanguageChanged, [this](std::string const&) {
+    impl_->languageListener = language->listenToLanguageChange([this](std::string const&) {
         const auto retitle = [this](int tabId, char const* key) {
             impl_->tabs.modifyTabById(tabId, [key](ScriptNuiComponents::Tabs::Tab* tab) {
                 if (tab)

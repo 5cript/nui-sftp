@@ -30,9 +30,8 @@ struct NewSessionDialog::Implementation
     Nui::Observed<ScriptNuiComponents::ValueState> nameValid{ScriptNuiComponents::ValueState::Valid};
     Nui::Observed<std::string> icon{"laptop"};
     Nui::Observed<std::string> sessionType{"ssh"};
-    Nui::Observed<std::string> validationMessage{
-        "Session name must be 1-5000 characters long and cannot contain \\ or / or \" characters."
-    };
+    Nui::Observed<std::string> validationMessage{language->get("newSessionDialog", "validationMessage")};
+    LanguageChangeListener languageListener{};
     Nui::Observed<bool> showIconPicker{true};
     Nui::Observed<bool> showSessionTypePicker{true};
     bool confirmOnClose{false};
@@ -49,7 +48,7 @@ NewSessionDialog::NewSessionDialog(std::string id)
 {
     impl_->dialog = std::make_unique<ScriptNuiComponents::Dialog>(impl_->id, dialogBody());
 
-    language->listenToLanguageChange(
+    impl_->languageListener = language->listenToLanguageChange(
         [this](std::string const&)
         {
             impl_->validationMessage = language->get("newSessionDialog", "validationMessage");

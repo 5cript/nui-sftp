@@ -56,6 +56,7 @@ struct DirectConnectDialog::Implementation
     Nui::Observed<std::string> portValidationMessage{""};
 
     bool loadedFromState{false};
+    LanguageChangeListener languageListener{};
     bool confirmOnClose{false};
     std::function<void(DirectConnectDialog::ConfirmResult const&)> onConfirm;
 
@@ -73,7 +74,7 @@ DirectConnectDialog::DirectConnectDialog(std::string id, Persistence::StateHolde
 
     impl_->hostValidationMessage = language->get("directConnectDialog", "hostValidationMessage");
     impl_->portValidationMessage = language->get("directConnectDialog", "portValidationMessage");
-    language->listenToLanguageChange(
+    impl_->languageListener = language->listenToLanguageChange(
         [this](std::string const&)
         {
             impl_->hostValidationMessage = language->get("directConnectDialog", "hostValidationMessage");
