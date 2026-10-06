@@ -1,13 +1,8 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/file_explorer/place_names.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 
-#include <ui5-sap-icons/icons/home.hpp>
-#include <ui5-sap-icons/icons/desktop-mobile.hpp>
 #include <ui5-sap-icons/icons/download.hpp>
-#include <ui5-sap-icons/icons/documents.hpp>
-#include <ui5-sap-icons/icons/picture.hpp>
-#include <ui5-sap-icons/icons/video.hpp>
-#include <ui5-sap-icons/icons/folder.hpp>
 #include <ui5-sap-icons/icons/open-folder.hpp>
 #include <ui5-sap-icons/icons/open-command-field.hpp>
 #include <ui5-sap-icons/icons/synchronize.hpp>
@@ -31,26 +26,6 @@
 #include <iterator>
 
 using namespace std::string_literals;
-
-namespace
-{
-    Nui::ElementRenderer iconForPlaceName(std::string const& name)
-    {
-        if (name == "Home")
-            return Ui5Icons::home();
-        if (name == "Desktop")
-            return Ui5Icons::desktop_mobile();
-        if (name == "Downloads")
-            return Ui5Icons::download();
-        if (name == "Documents")
-            return Ui5Icons::documents();
-        if (name == "Pictures")
-            return Ui5Icons::picture();
-        if (name == "Videos")
-            return Ui5Icons::video();
-        return Ui5Icons::folder();
-    }
-}
 
 RemoteSideModel::RemoteSideModel(
     Persistence::UiOptions uiOptions,
@@ -178,7 +153,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
         const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
         items.push_back(
             Snc::PopupMenu::item(
-                isFav ? "Remove from Favorites" : "Add to Favorites",
+                language->get("fileExplorer", "contextMenu", isFav ? "removeFromFavorites" : "addToFavorites"),
                 isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
                 [this, selPath, isFav]()
                 {
@@ -208,7 +183,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             !hasItems
         ),
         Snc::PopupMenu::item(
-            "Download as Archive",
+            language->get("fileExplorer", "contextMenu", "downloadAsArchive"),
             Ui5Icons::download(),
             [this, selectedItems]()
             {
@@ -834,7 +809,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                 .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                     ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
                 .focusButton = ConfirmDialog::Button::No,
-                .listItems = {{.text = item.second.path.generic_string(), .description = "File already exists"}},
+                .listItems = {{.text = item.second.path.generic_string(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
                 .onClose = [this,
                                downloadItems = std::move(downloadItems),
                                existsResults,
@@ -973,7 +948,7 @@ void RemoteSideModel::onTransfer(
 
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = "Download Items?",
+            .headerText = language->get("remoteSideModel", "downloadItemsQuestion"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
@@ -1115,10 +1090,10 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         return;
 
     const auto defaultStem =
-        items.size() == 1 ? items.front().path.filename().generic_string() : std::string{"archive"};
+        items.size() == 1 ? items.front().path.filename().generic_string() : language->get("fileExplorer", "archiveDefaultName");
 
     archiveTransferDialog_->open({
-        .headerText = "Download as Archive",
+        .headerText = language->get("fileExplorer", "contextMenu", "downloadAsArchive"),
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
@@ -1150,7 +1125,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                         Log::error("Archive download failed to enqueue: {}", info);
                         confirmDialog_->open({
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = "Archive Download Failed",
+                            .headerText = language->get("remoteSideModel", "archiveDownloadFailed"),
                             .text = info,
                             .buttons = ConfirmDialog::Button::Ok,
                         });
@@ -1502,7 +1477,7 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
     std::vector<PlaceEntry> entries;
     entries.reserve(defaults.size());
     for (auto const& [name, path] : defaults)
-        entries.push_back({.icon = iconForPlaceName(name), .name = name, .path = path});
+        entries.push_back({.icon = iconForPlaceName(name), .name = placeDisplayName(name), .path = path});
 
     callback(std::move(entries));
 }

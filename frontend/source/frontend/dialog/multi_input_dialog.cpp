@@ -1,5 +1,6 @@
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -115,6 +116,7 @@ void MultiInputDialog::open(OpenOptions const& options)
         ? ""
         : fmt::format("MultiInputDialogInput_{}_{}", impl_->id, options.inputFields.front().key);
 
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .headerText = options.headerText,
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,

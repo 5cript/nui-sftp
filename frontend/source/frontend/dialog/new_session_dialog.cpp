@@ -2,6 +2,7 @@
 #include <frontend/dialog/new_session_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/session_icon_options.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -176,13 +177,13 @@ Nui::ElementRenderer NewSessionDialog::dialogBody()
                     return span{}(
                         observe(stateful.get()),
                         [](std::string const& typeStr) -> Nui::ElementRenderer {
-                            return span{}(typeStr == "ssh" ? "SSH" : "Local Shell");
+                            return span{}(typeStr == "ssh" ? std::string{"SSH"} : language->get("sessionFrontend", "localShell"));
                         }
                     );
                 },
                 .elementRenderer = [](std::string const& typeStr) -> Nui::ElementRenderer
                 {
-                    return span{}(typeStr == "ssh" ? "SSH" : "Local Shell");
+                    return span{}(typeStr == "ssh" ? std::string{"SSH"} : language->get("sessionFrontend", "localShell"));
                 },
                 .makeId = [](){
                     return Nui::val::global("generateId")().as<std::string>();
@@ -240,6 +241,7 @@ void NewSessionDialog::open(OpenOptions options)
     checkInputValue(impl_->sessionName.value());
     Nui::globalEventContext.executeActiveEventsImmediately();
 
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .headerText = language->get("newSessionDialog", "title"),
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,

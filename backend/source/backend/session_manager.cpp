@@ -114,8 +114,8 @@ void SessionManager::addSession(
         {
             const auto sessionId = Ids::SessionId{Ids::generateId()};
 
-            std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "Key phrase"};
-            std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "Password"};
+            std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "keyPhrase"};
+            std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "password"};
             auto maybeSshSession = SecureShell::makeSession(
                 sessionOptions,
                 askPassDefault,

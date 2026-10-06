@@ -101,7 +101,7 @@ namespace
                 Snc::button({
                     .icon = Ui5Icons::save(),
                     .attributes = {
-                        Nui::Attributes::title = std::string{"Save terminal to file"},
+                        Nui::Attributes::title = language->get("terminalPanel", "saveToFile"),
                         onClick = [&self, channelIdCell](Nui::WebApi::MouseEvent e) {
                             e.stopPropagation();
                             if (channelIdCell && *channelIdCell)
@@ -113,7 +113,7 @@ namespace
                 Snc::button({
                     .icon = Ui5Icons::copy(),
                     .attributes = {
-                        Nui::Attributes::title = std::string{"Copy terminal to clipboard (with formatting)"},
+                        Nui::Attributes::title = language->get("terminalPanel", "copyFormatted"),
                         onClick = [&self, channelIdCell](Nui::WebApi::MouseEvent e) {
                             e.stopPropagation();
                             if (channelIdCell && *channelIdCell)
@@ -125,7 +125,7 @@ namespace
                 Snc::button({
                     .icon = Ui5Icons::document_text(),
                     .attributes = {
-                        Nui::Attributes::title = std::string{"Copy terminal as plain text (strip ANSI/control codes)"},
+                        Nui::Attributes::title = language->get("terminalPanel", "copyPlain"),
                         onClick = [&self, channelIdCell](Nui::WebApi::MouseEvent e) {
                             e.stopPropagation();
                             if (channelIdCell && *channelIdCell)
@@ -479,7 +479,7 @@ void TerminalPanel::saveChannelToFile(Ids::ChannelId const& channelId)
 
     Nui::FileDialog::showSaveDialog(
         Nui::FileDialog::SaveDialogOptions{
-            .title = "Save terminal contents",
+            .title = language->get("terminalPanel", "saveDialogTitle"),
             .defaultPath = "%userprofile%",
             .filters = {},
             .forcePath = false,
@@ -559,7 +559,7 @@ void TerminalPanel::onLockedModeUserInput(Ids::ChannelId channelId, std::string 
         Nui::FileDialog::showSaveDialog(
             Nui::FileDialog::SaveDialogOptions{
                 // all are optional
-                .title = "Pick directory / file",
+                .title = language->get("terminalPanel", "saveDialogTitle"),
                 .defaultPath = "%userprofile%",
                 .filters = {},
                 .forcePath = false,

@@ -1,4 +1,5 @@
 #include <frontend/dialog/file_property_dialog.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 
 #include <script-nui-components/carousel.hpp>
@@ -11,8 +12,39 @@
 #include <nui/frontend/dom/basic_element.hpp>
 
 #include <utility/format_bytes.hpp>
+#include <utility/language.hpp>
 
 namespace Snc = ScriptNuiComponents;
+
+namespace
+{
+    std::string localizedFileType(SharedData::FileType type)
+    {
+        using enum SharedData::FileType;
+        switch (type)
+        {
+            case Regular:
+                return language->get("filePropertyDialog", "typeRegular");
+            case Directory:
+                return language->get("filePropertyDialog", "typeDirectory");
+            case Symlink:
+                return language->get("filePropertyDialog", "typeSymlink");
+            case Special:
+                return language->get("filePropertyDialog", "typeSpecial");
+            case Socket:
+                return language->get("filePropertyDialog", "typeSocket");
+            case CharDevice:
+                return language->get("filePropertyDialog", "typeCharDevice");
+            case BlockDevice:
+                return language->get("filePropertyDialog", "typeBlockDevice");
+            case Fifo:
+                return language->get("filePropertyDialog", "typeFifo");
+            case Unknown:
+            default:
+                return language->get("filePropertyDialog", "typeUnknown");
+        }
+    }
+}
 
 struct FilePropertyDialog::Implementation
 {
@@ -64,7 +96,7 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
         class_ = "file-property-dialog-content",
     }(
         div{}(
-            span{}("Path"),
+            span{}(language->getObserved("filePropertyDialog", "path")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.path.generic_string();
@@ -73,25 +105,29 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
             })
         ),
         div{}(
-            span{}("Size"),
+            span{}(language->getObserved("filePropertyDialog", "size")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
-                    return fmt::format("{} ({} bytes)", Utility::formatBytes(entry.size), entry.size);
+                    return fmt::format(
+                        fmt::runtime(language->get("filePropertyDialog", "sizeValue")),
+                        Utility::formatBytes(entry.size),
+                        entry.size
+                    );
                 }),
                 .attributes = {readOnly = true},
             })
         ),
         div{}(
-            span{}("Type"),
+            span{}(language->getObserved("filePropertyDialog", "type")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
-                    return fileTypeToString(entry.type);
+                    return localizedFileType(entry.type);
                 }),
                 .attributes = {readOnly = true},
             })
         ),
         div{}(
-            span{}("Permissions"),
+            span{}(language->getObserved("filePropertyDialog", "permissions")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.lsStyleTypePermsUserGroup();
@@ -100,7 +136,7 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
             })
         ),
         div{}(
-            span{}("Creation Date"),
+            span{}(language->getObserved("filePropertyDialog", "creationDate")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.readableCreateTime();
@@ -109,7 +145,7 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
             })
         ),
         div{}(
-            span{}("Last Modified"),
+            span{}(language->getObserved("filePropertyDialog", "lastModified")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.readableMTime();
@@ -118,7 +154,7 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
             })
         ),
         div{}(
-            span{}("Access Time"),
+            span{}(language->getObserved("filePropertyDialog", "accessTime")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.readableATime();
@@ -127,25 +163,25 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
             })
         ),
         div{}(
-            span{}("User"),
+            span{}(language->getObserved("filePropertyDialog", "user")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
-                    return fmt::format("{} (id: {})", entry.owner, entry.uid);
+                    return fmt::format(fmt::runtime(language->get("filePropertyDialog", "idValue")), entry.owner, entry.uid);
                 }),
                 .attributes = {readOnly = true},
             })
         ),
         div{}(
-            span{}("Group"),
+            span{}(language->getObserved("filePropertyDialog", "group")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
-                    return fmt::format("{} (id: {})", entry.group, entry.gid);
+                    return fmt::format(fmt::runtime(language->get("filePropertyDialog", "idValue")), entry.group, entry.gid);
                 }),
                 .attributes = {readOnly = true},
             })
         ),
         div{}(
-            span{}("Access Control List"),
+            span{}(language->getObserved("filePropertyDialog", "accessControlList")),
             Snc::textInput(Snc::TextInputOptions{
                 .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
                     return entry.acl;
@@ -176,6 +212,7 @@ void FilePropertyDialog::open(SharedData::DirectoryEntry const& entry)
     }
     Nui::globalEventContext.executeActiveEventsImmediately();
 
+    impl_->dialog.setButtonLabels(localizedButtonLabels());
     impl_->dialog.open({
         .styleVariant = Snc::StyleVariant::Regular,
         .initialFocus = Snc::Dialog::Button::Ok,

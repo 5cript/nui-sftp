@@ -1,5 +1,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
+#include <utility/language.hpp>
 #include <log/log.hpp>
 
 #include <script-nui-components/button.hpp>
@@ -85,7 +87,7 @@ Nui::ElementRenderer InputDialog::dialogBody()
                     if (!impl_->isPassword.value())
                         return Nui::nil();
                     return ScriptNuiComponents::button({
-                        .text = impl_->showPassword.value() ? "Hide" : "Show",
+                        .text = language->get("inputDialog", impl_->showPassword.value() ? "hidePassword" : "showPassword"),
                         .attributes = {
                             class_ = "input-dialog-toggle-btn",
                             onClick = [this](){
@@ -114,6 +116,7 @@ void InputDialog::open(OpenOptions const& options)
     impl_->inputText = options.initialValue;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .headerText = impl_->headerText,
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,

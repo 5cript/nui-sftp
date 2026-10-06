@@ -154,6 +154,7 @@ target_sources(
         file_explorer/side_model.cpp
         file_explorer/remote_side_model.cpp
         file_explorer/local_side_model.cpp
+        file_explorer/place_names.cpp
         "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
         "${NUI_SFTP_LICENSES_HEADER}"
 )
