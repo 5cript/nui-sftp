@@ -3,7 +3,6 @@
     "name": "nui-sftp",
     "version": "1.0.0",
     "scripts": {
-        "tailwatch": "cross-env NODE_ENV=development tailwindcss --config tailwind.config.js --watch=always --output build/clang_debug/bin/liveload/tailwind.css",
         "licenses": "license-checker-rseidelsohn --production --json --out licenses/npm-licenses.json",
         "test:osc": "node --test static/test/"
     },
