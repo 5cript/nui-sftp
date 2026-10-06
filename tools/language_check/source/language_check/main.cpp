@@ -97,7 +97,8 @@ namespace
         {
             if (!current.IsMap())
                 return false;
-            current = current[part];
+            // Node::operator= assigns through to the shared tree, reset() rebinds.
+            current.reset(current[part]);
         }
         return current.IsDefined() && !current.IsMap();
     }

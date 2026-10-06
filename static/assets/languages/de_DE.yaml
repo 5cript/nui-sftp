@@ -58,7 +58,6 @@ remoteSideModel:
   renamePrompt: "Geben Sie den neuen Namen für {} ein"
   renameWithItem: "{} umbenennen"
   failedToRenameItem: "Fehler beim Umbenennen von '{}' in '{}': {}"
-  failedToOpenFile: "Datei konnte nicht geöffnet werden."
 localSideModel:
   failedToStatFile: "Dateiinformationen für '{}' konnten nicht abgerufen werden: {}"
   fileAlreadyExistsOverwriteHeader: "Datei existiert bereits, überschreiben?"
@@ -329,7 +328,6 @@ settings:
   addNew: "Neu hinzufügen!"
   configuration: "Konfiguration"
   sessionsServers: "Sitzungen / Server"
-  logLevel: "Protokollierungsstufe"
   termiosGroupName: "Termios"
   sshOptionsGroupName: "SSH Optionen"
   sftpOptionsGroupName: "SFTP Optionen"
@@ -451,9 +449,6 @@ settings:
     remoteFavoritesHelpText: "Favorisierte Verzeichnisse auf dem Remote Server, die als Verknüpfungen in der Orte-Leiste des Remote Datei Explorers angezeigt werden. An diese SSH Sitzung gebunden, da absolute Pfade nur relativ zu einem Server sinnvoll sind."
     maxReconnectAttempts: "Max. Reconnect-Versuche"
     maxReconnectBackoffMs: "Max. Reconnect-Wartezeit (ms)"
-  listSetting:
-    itemValue: "Elementwert"
-    addItemText: "Element hinzufügen"
   sshOptions:
     identitiesHelpText: "Liste von SSH Identitäten (Pfade zu privaten Schlüsseln), die für die automatische Schlüssel Authentifizierung verwendet werden, wenn kein SSH Agent vorhanden ist."
     sshDirectoryHelpText: "Das Verzeichnis, in dem SSH bezogene Dateien wie bekannte Hosts und Identitätsschlüssel gespeichert werden (in der Regel ~/.ssh)."
