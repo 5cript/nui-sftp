@@ -39,9 +39,13 @@ namespace
     )
     {
         const auto relativePath = std::filesystem::relative(path, root).generic_string();
+        const auto name = path.filename().string();
         for (const auto& pattern : gitIgnores)
         {
             if (fnmatch(pattern.c_str(), relativePath.c_str(), 0) == 0)
+                return true;
+            // Like git, a pattern without a slash matches at any depth.
+            if (pattern.find('/') == std::string::npos && fnmatch(pattern.c_str(), name.c_str(), 0) == 0)
                 return true;
         }
         return false;

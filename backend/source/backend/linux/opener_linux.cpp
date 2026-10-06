@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <utility/localized_message.hpp>
 
 #include <utility/fd_guard.hpp>
 #include <utility/glib_raii.hpp>
@@ -383,18 +384,15 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
 
     if (!impl_->connection)
     {
-        constexpr auto const* msg =
-            "Session bus is unavailable; cannot open files via xdg-desktop-portal. "
-            "This typically happens when running as root or without a user D-Bus session.";
-        Log::error("Opener: {}", msg);
-        return std::unexpected{std::string{msg}};
+        Log::error("Opener: session bus is unavailable, cannot open files via xdg-desktop-portal.");
+        return std::unexpected{std::string{"backend.opener.sessionBusUnavailableOpenFile"}};
     }
 
     Utility::FdGuard fd{::open(path.c_str(), O_RDONLY)};
     if (!fd.valid())
     {
         Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
-        return std::unexpected{std::string{"Failed to open file: "} + std::strerror(errno)};
+        return std::unexpected{Utility::localizedMessage("backend.opener.openFileFailed", std::strerror(errno))};
     }
 
     auto result = callPortalFdMethod(
@@ -412,7 +410,7 @@ SharedData::OpenerCapabilities Opener::capabilities() const
     {
         caps.canOpenFile = false;
         caps.canOpenInFileManager = false;
-        caps.reason = "D-Bus session bus is unavailable.";
+        caps.reason = "backend.opener.sessionBusUnavailable";
         return caps;
     }
 
@@ -424,7 +422,7 @@ SharedData::OpenerCapabilities Opener::capabilities() const
     {
         caps.canOpenFile = false;
         caps.canOpenInFileManager = false;
-        caps.reason = "xdg-desktop-portal OpenURI interface is unavailable.";
+        caps.reason = "backend.opener.openUriUnavailable";
         return caps;
     }
 
@@ -439,8 +437,7 @@ SharedData::OpenerCapabilities Opener::capabilities() const
         if (documentsVersion == 0)
         {
             caps.canOpenFile = false;
-            caps.reason = "xdg-document-portal is unavailable; "
-                          "file-descriptor-based opening is not possible in this flatpak.";
+            caps.reason = "backend.opener.documentPortalUnavailable";
             // openInFileManager for directories uses g_app_info_launch_default_for_uri, which
             // does not require the Documents portal, so leave canOpenInFileManager untouched.
         }
@@ -456,11 +453,8 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
 
     if (!impl_->connection)
     {
-        constexpr auto const* msg =
-            "Session bus is unavailable; cannot open file manager via xdg-desktop-portal. "
-            "This typically happens when running as root or without a user D-Bus session.";
-        Log::error("Opener: {}", msg);
-        return std::unexpected{std::string{msg}};
+        Log::error("Opener: session bus is unavailable, cannot open the file manager via xdg-desktop-portal.");
+        return std::unexpected{std::string{"backend.opener.sessionBusUnavailableFileManager"}};
     }
 
     std::error_code directoryCheckEc;
@@ -481,7 +475,7 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
     if (!fd.valid())
     {
         Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
-        return std::unexpected{std::string{"Failed to open file: "} + std::strerror(errno)};
+        return std::unexpected{Utility::localizedMessage("backend.opener.openFileFailed", std::strerror(errno))};
     }
 
     auto result = callPortalFdMethod(

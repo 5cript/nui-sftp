@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <utility/localized_message.hpp>
 
 #include <nui/utility/utf.hpp>
 
@@ -9,6 +10,7 @@
 #include <shlwapi.h>
 
 #include <string>
+#include <system_error>
 
 namespace
 {
@@ -17,31 +19,31 @@ namespace
         switch (code)
         {
             case 0:
-                return "Out of memory or resources";
+                return "backend.opener.windows.outOfResources";
             case 2:
-                return "File not found";
+                return "backend.opener.windows.fileNotFound";
             case 3:
-                return "Path not found";
+                return "backend.opener.windows.pathNotFound";
             case 5:
-                return "Access denied";
+                return "backend.opener.windows.accessDenied";
             case 8:
-                return "Insufficient memory";
+                return "backend.opener.windows.insufficientMemory";
             case 26:
-                return "Sharing violation";
+                return "backend.opener.windows.sharingViolation";
             case 27:
-                return "Filename association is incomplete or invalid";
+                return "backend.opener.windows.associationIncomplete";
             case 28:
-                return "DDE transaction timed out";
+                return "backend.opener.windows.ddeTimeout";
             case 29:
-                return "DDE transaction failed";
+                return "backend.opener.windows.ddeFailed";
             case 30:
-                return "Other DDE transaction in progress";
+                return "backend.opener.windows.ddeBusy";
             case 31:
-                return "No application associated with this file type";
+                return "backend.opener.windows.noAssociation";
             case 32:
-                return "DLL not found";
+                return "backend.opener.windows.dllNotFound";
             default:
-                return "Unknown shell error (code " + std::to_string(code) + ")";
+                return Utility::localizedMessage("backend.opener.windows.unknownShellError", code);
         }
     }
 
@@ -49,7 +51,7 @@ namespace
     {
         auto const ext = path.extension().wstring();
         if (AssocIsDangerous(ext.c_str()))
-            return std::unexpected{"File type is blocked by attachment policy"};
+            return std::unexpected{"backend.opener.windows.blockedByPolicy"};
         return {};
     }
 }
@@ -75,7 +77,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     // Refuse to open binary executables (content-based, not extension-based)
     DWORD binaryType{};
     if (GetBinaryTypeW(pathWstr.c_str(), &binaryType))
-        return std::unexpected{"File is a binary executable"};
+        return std::unexpected{"backend.opener.windows.binaryExecutable"};
 
     // Windows attachment policy (respects system/zone policy)
     // If I keep this, it prevents opening of folders:
@@ -86,7 +88,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     if (openWith)
     {
         if (!std::filesystem::exists(path) || !path.is_absolute())
-            return std::unexpected{"File not found"};
+            return std::unexpected{"backend.opener.windows.fileNotFound"};
 
         CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         SHELLEXECUTEINFOW sei = {sizeof(sei)};
@@ -98,7 +100,11 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
         if (!winBoolResult)
         {
             const auto error = GetLastError();
-            return std::unexpected{"ShellExecuteExW failed: " + shellExecuteErrorToString(error)};
+            return std::unexpected{Utility::localizedMessage(
+                "backend.opener.windows.shellExecuteExFailed",
+                std::system_category().message(static_cast<int>(error)),
+                error
+            )};
         }
     }
     else

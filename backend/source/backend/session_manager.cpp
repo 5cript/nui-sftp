@@ -235,9 +235,7 @@ void SessionManager::registerRpcSessionConnect()
                             );
                             return reply(
                                 {{"error",
-                                    maybeErrorMessage.value_or(
-                                        "Failed to connect to ssh server for unspecified reason."
-                                    )}}
+                                    maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")}}
                             );
                         }
 

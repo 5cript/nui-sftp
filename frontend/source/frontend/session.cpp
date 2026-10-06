@@ -748,7 +748,7 @@ void Session::onOpenSession(bool success, std::string const& info)
         impl_->confirmDialog->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sessionFrontend", "sessionCreationFailedHeader"),
-            .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "sessionCreationFailedText")), info),
+            .text = fmt::format(fmt::runtime(language->get("sessionFrontend", "sessionCreationFailedText")), language->translate(info)),
             .buttons = ConfirmDialog::Button::Ok,
             .neverShowAgainId = "sessionCreationFailed",
         });

@@ -2,6 +2,7 @@
 #include <log/log.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <utility/path_utf.hpp>
+#include <utility/localized_message.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
@@ -150,7 +151,7 @@ void RpcFilesystem::registerRemove()
                 if (!options_.preventDeletion)
                 {
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
-                    return reply.error("File deletion is prevented by configuration.");
+                    return reply.error("backend.rpcFilesystem.deletionPrevented");
                 }
 
                 Log::info("RpcFilesystem::remove called with parameters: {}", parameters.dump(4));
@@ -204,7 +205,7 @@ void RpcFilesystem::registerRemoveMultiple()
                 if (options_.preventDeletion)
                 {
                     Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
-                    return reply.error("File deletion is prevented by configuration.");
+                    return reply.error("backend.rpcFilesystem.deletionPrevented");
                 }
 
                 if (!RpcHelper::ParameterVerifyView{reply, "RpcFilesystem::removeSome", parameters}.hasValueDeep(
@@ -235,7 +236,7 @@ void RpcFilesystem::registerRemoveMultiple()
                     if (ec)
                     {
                         Log::error("Failed to remove path '{}': {}", pathUtf8, ec.message());
-                        return reply.error(fmt::format("Failed to remove path '{}': {}", pathUtf8, ec.message()));
+                        return reply.error(Utility::localizedMessage("backend.rpcFilesystem.removeFailed", pathUtf8, ec.message()));
                     }
                 }
                 Log::info("Successfully removed all specified paths.");
@@ -253,7 +254,7 @@ void RpcFilesystem::registerRename()
                 if (options_.preventRename)
                 {
                     Log::warn("RpcFilesystem::rename called but renaming is prevented by configuration.");
-                    return reply.error("File renaming is prevented by configuration.");
+                    return reply.error("backend.rpcFilesystem.renamePrevented");
                 }
 
                 Log::info("RpcFilesystem::rename called with parameters: {}", parameters.dump(4));
@@ -378,7 +379,7 @@ void RpcFilesystem::registerCreateFile()
                 if (options_.preventCreateFile)
                 {
                     Log::warn("RpcFilesystem::createFile called but file creation is prevented by configuration.");
-                    return reply.error("File creation is prevented by configuration.");
+                    return reply.error("backend.rpcFilesystem.createFilePrevented");
                 }
 
                 Log::info("RpcFilesystem::createFile called with parameters: {}", parameters.dump(4));
@@ -418,7 +419,7 @@ void RpcFilesystem::registerCreateDirectory()
                     Log::warn(
                         "RpcFilesystem::createDirectory called but directory creation is prevented by configuration."
                     );
-                    return reply.error("Directory creation is prevented by configuration.");
+                    return reply.error("backend.rpcFilesystem.createDirectoryPrevented");
                 }
 
                 Log::info("RpcFilesystem::createDirectory called with parameters: {}", parameters.dump(4));

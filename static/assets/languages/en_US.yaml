@@ -900,3 +900,38 @@ terminalPanel:
   copyPlain: "Copy terminal as plain text (strip ANSI/control codes)"
   saveDialogTitle: "Save terminal contents"
   saveToFile: "Save terminal to file"
+backend:
+  rpcFilesystem:
+    deletionPrevented: "File deletion is prevented by configuration."
+    renamePrevented: "File renaming is prevented by configuration."
+    createFilePrevented: "File creation is prevented by configuration."
+    createDirectoryPrevented: "Directory creation is prevented by configuration."
+    removeFailed: "Failed to remove path '{}': {}"
+  opener:
+    sessionBusUnavailable: "D-Bus session bus is unavailable."
+    sessionBusUnavailableOpenFile: "Session bus is unavailable; cannot open files via xdg-desktop-portal. This typically happens when running as root or without a user D-Bus session."
+    sessionBusUnavailableFileManager: "Session bus is unavailable; cannot open the file manager via xdg-desktop-portal. This typically happens when running as root or without a user D-Bus session."
+    openFileFailed: "Failed to open file: {}"
+    openUriUnavailable: "xdg-desktop-portal OpenURI interface is unavailable."
+    documentPortalUnavailable: "xdg-document-portal is unavailable; file-descriptor-based opening is not possible in this flatpak."
+    windows:
+      outOfResources: "Out of memory or resources"
+      fileNotFound: "File not found"
+      pathNotFound: "Path not found"
+      accessDenied: "Access denied"
+      insufficientMemory: "Insufficient memory"
+      sharingViolation: "Sharing violation"
+      associationIncomplete: "Filename association is incomplete or invalid"
+      ddeTimeout: "DDE transaction timed out"
+      ddeFailed: "DDE transaction failed"
+      ddeBusy: "Other DDE transaction in progress"
+      noAssociation: "No application associated with this file type"
+      dllNotFound: "DLL not found"
+      unknownShellError: "Unknown shell error (code {})"
+      shellExecuteExFailed: "ShellExecuteExW failed: {} (code {})"
+      blockedByPolicy: "File type is blocked by attachment policy"
+      binaryExecutable: "File is a binary executable"
+  sessionManager:
+    connectFailedUnspecified: "Failed to connect to ssh server for unspecified reason."
+  persistence:
+    saveFailed: "Failed to save state to disk: {}"

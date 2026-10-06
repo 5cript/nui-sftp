@@ -393,7 +393,7 @@ Nui::ElementRenderer Toolbar::operator()()
                                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                     .headerText = language->get("toolbar", "errorSavingSettingsHeader"),
                                     .text = fmt::format(
-                                        fmt::runtime(language->get("toolbar", "errorSavingSettings") + ": {}"), *error
+                                        fmt::runtime(language->get("toolbar", "errorSavingSettings") + ": {}"), language->translate(*error)
                                     ),
                                     .buttons = ConfirmDialog::Button::Ok,
                                 });

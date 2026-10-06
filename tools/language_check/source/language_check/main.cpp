@@ -11,6 +11,7 @@
 #include <map>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -133,10 +134,12 @@ namespace
     }
 
     // Extracts all language->get(...) and language->getObserved(...) calls with source locations, including
-    // multi-line calls and ternaries choosing between literal keys.
+    // multi-line calls and ternaries choosing between literal keys. Also collects the dot separated message keys of
+    // code without access to the language files, which all start with "backend.".
     LanguageCalls extractLanguageCalls(const std::vector<std::filesystem::path>& files)
     {
         static const std::regex callStart(R"re(language\s*->\s*get(?:Observed)?\s*\()re", std::regex::ECMAScript);
+        static const std::regex messageKey(R"re("(backend(?:\.[A-Za-z0-9_]+)+)")re", std::regex::ECMAScript);
 
         LanguageCalls result;
 
@@ -173,6 +176,15 @@ namespace
                 const SourceLocation location{fileStr, lineOf(content, match.position())};
                 for (auto& keyPath : expand(alternativesPerPart))
                     target[std::move(keyPath)].push_back(location);
+            }
+
+            for (auto it = std::sregex_iterator(content.begin(), content.end(), messageKey); it != end; ++it)
+            {
+                KeyPath keyPath;
+                std::stringstream parts{(*it)[1].str()};
+                for (std::string part; std::getline(parts, part, '.');)
+                    keyPath.push_back(part);
+                result.keys[std::move(keyPath)].push_back({fileStr, lineOf(content, it->position())});
             }
         }
 

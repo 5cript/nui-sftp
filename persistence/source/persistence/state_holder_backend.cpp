@@ -1,6 +1,7 @@
 #include <persistence/state_holder.hpp>
 #include <persistence/state/state.hpp>
 #include <utility/resources.hpp>
+#include <utility/localized_message.hpp>
 #include <constants/persistence.hpp>
 #include <log/log.hpp>
 #include <yaml-cpp/yaml.h>
@@ -493,7 +494,7 @@ namespace Persistence
                     hub.callRemote(
                         responseId,
                         nlohmann::json{
-                            {"error", fmt::format("Failed to save state to disk: {}", e.what())},
+                            {"error", Utility::localizedMessage("backend.persistence.saveFailed", e.what())},
                         }
                     );
                 }

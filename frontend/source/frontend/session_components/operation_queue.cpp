@@ -1674,7 +1674,7 @@ void OperationQueue::changeAutoClean(bool doClean)
                         impl_->confirmDialog->open({
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = language->get("persistence", "errorSavingState"),
-                            .text = fmt::format(fmt::runtime(language->get("persistence", "saveFailed")), *error),
+                            .text = fmt::format(fmt::runtime(language->get("persistence", "saveFailed")), language->translate(*error)),
                             .buttons = ConfirmDialog::Button::Ok,
                         });
                     }

@@ -61,7 +61,7 @@ LocalSideModel::LocalSideModel(
                       const auto success = val["success"].as<bool>();
                       if (!success)
                       {
-                          const auto error = val["error"].as<std::string>();
+                          const auto error = language->translate(val["error"].as<std::string>());
                           Log::error("Failed to list files: {}", error);
                           onResultsAvailable({});
                           return;
@@ -137,7 +137,8 @@ void LocalSideModel::probeOpenerCapabilities()
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                     .headerText = language->get("localSideModel", "portalUnavailableHeader"),
                     .text = fmt::format(
-                        fmt::runtime(language->get("localSideModel", "portalUnavailableText")), caps.reason
+                        fmt::runtime(language->get("localSideModel", "portalUnavailableText")),
+                        language->translate(caps.reason)
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "localSideModel.portalUnavailable",
@@ -340,7 +341,7 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                             const auto success = val["success"].as<bool>();
                             if (!success)
                             {
-                                const auto error = val["error"].as<std::string>();
+                                const auto error = language->translate(val["error"].as<std::string>());
                                 Log::error("Failed to create directory: {}", error);
                                 confirmDialog_->open({
                                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -382,7 +383,7 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                             const auto success = val["success"].as<bool>();
                             if (!success)
                             {
-                                const auto error = val["error"].as<std::string>();
+                                const auto error = language->translate(val["error"].as<std::string>());
                                 Log::error("Failed to create file: {}", error);
                                 confirmDialog_->open({
                                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -466,7 +467,7 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                         const auto success = val["success"].as<bool>();
                         if (!success)
                         {
-                            const auto error = val["error"].as<std::string>();
+                            const auto error = language->translate(val["error"].as<std::string>());
                             Log::error("Failed to delete files: {}", error);
                             confirmDialog_->open({
                                 .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -656,7 +657,7 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
                 const auto success = val["success"].as<bool>();
                 if (!success)
                 {
-                    const auto error = val["error"].as<std::string>();
+                    const auto error = language->translate(val["error"].as<std::string>());
                     Log::error("Failed to rename item: {}", error);
                     confirmDialog_->open({
                         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -868,7 +869,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
             const auto success = val["success"].as<bool>();
             if (!success)
             {
-                const auto error = val["error"].as<std::string>();
+                const auto error = language->translate(val["error"].as<std::string>());
                 Log::error("Failed to list files: {}", error);
                 confirmDialog_->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -1351,7 +1352,7 @@ void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
             const auto success = val["success"].as<bool>();
             if (!success)
             {
-                const auto error = val["error"].as<std::string>();
+                const auto error = language->translate(val["error"].as<std::string>());
                 Log::error("Failed to open file: {}", error);
                 confirmDialog_->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -1393,7 +1394,7 @@ void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
             const auto success = val["success"].as<bool>();
             if (!success)
             {
-                const auto error = val["error"].as<std::string>();
+                const auto error = language->translate(val["error"].as<std::string>());
                 Log::error("Failed to open in file manager: {}", error);
                 confirmDialog_->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,

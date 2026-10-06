@@ -1,8 +1,6 @@
 #include <frontend/persistence_load_warnings.hpp>
 #include <utility/language.hpp>
-#include <log/log.hpp>
 
-#include <fmt/args.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -40,24 +38,6 @@ namespace
         }
         return {};
     }
-
-    std::string formatLoadWarning(Persistence::LoadWarning const& warning)
-    {
-        const auto text = translation(warning.kind);
-        fmt::dynamic_format_arg_store<fmt::format_context> arguments{};
-        for (auto const& argument : warning.arguments)
-            arguments.push_back(argument);
-
-        try
-        {
-            return fmt::vformat(text, arguments);
-        }
-        catch (fmt::format_error const& error)
-        {
-            Log::error("Translation '{}' does not fit its {} arguments: {}", text, warning.arguments.size(), error.what());
-            return fmt::format("{}\n{}", text, fmt::join(warning.arguments, "\n"));
-        }
-    }
 }
 
 std::string formatLoadWarnings(Persistence::LoadWarnings const& warnings)
@@ -65,6 +45,6 @@ std::string formatLoadWarnings(Persistence::LoadWarnings const& warnings)
     std::vector<std::string> paragraphs{};
     paragraphs.reserve(warnings.size());
     for (auto const& warning : warnings)
-        paragraphs.push_back(formatLoadWarning(warning));
+        paragraphs.push_back(formatWithArguments(translation(warning.kind), warning.arguments));
     return fmt::format("{}", fmt::join(paragraphs, "\n"));
 }
