@@ -128,6 +128,7 @@ localSideModel:
   externalDropWebkitWarningText: "Due to technical limitations of the WebKitGTK engine, dropping external items onto the remote side only works for single items."
   uploadFailed: "Upload Failed"
   uploadSingleConfirmText: "Are you sure you want to upload this item '{}' to {}?"
+  uploadMultipleConfirmText: "Are you sure you want to upload the following {} items to {}?"
   createItemFailedTitle: "Create Item Failed"
   uploadConfirmTitle: "Upload Items?"
   deleteFilesFailedTitle: "Delete Files Failed"
