@@ -93,13 +93,17 @@ cmake --build build/clang_debug
 
 The frontend WASM module is built as the `nui-sftp-emscripten` sub-target and
 copied into `build/clang_debug/bin/../frontend/` as a post-build step, so the
-debug binary at `build/clang_debug/bin/nui-sftp` finds it at runtime. Both
-targets can be rebuilt individually:
+debug binary at `build/clang_debug/bin/nui-sftp` finds it at runtime. The
+frontend can be rebuilt on its own:
 
 ```bash
 cmake --build build/clang_debug --target nui-sftp-emscripten   # frontend only
-cmake --build build/clang_debug --target nui-sftp              # backend only
+cmake --build build/clang_debug --target nui-sftp              # backend and frontend
 ```
+
+There is no backend-only target. `nui-sftp` depends on the `nui-sftp-emscripten`
+ExternalProject, which is declared with `BUILD_ALWAYS`, so building `nui-sftp`
+always runs the frontend sub-build as well.
 
 ### Release build
 
@@ -209,6 +213,7 @@ backend/test/backend
 utility/test/utility
 shared_data/test/shared_data
 tar-archive/test/tar_archive
+command-store/test/command-store
 ```
 
 They are enabled only when `NUI_SFTP_ENABLE_TESTING=ON`. Build and run them
@@ -218,7 +223,8 @@ explicitly, or use ctest:
 # Build every test target in one go.
 cmake --build build/clang_debug --target \
   nui-tests nui-sftp-backend-test nui-sftp-utility-test \
-  nui-sftp-shared-data-test nui-sftp-ssh-test
+  nui-sftp-shared-data-test nui-sftp-ssh-test \
+  nui-sftp-tar-archive-test nui-sftp-command-store-test
 
 # Run the whole suite.
 ctest --test-dir build/clang_debug --output-on-failure
