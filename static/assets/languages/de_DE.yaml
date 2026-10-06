@@ -898,3 +898,38 @@ terminalPanel:
   copyPlain: "Terminal als reinen Text kopieren (ohne ANSI-/Steuerzeichen)"
   saveDialogTitle: "Terminalinhalt speichern"
   saveToFile: "Terminal in Datei speichern"
+backend:
+  rpcFilesystem:
+    deletionPrevented: "Das Löschen von Dateien ist durch die Konfiguration verhindert."
+    renamePrevented: "Das Umbenennen von Dateien ist durch die Konfiguration verhindert."
+    createFilePrevented: "Das Erstellen von Dateien ist durch die Konfiguration verhindert."
+    createDirectoryPrevented: "Das Erstellen von Verzeichnissen ist durch die Konfiguration verhindert."
+    removeFailed: "Pfad '{}' konnte nicht entfernt werden: {}"
+  opener:
+    sessionBusUnavailable: "Der D-Bus-Sitzungsbus ist nicht verfügbar."
+    sessionBusUnavailableOpenFile: "Der Sitzungsbus ist nicht verfügbar, Dateien können nicht über xdg-desktop-portal geöffnet werden. Das passiert typischerweise bei Ausführung als root oder ohne D-Bus-Benutzersitzung."
+    sessionBusUnavailableFileManager: "Der Sitzungsbus ist nicht verfügbar, der Dateimanager kann nicht über xdg-desktop-portal geöffnet werden. Das passiert typischerweise bei Ausführung als root oder ohne D-Bus-Benutzersitzung."
+    openFileFailed: "Datei konnte nicht geöffnet werden: {}"
+    openUriUnavailable: "Die OpenURI-Schnittstelle von xdg-desktop-portal ist nicht verfügbar."
+    documentPortalUnavailable: "xdg-document-portal ist nicht verfügbar, das Öffnen über Dateideskriptoren ist in diesem Flatpak nicht möglich."
+    windows:
+      outOfResources: "Nicht genügend Speicher oder Ressourcen"
+      fileNotFound: "Datei nicht gefunden"
+      pathNotFound: "Pfad nicht gefunden"
+      accessDenied: "Zugriff verweigert"
+      insufficientMemory: "Nicht genügend Speicher"
+      sharingViolation: "Freigabeverletzung"
+      associationIncomplete: "Die Dateizuordnung ist unvollständig oder ungültig"
+      ddeTimeout: "Zeitüberschreitung der DDE-Transaktion"
+      ddeFailed: "DDE-Transaktion fehlgeschlagen"
+      ddeBusy: "Eine andere DDE-Transaktion läuft"
+      noAssociation: "Diesem Dateityp ist keine Anwendung zugeordnet"
+      dllNotFound: "DLL nicht gefunden"
+      unknownShellError: "Unbekannter Shell-Fehler (Code {})"
+      shellExecuteExFailed: "ShellExecuteExW fehlgeschlagen: {} (Code {})"
+      blockedByPolicy: "Der Dateityp ist durch die Anlagenrichtlinie gesperrt"
+      binaryExecutable: "Die Datei ist eine ausführbare Binärdatei"
+  sessionManager:
+    connectFailedUnspecified: "Verbindung zum SSH-Server aus unbekanntem Grund fehlgeschlagen."
+  persistence:
+    saveFailed: "Der Zustand konnte nicht gespeichert werden: {}"

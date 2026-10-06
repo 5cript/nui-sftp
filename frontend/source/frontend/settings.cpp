@@ -743,7 +743,7 @@ void Settings::save()
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("settings", "errorSavingSettingsHeader"),
                     .text =
-                        fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error),
+                        fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "errorSavingSettings",
                 });
@@ -998,7 +998,7 @@ void Settings::addNewSession()
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = language->get("settings", "errorSavingSettingsHeader"),
                             .text = fmt::format(
-                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)
                             ),
                             .buttons = ConfirmDialog::Button::Ok,
                             .neverShowAgainId = "errorSavingSettings",
@@ -1365,7 +1365,7 @@ void Settings::deleteActiveSession()
                                 .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = language->get("settings", "errorSavingSettingsHeader"),
                                 .text = fmt::format(
-                                    fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                    fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)
                                 ),
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
@@ -1436,7 +1436,7 @@ void Settings::renameActiveSession()
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = language->get("settings", "errorSavingSettingsHeader"),
                             .text = fmt::format(
-                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)
                             ),
                             .buttons = ConfirmDialog::Button::Ok,
                         });
@@ -1505,7 +1505,7 @@ void Settings::copyActiveSession()
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                             .headerText = language->get("settings", "errorSavingSettingsHeader"),
                             .text = fmt::format(
-                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), *error
+                                fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)
                             ),
                             .buttons = ConfirmDialog::Button::Ok,
                         });

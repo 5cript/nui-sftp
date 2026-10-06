@@ -1,18 +1,44 @@
 #pragma once
 
 #include <events/app_wide_events.hpp>
+#include <utility/localized_message.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
 #include <nui/event_system/listen.hpp>
 
 #include <nlohmann/json.hpp>
+#include <fmt/args.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <utility>
+
+/**
+ * @brief Formats a translation with arguments only known at runtime. A translation whose placeholders do not fit the
+ * arguments comes back unformatted with the arguments appended, instead of throwing.
+ */
+inline std::string formatWithArguments(std::string const& pattern, std::vector<std::string> const& arguments)
+{
+    fmt::dynamic_format_arg_store<fmt::format_context> store{};
+    for (auto const& argument : arguments)
+        store.push_back(argument);
+    try
+    {
+        return fmt::vformat(pattern, store);
+    }
+    catch (fmt::format_error const&)
+    {
+        if (arguments.empty())
+            return pattern;
+        return fmt::format("{}\n{}", pattern, fmt::join(arguments, "\n"));
+    }
+}
 
 class LanguageProvider
 {
@@ -101,6 +127,29 @@ class LanguageProvider
         return *res;
     }
 
+    /**
+     * @brief Translates a message built with Utility::localizedMessage, like the error texts of the backend. Falls
+     * back to English, then to the key and its arguments. Text that is not a key, like a raw system error, has no
+     * translation and comes back unchanged.
+     */
+    std::string translate(std::string_view message)
+    {
+        const auto parsed = Utility::parseLocalizedMessage(message);
+        std::string path = parsed.key;
+        std::replace(path.begin(), path.end(), '.', '/');
+
+        auto translation = findPath(events_->onLanguageChanged.value(), path);
+        if (!translation)
+            translation = findPath("en_US", path);
+        if (!translation)
+        {
+            if (parsed.arguments.empty())
+                return parsed.key;
+            return fmt::format("{}: {}", parsed.key, fmt::join(parsed.arguments, ", "));
+        }
+        return formatWithArguments(*translation, parsed.arguments);
+    }
+
     auto listenToLanguageChange(std::function<void(std::string const&)> onChange) const
     {
         return Nui::smartListen(
@@ -110,6 +159,15 @@ class LanguageProvider
                 onChange(newLang);
             }
         );
+    }
+
+  private:
+    std::optional<std::string> findPath(std::string const& languageKey, std::string const& path) const
+    {
+        auto iter = lookupMap_.find(fmt::format("/{}/{}", languageKey, path));
+        if (iter != lookupMap_.end())
+            return iter->second;
+        return std::nullopt;
     }
 
   private:
