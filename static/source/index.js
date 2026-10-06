@@ -1,5 +1,3 @@
-// import './livereload.ts';
-
 import { ContentPanelManager } from "./content_panel_manager.ts";
 import "./addressable_setting.ts";
 
