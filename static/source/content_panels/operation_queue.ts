@@ -5,11 +5,9 @@ import {
 
 class OperationQueue extends NuiWidget {
     constructor(name: string, factory: () => HTMLElement | undefined, deleter: () => any) {
-        super(name, factory, deleter, 'operation-queue');
+        super(name, factory, deleter, 'operation-queue', 'operationQueue');
 
-        this.title.label = 'Operation Queue';
         this.title.closable = true;
-        this.title.caption = 'Operation Queue';
     }
 }
 

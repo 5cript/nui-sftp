@@ -5,11 +5,9 @@ import {
 
 class SessionOptions extends NuiWidget {
     constructor(name: string, factory: () => HTMLElement | undefined, deleter: () => any) {
-        super(name, factory, deleter, 'session-options');
+        super(name, factory, deleter, 'session-options', 'sessionOptions');
 
-        this.title.label = 'Session Options';
         this.title.closable = true;
-        this.title.caption = 'Session Options';
     }
 }
 

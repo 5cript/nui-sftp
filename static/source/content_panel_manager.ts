@@ -5,6 +5,7 @@ import {
     TabBar
 } from '@lumino/widgets';
 import { ChannelId } from './ids.ts';
+import { PanelTitleKey, panelTitles } from './content_panels/panel_titles';
 
 interface addPanelArguments {
     host: HTMLElement;
@@ -188,6 +189,13 @@ class ContentPanelManager {
             return;
         }
         panel.dock.addWidget(component, { ref: request.widget.titles[0].owner });
+    }
+
+    /** Sets the translated tab titles and relabels every open panel. */
+    setPanelTitles = (titles: Partial<Record<PanelTitleKey, string>>) => {
+        Object.assign(panelTitles, titles);
+        for (const panel of this.panels.values())
+            panel.relabel();
     }
 
     renameTerminalById = (panelId: string, channelId: ChannelId, title: string) => {

@@ -5,11 +5,9 @@ import {
 
 class FileExplorer extends NuiWidget {
     constructor(name: string, factory: () => HTMLElement | undefined, deleter: () => any) {
-        super(name, factory, deleter, 'file-explorer');
+        super(name, factory, deleter, 'file-explorer', 'fileExplorer');
 
-        this.title.label = name;
         this.title.closable = true;
-        this.title.caption = `File Explorer`;
     }
 }
 
