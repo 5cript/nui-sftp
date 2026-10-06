@@ -4,11 +4,9 @@ import {
 
 class CommandSnippets extends NuiWidget {
     constructor(name: string, factory: () => HTMLElement | undefined, deleter: () => any) {
-        super(name, factory, deleter, 'command-snippets');
+        super(name, factory, deleter, 'command-snippets', 'commandSnippets');
 
-        this.title.label = 'Command Snippets';
         this.title.closable = true;
-        this.title.caption = 'Command Snippets';
     }
 }
 

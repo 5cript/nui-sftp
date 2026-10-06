@@ -5,7 +5,7 @@ import { ChannelId } from '../ids.tsx';
 
 class Terminal extends NuiWidget {
     constructor(name: string, factory: () => HTMLElement | undefined, deleter: (_: ChannelId | undefined) => any) {
-        super(name, factory, () => {}, 'terminal');
+        super(name, factory, () => {}, 'terminal', 'terminal');
         this.deleter = () => {
             const channelElement = this.node.querySelector('.terminal-channel');
             if (channelElement) {
@@ -18,9 +18,7 @@ class Terminal extends NuiWidget {
             deleter("INVALID_ID" as ChannelId);
         };
 
-        this.title.label = 'Terminal';
         this.title.closable = true;
-        this.title.caption = 'Terminal';
     }
 
 

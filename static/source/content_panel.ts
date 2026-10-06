@@ -6,6 +6,7 @@ import { SessionOptions } from './content_panels/session_options';
 import { FileTracking } from './content_panels/file_tracking';
 import { CommandHistory } from './content_panels/command_history';
 import { CommandSnippets } from './content_panels/command_snippets';
+import { NuiWidget } from './content_panels/nui_widget';
 import {
     BoxPanel,
     DockPanel,
@@ -150,12 +151,22 @@ export class ContentPanel {
         for (const widget of this.dock.widgets()) {
             const el = widget.node.querySelector(`.terminal-channel[data-channelid="${channelId}"]`);
             if (el) {
+                if (widget instanceof NuiWidget)
+                    widget.titleKey = undefined;
                 widget.title.label = title;
                 widget.title.caption = title;
                 return true;
             }
         }
         return false;
+    }
+
+    /** Re-applies the translated titles to every tab that has no title of its own. */
+    relabel() {
+        for (const widget of this.dock.widgets()) {
+            if (widget instanceof NuiWidget)
+                widget.applyTitle();
+        }
     }
 
     /** Closes a channel widget by channelId. Returns false if not found. */

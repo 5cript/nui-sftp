@@ -25,6 +25,22 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
+namespace
+{
+    void applyPanelTitles()
+    {
+        auto titles = Nui::val::object();
+        titles.set("terminal", language->get("sessionFrontend", "terminal"));
+        titles.set("fileExplorer", language->get("sessionFrontend", "fileExplorer"));
+        titles.set("fileTracking", language->get("sessionFrontend", "fileTracking"));
+        titles.set("operationQueue", language->get("sessionFrontend", "operationQueue"));
+        titles.set("sessionOptions", language->get("sessionFrontend", "sessionOptions"));
+        titles.set("commandHistory", language->get("sessionFrontend", "commandHistory"));
+        titles.set("commandSnippets", language->get("sessionFrontend", "commandSnippets"));
+        Nui::val::global("contentPanelManager").call<void>("setPanelTitles", titles);
+    }
+}
+
 struct MainPage::Implementation
 {
     Persistence::StateHolder* stateHolder;
@@ -50,6 +66,7 @@ struct MainPage::Implementation
     Nui::Observed<bool> darkMode;
     Nui::TimerHandle setupWait;
     NotificationLog notificationLog;
+    LanguageChangeListener panelTitlesListener{};
 
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
         : stateHolder{stateHolder}
@@ -100,6 +117,13 @@ MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events
 void MainPage::onSetupComplete()
 {
     Log::info("Setup is complete.");
+    applyPanelTitles();
+    impl_->panelTitlesListener = language->listenToLanguageChange(
+        [](std::string const&)
+        {
+            applyPanelTitles();
+        }
+    );
     Nui::RpcClient::callWithBackChannel(
         "Main::getVersion",
         [this](Nui::val response)
