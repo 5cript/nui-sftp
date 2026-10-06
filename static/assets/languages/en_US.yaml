@@ -122,6 +122,13 @@ syncDialog:
   synchronize: "Synchronize"
   confirmHeader: "Synchronize Directories"
   confirmText: "Synchronize {} with {}?"
+  tree:
+    loading: "Loading…"
+    loadFailed: "Failed: {}"
+    loadMore: "Load up to {} more ({} remaining)"
+    collapseAll: "Collapse all"
+    selectAll: "Select all"
+    deselectAll: "Deselect all"
 syncProgressDialog:
   titleFormat: "Comparing: {} / {}"
   listingFiles: "Listing files..."
@@ -262,6 +269,7 @@ notificationLog:
   summaryOne: "1 notification"
   summaryMany: "{} notifications"
   repeatsTooltip: "Occurred {} times, last at {}"
+  dismiss: "Dismiss"
 commandHistoryPanel:
   searchPlaceholder: "Search commands..."
   favoritesOnlyTooltip: "Show favorites only"
@@ -871,6 +879,8 @@ onboarding:
   next: "Next"
   finish: "Finish"
   skip: "Skip"
+  stepCounter: "STEP {} OF {}"
+  dismiss: "Dismiss"
 licenses:
   title: "About & Licenses"
   licensesTab: "Licenses"
@@ -909,6 +919,9 @@ filePropertyDialog:
   typeSymlink: "Symbolic Link"
   typeUnknown: "Unknown"
   user: "User"
+  previousSlide: "Previous entry"
+  nextSlide: "Next entry"
+  goToSlide: "Go to entry {}"
 inputDialog:
   hidePassword: "Hide"
   showPassword: "Show"

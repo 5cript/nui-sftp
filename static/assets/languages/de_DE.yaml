@@ -179,6 +179,13 @@ syncDialog:
   synchronize: "Synchronisieren"
   confirmHeader: "Verzeichnisse synchronisieren"
   confirmText: "{} mit {} synchronisieren?"
+  tree:
+    loading: "Lädt…"
+    loadFailed: "Fehlgeschlagen: {}"
+    loadMore: "Bis zu {} weitere laden ({} verbleibend)"
+    collapseAll: "Alle einklappen"
+    selectAll: "Alle auswählen"
+    deselectAll: "Auswahl aufheben"
 syncProgressDialog:
   titleFormat: "Vergleichen: {} / {}"
   listingFiles: "Dateien werden aufgelistet..."
@@ -262,6 +269,7 @@ notificationLog:
   summaryOne: "1 Benachrichtigung"
   summaryMany: "{} Benachrichtigungen"
   repeatsTooltip: "{}-mal aufgetreten, zuletzt um {}"
+  dismiss: "Schließen"
 commandHistoryPanel:
   searchPlaceholder: "Befehle durchsuchen..."
   favoritesOnlyTooltip: "Nur Favoriten anzeigen"
@@ -869,6 +877,8 @@ onboarding:
   next: "Weiter"
   finish: "Fertig"
   skip: "Überspringen"
+  stepCounter: "SCHRITT {} VON {}"
+  dismiss: "Schließen"
 licenses:
   title: "Über & Lizenzen"
   licensesTab: "Lizenzen"
@@ -907,6 +917,9 @@ filePropertyDialog:
   typeSymlink: "Symbolischer Link"
   typeUnknown: "Unbekannt"
   user: "Benutzer"
+  previousSlide: "Vorheriger Eintrag"
+  nextSlide: "Nächster Eintrag"
+  goToSlide: "Zu Eintrag {}"
 inputDialog:
   hidePassword: "Verbergen"
   showPassword: "Anzeigen"

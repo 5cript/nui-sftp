@@ -62,16 +62,25 @@ struct FilePropertyDialog::Implementation
         , entry{}
         , targetEntry{}
         , carouselPage{std::make_shared<Nui::Observed<int>>(0)}
-        , carousel{std::make_unique<Snc::Carousel>(
-              carouselPage,
-              [this](int page) -> Nui::ElementRenderer
-              {
-                  if (page == 0)
-                      return renderEntrySection(entry);
-                  return renderEntrySection(targetEntry);
-              },
-              1
-          )}
+        , carousel{[this]()
+                   {
+                       auto created = std::make_unique<Snc::Carousel>(
+                           carouselPage,
+                           [this](int page) -> Nui::ElementRenderer
+                           {
+                               if (page == 0)
+                                   return renderEntrySection(entry);
+                               return renderEntrySection(targetEntry);
+                           },
+                           1
+                       );
+                       created->setLabels({
+                           .previous = language->get("filePropertyDialog", "previousSlide"),
+                           .next = language->get("filePropertyDialog", "nextSlide"),
+                           .goToSlide = language->get("filePropertyDialog", "goToSlide"),
+                       });
+                       return created;
+                   }()}
         , dialog{
               "FilePropertyDialog_" +
                   []()
