@@ -7,6 +7,7 @@ add_library(
         rpc_system.cpp
         theme_finder.cpp
         program_options.cpp
+        inspector_environment.cpp
         password/password_prompter.cpp
         process/process.cpp
         process/process_store.cpp
