@@ -7,6 +7,7 @@
 #    include <backend/process/fork_pool.hpp>
 #endif
 
+#include <backend/inspector_environment.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <utility/resources.hpp>
@@ -185,7 +186,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
     );
 }
 
-Main::Main([[maybe_unused]] ProgramOptions options, ForkPool* forkPool)
+Main::Main(ProgramOptions options, ForkPool* forkPool)
     : shuttingDown_{false}
     , programDir_{boost::dll::program_location().parent_path().string()}
     , stateHolder_{programDir_}
@@ -193,11 +194,7 @@ Main::Main([[maybe_unused]] ProgramOptions options, ForkPool* forkPool)
     , window_{
           Nui::WindowOptions{
               .title = "NuiSftp"s,
-#ifdef NDEBUG
               .debug = options.enableDevTools,
-#else
-              .debug = true,
-#endif
               .customSchemes = {createFolderMapping(programDir_, "nui")},
               .onRpcAliveMessage = [this]() {
                   onRpcAlive();
@@ -423,6 +420,9 @@ int main(int const argc, char const* const* argv)
     auto options = parseProgramOptions(argc, argv);
     if (!options)
         return 0;
+
+    if (!options->enableDevTools)
+        removeRemoteInspectorEnvironment();
 
 #ifdef __linux__
 

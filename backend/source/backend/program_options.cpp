@@ -24,8 +24,11 @@ std::optional<ProgramOptions> parseProgramOptions(int argc, char const* const* a
         }
 
         ProgramOptions options;
-        if (vm.count("enable-dev-tools"))
-            options.enableDevTools = true;
+#ifdef NDEBUG
+        options.enableDevTools = vm.count("enable-dev-tools") > 0;
+#else
+        options.enableDevTools = true;
+#endif
 
         return options;
     }
