@@ -100,6 +100,7 @@ target_sources(
         notifications.cpp
         notification_center.cpp
         notification_log.cpp
+        persistence_load_warnings.cpp
         dialog/input_dialog.cpp
         dialog/multi_input_dialog.cpp
         dialog/password_prompter.cpp

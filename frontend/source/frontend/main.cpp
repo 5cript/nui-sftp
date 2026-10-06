@@ -59,7 +59,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 
         persistence = std::make_unique<Persistence::StateHolder>();
         persistence->load(
-            [](std::optional<std::string> const&, Persistence::StateHolder&, std::optional<std::string> const&)
+            [](std::optional<std::string> const&, Persistence::StateHolder&, Persistence::LoadWarnings const&)
             {
                 Log::info("State loaded, setting up frontend.");
                 frontendEvents = std::make_unique<FrontendEvents>();
@@ -184,4 +184,4 @@ EMSCRIPTEN_BINDINGS(nui_example_frontend)
 {
     emscripten::function("main", &frontendMain);
 }
-#include <nui/frontend/bindings.hpp>
+#include <nui/frontend/bindings.hpp>
