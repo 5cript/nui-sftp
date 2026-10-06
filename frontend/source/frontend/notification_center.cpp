@@ -1,4 +1,5 @@
 #include <frontend/notification_center.hpp>
+#include <utility/language.hpp>
 
 #include <script-nui-components/toast.hpp>
 
@@ -64,6 +65,7 @@ struct NotificationCenter::Implementation
     ScriptNuiComponents::Toast toast{{
         .style = ScriptNuiComponents::ToastStyle::Strip,
         .position = ScriptNuiComponents::ToastPosition::BottomCenter,
+        .dismissLabel = language->get("notificationLog", "dismiss"),
     }};
     Nui::Observed<std::vector<NotificationEntry>> entries{};
     Nui::Observed<NotificationAttention> attention{};

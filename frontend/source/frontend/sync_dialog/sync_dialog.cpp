@@ -59,6 +59,18 @@ using namespace std::string_literals;
 
 namespace
 {
+    ScriptNuiComponents::Tree::Texts treeTexts()
+    {
+        return {
+            .loading = language->get("syncDialog", "tree", "loading"),
+            .loadFailed = language->get("syncDialog", "tree", "loadFailed"),
+            .loadMore = language->get("syncDialog", "tree", "loadMore"),
+            .collapseAll = language->get("syncDialog", "tree", "collapseAll"),
+            .selectAll = language->get("syncDialog", "tree", "selectAll"),
+            .deselectAll = language->get("syncDialog", "tree", "deselectAll"),
+        };
+    }
+
     using SyncDirection = SharedData::Sync::Direction;
     using SharedData::Sync::DiffSection;
     using SharedData::Sync::DiffTreeNode;
@@ -343,6 +355,7 @@ struct SyncDialog::Implementation
             .showCollapseAllButton = true,
             .showSelectAllButton = true,
             .showDeselectAllButton = true,
+            .texts = treeTexts(),
         }};
         downloadTree_ = Snc::Tree{Snc::Tree::Options{
             .rowContent = makeTreeRowRenderer(DiffSection::Download),
@@ -358,6 +371,7 @@ struct SyncDialog::Implementation
             .showCollapseAllButton = true,
             .showSelectAllButton = true,
             .showDeselectAllButton = true,
+            .texts = treeTexts(),
         }};
         deleteTree_ = Snc::Tree{Snc::Tree::Options{
             .rowContent = makeTreeRowRenderer(DiffSection::Delete),
@@ -372,6 +386,7 @@ struct SyncDialog::Implementation
             .showCollapseAllButton = true,
             .showSelectAllButton = true,
             .showDeselectAllButton = true,
+            .texts = treeTexts(),
         }};
     }
 

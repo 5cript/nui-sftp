@@ -37,8 +37,10 @@ namespace Frontend
                 .title = language->get("onboarding", "step1Title"),
                 .bodyText = language->get("onboarding", "step1Body"),
                 .stepCounter = ScriptNuiComponents::SpotlightStepCounter{1, 2},
+                .stepCounterFormat = language->get("onboarding", "stepCounter"),
                 .ctaLabel = language->get("onboarding", "next"),
                 .skipLabel = language->get("onboarding", "skip"),
+                .dismissLabel = language->get("onboarding", "dismiss"),
                 // Backdrop click is disabled: accidental clicks (or clicks
                 // forwarded through the cutout to the highlighted button)
                 // would otherwise terminate the flow rather than advance it.
@@ -64,8 +66,10 @@ namespace Frontend
                 .title = language->get("onboarding", "step2Title"),
                 .bodyText = language->get("onboarding", "step2Body"),
                 .stepCounter = ScriptNuiComponents::SpotlightStepCounter{2, 2},
+                .stepCounterFormat = language->get("onboarding", "stepCounter"),
                 .ctaLabel = language->get("onboarding", "finish"),
                 .skipLabel = language->get("onboarding", "skip"),
+                .dismissLabel = language->get("onboarding", "dismiss"),
                 .dismissOnBackdropClick = false,
                 .onAdvance =
                     [this]()
