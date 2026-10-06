@@ -16,18 +16,18 @@ namespace Utility::Tests
 
     TEST_F(LocalizedMessageTests, KeyWithoutArgumentsStaysTheKey)
     {
-        const auto message = localizedMessage("backend.example.key");
-        EXPECT_EQ(message, "backend.example.key");
+        const auto message = localizedMessage("tests.example.key");
+        EXPECT_EQ(message, "tests.example.key");
 
         const auto parsed = parseLocalizedMessage(message);
-        EXPECT_EQ(parsed.key, "backend.example.key");
+        EXPECT_EQ(parsed.key, "tests.example.key");
         EXPECT_TRUE(parsed.arguments.empty());
     }
 
     TEST_F(LocalizedMessageTests, ArgumentsRoundTrip)
     {
-        const auto parsed = parseLocalizedMessage(localizedMessage("backend.example.key", "/some path/a.txt", 42, ""));
-        EXPECT_EQ(parsed.key, "backend.example.key");
+        const auto parsed = parseLocalizedMessage(localizedMessage("tests.example.key", "/some path/a.txt", 42, ""));
+        EXPECT_EQ(parsed.key, "tests.example.key");
         EXPECT_EQ(parsed.arguments, (std::vector<std::string>{"/some path/a.txt", "42", ""}));
     }
 
