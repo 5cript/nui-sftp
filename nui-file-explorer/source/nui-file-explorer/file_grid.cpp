@@ -18,7 +18,6 @@ namespace NuiFileExplorer
         std::optional<Side> rightSide;
 
         Nui::Observed<bool> swapSides{false};
-        std::function<void(std::string const&)> onError{};
         std::weak_ptr<Nui::Dom::BasicElement> grabber{};
         std::weak_ptr<Nui::Dom::BasicElement> grid{};
         std::weak_ptr<Nui::Dom::BasicElement> divider{};
@@ -90,11 +89,6 @@ namespace NuiFileExplorer
         return impl_->rightSide ? &impl_->rightSide.value() : nullptr;
     }
 
-    void FileGrid::onError(std::function<void(std::string const&)> const& callback)
-    {
-        impl_->onError = callback;
-    }
-
     void FileGrid::onUneventfulClick()
     {
         impl_->leftSide.onUneventfulClick();
@@ -113,6 +107,13 @@ namespace NuiFileExplorer
     {
         impl_->swapSides = doSwap;
         Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
+    void FileGrid::texts(Texts const& value)
+    {
+        impl_->leftSide.texts(value);
+        if (impl_->rightSide)
+            impl_->rightSide->texts(value);
     }
 
     ISideModel& FileGrid::leftModel()

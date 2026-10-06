@@ -4,6 +4,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
+#include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <persistence/state_holder.hpp>
@@ -56,6 +57,7 @@ namespace
                         );
                     },
                     .pageSize = uiOptions.fileGridPageSize,
+                    .texts = fileExplorerTexts(),
                 },
                 {
                     .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
@@ -71,6 +73,7 @@ namespace
                         );
                     },
                     .pageSize = uiOptions.fileGridPageSize,
+                    .texts = fileExplorerTexts(),
                 },
                 std::make_unique<LocalSideModel>(
                     uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
@@ -102,6 +105,7 @@ namespace
                     );
                 },
                 .pageSize = uiOptions.fileGridPageSize,
+                .texts = fileExplorerTexts(),
             },
             std::make_unique<LocalSideModel>(
                 uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
@@ -125,6 +129,7 @@ struct FileExplorerPanel::Implementation
 
     NuiFileExplorer::FileGrid fileGrid;
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileExplorerElement{};
+    LanguageChangeListener languageListener{};
 
     explicit Implementation(Params&& params)
         : stateHolder{params.stateHolder}
@@ -185,17 +190,17 @@ void FileExplorerPanel::setup()
         );
     }
 
-    impl_->fileGrid.onError(
-        [confirmDialog = impl_->confirmDialog](auto const& message)
+    impl_->languageListener = language->listenToLanguageChange(
+        [this](std::string const&)
         {
-            Log::error("File grid error: {}", message);
-            confirmDialog->open({
-                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                .headerText = language->get("fileExplorer", "fileGridError"),
-                .text = message,
-                .buttons = ConfirmDialog::Button::Ok,
-                .neverShowAgainId = "fileGridError",
-            });
+            impl_->fileGrid.texts(fileExplorerTexts());
+            // The default place names come from the side models, which translate them when they are requested.
+            for (auto* side : {&impl_->fileGrid.leftSide(), impl_->fileGrid.rightSide()})
+            {
+                if (side && side->places())
+                    side->places()->reloadDefaultPlaces();
+            }
+            Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
 

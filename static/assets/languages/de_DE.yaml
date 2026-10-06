@@ -25,9 +25,44 @@ fileExplorer:
     downloadAsArchive: "Als Archiv herunterladen"
     removeFromFavorites: "Aus Favoriten entfernen"
     uploadAsArchive: "Als Archiv hochladen"
+    synchronize: "Synchronisieren..."
+    synchronizeHint: "Wählen Sie auf jeder Seite genau ein Verzeichnis zum Synchronisieren aus."
   archiveDefaultName: "archiv"
   fileAlreadyExists: "Datei existiert bereits"
-  fileGridError: "Fehler im Datei-Explorer"
+  toolbar:
+    newMenu: "Neu"
+    sortMenu: "Sortieren"
+    viewMenu: "Ansicht"
+    searchPlaceholder: "Suchen"
+  newMenu:
+    file: "Datei"
+    folder: "Ordner"
+  sortMenu:
+    nameAscending: "Name aufsteigend"
+    nameDescending: "Name absteigend"
+    sizeAscending: "Größe aufsteigend"
+    sizeDescending: "Größe absteigend"
+    infoAscending: "Info aufsteigend"
+    infoDescending: "Info absteigend"
+    modificationTimeAscending: "Änderungszeit aufsteigend"
+    modificationTimeDescending: "Änderungszeit absteigend"
+  viewMenu:
+    icons: "Symbole"
+    table: "Tabelle"
+  columns:
+    name: "Name"
+    size: "Größe"
+    info: "Info"
+    lastModified: "Zuletzt geändert"
+  places:
+    places: "Orte"
+    favorites: "Favoriten"
+    devices: "Geräte"
+    drives: "Laufwerke"
+    root: "Wurzelverzeichnis"
+  errors:
+    dropOnSameSide: "Das Verschieben von Elementen per Drag and Drop innerhalb derselben Seite wird nicht unterstützt."
+    dropDataUnreadable: "Die Drag-and-Drop-Daten konnten nicht gelesen werden: {}"
 newSessionDialog:
   title: "Neue Sitzung erstellen"
   validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."

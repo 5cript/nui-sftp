@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/local_side_model.hpp>
+#include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
@@ -173,10 +174,10 @@ void LocalSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEn
             entries.reserve(len);
             for (int idx = 0; idx < len; ++idx)
             {
-                auto const placeName = places[idx]["name"].as<std::string>();
+                auto const placeKind = places[idx]["kind"].as<std::string>();
                 entries.push_back({
-                    .icon = iconForPlaceName(placeName),
-                    .name = placeDisplayName(placeName),
+                    .icon = iconForPlaceKind(placeKind),
+                    .name = placeDisplayName(placeKind, places[idx]["name"].as<std::string>()),
                     .path = places[idx]["path"].as<std::string>(),
                 });
             }
@@ -796,8 +797,9 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
         args
     );
 }
-void LocalSideModel::onError(std::string const& error)
+void LocalSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
 {
+    const auto error = fileExplorerErrorText(fileExplorerError);
     Log::error("File grid error (local side): {}", error);
     confirmDialog_->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,

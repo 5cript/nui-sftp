@@ -9,38 +9,47 @@
 #include <ui5-sap-icons/icons/video.hpp>
 #include <ui5-sap-icons/icons/folder.hpp>
 
-Nui::ElementRenderer iconForPlaceName(std::string const& name)
+#include <algorithm>
+#include <array>
+#include <string_view>
+
+namespace
 {
-    if (name == "Home")
-        return Ui5Icons::home();
-    if (name == "Desktop")
-        return Ui5Icons::desktop_mobile();
-    if (name == "Downloads")
-        return Ui5Icons::download();
-    if (name == "Documents")
-        return Ui5Icons::documents();
-    if (name == "Pictures")
-        return Ui5Icons::picture();
-    if (name == "Videos")
-        return Ui5Icons::video();
-    return Ui5Icons::folder();
+    struct PlaceKind
+    {
+        std::string_view kind;
+        Nui::ElementRenderer (*icon)();
+        /**
+         * @brief Spelled out per kind, so language-check sees every key.
+         */
+        std::string (*displayName)();
+    };
+
+    const std::array<PlaceKind, 7> placeKinds{{
+        {"home", &Ui5Icons::home, [] { return language->get("places", "home"); }},
+        {"desktop", &Ui5Icons::desktop_mobile, [] { return language->get("places", "desktop"); }},
+        {"downloads", &Ui5Icons::download, [] { return language->get("places", "downloads"); }},
+        {"documents", &Ui5Icons::documents, [] { return language->get("places", "documents"); }},
+        {"pictures", &Ui5Icons::picture, [] { return language->get("places", "pictures"); }},
+        {"videos", &Ui5Icons::video, [] { return language->get("places", "videos"); }},
+        {"music", &Ui5Icons::folder, [] { return language->get("places", "music"); }},
+    }};
+
+    PlaceKind const* findPlaceKind(std::string const& kind)
+    {
+        const auto iter = std::ranges::find(placeKinds, kind, &PlaceKind::kind);
+        return iter == placeKinds.end() ? nullptr : &*iter;
+    }
 }
 
-std::string placeDisplayName(std::string const& name)
+Nui::ElementRenderer iconForPlaceKind(std::string const& kind)
 {
-    if (name == "Home")
-        return language->get("places", "home");
-    if (name == "Desktop")
-        return language->get("places", "desktop");
-    if (name == "Downloads")
-        return language->get("places", "downloads");
-    if (name == "Documents")
-        return language->get("places", "documents");
-    if (name == "Pictures")
-        return language->get("places", "pictures");
-    if (name == "Videos")
-        return language->get("places", "videos");
-    if (name == "Music")
-        return language->get("places", "music");
-    return name;
+    const auto* placeKind = findPlaceKind(kind);
+    return placeKind ? placeKind->icon() : Ui5Icons::folder();
+}
+
+std::string placeDisplayName(std::string const& kind, std::string const& fallback)
+{
+    const auto* placeKind = findPlaceKind(kind);
+    return placeKind ? placeKind->displayName() : fallback;
 }

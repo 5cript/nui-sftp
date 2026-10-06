@@ -50,6 +50,7 @@ namespace NuiFileExplorer
         Nui::Observed<unsigned int> iconSpacing{48u};
         Nui::Observed<std::pair<SortCriterion, bool>> sorting{{SortCriterion::Name, true}};
         Nui::Observed<bool> showHiddenFiles{false};
+        Nui::Observed<Texts> texts{};
 
         std::weak_ptr<Nui::Dom::BasicElement> sideElement{};
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};
@@ -238,14 +239,146 @@ namespace NuiFileExplorer
             }
         }
 
+        /**
+         * @brief Fills the dropdown menus with the current texts.
+         */
+        void setMenuItems()
+        {
+            namespace Snc = ScriptNuiComponents;
+
+            newItemMenu.setItems({
+                Snc::PopupMenu::item(
+                    texts.value().newMenu.file,
+                    std::string{},
+                    [this]()
+                    {
+                        this->model->onNewItem(Item::Type::Regular);
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().newMenu.folder,
+                    std::string{},
+                    [this]()
+                    {
+                        this->model->onNewItem(Item::Type::Directory);
+                    }
+                ),
+            });
+
+            sortMenu.setItems({
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.nameAscending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Name, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.nameDescending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Name, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.sizeAscending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Size, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.sizeDescending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Size, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.infoAscending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Info, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.infoDescending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Info, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.modificationTimeAscending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Mtime, true};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().sortMenu.modificationTimeDescending,
+                    std::string{},
+                    [this]()
+                    {
+                        sorting = {SortCriterion::Mtime, false};
+                        sortItems();
+                        items.modifyNow();
+                    }
+                ),
+            });
+
+            viewMenu.setItems({
+                Snc::PopupMenu::item(
+                    texts.value().viewMenu.icons,
+                    std::string{},
+                    [this]()
+                    {
+                        flavor = Flavor::Icons;
+                        selectionManager.setFlavor(flavor.value());
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                ),
+                Snc::PopupMenu::item(
+                    texts.value().viewMenu.table,
+                    std::string{},
+                    [this]()
+                    {
+                        flavor = Flavor::Table;
+                        selectionManager.setFlavor(flavor.value());
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                ),
+            });
+        }
+
         SideImplementation(SideSettings settings, std::unique_ptr<ISideModel> model)
             : settings{std::move(settings)}
             , model{std::move(model)}
             , showHiddenFiles{this->settings.showHiddenFiles}
+            , texts{this->settings.texts}
             , pageSize{std::max(1, this->settings.pageSize)}
         {
-            namespace Snc = ScriptNuiComponents;
-
             newItemMenu.setOnOpen(
                 [this]()
                 {
@@ -271,130 +404,7 @@ namespace NuiFileExplorer
                 }
             );
 
-            newItemMenu.setItems({
-                Snc::PopupMenu::item(
-                    "File",
-                    std::string{},
-                    [this]()
-                    {
-                        this->model->onNewItem(Item::Type::Regular);
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Folder",
-                    std::string{},
-                    [this]()
-                    {
-                        this->model->onNewItem(Item::Type::Directory);
-                    }
-                ),
-            });
-
-            sortMenu.setItems({
-                Snc::PopupMenu::item(
-                    "Name Ascending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Name, true};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Name Descending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Name, false};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Size Ascending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Size, true};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Size Descending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Size, false};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Info Ascending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Info, true};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Info Descending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Info, false};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Modification Time Ascending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Mtime, true};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Modification Time Descending",
-                    std::string{},
-                    [this]()
-                    {
-                        sorting = {SortCriterion::Mtime, false};
-                        sortItems();
-                        items.modifyNow();
-                    }
-                ),
-            });
-
-            viewMenu.setItems({
-                Snc::PopupMenu::item(
-                    "Icons",
-                    std::string{},
-                    [this]()
-                    {
-                        flavor = Flavor::Icons;
-                        selectionManager.setFlavor(flavor.value());
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    }
-                ),
-                Snc::PopupMenu::item(
-                    "Table",
-                    std::string{},
-                    [this]()
-                    {
-                        flavor = Flavor::Table;
-                        selectionManager.setFlavor(flavor.value());
-                        Nui::globalEventContext.executeActiveEventsImmediately();
-                    }
-                ),
-            });
+            setMenuItems();
 
             selectionManager.setScrollIntoViewCallback(
                 [this](std::size_t idx)

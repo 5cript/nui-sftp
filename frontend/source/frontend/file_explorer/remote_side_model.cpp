@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 
@@ -384,8 +385,9 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
     }
 }
 
-void RemoteSideModel::onError(std::string const& error)
+void RemoteSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
 {
+    const auto error = fileExplorerErrorText(fileExplorerError);
     Log::error("File grid error (remote side): {}", error);
     confirmDialog_->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
@@ -1465,19 +1467,19 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
 {
     const std::string home = "/home/" + remoteUsername_;
     const std::vector<std::pair<std::string, std::string>> defaults = {
-        {"Home", home},
-        {"Desktop", home + "/Desktop"},
-        {"Downloads", home + "/Downloads"},
-        {"Documents", home + "/Documents"},
-        {"Pictures", home + "/Pictures"},
-        {"Videos", home + "/Videos"},
-        {"Music", home + "/Music"},
+        {"home", home},
+        {"desktop", home + "/Desktop"},
+        {"downloads", home + "/Downloads"},
+        {"documents", home + "/Documents"},
+        {"pictures", home + "/Pictures"},
+        {"videos", home + "/Videos"},
+        {"music", home + "/Music"},
     };
 
     std::vector<PlaceEntry> entries;
     entries.reserve(defaults.size());
-    for (auto const& [name, path] : defaults)
-        entries.push_back({.icon = iconForPlaceName(name), .name = placeDisplayName(name), .path = path});
+    for (auto const& [kind, path] : defaults)
+        entries.push_back({.icon = iconForPlaceKind(kind), .name = placeDisplayName(kind, kind), .path = path});
 
     callback(std::move(entries));
 }

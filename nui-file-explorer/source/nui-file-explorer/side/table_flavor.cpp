@@ -134,7 +134,10 @@ namespace NuiFileExplorer
         // single onMouseDown. A shared dragStarted flag is set once movement exceeds the
         // threshold; on mouseup, sort fires only if no drag occurred.
         const auto makeHeaderCell = [&](
-                                        SortCriterion sortCriterion, std::string const& name, int colIdx, bool resizable
+                                        SortCriterion sortCriterion,
+                                        std::string Texts::Columns::* name,
+                                        int colIdx,
+                                        bool resizable
                                     ) -> Nui::ElementRenderer
         {
             return div{
@@ -201,7 +204,9 @@ namespace NuiFileExplorer
                         options
                     );
                 }
-            }(span{class_ = "nui-file-grid-header-cell-text"}(name),
+            }(span{class_ = "nui-file-grid-header-cell-text"}(observe(impl().texts).generate([this, name]() {
+                return impl().texts.value().columns.*name;
+            })),
                 span{
                     class_ = "nui-file-grid-col-expand-btn",
                     onMouseDown =
@@ -284,10 +289,10 @@ namespace NuiFileExplorer
             },
         }(
             div{class_ = "nui-file-grid-table-header"}(
-                makeHeaderCell(SortCriterion::Name, "Name", 0, true),
-                makeHeaderCell(SortCriterion::Size, "Size", 1, true),
-                makeHeaderCell(SortCriterion::Info, "Info", 2, true),
-                makeHeaderCell(SortCriterion::Mtime, "Last Modified", 3, true)
+                makeHeaderCell(SortCriterion::Name, &Texts::Columns::name, 0, true),
+                makeHeaderCell(SortCriterion::Size, &Texts::Columns::size, 1, true),
+                makeHeaderCell(SortCriterion::Info, &Texts::Columns::info, 2, true),
+                makeHeaderCell(SortCriterion::Mtime, &Texts::Columns::lastModified, 3, true)
             ),
             div{class_ = "nui-file-grid-table-rows"}(
                 Nui::range(impl().items).before(

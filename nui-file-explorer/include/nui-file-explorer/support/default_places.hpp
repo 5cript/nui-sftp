@@ -9,7 +9,8 @@ namespace NuiFileExplorer
      * Windows known folders on Windows) and exposes them via an RPC endpoint.
      *
      * Registers: @c "NuiFileExplorer::DefaultPlaces::list"
-     * Returns a JSON array of @c {name, path} objects.
+     * Returns a JSON array of @c {kind, name, path} objects. @c kind is a stable id (home, desktop, downloads,
+     * documents, music, pictures, videos) to pick icons and translations by, @c name is an English label.
      *
      * Construct this in the backend Main and call @c registerRpc() once the hub is alive.
      */

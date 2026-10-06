@@ -23,19 +23,20 @@ namespace NuiFileExplorer
 
         struct PlaceDef
         {
+            char const* kind;
             char const* name;
             char const* envVar; // nullptr for Home (uses HOME directly)
             char const* fallback; // relative to HOME
         };
 
         constexpr PlaceDef xdgPlaces[] = {
-            {"Home", nullptr, ""},
-            {"Desktop", "XDG_DESKTOP_DIR", "Desktop"},
-            {"Downloads", "XDG_DOWNLOAD_DIR", "Downloads"},
-            {"Documents", "XDG_DOCUMENTS_DIR", "Documents"},
-            {"Music", "XDG_MUSIC_DIR", "Music"},
-            {"Pictures", "XDG_PICTURES_DIR", "Pictures"},
-            {"Videos", "XDG_VIDEOS_DIR", "Videos"},
+            {"home", "Home", nullptr, ""},
+            {"desktop", "Desktop", "XDG_DESKTOP_DIR", "Desktop"},
+            {"downloads", "Downloads", "XDG_DOWNLOAD_DIR", "Downloads"},
+            {"documents", "Documents", "XDG_DOCUMENTS_DIR", "Documents"},
+            {"music", "Music", "XDG_MUSIC_DIR", "Music"},
+            {"pictures", "Pictures", "XDG_PICTURES_DIR", "Pictures"},
+            {"videos", "Videos", "XDG_VIDEOS_DIR", "Videos"},
         };
     }
 
@@ -65,6 +66,7 @@ namespace NuiFileExplorer
                           continue;
 
                       result.push_back({
+                          {"kind", def.kind},
                           {"name", def.name},
                           {"path", resolved.generic_string()},
                       });

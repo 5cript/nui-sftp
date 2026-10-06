@@ -5,11 +5,14 @@
 #include <string>
 
 /**
- * @brief The icon for a default place, picked by its untranslated name such as "Home" or "Downloads".
+ * @brief The icon for a default place, picked by its kind such as "home" or "downloads".
  */
-Nui::ElementRenderer iconForPlaceName(std::string const& name);
+Nui::ElementRenderer iconForPlaceKind(std::string const& kind);
 
 /**
- * @brief The translated label of a default place, or the name itself if it is not a known default place.
+ * @brief The translated label of a default place.
+ *
+ * @param kind The kind of the place, such as "home" or "downloads".
+ * @param fallback Shown for kinds without a translation.
  */
-std::string placeDisplayName(std::string const& name);
+std::string placeDisplayName(std::string const& kind, std::string const& fallback);

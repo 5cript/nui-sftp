@@ -41,11 +41,6 @@ namespace NuiFileExplorer
 
         Nui::ElementRenderer operator()(std::vector<Nui::Attribute>&& attributes = {});
 
-        /**
-         * @brief Triggered when an error occurs.
-         */
-        void onError(std::function<void(std::string const&)> const& callback);
-
         Side& leftSide();
         Side* rightSide();
 
@@ -56,6 +51,12 @@ namespace NuiFileExplorer
          * @brief Only visually, does not change what the methods leftSide and rightSide return.
          */
         void swapSides(bool doSwap);
+
+        /**
+         * @brief Replaces the texts of both sides, for example after a language change. Syncing the change is
+         * left to the caller.
+         */
+        void texts(Texts const& value);
 
       private:
         Nui::MoveDetector moveDetector_;

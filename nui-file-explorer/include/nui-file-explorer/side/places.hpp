@@ -1,6 +1,9 @@
 #pragma once
 
+#include <nui-file-explorer/texts.hpp>
+
 #include <nui/frontend/element_renderer.hpp>
+#include <nui/event_system/observed_value.hpp>
 
 #include <filesystem>
 #include <functional>
@@ -13,7 +16,14 @@ namespace NuiFileExplorer
     class Places
     {
       public:
-        Places(ISideModel& model, std::function<void(std::filesystem::path const&)> onNavigate);
+        /**
+         * @param texts Owned by the side, which outlives the places panel.
+         */
+        Places(
+            ISideModel& model,
+            Nui::Observed<Texts> const& texts,
+            std::function<void(std::filesystem::path const&)> onNavigate
+        );
         ~Places();
 
         Places(Places const&) = delete;
