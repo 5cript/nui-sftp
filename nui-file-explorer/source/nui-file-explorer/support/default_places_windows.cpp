@@ -29,18 +29,19 @@ namespace NuiFileExplorer
 
         struct FolderDef
         {
+            char const* kind;
             char const* name;
             KNOWNFOLDERID const* folderId;
         };
 
         FolderDef const windowsFolders[] = {
-            {"Home", &FOLDERID_Profile},
-            {"Desktop", &FOLDERID_Desktop},
-            {"Downloads", &FOLDERID_Downloads},
-            {"Documents", &FOLDERID_Documents},
-            {"Music", &FOLDERID_Music},
-            {"Pictures", &FOLDERID_Pictures},
-            {"Videos", &FOLDERID_Videos},
+            {"home", "Home", &FOLDERID_Profile},
+            {"desktop", "Desktop", &FOLDERID_Desktop},
+            {"downloads", "Downloads", &FOLDERID_Downloads},
+            {"documents", "Documents", &FOLDERID_Documents},
+            {"music", "Music", &FOLDERID_Music},
+            {"pictures", "Pictures", &FOLDERID_Pictures},
+            {"videos", "Videos", &FOLDERID_Videos},
         };
     }
 
@@ -65,6 +66,7 @@ namespace NuiFileExplorer
                     if (resolved.empty())
                         continue;
                     result.push_back({
+                        {"kind", def.kind},
                         {"name", def.name},
                         {"path", resolved},
                     });

@@ -89,6 +89,7 @@ namespace NuiFileExplorer
         {
             places_ = std::make_unique<Places>(
                 *impl_->model,
+                impl_->texts,
                 [this](std::filesystem::path const& path)
                 {
                     impl_->model->navigateTo(path);
@@ -674,7 +675,7 @@ namespace NuiFileExplorer
                 const auto localPath = thisIsLocal ? clickItems[0].fullPath : otherSelected[0].fullPath;
                 const auto remotePath = thisIsLocal ? otherSelected[0].fullPath : clickItems[0].fullPath;
                 menuItems.push_back(Snc::PopupMenu::item(
-                    "Synchronize...",
+                    impl_->texts.value().contextMenu.synchronize,
                     Ui5Icons::synchronize(),
                     [this, localPath, remotePath]() { impl_->onSynchronize(localPath, remotePath); }
                 ));
@@ -682,12 +683,12 @@ namespace NuiFileExplorer
             else
             {
                 menuItems.push_back(Snc::PopupMenu::item(
-                    "Synchronize...",
+                    impl_->texts.value().contextMenu.synchronize,
                     Ui5Icons::synchronize(),
                     {},
                     /*disabled=*/true,
                     /*shortcut=*/{},
-                    "Select exactly one directory on each side to synchronize."
+                    impl_->texts.value().contextMenu.synchronizeHint
                 ));
             }
         }
@@ -707,6 +708,17 @@ namespace NuiFileExplorer
     std::filesystem::path Side::path()
     {
         return model().currentPath().value();
+    }
+
+    void Side::texts(Texts value)
+    {
+        impl_->texts = std::move(value);
+        impl_->setMenuItems();
+    }
+
+    Texts const& Side::texts() const
+    {
+        return impl_->texts.value();
     }
 
     void Side::setOnSynchronize(
@@ -741,6 +753,15 @@ namespace NuiFileExplorer
         namespace Snc = ScriptNuiComponents;
 
         const std::string sideStr = model().isLeft() ? "left" : "right";
+        const auto toolbarText = [this](std::string Texts::Toolbar::* member)
+        {
+            return observe(impl_->texts).generate(
+                [this, member]()
+                {
+                    return impl_->texts.value().toolbar.*member;
+                }
+            );
+        };
 
         // clang-format off
         return div{
@@ -763,9 +784,9 @@ namespace NuiFileExplorer
                     }
                 });
             }(),
-            impl_->newItemMenu("New",  "nfe-new-"  + sideStr),
-            impl_->sortMenu("Sort", "nfe-sort-" + sideStr),
-            impl_->viewMenu("View", "nfe-view-" + sideStr),
+            impl_->newItemMenu(toolbarText(&Texts::Toolbar::newMenu), "nfe-new-" + sideStr),
+            impl_->sortMenu(toolbarText(&Texts::Toolbar::sortMenu), "nfe-sort-" + sideStr),
+            impl_->viewMenu(toolbarText(&Texts::Toolbar::viewMenu), "nfe-view-" + sideStr),
             div{}(
                 observe(impl_->showHiddenFiles),
                 [this]() -> Nui::ElementRenderer {
@@ -1035,7 +1056,9 @@ namespace NuiFileExplorer
             ScriptNuiComponents::textInput({
                 .value = "",
                 .attributes = {
-                    placeHolder = "Search",
+                    placeHolder = observe(impl_->texts).generate([this]() {
+                        return impl_->texts.value().toolbar.searchPlaceholder;
+                    }),
                     reference = [this](std::weak_ptr<Nui::Dom::BasicElement> const& ref){
                         impl_->searchTextBox = ref;
                     },

@@ -85,7 +85,7 @@ class RemoteSideModel
     ) override;
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
-    void onError(std::string const& error) override;
+    void onError(NuiFileExplorer::Error const& error) override;
 
     bool isLeft() const override
     {

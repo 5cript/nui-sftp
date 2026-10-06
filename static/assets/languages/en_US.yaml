@@ -25,9 +25,44 @@ fileExplorer:
     downloadAsArchive: "Download as Archive"
     removeFromFavorites: "Remove from Favorites"
     uploadAsArchive: "Upload as Archive"
+    synchronize: "Synchronize..."
+    synchronizeHint: "Select exactly one directory on each side to synchronize."
   archiveDefaultName: "archive"
   fileAlreadyExists: "File already exists"
-  fileGridError: "File Grid Error"
+  toolbar:
+    newMenu: "New"
+    sortMenu: "Sort"
+    viewMenu: "View"
+    searchPlaceholder: "Search"
+  newMenu:
+    file: "File"
+    folder: "Folder"
+  sortMenu:
+    nameAscending: "Name Ascending"
+    nameDescending: "Name Descending"
+    sizeAscending: "Size Ascending"
+    sizeDescending: "Size Descending"
+    infoAscending: "Info Ascending"
+    infoDescending: "Info Descending"
+    modificationTimeAscending: "Modification Time Ascending"
+    modificationTimeDescending: "Modification Time Descending"
+  viewMenu:
+    icons: "Icons"
+    table: "Table"
+  columns:
+    name: "Name"
+    size: "Size"
+    info: "Info"
+    lastModified: "Last Modified"
+  places:
+    places: "Places"
+    favorites: "Favorites"
+    devices: "Devices"
+    drives: "Drives"
+    root: "Root"
+  errors:
+    dropOnSameSide: "Moving items by drag and drop within the same side is not supported."
+    dropDataUnreadable: "Failed to read the drag and drop data: {}"
 newSessionDialog:
   title: "Create New Session"
   validationMessage: "Please fill in all required fields."

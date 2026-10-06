@@ -38,9 +38,7 @@ namespace NuiFileExplorer
         {
             if (side_->model().isLeft())
             {
-                side_->model().onError(
-                    "Dropping external items on the local side is not supported yet. Copy files via the system means."
-                );
+                side_->model().onError(Error{.code = ErrorCode::ExternalDropOnLocalSide});
                 return;
             }
             Nui::WebApi::Console::log("External items dropped: ", eventExtracted->externDroppedItems->size());
@@ -70,7 +68,7 @@ namespace NuiFileExplorer
             else
             {
                 // TODO: else its a move within the same side.
-                side_->model().onError("drag and drop on the same side is not implemented");
+                side_->model().onError(Error{.code = ErrorCode::DropOnSameSide});
             }
         }
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nui-file-explorer/item.hpp>
+#include <nui-file-explorer/error.hpp>
 #include <nui-file-explorer/flavor.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
 #include <nui-file-explorer/favorites_provider_interface.hpp>
@@ -124,9 +125,9 @@ namespace NuiFileExplorer
         ) = 0;
 
         /**
-         * @brief Triggered when an error occurs.
+         * @brief Triggered when an error occurs. The model words the error, so it can localize it.
          */
-        virtual void onError(std::string const& error) = 0;
+        virtual void onError(Error const& error) = 0;
 
         /**
          * @brief Create a list of suggestions for the path box based on the given path.

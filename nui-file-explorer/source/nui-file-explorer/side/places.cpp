@@ -19,14 +19,20 @@ namespace NuiFileExplorer
     struct Places::Implementation
     {
         ISideModel* model;
+        Nui::Observed<Texts> const* texts;
         std::function<void(std::filesystem::path const&)> onNavigate;
 
         Nui::Observed<std::vector<IPlacesProvider::PlaceEntry>> defaultPlaces{};
         Nui::Observed<std::vector<IPlacesProvider::PlaceEntry>> drives{};
         std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites{};
 
-        explicit Implementation(ISideModel& mdl, std::function<void(std::filesystem::path const&)> nav)
+        Implementation(
+            ISideModel& mdl,
+            Nui::Observed<Texts> const& txts,
+            std::function<void(std::filesystem::path const&)> nav
+        )
             : model{&mdl}
+            , texts{&txts}
             , onNavigate{std::move(nav)}
         {
             if (auto* prov = model->placesProvider(); prov)
@@ -54,10 +60,24 @@ namespace NuiFileExplorer
                 favorites = prov->favorites();
             }
         }
+
+        auto text(std::string Texts::Places::* member) const
+        {
+            return Nui::observe(*texts).generate(
+                [this, member]()
+                {
+                    return texts->value().places.*member;
+                }
+            );
+        }
     };
 
-    Places::Places(ISideModel& model, std::function<void(std::filesystem::path const&)> onNavigate)
-        : impl_{std::make_unique<Implementation>(model, std::move(onNavigate))}
+    Places::Places(
+        ISideModel& model,
+        Nui::Observed<Texts> const& texts,
+        std::function<void(std::filesystem::path const&)> onNavigate
+    )
+        : impl_{std::make_unique<Implementation>(model, texts, std::move(onNavigate))}
     {}
 
     void Places::reloadDefaultPlaces()
@@ -100,7 +120,7 @@ namespace NuiFileExplorer
                 return div{}(
                     Nui::range(impl_->defaultPlaces)
                         .before(
-                            div{class_ = "nui-file-grid-places-section-header"}("Places")
+                            div{class_ = "nui-file-grid-places-section-header"}(impl_->text(&Texts::Places::places))
                         ),
                     [this](long long /*idx*/, IPlacesProvider::PlaceEntry const& entry) -> Nui::ElementRenderer {
                         return div{
@@ -122,7 +142,7 @@ namespace NuiFileExplorer
                 return div{}(
                     Nui::range(*impl_->favorites)
                         .before(
-                            div{class_ = "nui-file-grid-places-section-header"}("Favorites")
+                            div{class_ = "nui-file-grid-places-section-header"}(impl_->text(&Texts::Places::favorites))
                         ),
                     [this, favProv](long long /*idx*/, std::filesystem::path const& fav) -> Nui::ElementRenderer {
                         return div{
@@ -150,7 +170,7 @@ namespace NuiFileExplorer
                 if (!impl_->model->showRootEntry())
                     return Nui::nil();
                 return div{}(
-                    div{class_ = "nui-file-grid-places-section-header"}("Devices"),
+                    div{class_ = "nui-file-grid-places-section-header"}(impl_->text(&Texts::Places::devices)),
                     div{
                         class_ = "nui-file-grid-places-item",
                         onClick = [this]() {
@@ -158,7 +178,7 @@ namespace NuiFileExplorer
                         }
                     }(
                         span{class_ = "nui-file-grid-places-item-icon"}(Ui5Icons::home()),
-                        span{}("Root")
+                        span{}(impl_->text(&Texts::Places::root))
                     )
                 );
             }(),
@@ -169,7 +189,7 @@ namespace NuiFileExplorer
                 return div{}(
                     Nui::range(impl_->drives)
                         .before(
-                            div{class_ = "nui-file-grid-places-section-header"}("Drives")
+                            div{class_ = "nui-file-grid-places-section-header"}(impl_->text(&Texts::Places::drives))
                         ),
                     [this](long long /*idx*/, IPlacesProvider::PlaceEntry const& entry) -> Nui::ElementRenderer {
                         return div{

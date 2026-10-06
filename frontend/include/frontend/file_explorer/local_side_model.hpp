@@ -88,7 +88,7 @@ class LocalSideModel
     ) override;
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
-    void onError(std::string const& error) override;
+    void onError(NuiFileExplorer::Error const& error) override;
     void onOpen(NuiFileExplorer::Item const& item, bool openWith);
 
     /**

@@ -132,6 +132,17 @@ namespace NuiFileExplorer
         std::vector<Item> selectedItems() const;
 
         /**
+         * @brief Replaces the texts the side renders, for example after a language change. Syncing the change is
+         * left to the caller.
+         */
+        void texts(Texts value);
+
+        /**
+         * @brief The texts the side currently renders.
+         */
+        Texts const& texts() const;
+
+        /**
          * @brief Sets a callback invoked when both sides have exactly one directory-like item
          *        selected and the user triggers the "Synchronize..." context menu entry.
          *        The callback receives (localPath, remotePath) regardless of which side's

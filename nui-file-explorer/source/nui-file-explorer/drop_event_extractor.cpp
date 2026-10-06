@@ -247,7 +247,7 @@ namespace NuiFileExplorer
             }
             catch (std::exception const& e)
             {
-                sideModel.onError(std::string{"Failed to parse drag and drop data: "} + e.what());
+                sideModel.onError(Error{.code = ErrorCode::DropDataUnreadable, .detail = e.what()});
                 return std::nullopt;
             }
         }
