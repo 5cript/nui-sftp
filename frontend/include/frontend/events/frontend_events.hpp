@@ -7,6 +7,18 @@
 
 #include <persistence/state/state.hpp>
 
+#include <string>
+
+/**
+ * @brief Version of the running program, as reported by the backend.
+ */
+struct AppVersion
+{
+    std::string version{};
+    std::string gitTag{};
+    std::string gitBranch{};
+};
+
 struct FrontendEvents : public AppWideEvents
 {
     FrontendEvents()
@@ -28,6 +40,10 @@ struct FrontendEvents : public AppWideEvents
     /// gate on this rather than polling the DOM.
     Nui::Observed<bool> settingsInitialLoadComplete{false};
     Nui::Observed<bool> licensesOpen{false};
+    /**
+     * @brief Filled once from the backend after setup, empty until then.
+     */
+    Nui::Observed<AppVersion> appVersion{};
     /// Whether the notification log page is shown; opened from the toolbar or by clicking a toast.
     Nui::Observed<bool> notificationLogOpen{false};
     /// Opens settings and scrolls to the rendered element whose DOM id equals

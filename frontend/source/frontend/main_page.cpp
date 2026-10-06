@@ -100,6 +100,18 @@ void MainPage::onSetupComplete()
 {
     Log::info("Setup is complete.");
     Nui::RpcClient::callWithBackChannel(
+        "Main::getVersion",
+        [this](Nui::val response)
+        {
+            impl_->events->appVersion = AppVersion{
+                .version = response["version"].as<std::string>(),
+                .gitTag = response["gitTag"].as<std::string>(),
+                .gitBranch = response["gitBranch"].as<std::string>(),
+            };
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+    );
+    Nui::RpcClient::callWithBackChannel(
         "Main::getInitialPersistenceLoadWarning",
         [this](Nui::val response)
         {

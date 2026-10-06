@@ -10,6 +10,7 @@
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <utility/resources.hpp>
+#include <version.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
 
 #include <nui/core.hpp>
@@ -252,6 +253,7 @@ void Main::registerRpc()
     processes_.registerRpc(window_, hub_);
     sshSessionManager_->registerRpc();
     registerInitialWarningGetter();
+    registerVersionGetter();
     registerCommandStore();
 
     defaultPlacesProvider_ = std::make_unique<NuiFileExplorer::DefaultPlacesProvider>(hub_);
@@ -359,6 +361,24 @@ void Main::registerInitialWarningGetter()
                 nlohmann::json{
                     {"warning", initialPersistenceLoadWarning_},
                     {"isRoot", runningAsRoot},
+                }
+            );
+        }
+    );
+}
+
+void Main::registerVersionGetter()
+{
+    hub_.registerFunction(
+        "Main::getVersion",
+        [this](std::string responseId)
+        {
+            hub_.callRemote(
+                responseId,
+                nlohmann::json{
+                    {"version", VERSION},
+                    {"gitTag", GIT_TAG},
+                    {"gitBranch", GIT_BRANCH},
                 }
             );
         }

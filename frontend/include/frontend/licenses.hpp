@@ -19,6 +19,7 @@ class Licenses
     Nui::ElementRenderer header();
     Nui::ElementRenderer sidebar();
     Nui::ElementRenderer main();
+    Nui::ElementRenderer about();
 
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

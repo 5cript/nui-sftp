@@ -3,6 +3,8 @@
 #include <licenses_data.hpp>
 
 #include <log/log.hpp>
+#include <utility/language.hpp>
+#include <script-nui-components/tabs.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -79,15 +81,42 @@ struct Licenses::Implementation
     Nui::Observed<std::string> filter{};
     /// Index into `entries`, or -1 to show the "All" view.
     Nui::Observed<long long> selectedIndex{-1};
+    ScriptNuiComponents::Tabs tabs{ScriptNuiComponents::Tabs::ClassNames{
+        .bar = "lm-TabBar lm-TabBar-content",
+        .item = "licenses-page-tab-item",
+        .tab = "lm-TabBar-tab",
+        .selectedTab = "lm-mod-current",
+        .label = "lm-TabBar-tabLabel",
+    }};
+    int licensesTabId{-1};
+    int aboutTabId{-1};
+    Nui::Observed<int> activeTabId{-1};
 
     explicit Implementation(FrontendEvents* events)
         : events{events}
     {}
+
+    void selectTab(int tabId)
+    {
+        tabs.select(tabId);
+        activeTabId = tabId;
+    }
 };
 
 Licenses::Licenses(FrontendEvents* events)
     : impl_{std::make_unique<Implementation>(events)}
-{}
+{
+    impl_->licensesTabId = impl_->tabs.add(language->get("licenses", "licensesTab"), false);
+    impl_->aboutTabId = impl_->tabs.add(language->get("licenses", "aboutTab"), false);
+    impl_->selectTab(impl_->licensesTabId);
+    impl_->tabs.onSelect(
+        [this](int tabId)
+        {
+            impl_->activeTabId = tabId;
+            return true;
+        }
+    );
+}
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Licenses);
 
 void Licenses::loadIfNeeded()
@@ -135,7 +164,7 @@ Nui::ElementRenderer Licenses::header()
     using Nui::Elements::span;
 
     return div{class_ = "licenses-page-header"}(
-        span{class_ = "licenses-page-title"}("Third-Party Licenses"),
+        span{class_ = "licenses-page-title"}(language->getObserved("licenses", "title")),
         button{
             class_ = "licenses-close-button",
             onClick = [this](Nui::val) {
@@ -272,6 +301,51 @@ Nui::ElementRenderer Licenses::main()
     );
 }
 
+Nui::ElementRenderer Licenses::about()
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+    using Nui::Elements::a;
+
+    const auto detailRow = [](std::string const& label, std::string const& value) -> Nui::ElementRenderer
+    {
+        if (value.empty() || value == "N/A")
+            return Nui::nil();
+        return div{class_ = "licenses-about-detail"}(
+            span{class_ = "licenses-about-detail-label"}(label),
+            span{class_ = "licenses-about-detail-value"}(value)
+        );
+    };
+
+    return div{class_ = "licenses-about"}(
+        div{class_ = "licenses-about-name"}("nui-sftp"),
+        div{class_ = "licenses-about-version"}(
+            Nui::observe(impl_->events->appVersion).generate([this]() {
+                const auto& version = impl_->events->appVersion.value().version;
+                return version.empty() ? std::string{"..."} : version;
+            })
+        ),
+        div{class_ = "licenses-about-details"}(
+            Nui::observe(impl_->events->appVersion, impl_->events->onLanguageChanged),
+            [this, detailRow]() -> Nui::ElementRenderer {
+                const auto& version = impl_->events->appVersion.value();
+                return Nui::Elements::fragment(
+                    detailRow(language->get("licenses", "gitTag"), version.gitTag),
+                    detailRow(language->get("licenses", "gitBranch"), version.gitBranch)
+                );
+            }
+        ),
+        a{
+            class_ = "licenses-about-link",
+            href = "https://github.com/5cript/nui-sftp",
+            target = "_blank",
+            rel = "noopener",
+        }("github.com/5cript/nui-sftp")
+    );
+}
+
 Nui::ElementRenderer Licenses::operator()()
 {
     using namespace Nui::Elements;
@@ -279,9 +353,23 @@ Nui::ElementRenderer Licenses::operator()()
     using Nui::Elements::div;
 
     Nui::listen(impl_->events->licensesOpen, [this](bool isOpen) {
-        if (isOpen)
-            loadIfNeeded();
+        if (!isOpen)
+            return;
+        loadIfNeeded();
+        impl_->selectTab(impl_->licensesTabId);
     });
+
+    Nui::listen(impl_->events->onLanguageChanged, [this](std::string const&) {
+        const auto retitle = [this](int tabId, char const* key) {
+            impl_->tabs.modifyTabById(tabId, [key](ScriptNuiComponents::Tabs::Tab* tab) {
+                if (tab)
+                    tab->title = language->get("licenses", key);
+            });
+        };
+        retitle(impl_->licensesTabId, "licensesTab");
+        retitle(impl_->aboutTabId, "aboutTab");
+    });
+
 
     return div{
         class_ = "licenses-page-background-blocker",
@@ -297,9 +385,22 @@ Nui::ElementRenderer Licenses::operator()()
     }(
         div{class_ = "licenses-page"}(
             header(),
+            div{class_ = "licenses-page-tab-strip"}(
+                impl_->tabs({"data-class"_attr = "licenses-page-tabs"})
+            ),
+            // The about page covers the licenses instead of toggling them, since any style change
+            // on the licenses relays out the large license text, which takes a few hundred ms.
             div{class_ = "licenses-page-content"}(
                 sidebar(),
                 main()
+            ),
+            div{
+                class_ = "licenses-about-page",
+                style = Nui::observe(impl_->activeTabId).generate([this]() -> std::string {
+                    return impl_->activeTabId.value() == impl_->aboutTabId ? std::string{} : std::string{"visibility: hidden;"};
+                }),
+            }(
+                about()
             )
         )
     );

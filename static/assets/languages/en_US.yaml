@@ -301,6 +301,7 @@ fileTracking:
   headerCleanupButton: "Clean Up Orphaned"
   headerCleanupRunning: "Cleaning…"
 settings:
+  version: "Version"
   settingsRestartRequiredHeader: "Restart Required"
   settingsRestartRequiredText: "You have changed a setting that only takes effect after the application is restarted.\nPlease restart the application to apply the changes."
   restartRequiredMessage: "A setting was changed that only takes effect after an application restart."
@@ -819,3 +820,9 @@ onboarding:
   next: "Next"
   finish: "Finish"
   skip: "Skip"
+licenses:
+  title: "About & Licenses"
+  licensesTab: "Licenses"
+  aboutTab: "About"
+  gitTag: "Tag"
+  gitBranch: "Branch"
