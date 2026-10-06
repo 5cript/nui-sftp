@@ -7,6 +7,7 @@
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <persistence/state/state.hpp>
+#include <persistence/load_warning.hpp>
 
 #include <functional>
 
@@ -22,7 +23,7 @@ namespace Persistence
             std::function<void(
                 std::optional<std::string> const& /*error*/,
                 StateHolder&,
-                std::optional<std::string> const& /*warning*/
+                LoadWarnings const& /*warnings*/
             )> const& onLoad
         );
         void save(
@@ -52,7 +53,7 @@ namespace Persistence
         State& stateCache();
 
         /**
-         * @brief Clears any cached warning from prior loads. To be called once the warning has been
+         * @brief Clears any cached warnings from prior loads. To be called once the warning has been
          * presented to the user, so it is not shown again on subsequent loads.
          */
         void clearWarnings(std::function<void()> const& onComplete = [] {});
@@ -72,17 +73,17 @@ namespace Persistence
 
         void registerRpc(Nui::RpcHub& rpcHub);
         /**
-         * @brief
+         * @brief Adds missing defaults to the state cache and writes it back if anything changed.
          *
-         * @param before
-         * @return std::optional<std::string> A warning string if something was changed.
+         * @param before The json as it was read from disk.
+         * @return What was changed, empty if nothing was.
          */
-        std::optional<std::string> dataFixer(nlohmann::json const& before);
+        LoadWarnings dataFixer(nlohmann::json const& before);
 #endif
 
       private:
         State stateCache_{};
         std::filesystem::path programDirectory_;
-        std::optional<std::string> cachedWarning_{std::nullopt};
+        LoadWarnings cachedWarnings_{};
     };
 } // namespace Persistence

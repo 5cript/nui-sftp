@@ -18,6 +18,7 @@
 #include <frontend/notifications.hpp>
 #include <frontend/notification_center.hpp>
 #include <frontend/notification_log.hpp>
+#include <frontend/persistence_load_warnings.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -117,13 +118,10 @@ void MainPage::onSetupComplete()
         {
             auto showPersistenceWarning = [this, response]()
             {
-                if (!response.hasOwnProperty("warning"))
-                {
-                    impl_->onboarding.maybeStart();
-                    return;
-                }
-                const auto warning = response["warning"].as<std::string>();
-                if (warning.empty())
+                const auto warnings = response.hasOwnProperty("warnings")
+                    ? Persistence::parseLoadWarnings(response["warnings"])
+                    : Persistence::LoadWarnings{};
+                if (warnings.empty())
                 {
                     impl_->onboarding.maybeStart();
                     return;
@@ -136,7 +134,9 @@ void MainPage::onSetupComplete()
                 impl_->confirmDialog.open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
                     .headerText = language->get("persistence", "warningLoadingState"),
-                    .text = fmt::format(fmt::runtime(language->get("persistence", "loadedWithWarnings")), warning),
+                    .text = fmt::format(
+                        fmt::runtime(language->get("persistence", "loadedWithWarnings")), formatLoadWarnings(warnings)
+                    ),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "persistenceLoadWarning",
                     .onClose = [this](auto)
@@ -207,4 +207,4 @@ Nui::ElementRenderer MainPage::render()
         )
     );
     // clang-format on
-}
+}

@@ -792,6 +792,20 @@ settings:
 persistence:
   warningLoadingState: "Warning loading state"
   loadedWithWarnings: "The application state was loaded with warnings:\n\n{}\n\nPlease check your configuration."
+  errorLoadingState: "Error loading state"
+  loadFailed: "An error occurred while loading the application state: {}\n{}\nDefault state will be used."
+  loadWarnings:
+    configUnreadable: "The config file could not be read and was replaced with defaults. The unreadable file was saved as {}.\nReason: {}"
+    unknownEntriesRemoved: "The config contained entries that this version does not understand, so they were removed. They might be typos or settings from a newer version. Please check the config file and re-apply any settings you need.\nRemoved entries:\n{}"
+    missingFieldsDefaulted: "The following required fields were missing in the config and were set to defaults:\n{}"
+    addedDefaultTermios: "Added default termios settings."
+    addedDefaultTerminalOptions: "Added default terminal options."
+    addedNebulaTerminalOptions: "Added the 'nebula' terminal options preset."
+    addedDefaultSshOptions: "Added default SSH options."
+    addedDefaultSftpOptions: "Added default SFTP options."
+    addedDefaultQueueOptions: "Added default queue options."
+    addedDefaultHistoryOptions: "Added default history options."
+    wroteMissingDefaults: "Wrote the missing default settings to the config file."
 rootWarning:
   header: "Running as root is strongly discouraged"
   text: "nui-sftp is running with root privileges.\n\nThis is dangerous and unnecessary:\n  - Files transferred or created will be owned by root.\n  - A bug, a malicious server, or a compromised remote can damage your entire system.\n  - The user D-Bus session is unavailable, so opening files with external applications will not work.\n  - SSH keys, agents and configuration normally found in your real home directory will not be picked up.\n\nClose the application and restart it as your normal user. Use sudo only when you genuinely need to manipulate files that require it, and prefer changing file ownership over running the whole GUI as root."

@@ -790,6 +790,20 @@ settings:
 persistence:
   warningLoadingState: "Warnung beim Laden des Zustands"
   loadedWithWarnings: "Der Anwendungszustand wurde mit Warnungen geladen:\n\n{}\n\nBitte überprüfen Sie Ihre Konfiguration."
+  errorLoadingState: "Fehler beim Laden des Zustands"
+  loadFailed: "Beim Laden des Anwendungszustands ist ein Fehler aufgetreten: {}\n{}\nEs wird der Standardzustand verwendet."
+  loadWarnings:
+    configUnreadable: "Die Konfigurationsdatei konnte nicht gelesen werden und wurde durch Standardwerte ersetzt. Die unlesbare Datei wurde als {} gesichert.\nGrund: {}"
+    unknownEntriesRemoved: "Die Konfiguration enthielt Einträge, die diese Version nicht versteht, daher wurden sie entfernt. Es könnte sich um Tippfehler oder Einstellungen aus einer neueren Version handeln. Bitte prüfen Sie die Konfigurationsdatei und übernehmen Sie benötigte Einstellungen erneut.\nEntfernte Einträge:\n{}"
+    missingFieldsDefaulted: "Die folgenden erforderlichen Felder fehlten in der Konfiguration und wurden auf Standardwerte gesetzt:\n{}"
+    addedDefaultTermios: "Standard-Termios-Einstellungen hinzugefügt."
+    addedDefaultTerminalOptions: "Standard-Terminaloptionen hinzugefügt."
+    addedNebulaTerminalOptions: "Terminaloptionen-Vorlage 'nebula' hinzugefügt."
+    addedDefaultSshOptions: "Standard-SSH-Optionen hinzugefügt."
+    addedDefaultSftpOptions: "Standard-SFTP-Optionen hinzugefügt."
+    addedDefaultQueueOptions: "Standard-Warteschlangenoptionen hinzugefügt."
+    addedDefaultHistoryOptions: "Standard-Verlaufsoptionen hinzugefügt."
+    wroteMissingDefaults: "Die fehlenden Standardeinstellungen wurden in die Konfigurationsdatei geschrieben."
 rootWarning:
   header: "Ausführung als root wird dringend abgeraten"
   text: "nui-sftp läuft mit Root-Rechten.\n\nDas ist gefährlich und unnötig:\n  - Übertragene oder neu erstellte Dateien gehören anschließend root.\n  - Ein Fehler, ein bösartiger Server oder ein kompromittiertes Gegenüber kann Ihr gesamtes System beschädigen.\n  - Die Benutzer-D-Bus-Sitzung ist nicht verfügbar, daher funktioniert das Öffnen von Dateien mit externen Anwendungen nicht.\n  - SSH-Schlüssel, Agents und Konfiguration aus Ihrem eigentlichen Heimatverzeichnis werden nicht verwendet.\n\nBitte schließen Sie die Anwendung und starten Sie sie als normaler Benutzer neu. Verwenden Sie sudo nur, wenn Sie wirklich Dateien bearbeiten müssen, die das erfordern, und ändern Sie lieber Dateiberechtigungen als die gesamte Oberfläche als root zu starten."

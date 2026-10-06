@@ -2,6 +2,8 @@
 
 #include <persistence/state_holder.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/persistence_load_warnings.hpp>
+#include <utility/language.hpp>
 
 inline void loadState(
     Persistence::StateHolder& stateHolder,
@@ -14,34 +16,29 @@ inline void loadState(
         [confirmDialog, onLoad, extraErrorMessage](
             std::optional<std::string> const& error,
             Persistence::StateHolder& holder,
-            std::optional<std::string> const& warning
+            Persistence::LoadWarnings const& warnings
         )
         {
             if (error)
             {
-                const std::string extraMessage = extraErrorMessage.value_or("");
-
                 confirmDialog->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = "Error loading state",
+                    .headerText = language->get("persistence", "errorLoadingState"),
                     .text = fmt::format(
-                        "An error occurred while loading the application state: {}\n{}\nDefault state will be used.",
-                        *error,
-                        extraMessage
+                        fmt::runtime(language->get("persistence", "loadFailed")), *error, extraErrorMessage.value_or("")
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
                 return onLoad(false, holder.stateCache().fullyResolve());
             }
 
-            if (warning)
+            if (!warnings.empty())
             {
                 confirmDialog->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                    .headerText = "Warning loading state",
+                    .headerText = language->get("persistence", "warningLoadingState"),
                     .text = fmt::format(
-                        "The application state was loaded with warnings:\n{}\nPlease check your configuration.",
-                        *warning
+                        fmt::runtime(language->get("persistence", "loadedWithWarnings")), formatLoadWarnings(warnings)
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "persistenceLoadWarning",

@@ -78,7 +78,7 @@ class Main
     std::shared_ptr<SessionManager> sshSessionManager_;
     boost::asio::steady_timer childSignalTimer_;
     // for display later in UI
-    std::string initialPersistenceLoadWarning_;
+    Persistence::LoadWarnings initialPersistenceLoadWarnings_;
     AppWideEvents events_;
     ThemeFinder themeFinder_;
     std::once_flag rpcAliveOnce_;

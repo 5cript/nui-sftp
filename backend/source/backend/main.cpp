@@ -176,7 +176,7 @@ namespace
 Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
 {
     stateHolder.load(
-        [](std::optional<std::string> const&, Persistence::StateHolder& holder, std::optional<std::string> const&)
+        [](std::optional<std::string> const&, Persistence::StateHolder& holder, Persistence::LoadWarnings const&)
         {
             auto const& state = holder.stateCache();
             Log::Logger::setupGlobalSinks(
@@ -262,13 +262,13 @@ void Main::registerRpc()
         [this](
             std::optional<std::string> const& error,
             Persistence::StateHolder& holder,
-            std::optional<std::string> const& warning
+            Persistence::LoadWarnings const& warnings
         )
         {
-            if (warning)
+            if (!warnings.empty())
             {
-                Log::warn("Warning loading state: {}", *warning);
-                initialPersistenceLoadWarning_ = *warning;
+                Log::warn("Warnings loading state: {}", nlohmann::json(warnings).dump());
+                initialPersistenceLoadWarnings_ = warnings;
             }
 
             opener_ = std::make_unique<Opener>(window_.getNativeWindow());
@@ -356,7 +356,7 @@ void Main::registerInitialWarningGetter()
             hub_.callRemote(
                 responseId,
                 nlohmann::json{
-                    {"warning", initialPersistenceLoadWarning_},
+                    {"warnings", initialPersistenceLoadWarnings_},
                     {"isRoot", runningAsRoot},
                 }
             );
@@ -474,4 +474,4 @@ int main(int const argc, char const* const* argv)
     }
 
     ssh_finalize();
-}
+}

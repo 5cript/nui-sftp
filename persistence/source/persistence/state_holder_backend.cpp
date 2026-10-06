@@ -7,6 +7,7 @@
 #include <build_environment.hpp>
 
 #include <fmt/chrono.h>
+#include <fmt/ranges.h>
 #include <nui/backend/filesystem/special_paths.hpp>
 
 #include <filesystem>
@@ -29,7 +30,7 @@ namespace Persistence
                 std::filesystem::create_directories(parentPath);
         }
 
-        auto makeBackup(std::filesystem::path const& path)
+        std::filesystem::path makeBackup(std::filesystem::path const& path)
         {
             const auto backupFileName = [&path]()
             {
@@ -46,25 +47,33 @@ namespace Persistence
                 writer << reader.rdbuf();
             }
             Log::info("Copied config file to backup: {}", backupFileName.string());
-        };
+            return backupFileName;
+        }
+
+        LoadWarning unreadableConfig(std::filesystem::path const& path, std::exception const& exception)
+        {
+            Log::error("Failed to parse config file: {}", exception.what());
+            return LoadWarning{
+                .kind = LoadWarningKind::ConfigUnreadable,
+                .arguments = {makeBackup(path).string(), exception.what()},
+            };
+        }
     }
 
     void StateHolder::load(
-        std::function<void(
-            std::optional<std::string> const& error,
-            StateHolder&,
-            std::optional<std::string> const& warning
-        )> const& onLoad
+        std::function<void(std::optional<std::string> const& error, StateHolder&, LoadWarnings const& warnings)> const&
+            onLoad
     )
     {
         setupPersistence();
         const auto path = Nui::resolvePath(Constants::persistencePath);
 
         std::optional<std::string> error{std::nullopt};
-        bool fileExisted = false;
         try
         {
-            const auto before = [&path, &error, &fileExisted]()
+            std::optional<LoadWarning> unreadable{std::nullopt};
+            bool fileExisted = false;
+            const auto before = [&path, &unreadable, &fileExisted]()
             {
                 try
                 {
@@ -77,94 +86,66 @@ namespace Persistence
                     fileExisted = true;
                     return nlohmann::json::parse(reader, nullptr, true, true);
                 }
-                catch (nlohmann::json::parse_error const& e)
-                {
-                    Log::error("Failed to parse config file: {}", e.what());
-                    error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup(path);
-                    return nlohmann::json(nullptr);
-                }
-                catch (nlohmann::json::exception const& e)
-                {
-                    Log::error("Failed to parse config file: {}", e.what());
-                    error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup(path);
-                    return nlohmann::json(nullptr);
-                }
                 catch (std::exception const& e)
                 {
-                    Log::error("Failed to parse config file: {}", e.what());
-                    error = fmt::format("Failed to parse config file: {}", e.what());
-                    makeBackup(path);
+                    unreadable = unreadableConfig(path, e);
                     return nlohmann::json(nullptr);
                 }
             }();
 
-            auto appendWarning = [this](std::optional<std::string> const& warning)
+            const auto appendWarnings = [this](LoadWarnings const& warnings)
             {
-                if (!warning)
-                    return;
-                cachedWarning_ = cachedWarning_ ? *cachedWarning_ + "\n" + *warning : *warning;
+                cachedWarnings_.insert(cachedWarnings_.end(), warnings.begin(), warnings.end());
             };
 
             if (before.is_null())
             {
                 // Save something valid
-                const auto warning = dataFixer(nlohmann::json::object());
-                // On a true first run (no file existed) every default we just
-                // populated is expected behaviour, not something to warn about.
-                // Only surface warnings if the file existed but was unreadable.
-                if (fileExisted)
-                    appendWarning(warning);
-                error = std::nullopt;
+                const auto warnings = dataFixer(nlohmann::json::object());
+                // On a true first run (no file existed) every default we just populated is expected behaviour, not
+                // something to warn about. An unreadable file already says that the defaults replaced it.
+                if (unreadable)
+                    appendWarnings({*unreadable});
+                else if (fileExisted)
+                    appendWarnings(warnings);
             }
             else
             {
                 stateCache_ = State{};
                 before.get_to(stateCache_);
-                auto warning = dataFixer(before);
-                auto missing = stateCache_.collectMissingMembers(stateCache_);
+                auto warnings = dataFixer(before);
+                const auto missing = stateCache_.collectMissingMembers(stateCache_);
                 if (!missing.empty())
                 {
-                    if (warning)
-                    {
-                        *warning += "\n";
-                    }
-                    else
-                    {
-                        warning =
-                            "The following required fields were missing in the config and were set to defaults:\n";
-                    }
-                    for (auto const& member : missing)
-                    {
-                        *warning += fmt::format("- {}\n", member);
-                    }
+                    warnings.push_back(
+                        LoadWarning{
+                            .kind = LoadWarningKind::MissingFieldsDefaulted,
+                            .arguments = {fmt::format("- {}", fmt::join(missing, "\n- "))},
+                        }
+                    );
                 }
-                appendWarning(warning);
+                appendWarnings(warnings);
             }
         }
         catch (std::exception const& e)
         {
             Log::error("Failed to load config file: {}", e.what());
-            error = fmt::format("Failed to load config file: {}", e.what());
+            error = e.what();
         }
 
-        onLoad(error, *this, cachedWarning_);
+        onLoad(error, *this, cachedWarnings_);
     }
 
-    std::optional<std::string> StateHolder::dataFixer(nlohmann::json const& before)
+    LoadWarnings StateHolder::dataFixer(nlohmann::json const& before)
     {
         const auto after = nlohmann::json(stateCache_);
         const auto diff = nlohmann::json::diff(before, after);
         bool mustSave = !diff.empty();
-        std::optional<std::string> warning{std::nullopt};
+        LoadWarnings warnings{};
 
-        auto extendWarning = [&](std::string const& msg)
+        const auto addWarning = [&warnings](LoadWarningKind kind, std::vector<std::string> arguments = {})
         {
-            if (warning)
-                *warning += "\n" + msg;
-            else
-                warning = msg;
+            warnings.push_back(LoadWarning{.kind = kind, .arguments = std::move(arguments)});
         };
 
         if (mustSave)
@@ -183,14 +164,7 @@ namespace Persistence
             }
             if (!droppedOps.empty())
             {
-                extendWarning(
-                    fmt::format(
-                        "Loaded json contains entries that are not understood by this version and were removed.\n"
-                        "These might have been some typos or entries from a newer version.\nPlease check the config "
-                        "file and re-apply any necessary settings.\nDiff:\n{}",
-                        droppedOps.dump(4)
-                    )
-                );
+                addWarning(LoadWarningKind::UnknownEntriesRemoved, {droppedOps.dump(4)});
             }
         }
 
@@ -200,7 +174,7 @@ namespace Persistence
         {
             Log::warn("Config file misses termios, adding defaults.");
             stateCache_.termios["default"] = Termios::saneDefaults();
-            extendWarning("Added default termios settings.");
+            addWarning(LoadWarningKind::AddedDefaultTermios);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -229,7 +203,7 @@ namespace Persistence
                     .white = "#efefef",
                 },
             };
-            extendWarning("Added default terminal options.");
+            addWarning(LoadWarningKind::AddedDefaultTerminalOptions);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -279,7 +253,7 @@ namespace Persistence
                     .yellow = "#e5c87a",
                 },
             };
-            extendWarning("Added 'nebula' terminal options preset.");
+            addWarning(LoadWarningKind::AddedNebulaTerminalOptions);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -305,7 +279,7 @@ namespace Persistence
                 .connectTimeoutSeconds = 5,
                 .localeEnv = "en_US.UTF-8",
             };
-            extendWarning("Added default ssh options.");
+            addWarning(LoadWarningKind::AddedDefaultSshOptions);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -354,7 +328,7 @@ namespace Persistence
                 .operationTimeout = 5s
             };
 #pragma clang diagnostic pop
-            extendWarning("Added default sftp options.");
+            addWarning(LoadWarningKind::AddedDefaultSftpOptions);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -366,7 +340,7 @@ namespace Persistence
             stateCache_.queueOptions["default"] = QueueOptions{
                 .startInPausedState = true,
             };
-            extendWarning("Added default queue options.");
+            addWarning(LoadWarningKind::AddedDefaultQueueOptions);
             mustSave = true;
             hasMissingDefaults = true;
         }
@@ -378,7 +352,7 @@ namespace Persistence
             stateCache_.historyOptions["default"] = HistoryOptions{
                 .captureMode = HistoryCaptureMode::smart,
             };
-            extendWarning("Added default history options.");
+            addWarning(LoadWarningKind::AddedDefaultHistoryOptions);
             mustSave = true;
             hasMissingDefaults = true;
 
@@ -424,19 +398,19 @@ namespace Persistence
 
         if (hasMissingDefaults)
         {
-            extendWarning("Wrote missing default settings to config file.");
+            addWarning(LoadWarningKind::WroteMissingDefaults);
         }
         if (mustSave)
         {
             Log::warn("Config file misses some defaults or has misunderstood parameters, writing them back to disk.");
             save();
         }
-        return warning;
+        return warnings;
     }
 
     void StateHolder::clearWarnings(std::function<void()> const& onComplete)
     {
-        cachedWarning_ = std::nullopt;
+        cachedWarnings_.clear();
         onComplete();
     }
 
@@ -468,14 +442,11 @@ namespace Persistence
 
                 load(
                     [responseId, &hub](
-                        std::optional<std::string> const& error,
-                        StateHolder& holder,
-                        std::optional<std::string> const& warning
+                        std::optional<std::string> const& error, StateHolder& holder, LoadWarnings const& warnings
                     )
                     {
                         auto json = nlohmann::json::object();
-                        if (warning)
-                            json["warning"] = *warning;
+                        json["warnings"] = warnings;
                         if (error)
                         {
                             json["error"] = *error;
@@ -533,7 +504,7 @@ namespace Persistence
             "StateHolder::clearWarnings",
             [&hub, this](std::string responseId)
             {
-                cachedWarning_ = std::nullopt;
+                cachedWarnings_.clear();
                 hub.callRemote(responseId, nlohmann::json{{"success", true}});
             }
         );

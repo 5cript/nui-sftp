@@ -2,28 +2,38 @@
 #include <log/log.hpp>
 
 #include <nui/frontend/api/console.hpp>
+#include <nui/frontend/api/json.hpp>
 
 namespace Persistence
 {
+    LoadWarnings parseLoadWarnings(Nui::val const& warningsValue)
+    {
+        LoadWarnings warnings{};
+        try
+        {
+            nlohmann::json::parse(Nui::JSON::stringify(warningsValue)).get_to(warnings);
+        }
+        catch (std::exception const& exc)
+        {
+            Log::error("Failed to parse state load warnings: {}", exc.what());
+        }
+        return warnings;
+    }
+
     void StateHolder::load(
-        std::function<void(
-            std::optional<std::string> const& error,
-            StateHolder&,
-            std::optional<std::string> const& warning
-        )> const& onLoad
+        std::function<void(std::optional<std::string> const& error, StateHolder&, LoadWarnings const& warnings)> const&
+            onLoad
     )
     {
         Nui::RpcClient::getRemoteCallableWithBackChannel(
             "StateHolder::load", [this, onLoad](Nui::val const& objectWithErrorWarningState) {
-                std::optional<std::string> warning{std::nullopt};
-                if (objectWithErrorWarningState.hasOwnProperty("warning"))
-                {
-                    warning = objectWithErrorWarningState["warning"].as<std::string>();
-                }
+                const auto warnings = objectWithErrorWarningState.hasOwnProperty("warnings")
+                    ? parseLoadWarnings(objectWithErrorWarningState["warnings"])
+                    : LoadWarnings{};
 
                 if (objectWithErrorWarningState.hasOwnProperty("error"))
                 {
-                    onLoad(objectWithErrorWarningState["error"].as<std::string>(), *this, warning);
+                    onLoad(objectWithErrorWarningState["error"].as<std::string>(), *this, warnings);
                     return;
                 }
 
@@ -34,10 +44,10 @@ namespace Persistence
                 catch (std::exception const& exc)
                 {
                     Log::info("Failed to parse state from json: {}", exc.what());
-                    onLoad(fmt::format("Failed to parse state from json: {}", exc.what()), *this, warning);
+                    onLoad(exc.what(), *this, warnings);
                     return;
                 }
-                onLoad(std::nullopt, *this, warning);
+                onLoad(std::nullopt, *this, warnings);
             })();
     }
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
@@ -64,7 +74,7 @@ namespace Persistence
     {
         load(
             [this, modifier = std::move(modifier), onComplete = std::move(onComplete)](
-                std::optional<std::string> const& error, StateHolder&, std::optional<std::string> const&
+                std::optional<std::string> const& error, StateHolder&, LoadWarnings const&
             ) mutable
             {
                 if (error)
