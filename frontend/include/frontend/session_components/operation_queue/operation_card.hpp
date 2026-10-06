@@ -256,7 +256,7 @@ class OperationCard : public OperationCardInterface
             }(
                 observe(state_).generate([this]() -> std::string {
                     if (state_.value() == SharedData::OperationState::Failed || state_.value() == SharedData::OperationState::PartialSuccess)
-                        return "Error!";
+                        return language->get("operationQueue", "errorButton");
                     return "?";
                 })
             ),
@@ -322,9 +322,9 @@ class OperationCard : public OperationCardInterface
         if (!error_.value().has_value())
         {
             if (failedEntries_.value().empty())
-                return "No Error";
+                return language->get("operationQueue", "noError");
             else
-                error = fmt::format("{} entries failed:\n", failedEntries_.value().size());
+                error = fmt::format(fmt::runtime(language->get("operationQueue", "entriesFailed")), failedEntries_.value().size());
         }
         else
             error = error_.value()->toString();

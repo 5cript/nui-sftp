@@ -1,4 +1,5 @@
 #include <frontend/session_components/connection_loss_overlay.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 
 #include <log/log.hpp>
 #include <utility/language.hpp>
@@ -171,6 +172,7 @@ void ConnectionLossOverlay::show()
     // move it out of the way.  The dialog's lifetime is bound to the
     // Session we never explicitly close it since the Session replace
     // tears its DOM down when the reconnect succeeds.
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
         .headerText = language->get("sessionFrontend", "connectionLost"),

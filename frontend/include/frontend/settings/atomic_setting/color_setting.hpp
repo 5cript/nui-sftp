@@ -56,6 +56,7 @@ class ColorSetting : public Setting<Disengageable, std::string>
                 .attributes = {
                     observeEngagedToBool(disabled),
                 },
+                .pickButtonText = language->get("settings", "colorSetting", "pickButton"),
                 .onChange = [this](std::string const& newColor)
                 {
                     reformatColor(newColor);

@@ -2,6 +2,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
@@ -57,7 +58,7 @@ void SessionOptions::loadLayoutNames()
 
             impl_->layoutNames.modifyNow();
         },
-        "Cannot load layout names."
+        language->get("sessionOptions", "cannotLoadLayoutNames")
     );
 }
 

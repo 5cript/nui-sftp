@@ -661,8 +661,8 @@ void Session::openLocalFilesystem()
                 Log::error("Invalid response from RpcFilesystem::getHome: missing 'path'");
                 impl_->confirmDialog->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = "Get Home Directory Failed",
-                    .text = "Invalid response from backend: missing 'path'",
+                    .headerText = language->get("sessionFrontend", "getHomeDirectoryFailed"),
+                    .text = language->get("remoteSideModel", "invalidResponseFromBackend"),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "getHomeDirectoryFailed",
                 });
@@ -695,9 +695,8 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                 );
                 impl_->confirmDialog->open({
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = "SFTP Initialization Failed",
-                    .text = "Remote side model is not available, cannot open SFTP. This is a bug and should not happen "
-                            "by design.",
+                    .headerText = language->get("sessionFrontend", "sftpInitializationFailed"),
+                    .text = language->get("sessionFrontend", "remoteSideModelUnavailable"),
                     .buttons = ConfirmDialog::Button::Ok,
                     .neverShowAgainId = "sftpInitializationFailed",
                 });

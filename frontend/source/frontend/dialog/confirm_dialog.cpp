@@ -1,5 +1,6 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 #include <persistence/state_holder.hpp>
@@ -92,8 +93,9 @@ void ConfirmDialog::open(OpenOptions const& options)
     for (std::size_t idx = 0; idx < shownRows; ++idx)
         impl_->table.addRow({options.listItems[idx].text});
     if (totalRows > shownRows)
-        impl_->table.addRow({fmt::format("... and {} more", totalRows - shownRows)});
+        impl_->table.addRow({fmt::format(fmt::runtime(language->get("confirmDialog", "andMore")), totalRows - shownRows)});
     impl_->text = options.text;
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open(
         {.styleVariant = options.styleVariant,
             .headerText = options.headerText,

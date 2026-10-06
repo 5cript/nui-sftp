@@ -1,5 +1,6 @@
 #include <frontend/dialog/direct_connect_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -258,7 +259,7 @@ Nui::ElementRenderer DirectConnectDialog::dialogBody()
                         onClick = [this](auto const&) {
                             Nui::FileDialog::showOpenDialog(
                                 {
-                                    .title = "Pick SSH private key",
+                                    .title = language->get("directConnectDialog", "pickPrivateKey"),
                                     .defaultPath = "%userprofile%",
                                     .filters = {},
                                     .forcePath = false,
@@ -317,6 +318,7 @@ void DirectConnectDialog::open(OpenOptions options)
     checkPortValue(impl_->port.value());
     Nui::globalEventContext.executeActiveEventsImmediately();
 
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .headerText = language->get("directConnectDialog", "title"),
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,

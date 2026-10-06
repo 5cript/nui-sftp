@@ -170,7 +170,7 @@ Nui::ElementRenderer Licenses::header()
             onClick = [this](Nui::val) {
                 impl_->events->licensesOpen = false;
             },
-        }("Close")
+        }(language->get("licenses", "close"))
     );
 }
 
@@ -184,7 +184,7 @@ Nui::ElementRenderer Licenses::sidebar()
     return div{class_ = "licenses-side"}(
         input{
             type = "text",
-            placeHolder = "Filter packages...",
+            placeHolder = language->get("licenses", "filterPlaceholder"),
             class_ = "licenses-filter-input",
             value = impl_->filter,
             onInput = [this](Nui::val event) {
@@ -202,7 +202,7 @@ Nui::ElementRenderer Licenses::sidebar()
                 impl_->selectedIndex = -1;
             },
         }(
-            span{class_ = "licenses-side-name"}("All licenses"),
+            span{class_ = "licenses-side-name"}(language->get("licenses", "allLicenses")),
             span{class_ = "licenses-side-pill licenses-side-pill-all"}(
                 Nui::observe(impl_->entries).generate([this]() {
                     return std::to_string(impl_->entries.value().size());
@@ -273,7 +273,7 @@ Nui::ElementRenderer Licenses::main()
                 return pre{class_ = "licenses-text"}(concatenated);
             }
             if (idx >= static_cast<long long>(list.size()))
-                return div{}("No selection.");
+                return div{}(language->get("licenses", "noSelection"));
             auto const& e = list[static_cast<std::size_t>(idx)];
             const Nui::ElementRenderer copyrightRow = e.copyright.empty()
                 ? Nui::nil()
@@ -295,7 +295,7 @@ Nui::ElementRenderer Licenses::main()
                 ),
                 copyrightRow,
                 homepageRow,
-                pre{class_ = "licenses-text"}(e.text.empty() ? std::string{"(no license text available)"} : e.text)
+                pre{class_ = "licenses-text"}(e.text.empty() ? language->get("licenses", "noLicenseText") : e.text)
             );
         }
     );

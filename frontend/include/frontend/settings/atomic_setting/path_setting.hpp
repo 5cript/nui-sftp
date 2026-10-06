@@ -60,7 +60,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
         {
             Nui::FileDialog::showDirectoryDialog(
                 {// all are optional
-                    .title = "Pick directory / file",
+                    .title = language->get("settings", "pathSetting", "pickDialogTitle"),
                     .defaultPath = "%userprofile%",
                     .filters = {},
                     .forcePath = false
@@ -96,7 +96,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
         {
             Nui::FileDialog::showOpenDialog(
                 {// all are optional
-                    .title = "Pick directory / file",
+                    .title = language->get("settings", "pathSetting", "pickDialogTitle"),
                     .defaultPath = "%userprofile%",
                     .filters = {},
                     .forcePath = false,

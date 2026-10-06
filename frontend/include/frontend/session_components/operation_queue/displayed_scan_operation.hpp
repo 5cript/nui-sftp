@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <utility/language.hpp>
 
 class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
 {
@@ -33,7 +34,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
         // clang-format off
         return fragment(
             span{}(
-                fmt::format("Scan '{}'", remotePath_.string())
+                fmt::format(fmt::runtime(language->get("operationQueue", "scanCard")), remotePath_.string())
             ),
             // Spanner
             div{}(),

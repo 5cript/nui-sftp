@@ -1,5 +1,6 @@
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/input_dialog.hpp>
+#include <utility/language.hpp>
 #include <log/log.hpp>
 
 #include <nui/rpc.hpp>
@@ -12,6 +13,18 @@ struct PasswordPrompter::Implementation
     InputDialog dialog{"PasswordPrompter"};
 };
 
+namespace
+{
+    std::string secretDisplayName(std::string const& whatFor)
+    {
+        if (whatFor == "password")
+            return language->get("passwordPrompter", "password");
+        if (whatFor == "keyPhrase")
+            return language->get("passwordPrompter", "keyPhrase");
+        return whatFor;
+    }
+}
+
 PasswordPrompter::PasswordPrompter()
     : impl_{std::make_unique<Implementation>()}
 {
@@ -21,9 +34,9 @@ PasswordPrompter::PasswordPrompter()
         {
             Log::info("Opening password prompt for '{}'", whatFor);
             impl_->dialog.open({
-                .whatFor = whatFor,
+                .whatFor = secretDisplayName(whatFor),
                 .prompt = prompt,
-                .headerText = "Enter Password",
+                .headerText = language->get("passwordPrompter", "header"),
                 .isPassword = true,
                 .onConfirm = [](std::optional<std::string> const& password)
                 {

@@ -1,6 +1,8 @@
 #include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
+#include <utility/language.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/dialog.hpp>
@@ -132,7 +134,7 @@ Nui::ElementRenderer ArchiveTransferDialog::dialogBody()
     // clang-format off
     return section{class_ = "archive-transfer-dialog"}(
         // Row 1 — file name (input + extension dropdown).
-        label{class_ = "archive-transfer-dialog-label"}("File name"),
+        label{class_ = "archive-transfer-dialog-label"}(language->getObserved("archiveTransferDialog", "fileName")),
         div{class_ = "archive-transfer-dialog-filename"}(
             Snc::textInput({
                 .value = impl_->fileStem,
@@ -156,16 +158,16 @@ Nui::ElementRenderer ArchiveTransferDialog::dialogBody()
             )
         ),
         // Row 2 — compression level slider.
-        label{class_ = "archive-transfer-dialog-label"}("Level"),
+        label{class_ = "archive-transfer-dialog-label"}(language->getObserved("archiveTransferDialog", "level")),
         div{class_ = "archive-transfer-dialog-level"}(
-            span{class_ = "archive-transfer-dialog-level-hint"}("Fastest"),
+            span{class_ = "archive-transfer-dialog-level-hint"}(language->getObserved("archiveTransferDialog", "fastest")),
             Snc::slider({
                 .value = impl_->compressionLevel,
                 .min = 1,
                 .max = 9,
                 .step = 1,
             }),
-            span{class_ = "archive-transfer-dialog-level-hint"}("Smallest"),
+            span{class_ = "archive-transfer-dialog-level-hint"}(language->getObserved("archiveTransferDialog", "smallest")),
             span{class_ = "archive-transfer-dialog-level-value"}(impl_->compressionLevel)
         )
     );
@@ -183,6 +185,7 @@ void ArchiveTransferDialog::open(OpenOptions const& options)
     impl_->confirmOnClose = false;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
+    impl_->dialog->setButtonLabels(localizedButtonLabels());
     impl_->dialog->open({
         .headerText = options.headerText,
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,

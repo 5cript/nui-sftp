@@ -328,7 +328,7 @@ OperationQueue::OperationQueue(
             impl_->enforceLivePageSize();
             Nui::globalEventContext.executeActiveEventsImmediately();
         },
-        "Cannot set up operation queue."
+        language->get("operationQueue", "cannotSetUp")
     );
 
     Nui::setInterval(
@@ -443,8 +443,8 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
     if (operation.warrantsCancelConfirm())
     {
         impl_->confirmDialog->open({
-            .headerText = "Cancel Operation",
-            .text = fmt::format("Are you sure you want to cancel the operation?"),
+            .headerText = language->get("operationQueue", "cancelOperationHeader"),
+            .text = language->get("operationQueue", "cancelOperationText"),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .onClose = [doCancel](std::optional<ConfirmDialog::Button> optButton)
             {
@@ -1261,7 +1261,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
                 SharedData::OperationError{
                     .type = SharedData::OperationErrorType::UnknownError,
                     .sftpError = std::nullopt,
-                    .extraInfo = "Unknown Error"
+                    .extraInfo = language->get("operationQueue", "unknownError")
                 }
             ));
             impl_->recordFailed(completed.operationId);
@@ -1673,8 +1673,8 @@ void OperationQueue::changeAutoClean(bool doClean)
                     {
                         impl_->confirmDialog->open({
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = "Error saving state",
-                            .text = fmt::format("An error occurred while saving the application state: {}.", *error),
+                            .headerText = language->get("persistence", "errorSavingState"),
+                            .text = fmt::format(fmt::runtime(language->get("persistence", "saveFailed")), *error),
                             .buttons = ConfirmDialog::Button::Ok,
                         });
                     }
@@ -2022,6 +2022,7 @@ Nui::ElementRenderer OperationQueue::operator()()
                     impl_->currentPage = newPage;
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 },
+                .liveLabel = language->get("operationQueue", "livePage"),
             })
         ),
         // Main content — switches between live regular-queue page, a static

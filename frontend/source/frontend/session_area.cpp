@@ -16,6 +16,7 @@
 #include <list>
 #include <unordered_map>
 #include <variant>
+#include <utility/language.hpp>
 
 /**
  * @brief Per-tab retry state for an in-progress reconnect cycle.  Owned by
@@ -412,7 +413,7 @@ void SessionArea::addSession(std::string const& name)
 
             setSelected(tabId);
         },
-        "Cannot add session."
+        language->get("sessionArea", "cannotAddSession")
     );
 }
 
@@ -482,7 +483,7 @@ void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& 
 
             setSelected(tabId);
         },
-        "Cannot add direct connect session."
+        language->get("sessionArea", "cannotAddDirectConnectSession")
     );
 }
 
@@ -573,7 +574,7 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
             reconnectState.candidate = std::make_unique<ProtoSession>(std::move(protoParams));
             reconnectState.candidate->start();
         },
-        "Cannot reconnect session."
+        language->get("sessionArea", "cannotReconnectSession")
     );
 }
 

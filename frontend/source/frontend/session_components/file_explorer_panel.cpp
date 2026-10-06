@@ -191,7 +191,7 @@ void FileExplorerPanel::setup()
             Log::error("File grid error: {}", message);
             confirmDialog->open({
                 .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                .headerText = "File Grid Error",
+                .headerText = language->get("fileExplorer", "fileGridError"),
                 .text = message,
                 .buttons = ConfirmDialog::Button::Ok,
                 .neverShowAgainId = "fileGridError",

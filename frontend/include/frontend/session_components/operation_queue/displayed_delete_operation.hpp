@@ -3,6 +3,7 @@
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
+#include <utility/language.hpp>
 
 struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
 {
@@ -106,10 +107,10 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                         observe(currentFile),
                         [this](){
                             if (type_ == SharedData::OperationType::BulkDelete)
-                                return fmt::format("Deleting selected items in {}", removePath_.generic_string());
+                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingSelectedIn")), removePath_.generic_string());
                             if (currentFile.value().empty())
-                                return fmt::format("Deleting: '{}'", removePath_.generic_string());
-                            return fmt::format("Deleting: '{}'", currentFile.value());
+                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), removePath_.generic_string());
+                            return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), currentFile.value());
                         }
                     )
                 ),

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <utility/language.hpp>
 
 class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
 {
@@ -53,7 +54,7 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
         return fragment(
             span{}(
                 fmt::format(
-                    "Rename: '{}' -> '{}'",
+                    fmt::runtime(language->get("operationQueue", "renameCard")),
                     sourcePath_.filename().string(),
                     destinationPath_.filename().string()
                 )

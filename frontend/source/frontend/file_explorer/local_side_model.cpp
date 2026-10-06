@@ -1,16 +1,10 @@
 #include <frontend/file_explorer/local_side_model.hpp>
+#include <frontend/file_explorer/place_names.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
-#include <ui5-sap-icons/icons/home.hpp>
-#include <ui5-sap-icons/icons/desktop-mobile.hpp>
-#include <ui5-sap-icons/icons/download.hpp>
-#include <ui5-sap-icons/icons/documents.hpp>
-#include <ui5-sap-icons/icons/picture.hpp>
-#include <ui5-sap-icons/icons/video.hpp>
-#include <ui5-sap-icons/icons/folder.hpp>
 #include <ui5-sap-icons/icons/database.hpp>
 #include <ui5-sap-icons/icons/upload.hpp>
 #include <ui5-sap-icons/icons/open-folder.hpp>
@@ -29,26 +23,6 @@
 #include <algorithm>
 
 using namespace std::string_literals;
-
-namespace
-{
-    Nui::ElementRenderer iconForPlaceName(std::string const& name)
-    {
-        if (name == "Home")
-            return Ui5Icons::home();
-        if (name == "Desktop")
-            return Ui5Icons::desktop_mobile();
-        if (name == "Downloads")
-            return Ui5Icons::download();
-        if (name == "Documents")
-            return Ui5Icons::documents();
-        if (name == "Pictures")
-            return Ui5Icons::picture();
-        if (name == "Videos")
-            return Ui5Icons::video();
-        return Ui5Icons::folder();
-    }
-}
 
 LocalSideModel::LocalSideModel(
     Persistence::UiOptions uiOptions,
@@ -201,7 +175,7 @@ void LocalSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEn
                 auto const placeName = places[idx]["name"].as<std::string>();
                 entries.push_back({
                     .icon = iconForPlaceName(placeName),
-                    .name = placeName,
+                    .name = placeDisplayName(placeName),
                     .path = places[idx]["path"].as<std::string>(),
                 });
             }
@@ -319,9 +293,16 @@ void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
 {
     inputDialog_->open(
-        {.whatFor = "New item",
-            .prompt = "Enter the name of the new item",
-            .headerText = "Create a new item",
+        {.whatFor = language->get(
+             "remoteSideModel", type == NuiFileExplorer::Item::Type::Directory ? "newDirectory" : "newFile"
+         ),
+            .prompt = language->get(
+                "remoteSideModel",
+                type == NuiFileExplorer::Item::Type::Directory ? "enterNewDirectoryName" : "enterNewFileName"
+            ),
+            .headerText = language->get(
+                "remoteSideModel", type == NuiFileExplorer::Item::Type::Directory ? "createNewDirectory" : "createNewFile"
+            ),
             .isPassword = false,
             .onConfirm = [this, type](std::optional<std::string> const& name)
             {
@@ -444,8 +425,8 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = "Delete Items?",
-            .text = "Are you sure you want to delete the selected items?",
+            .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
+            .text = language->get("localSideModel", "deleteSelectedConfirm"),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
@@ -520,8 +501,8 @@ void LocalSideModel::onTransfer(
         Log::error("Cannot transfer items: remote model is not set");
         confirmDialog_->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = "File Transfer Failed",
-            .text = "Remote side is not available",
+            .headerText = language->get("localSideModel", "transferFailedTitle"),
+            .text = language->get("localSideModel", "remoteSideUnavailable"),
             .buttons = ConfirmDialog::Button::Ok,
         });
         return;
@@ -695,9 +676,10 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
     };
 
     inputDialog_->open({
-        .whatFor = "Rename",
-        .prompt = "Enter the new name for " + item.path.filename().string(),
-        .headerText = "Rename " + item.path.filename().string(),
+        .whatFor = language->get("remoteSideModel", "rename"),
+        .prompt = fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.path.filename().string()),
+        .headerText =
+            fmt::format(fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()),
         .initialValue = item.path.filename().string(),
         .isPassword = false,
         .onConfirm = [doRename, item](std::optional<std::string> const& name)
@@ -1118,7 +1100,7 @@ void LocalSideModel::uploadItemsConfirmed(
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                 ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
             .focusButton = ConfirmDialog::Button::No,
-            .listItems = {{.text = item.second.path.generic_string(), .description = "File already exists"}},
+            .listItems = {{.text = item.second.path.generic_string(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
             .onClose = [this,
                            uploadItems = std::move(uploadItems),
                            existsResults,
@@ -1251,7 +1233,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         );
         items.push_back(
             Snc::PopupMenu::item(
-                "Upload as Archive",
+                language->get("fileExplorer", "contextMenu", "uploadAsArchive"),
                 Ui5Icons::upload(),
                 [this, selectedItems]()
                 {
@@ -1270,7 +1252,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
         items.push_back(
             Snc::PopupMenu::item(
-                isFav ? "Remove from Favorites" : "Add to Favorites",
+                language->get("fileExplorer", "contextMenu", isFav ? "removeFromFavorites" : "addToFavorites"),
                 isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
                 [this, selPath, isFav]()
                 {
@@ -1491,10 +1473,10 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
         return;
 
     const auto defaultStem =
-        items.size() == 1 ? items.front().path.filename().generic_string() : std::string{"archive"};
+        items.size() == 1 ? items.front().path.filename().generic_string() : language->get("fileExplorer", "archiveDefaultName");
 
     archiveTransferDialog_->open({
-        .headerText = "Upload as Archive",
+        .headerText = language->get("fileExplorer", "contextMenu", "uploadAsArchive"),
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
@@ -1525,7 +1507,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
                         Log::error("Archive upload failed to enqueue: {}", info);
                         confirmDialog_->open({
                             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = "Archive Upload Failed",
+                            .headerText = language->get("localSideModel", "archiveUploadFailed"),
                             .text = info,
                             .buttons = ConfirmDialog::Button::Ok,
                         });
