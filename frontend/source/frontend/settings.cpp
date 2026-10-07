@@ -25,6 +25,7 @@
 #include <frontend/settings/subgroup.hpp>
 #include <frontend/settings/setting_group.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
+#include <frontend/settings/search/settings_search.hpp>
 #include <frontend/settings/search/settings_search_index.hpp>
 #include <frontend/onboarding/onboarding.hpp>
 #include <utility/language.hpp>
@@ -137,6 +138,8 @@ struct Settings::Implementation
     // Values exchange here when switching, we dont have X session option uis, also because performance wise
     // impractical.
     SessionOptions currentSessionOptions;
+
+    std::unique_ptr<SettingsSearch> search{};
 
     Nui::Observed<bool> wasInitiallyLoaded{false};
     Nui::Observed<bool> initialLoadDone{false};
@@ -283,6 +286,38 @@ Settings::Settings(
           }
       )}
 {
+    impl_->search = std::make_unique<SettingsSearch>(
+        impl_->searchIndex,
+        *impl_->stateHolder,
+        *impl_->events,
+        [this]()
+        {
+            return impl_->activeSection.value() == Section::Session ? impl_->activeSession.value() : std::nullopt;
+        },
+        [this](SettingsSearchIndex::Entry const& entry, SettingsSearch::Target const& target)
+        {
+            auto const* registration = entry.renderedScope(target.scope);
+            if (!registration)
+                return;
+            const auto htmlId = registration->htmlId;
+            switch (target.scope)
+            {
+                case SettingScope::General:
+                    activateSection(Section::GeneralSettings);
+                    break;
+                case SettingScope::Inheritable:
+                    activateSection(Section::GlobalInheritables);
+                    break;
+                case SettingScope::Session:
+                    if (!target.sessionId)
+                        return;
+                    activateSession(*target.sessionId);
+                    break;
+            }
+            impl_->events->requestOpenSettingsAtId(htmlId);
+        }
+    );
+
     Nui::throttle(
         500,
         [this]()
@@ -985,6 +1020,7 @@ Nui::ElementRenderer Settings::header()
             }(
                 span{}(language->getObserved("settings", "saving"))
             ),
+            (*impl_->search)(),
             Snc::button({
                 .icon = GeneratedSvgs::decline(),
                 .attributes = {
@@ -1081,6 +1117,29 @@ void Settings::addNewSession()
     });
 }
 
+void Settings::activateSection(Section section)
+{
+    if (impl_->activeSession.value())
+    {
+        applySessionToState(*impl_->activeSession.value());
+        save();
+    }
+    impl_->activeSection = section;
+    impl_->activeSession = std::nullopt;
+}
+
+void Settings::activateSession(std::string const& sessionId)
+{
+    if (impl_->activeSession.value())
+    {
+        applySessionToState(*impl_->activeSession.value());
+        save();
+    }
+    impl_->activeSection = Section::Session;
+    impl_->activeSession = sessionId;
+    loadSessionFromState(sessionId);
+}
+
 void Settings::loadSessionFromState(std::string const& sessionId)
 {
     loadState(
@@ -1144,19 +1203,10 @@ Nui::ElementRenderer Settings::sectionSelector(SectionSelectorOptions const& opt
                     return;
                 }
 
-                if (impl_->activeSession.value())
-                {
-                    applySessionToState(*impl_->activeSession.value());
-                    save();
-                }
-                if (options.thisSection == Section::Session && options.sessionId.has_value()) {
-                    impl_->activeSection = Section::Session;
-                    impl_->activeSession = options.sessionId;
-                    loadSessionFromState(options.sessionId.value_or(""));
-                } else {
-                    impl_->activeSection = options.thisSection;
-                    impl_->activeSession = std::nullopt;
-                }
+                if (options.thisSection == Section::Session && options.sessionId.has_value())
+                    activateSession(*options.sessionId);
+                else
+                    activateSection(options.thisSection);
             },
         }(
             observe(impl_->activeSection, impl_->activeSession),

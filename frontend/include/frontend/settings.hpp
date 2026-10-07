@@ -64,6 +64,16 @@ class Settings
         Nui::ElementRenderer icon{};
     };
     Nui::ElementRenderer sectionSelector(SectionSelectorOptions const& options);
+
+    /**
+     * @brief Shows a section other than a session, after keeping the edits of the session shown so far.
+     */
+    void activateSection(Section section);
+
+    /**
+     * @brief Shows a session in the session editor, after keeping the edits of the session shown so far.
+     */
+    void activateSession(std::string const& sessionId);
     bool isActive(SectionSelectorOptions const& options);
 
     void onChange();

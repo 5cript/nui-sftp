@@ -1,0 +1,231 @@
+.settings-search {
+    position: relative;
+    margin-right: 12px;
+    font-size: 14px;
+}
+
+.settings-search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 280px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+    background-color: var(--background-color-fields);
+
+    &:focus-within {
+        border-color: var(--theme-color);
+    }
+
+    & svg {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        fill: var(--color-secondary);
+    }
+}
+
+.settings-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--color-fields);
+    font-size: 14px;
+
+    &:disabled {
+        cursor: progress;
+    }
+}
+
+.settings-search-pane {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(60vh, 560px);
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 6px;
+    background-color: var(--background-color);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+    &.open {
+        display: flex;
+    }
+}
+
+.settings-search-list {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.settings-search-empty {
+    padding: 12px 14px;
+    color: var(--subdued-text);
+}
+
+.settings-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover {
+        background-color: var(--brighter-background);
+    }
+
+    &.selected {
+        background-color: color-mix(in srgb, var(--theme-color) 22%, transparent);
+    }
+}
+
+.settings-search-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.settings-search-label {
+    overflow: hidden;
+    color: var(--color);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    & mark {
+        border-radius: 2px;
+        background-color: color-mix(in srgb, var(--theme-color) 45%, transparent);
+        color: inherit;
+    }
+}
+
+.settings-search-badge {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 8px;
+    color: var(--color-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.settings-search-breadcrumb,
+.settings-search-detail {
+    grid-column: 1;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-search-breadcrumb {
+    color: var(--theme-color);
+}
+
+.settings-search-detail {
+    color: var(--subdued-text);
+}
+
+.settings-search-chevron {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+
+    & svg {
+        width: 12px;
+        height: 12px;
+        fill: var(--color-secondary);
+    }
+}
+
+.settings-search-targets {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.settings-search-back {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-color-fields);
+    color: var(--color);
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+        background-color: var(--brighter-background);
+    }
+
+    & svg {
+        width: 14px;
+        height: 14px;
+        fill: var(--color-secondary);
+    }
+}
+
+.settings-search-pinned:not(:empty) {
+    flex: 0 0 auto;
+    padding: 4px;
+    border-bottom: 1px solid var(--border-color-fields);
+}
+
+.settings-search-server-list {
+    flex: 1 1 auto;
+}
+
+.settings-search-pinned .settings-search-row,
+.settings-search-server-list .settings-search-row {
+    grid-template-columns: 20px minmax(0, auto) auto minmax(0, 1fr);
+    align-items: center;
+}
+
+.settings-search-target-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+
+    & svg {
+        width: 16px;
+        height: 16px;
+        fill: var(--color);
+    }
+}
+
+.settings-search-target-name {
+    overflow: hidden;
+    color: var(--color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-search-target-note {
+    color: var(--theme-color);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.settings-search-target-status {
+    grid-column: 4;
+    overflow: hidden;
+    color: var(--subdued-text);
+    font-size: 12px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

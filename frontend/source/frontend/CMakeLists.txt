@@ -128,6 +128,7 @@ target_sources(
         settings/log_options.cpp
         settings/search/setting_factory.cpp
         settings/search/setting_identity.cpp
+        settings/search/settings_search.cpp
         settings/search/settings_search_index.cpp
         session/session_helpers.cpp
         command_store/command_store_client.cpp
@@ -260,6 +261,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/session_area.css"
         "${CMAKE_SOURCE_DIR}/static/styles/session.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings_group.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/settings_search.css"
         "${CMAKE_SOURCE_DIR}/static/styles/settings.css"
         "${CMAKE_SOURCE_DIR}/static/styles/licenses.css"
         "${CMAKE_SOURCE_DIR}/static/styles/notification_log.css"
