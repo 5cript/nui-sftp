@@ -12,8 +12,7 @@
 #include <utility/enum_string_convert.hpp>
 #include <utility/format_bytes.hpp>
 #include <utility/algorithm/case_convert.hpp>
-
-#include <rapidfuzz/fuzz.hpp>
+#include <utility/fuzzy_search.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/text_input.hpp>
@@ -35,30 +34,6 @@ namespace NuiFileExplorer
         // How long the type-ahead buffer survives between keystrokes. A new keystroke
         // resets this; once it expires the buffer is cleared and the highlight is lifted.
         constexpr int typeAheadIdleTimeoutMs = 750;
-
-        std::vector<std::string> tokenize(std::string const& input)
-        {
-            std::vector<std::string> result;
-            std::string currentToken;
-            for (char c : input)
-            {
-                if (std::isalnum(c))
-                {
-                    currentToken.push_back(std::tolower(c));
-                }
-                else if (std::isspace(c) || std::ispunct(c))
-                {
-                    if (!currentToken.empty())
-                    {
-                        result.push_back(currentToken);
-                        currentToken.clear();
-                    }
-                }
-            }
-            if (!currentToken.empty())
-                result.push_back(currentToken);
-            return result;
-        }
     }
 
     Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
@@ -1088,31 +1063,22 @@ namespace NuiFileExplorer
 
     namespace
     {
-        constexpr double kSearchHitScore = 90.;
-        constexpr double kSearchMinimumScore = 60.;
+        constexpr double searchHitScore = 90.;
+        constexpr double searchMinimumScore = 60.;
 
         /**
-         *  @brief Score how strongly @p itemTokens match any query token. Returns the max
-         *         partial_ratio across pairs. Used by both search (highlight) and applyFilter
-         *         (hide non-matches) so the two modes agree on what counts as a match.
+         * @brief Whether an item matches the query, as a case-insensitive substring or fuzzily. Used by both search
+         * (highlight) and applyFilter (hide non-matches) so the two modes agree on what counts as a match.
          */
-        double scoreItemAgainstQuery(
-            std::vector<std::string> const& itemTokens,
-            std::vector<std::string> const& queryTokens
+        bool matchesQuery(
+            std::string const& itemText,
+            std::u32string const& normalizedQuery,
+            std::vector<std::u32string> const& queryTokens
         )
         {
-            double max = 0.;
-            for (auto const& queryToken : queryTokens)
-            {
-                for (auto const& token : itemTokens)
-                {
-                    const auto fuzzScore = rapidfuzz::fuzz::partial_ratio(queryToken, token);
-                    if (fuzzScore >= kSearchHitScore)
-                        return fuzzScore;
-                    max = std::max(max, fuzzScore);
-                }
-            }
-            return max;
+            const auto item = Utility::FuzzySearch::NormalizedText::fromUtf8(itemText);
+            return item.text.find(normalizedQuery) != std::u32string::npos ||
+                Utility::FuzzySearch::bestPartialRatio(item.tokens, queryTokens, searchHitScore) >= searchMinimumScore;
         }
     }
 
@@ -1135,21 +1101,15 @@ namespace NuiFileExplorer
             return;
         }
 
-        Utility::Algorithm::toLowerCaseInplace(query);
-        const auto queryTokens = tokenize(query);
+        const auto normalizedQuery = Utility::FuzzySearch::normalize(query);
+        const auto queryTokens = Utility::FuzzySearch::tokenize(normalizedQuery);
 
         for (auto& item : impl_->items.value())
         {
-            const auto generic = item.item.path.generic_string();
-            if (generic.find(query) != std::string::npos)
-            {
-                item.searchHighlight(ItemWithInternals::SearchHighlight::Highlight);
-                continue;
-            }
-            const auto reachedScore = scoreItemAgainstQuery(tokenize(generic), queryTokens);
             item.searchHighlight(
-                reachedScore >= kSearchMinimumScore ? ItemWithInternals::SearchHighlight::Highlight
-                                                   : ItemWithInternals::SearchHighlight::Muted
+                matchesQuery(item.item.path.generic_string(), normalizedQuery, queryTokens)
+                    ? ItemWithInternals::SearchHighlight::Highlight
+                    : ItemWithInternals::SearchHighlight::Muted
             );
         }
     }
@@ -1216,14 +1176,12 @@ namespace NuiFileExplorer
 
         if (!query.empty())
         {
-            Utility::Algorithm::toLowerCaseInplace(query);
-            const auto queryTokens = tokenize(query);
+            const auto normalizedQuery = Utility::FuzzySearch::normalize(query);
+            const auto queryTokens = Utility::FuzzySearch::tokenize(normalizedQuery);
             auto const& items = impl_->items.value();
             for (std::size_t itemIdx = 0; itemIdx < items.size(); ++itemIdx)
             {
-                const auto generic = items[itemIdx].item.path.generic_string();
-                if (generic.find(query) != std::string::npos ||
-                    scoreItemAgainstQuery(tokenize(generic), queryTokens) >= kSearchMinimumScore)
+                if (matchesQuery(items[itemIdx].item.path.generic_string(), normalizedQuery, queryTokens))
                 {
                     const auto absoluteIndex = static_cast<long long>(itemIdx);
                     impl_->filterMatchPosition.emplace(
