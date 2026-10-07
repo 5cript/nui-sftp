@@ -3,9 +3,11 @@ add_library(
     STATIC
         command_template.cpp
         echo_suppressor.cpp
+        fuzzy_search.cpp
         shell_integration.cpp
         typed_line_buffer.cpp
         temporary_directory.cpp
+        utf8.cpp
 )
 
 target_include_directories(utility PUBLIC ${CMAKE_SOURCE_DIR}/utility/include)
@@ -39,6 +41,7 @@ target_link_libraries(utility PUBLIC
     nlohmann_json::nlohmann_json
     gimo::gimo
     fmt::fmt
+    rapidfuzz::rapidfuzz
     events
     constants
 )
