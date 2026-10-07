@@ -54,14 +54,14 @@ class NumberSetting : public Setting<Disengageable, ValueType>
     };
 
     explicit NumberSetting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         ConstructionArgs&& args,
         Nui::Observed<bool>* externalDisengage = nullptr
     )
         : SettingBase(
-              std::move(helpText),
+              std::move(identity),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction),
               externalDisengage
@@ -69,7 +69,7 @@ class NumberSetting : public Setting<Disengageable, ValueType>
         , args_(std::move(args))
     {}
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;

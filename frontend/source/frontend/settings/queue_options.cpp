@@ -6,19 +6,20 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
-QueueOptions::QueueOptions(std::function<void()> const& onChange)
-    : autoRemoveCompletedOperations{
-          language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperationsHelpText"),
+QueueOptions::QueueOptions(SettingFactory const& factory, std::function<void()> const& onChange)
+    : factory_{factory.forGroup(groupKey)}
+    , autoRemoveCompletedOperations{
+          factory_.identity({"queueOptions", "autoRemoveCompletedOperations"}),
           onChange,
           valueReset(autoRemoveCompletedOperations, onChange, false),
       }
     , startInPausedState{
-          language->getObserved("settings", "queueOptions", "startInPausedStateHelpText"),
+          factory_.identity({"queueOptions", "startInPausedState"}),
           onChange,
           valueReset(startInPausedState, onChange, true),
       }
     , liveQueuePageSize{
-          language->getObserved("settings", "queueOptions", "liveQueuePageSizeHelpText"),
+          factory_.identity({"queueOptions", "liveQueuePageSize"}),
           onChange,
           valueReset(liveQueuePageSize, onChange, 200),
           NumberSetting<int, true>::ConstructionArgs{
@@ -54,10 +55,8 @@ Nui::ElementRenderer QueueOptions::render()
     using namespace Nui::Elements;
 
     return fragment(
-        autoRemoveCompletedOperations(
-            language->getObserved("settings", "queueOptions", "autoRemoveCompletedOperations")
-        ),
-        startInPausedState(language->getObserved("settings", "queueOptions", "startInPausedState")),
-        liveQueuePageSize(language->getObserved("settings", "queueOptions", "liveQueuePageSize"))
+        autoRemoveCompletedOperations(),
+        startInPausedState(),
+        liveQueuePageSize()
     );
 }

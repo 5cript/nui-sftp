@@ -5,32 +5,52 @@
 
 using namespace std::string_literals;
 
-ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
+ExecutingSessionOptions::ExecutingSessionOptions(
+    SettingFactory const& factory,
+    std::function<void()> const& onChange,
+    InputDialog& inputDialog,
+    MultiInputDialog& multiInputDialog
+)
     : isPty{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "isPtyHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "isPty"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "isPty"}}
+        ),
         onChange,
         valueReset(isPty, onChange, Persistence::ExecutingSessionOptions{}.isPty)
     }
     , command{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "commandHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "command"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "command"}}
+        ),
         PathSettingType::File,
         onChange,
         valueReset(command, onChange, Persistence::ExecutingSessionOptions{}.command)
     }
     , arguments{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "argumentsHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "arguments"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "arguments"}}
+        ),
         inputDialog,
         onChange,
         nulloptReset(arguments, onChange)
     }
     , environment{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "environmentHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "environment"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "environmentVariables"}}
+        ),
         multiInputDialog,
         onChange,
         nulloptReset(environment, onChange)
     }
     , exitTimeoutSeconds{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "exitTimeoutSecondsHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "exitTimeoutSeconds"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "exitTimeoutSeconds"}}
+        ),
         onChange,
         valueReset(exitTimeoutSeconds, onChange, Persistence::ExecutingSessionOptions{}.exitTimeoutSeconds),
         {
@@ -39,7 +59,10 @@ ExecutingSessionOptions::ExecutingSessionOptions(std::function<void()> const& on
         }
     }
     , cleanEnvironment{
-        language->getObserved("settings", "sessionOptions", "executingSessionOptions", "cleanEnvironmentHelpText"),
+        factory.identity(
+            {"sessionOptions", "executingSessionOptions", "cleanEnvironment"},
+            {.labelKey = SettingKeyPath{"sessionOptions", "cleanEnvironment"}}
+        ),
         onChange,
         valueReset(cleanEnvironment, onChange, Persistence::ExecutingSessionOptions{}.cleanEnvironment)
     }

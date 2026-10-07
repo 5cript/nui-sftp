@@ -41,7 +41,7 @@ class ColorSetting : public Setting<Disengageable, std::string>
         }
     }
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;

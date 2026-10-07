@@ -9,170 +9,160 @@
 
 using namespace std::string_literals;
 
-TerminalOptions::TerminalTheme::TerminalTheme(std::function<void()> const& onChange, Nui::Observed<bool>* externalEngage)
+TerminalOptions::TerminalTheme::TerminalTheme(
+    SettingFactory const& factory,
+    std::function<void()> const& onChange,
+    Nui::Observed<bool>* externalEngage
+)
     : background{
-            language->getObserved("settings", "terminalOptions", "theme", "backgroundHelpText"),
+            factory.identity({"terminalOptions", "theme", "background"}),
             onChange,
             valueReset(background, onChange, "#202020"s),
             externalEngage
         }
     , black{
-            language->getObserved("settings", "terminalOptions", "theme", "blackHelpText"),
+            factory.identity({"terminalOptions", "theme", "black"}),
             onChange,
             valueReset(black, onChange, "#000000"s),
             externalEngage
     }
     , blue{
-            language->getObserved("settings", "terminalOptions", "theme", "blueHelpText"),
+            factory.identity({"terminalOptions", "theme", "blue"}),
             onChange,
             valueReset(blue, onChange, "#0000FF"s),
             externalEngage
         }
     , brightBlack{
-            language->getObserved("settings", "terminalOptions", "theme", "brightBlackHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightBlack"}),
             onChange,
             valueReset(brightBlack, onChange, "#555555"s),
             externalEngage
         }
     , brightBlue{
-            language->getObserved("settings", "terminalOptions", "theme", "brightBlueHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightBlue"}),
             onChange,
             valueReset(brightBlue, onChange, "#5555FF"s),
             externalEngage
         }
     , brightCyan{
-            language->getObserved("settings", "terminalOptions", "theme", "brightCyanHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightCyan"}),
             onChange,
             valueReset(brightCyan, onChange, "#55FFFF"s),
             externalEngage
         }
     , brightGreen{
-            language->getObserved("settings", "terminalOptions", "theme", "brightGreenHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightGreen"}),
             onChange,
             valueReset(brightGreen, onChange, "#55FF55"s),
             externalEngage
         }
     , brightMagenta{
-            language->getObserved("settings", "terminalOptions", "theme", "brightMagentaHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightMagenta"}),
             onChange,
             valueReset(brightMagenta, onChange, "#FF55FF"s),
             externalEngage
         }
     , brightRed{
-            language->getObserved("settings", "terminalOptions", "theme", "brightRedHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightRed"}),
             onChange,
             valueReset(brightRed, onChange, "#FF5555"s),
             externalEngage
         }
     , brightWhite{
-            language->getObserved("settings", "terminalOptions", "theme", "brightWhiteHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightWhite"}),
             onChange,
             valueReset(brightWhite, onChange, "#FFFFFF"s),
             externalEngage
         }
     , brightYellow{
-            language->getObserved("settings", "terminalOptions", "theme", "brightYellowHelpText"),
+            factory.identity({"terminalOptions", "theme", "brightYellow"}),
             onChange,
             valueReset(brightYellow, onChange, "#FFFF55"s),
             externalEngage
         }
     , cursor{
-            language->getObserved("settings", "terminalOptions", "theme", "cursorHelpText"),
+            factory.identity({"terminalOptions", "theme", "cursor"}),
             onChange,
             valueReset(cursor, onChange, "#FFFFFF"s),
             externalEngage
         }
     , cursorAccent{
-            language->getObserved("settings", "terminalOptions", "theme", "cursorAccentHelpText"),
+            factory.identity({"terminalOptions", "theme", "cursorAccent"}),
             onChange,
             valueReset(cursorAccent, onChange, "#FFFFFF"s),
             externalEngage
         }
     , cyan{
-            language->getObserved("settings", "terminalOptions", "theme", "cyanHelpText"),
+            factory.identity({"terminalOptions", "theme", "cyan"}),
             onChange,
             valueReset(cyan, onChange, "#00FFFF"s),
             externalEngage
         }
     , foreground{
-            language->getObserved("settings", "terminalOptions", "theme", "foregroundHelpText"),
+            factory.identity({"terminalOptions", "theme", "foreground"}),
             onChange,
             valueReset(foreground, onChange, "#FFFFFF"s),
             externalEngage
         }
     , green{
-            language->getObserved("settings", "terminalOptions", "theme", "greenHelpText"),
+            factory.identity({"terminalOptions", "theme", "green"}),
             onChange,
             valueReset(green, onChange, "#00FF00"s),
             externalEngage
         }
     , magenta{
-            language->getObserved("settings", "terminalOptions", "theme", "magentaHelpText"),
+            factory.identity({"terminalOptions", "theme", "magenta"}),
             onChange,
             valueReset(magenta, onChange, "#FF00FF"s),
             externalEngage
         }
     , red{
-            language->getObserved("settings", "terminalOptions", "theme", "redHelpText"),
+            factory.identity({"terminalOptions", "theme", "red"}),
             onChange,
             valueReset(red, onChange, "#FF0000"s),
             externalEngage
         }
     , selectionBackground{
-            language->getObserved(
-                "settings",
-                "terminalOptions",
-                "theme",
-                "selectionBackgroundHelpText"
-            ),
+            factory.identity({"terminalOptions", "theme", "selectionBackground"}),
             onChange,
             valueReset(selectionBackground, onChange, "#FFFFFF"s),
             externalEngage
         }
     , selectionForeground{
-            language->getObserved(
-                "settings",
-                "terminalOptions",
-                "theme",
-                "selectionForegroundHelpText"
-            ),
+            factory.identity({"terminalOptions", "theme", "selectionForeground"}),
             onChange,
             valueReset(selectionForeground, onChange, "#FFFFFF"s),
             externalEngage
         }
     , selectionInactiveBackground{
-            language->getObserved(
-                "settings",
-                "terminalOptions",
-                "theme",
-                "selectionInactiveBackgroundHelpText"
-            ),
+            factory.identity({"terminalOptions", "theme", "selectionInactiveBackground"}),
             onChange,
             valueReset(selectionInactiveBackground, onChange, "#FFFFFF"s),
             externalEngage
         }
     , white{
-            language->getObserved("settings", "terminalOptions", "theme", "whiteHelpText"),
+            factory.identity({"terminalOptions", "theme", "white"}),
             onChange,
             valueReset(white, onChange, "#FFFFFF"s),
             externalEngage
         }
     , yellow{
-            language->getObserved("settings", "terminalOptions", "theme", "yellowHelpText"),
+            factory.identity({"terminalOptions", "theme", "yellow"}),
             onChange,
             valueReset(yellow, onChange, "#FFFF00"s),
             externalEngage
         }
 {}
 
-TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
-    : fontFamily{
-            language->getObserved("settings", "terminalOptions", "fontFamilyHelpText"),
+TerminalOptions::TerminalOptions(SettingFactory const& factory, std::function<void()> const& onChange)
+    : factory_{factory.forGroup(groupKey)}
+    , fontFamily{
+            factory_.identity({"terminalOptions", "fontFamily"}),
             onChange,
             valueReset(fontFamily, onChange, "consolas, courier-new, courier, monospace"s),
         }
     , fontSize{
-            language->getObserved("settings", "terminalOptions", "fontSizeHelpText"),
+            factory_.identity({"terminalOptions", "fontSize"}),
             onChange,
             valueReset(fontSize, onChange, 14),
             {
@@ -181,7 +171,7 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             }
         }
     , lineHeight{
-            language->getObserved("settings", "terminalOptions", "lineHeightHelpText"),
+            factory_.identity({"terminalOptions", "lineHeight"}),
             onChange,
             valueReset(lineHeight, onChange, 1.0),
             {
@@ -191,18 +181,18 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
             }
         }
     , cursorBlink{
-            language->getObserved("settings", "terminalOptions", "cursorBlinkHelpText"),
+            factory_.identity({"terminalOptions", "cursorBlink"}),
             onChange,
             valueReset(cursorBlink, onChange, false),
         }
     , renderer{
             std::vector<std::string>{"dom", "webgl"},
-            language->getObserved("settings", "terminalOptions", "rendererHelpText"),
+            factory_.identity({"terminalOptions", "renderer"}),
             onChange,
             valueReset(renderer, onChange, "webgl"s),
         }
     , letterSpacing{
-            language->getObserved("settings", "terminalOptions", "letterSpacingHelpText"),
+            factory_.identity({"terminalOptions", "letterSpacing"}),
             onChange,
             valueReset(letterSpacing, onChange, 0),
             {
@@ -211,7 +201,7 @@ TerminalOptions::TerminalOptions(std::function<void()> const& onChange)
                 .stepValue = 0.1,
             }
         }
-    , theme{onChange, &themeEngaged}
+    , theme{factory_.within({"terminalOptions", "themeSubgroupTitle"}), onChange, &themeEngaged}
     , onChange_{onChange}
 {}
 
@@ -396,46 +386,40 @@ Nui::ElementRenderer TerminalOptions::render()
     using namespace Nui::Attributes;
 
     return fragment(
-        fontFamily(language->getObserved("settings", "terminalOptions", "fontFamily")),
-        fontSize(language->getObserved("settings", "terminalOptions", "fontSize")),
-        lineHeight(language->getObserved("settings", "terminalOptions", "lineHeight")),
-        cursorBlink(language->getObserved("settings", "terminalOptions", "cursorBlink")),
-        renderer(language->getObserved("settings", "terminalOptions", "renderer")),
-        letterSpacing(language->getObserved("settings", "terminalOptions", "letterSpacing")),
+        fontFamily(),
+        fontSize(),
+        lineHeight(),
+        cursorBlink(),
+        renderer(),
+        letterSpacing(),
         subgroup(
             {.engagedStatus = &themeEngaged,
                 .groupTitle = language->getObserved("settings", "terminalOptions", "themeSubgroupTitle"),
                 .onChange = onChange_},
             fragment(
-                theme.background(language->getObserved("settings", "terminalOptions", "theme", "background")),
-                theme.black(language->getObserved("settings", "terminalOptions", "theme", "black")),
-                theme.blue(language->getObserved("settings", "terminalOptions", "theme", "blue")),
-                theme.brightBlack(language->getObserved("settings", "terminalOptions", "theme", "brightBlack")),
-                theme.brightBlue(language->getObserved("settings", "terminalOptions", "theme", "brightBlue")),
-                theme.brightCyan(language->getObserved("settings", "terminalOptions", "theme", "brightCyan")),
-                theme.brightGreen(language->getObserved("settings", "terminalOptions", "theme", "brightGreen")),
-                theme.brightMagenta(language->getObserved("settings", "terminalOptions", "theme", "brightMagenta")),
-                theme.brightRed(language->getObserved("settings", "terminalOptions", "theme", "brightRed")),
-                theme.brightWhite(language->getObserved("settings", "terminalOptions", "theme", "brightWhite")),
-                theme.brightYellow(language->getObserved("settings", "terminalOptions", "theme", "brightYellow")),
-                theme.cursor(language->getObserved("settings", "terminalOptions", "theme", "cursor")),
-                theme.cursorAccent(language->getObserved("settings", "terminalOptions", "theme", "cursorAccent")),
-                theme.cyan(language->getObserved("settings", "terminalOptions", "theme", "cyan")),
-                theme.foreground(language->getObserved("settings", "terminalOptions", "theme", "foreground")),
-                theme.green(language->getObserved("settings", "terminalOptions", "theme", "green")),
-                theme.magenta(language->getObserved("settings", "terminalOptions", "theme", "magenta")),
-                theme.red(language->getObserved("settings", "terminalOptions", "theme", "red")),
-                theme.selectionBackground(
-                    language->getObserved("settings", "terminalOptions", "theme", "selectionBackground")
-                ),
-                theme.selectionForeground(
-                    language->getObserved("settings", "terminalOptions", "theme", "selectionForeground")
-                ),
-                theme.selectionInactiveBackground(
-                    language->getObserved("settings", "terminalOptions", "theme", "selectionInactiveBackground")
-                ),
-                theme.white(language->getObserved("settings", "terminalOptions", "theme", "white")),
-                theme.yellow(language->getObserved("settings", "terminalOptions", "theme", "yellow"))
+                theme.background(),
+                theme.black(),
+                theme.blue(),
+                theme.brightBlack(),
+                theme.brightBlue(),
+                theme.brightCyan(),
+                theme.brightGreen(),
+                theme.brightMagenta(),
+                theme.brightRed(),
+                theme.brightWhite(),
+                theme.brightYellow(),
+                theme.cursor(),
+                theme.cursorAccent(),
+                theme.cyan(),
+                theme.foreground(),
+                theme.green(),
+                theme.magenta(),
+                theme.red(),
+                theme.selectionBackground(),
+                theme.selectionForeground(),
+                theme.selectionInactiveBackground(),
+                theme.white(),
+                theme.yellow()
             )
         )
     );

@@ -1,4 +1,3 @@
-language: "Sprache"
 confirmDialog:
   yes: "Ja"
   no: "Nein"
@@ -484,16 +483,17 @@ settings:
     sshKeyPublic: "SSH öffentlicher Schlüssel (Optional, siehe Hilfe)"
     openSftpByDefault: "SFTP Channel direkt öffnen"
     remoteFavorites: "Remote Favoriten"
-  sessionSettings:
-    host: "Host / IP"
-    port: "Port"
-    user: "Benutzer"
-    sshKeyPrivate: "SSH Privater Schlüssel"
-    sshKeyPublic: "SSH öffentlicher Schlüssel (Optional, siehe Hilfe)"
-    openSftpByDefault: "SFTP Channel direkt öffnen"
+    hostHelpText: "Der Hostname oder die IP-Adresse des SSH Servers."
+    portHelpText: "Der Port, auf dem der SSH Server lauscht. Standard ist 22."
+    userHelpText: "Der Benutzername für die Anmeldung. Ohne Angabe wird die SSH Konfiguration oder der lokale Benutzername verwendet."
+    sshKeyPrivateHelpText: "Die private Schlüsseldatei für die Anmeldung mit öffentlichem Schlüssel an diesem Server."
+    sshKeyPublicHelpText: "Optional. Der öffentliche Schlüssel zum privaten Schlüssel. Wenn gesetzt, wird der Server zuerst gefragt, ob er diesen Schlüssel akzeptiert, bevor der private Schlüssel geladen und seine Passphrase abgefragt wird."
+    openSftpByDefaultHelpText: "Direkt nach dem Verbinden einen SFTP Channel und den Datei Explorer öffnen."
     remoteFavoritesHelpText: "Favorisierte Verzeichnisse auf dem Remote Server, die als Verknüpfungen in der Orte-Leiste des Remote Datei Explorers angezeigt werden. An diese SSH Sitzung gebunden, da absolute Pfade nur relativ zu einem Server sinnvoll sind."
     maxReconnectAttempts: "Max. Reconnect-Versuche"
+    maxReconnectAttemptsHelpText: "Wie oft nach einem Verbindungsabbruch automatisch neu verbunden wird. 0 schaltet automatische Versuche ab, -1 versucht es bis zum Abbruch."
     maxReconnectBackoffMs: "Max. Reconnect-Wartezeit (ms)"
+    maxReconnectBackoffMsHelpText: "Die längste Wartezeit zwischen zwei Reconnect-Versuchen in Millisekunden. Die Wartezeit verdoppelt sich mit jedem Versuch, beginnend bei einer Sekunde, bis sie diese Grenze erreicht."
   sshOptions:
     identitiesHelpText: "Liste von SSH Identitäten (Pfade zu privaten Schlüsseln), die für die automatische Schlüssel Authentifizierung verwendet werden, wenn kein SSH Agent vorhanden ist."
     sshDirectoryHelpText: "Das Verzeichnis, in dem SSH bezogene Dateien wie bekannte Hosts und Identitätsschlüssel gespeichert werden (in der Regel ~/.ssh)."
@@ -783,8 +783,7 @@ settings:
       VWERASEHelpText: "Wort Löschzeichen"
   general:
     localization:
-      dateTimeFormatString: "Datums- und Zeitformatsstring"
-      dateTimeFormatHelpText: "Der Datums- und Zeitformatsstring, der in der gesamten Anwendung verwendet wird, hauptsächlich in der Tabellenansicht des Dateiexplorers. Verwendet die fmt::format Formatierungssyntax. https://fmt.dev/12.0/syntax/#chrono-format-specifications"
+      language: "Sprache"
       languageHelpText: "Die Sprache, die in der Benutzeroberfläche der Anwendung verwendet wird."
     userInterface:
       themeHelpText: "Das allgemeine Thema der Benutzeroberfläche. Ein Thema ist kein Hell-/Dunkelmodus. Ein Thema stellt eine konsistente Farbgebung für die Benutzeroberfläche bereit, einschließlich, aber nicht beschränkt auf Hell-/Dunkelmodus."

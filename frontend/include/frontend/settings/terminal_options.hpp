@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/color_setting.hpp>
@@ -11,6 +12,13 @@
 
 struct TerminalOptions : public GroupKeys
 {
+  private:
+    /**
+     * @brief Creates the identities of the settings below.
+     */
+    SettingFactory factory_;
+
+  public:
     struct TerminalTheme
     {
         ColorSetting<true> background;
@@ -40,7 +48,11 @@ struct TerminalOptions : public GroupKeys
         // TODO:
         // std::optional<std::vector<std::string>> extendedAnsi{std::nullopt};
 
-        TerminalTheme(std::function<void()> const& onChange, Nui::Observed<bool>* externalEngage);
+        TerminalTheme(
+            SettingFactory const& factory,
+            std::function<void()> const& onChange,
+            Nui::Observed<bool>* externalEngage
+        );
     };
 
     TextSetting<true> fontFamily;
@@ -52,7 +64,7 @@ struct TerminalOptions : public GroupKeys
     Nui::Observed<bool> themeEngaged;
     TerminalTheme theme;
 
-    TerminalOptions(std::function<void()> const& onChange);
+    TerminalOptions(SettingFactory const& factory, std::function<void()> const& onChange);
 
     void applyToState(Persistence::TerminalOptions& state) const;
     void loadFromState(Persistence::TerminalOptions const& state);

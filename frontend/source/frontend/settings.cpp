@@ -24,7 +24,8 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/subgroup.hpp>
 #include <frontend/settings/setting_group.hpp>
-#include <frontend/settings/addressable_setting.hpp>
+#include <frontend/settings/search/setting_factory.hpp>
+#include <frontend/settings/search/settings_search_index.hpp>
 #include <frontend/onboarding/onboarding.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
@@ -52,6 +53,35 @@
 
 using namespace std::string_literals;
 namespace Snc = ScriptNuiComponents;
+
+namespace
+{
+    /**
+     * @brief Reports settings the search would find but could not show, and ids that do not resolve to exactly one
+     * element, so a result can never point nowhere or somewhere ambiguous.
+     */
+    void logSearchIndexProblems(SettingsSearchIndex const& index)
+    {
+        auto problems = index.verify();
+        const auto document = Nui::val::global("document");
+        for (auto const* entry : index.entries())
+        {
+            for (auto const& [scope, registration] : entry->scopes)
+            {
+                const auto count = document
+                                       .call<Nui::val>(
+                                           "querySelectorAll", fmt::format("[id=\"{}\"]", registration.htmlId)
+                                       )["length"]
+                                       .as<int>();
+                if (count != 1)
+                    problems.push_back(fmt::format("html id '{}' matches {} elements", registration.htmlId, count));
+            }
+        }
+        for (auto const& problem : problems)
+            Log::error("Settings search: {}", problem);
+        Log::info("Settings search: {} settings indexed, {} problems.", index.entries().size(), problems.size());
+    }
+}
 
 struct Settings::Implementation
 {
@@ -90,6 +120,11 @@ struct Settings::Implementation
     bool applyingToUi{false};
 
     Nui::Observed<std::vector<Settings::SectionSelectorOptions>> sessionSelectors{};
+
+    /**
+     * @brief Every setting below registers itself here, so it is declared first and outlives them.
+     */
+    SettingsSearchIndex searchIndex{};
 
     GeneralSettings generalSettings;
     TermiosSettings termiosSettings;
@@ -169,39 +204,51 @@ struct Settings::Implementation
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
         , newSessionDialog{&newSessionDialog}
-        , generalSettings{onChange, events, inputDialog, multiInputDialog}
-        , termiosSettings{[onChange, reloadInheritance]()
+        , generalSettings{SettingFactory{&searchIndex, SettingScope::General}, onChange, events, inputDialog, multiInputDialog}
+        , termiosSettings{inheritable().within({"termiosGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }}
-        , sshOptions{[onChange, reloadInheritance]()
+        , sshOptions{inheritable().within({"sshOptionsGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }, inputDialog, multiInputDialog}
-        , sftpOptions{[onChange, reloadInheritance]()
+        , sftpOptions{inheritable().within({"sftpOptionsGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }}
-        , terminalOptions{[onChange, reloadInheritance]()
+        , terminalOptions{inheritable().within({"terminalOptionsGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }}
-        , queueOptions{[onChange, reloadInheritance]()
+        , queueOptions{inheritable().within({"queueOptionsGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }}
-        , historyOptions{[onChange, reloadInheritance]()
+        , historyOptions{inheritable().within({"historyOptionsGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
                   reloadInheritance();
               }}
-        , currentSessionOptions{onChange, obtainCurrentLayout, confirmDialog, inputDialog, multiInputDialog}
+        , currentSessionOptions{
+              SettingFactory{&searchIndex, SettingScope::Session},
+              onChange,
+              obtainCurrentLayout,
+              confirmDialog,
+              inputDialog,
+              multiInputDialog
+          }
     {}
+
+    SettingFactory inheritable()
+    {
+        return SettingFactory{&searchIndex, SettingScope::Inheritable};
+    }
 };
 
 Settings::Settings(
@@ -293,6 +340,7 @@ Settings::Settings(
                                             impl_->initialLoadDone = true;
                                             impl_->events->settingsInitialLoadComplete = true;
                                             Nui::globalEventContext.executeActiveEventsImmediately();
+                                            logSearchIndexProblems(impl_->searchIndex);
                                         },
                                         std::placeholders::_1
                                     ));
@@ -1026,7 +1074,7 @@ void Settings::addNewSession()
                     // that's the first thing the user must fill in to make
                     // the new session functional.
                     if (engineType == Persistence::TerminalEngineType::ssh)
-                        impl_->events->requestOpenSettingsAtId("session-host");
+                        impl_->events->requestOpenSettingsAtId("setting-session-sessionOptions-host");
                 }
             );
         },
@@ -1575,12 +1623,8 @@ Nui::ElementRenderer Settings::currentSession()
                     .styleVariant = Snc::StyleVariant::Danger,
                 })
             ),
-            impl_->currentSessionOptions.terminalEngineType(
-                language->getObserved("settings", "sessionOptions", "terminalEngineType")
-            ),
-            impl_->currentSessionOptions.icon(
-                language->getObserved("settings", "sessionOptions", "icon")
-            ),
+            impl_->currentSessionOptions.terminalEngineType(),
+            impl_->currentSessionOptions.icon(),
             // SSH/local server options sit directly under the icon picker so
             // the connection-relevant fields (host, port, etc.) are visible
             // without scrolling. Sort/startup/layout controls live further
@@ -1600,16 +1644,15 @@ Nui::ElementRenderer Settings::currentSession()
                         onChange();
                     }},
                     fragment(
-                        addressableSetting(
-                            "session-host",
-                            impl_->currentSessionOptions.sshSessionOptions.host(language->getObserved("settings", "sessionOptions", "host"))
-                        ),
-                        impl_->currentSessionOptions.sshSessionOptions.port(language->getObserved("settings", "sessionOptions", "port")),
-                        impl_->currentSessionOptions.sshSessionOptions.user(language->getObserved("settings", "sessionOptions", "user")),
-                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPrivate(language->getObserved("settings", "sessionOptions", "sshKeyPrivate")),
-                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPublic(language->getObserved("settings", "sessionOptions", "sshKeyPublic")),
-                        impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(language->getObserved("settings", "sessionOptions", "openSftpByDefault")),
-                        impl_->currentSessionOptions.sshSessionOptions.remoteFavorites(language->getObserved("settings", "sessionOptions", "remoteFavorites"))
+                        impl_->currentSessionOptions.sshSessionOptions.host(),
+                        impl_->currentSessionOptions.sshSessionOptions.port(),
+                        impl_->currentSessionOptions.sshSessionOptions.user(),
+                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPrivate(),
+                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPublic(),
+                        impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(),
+                        impl_->currentSessionOptions.sshSessionOptions.remoteFavorites(),
+                        impl_->currentSessionOptions.sshSessionOptions.maxReconnectAttempts(),
+                        impl_->currentSessionOptions.sshSessionOptions.maxReconnectBackoffMs()
                     )
                 )
             ),
@@ -1628,24 +1671,17 @@ Nui::ElementRenderer Settings::currentSession()
                         onChange();
                     }},
                     fragment(
-                        impl_->currentSessionOptions.executingSessionOptions.isPty(language->getObserved("settings", "sessionOptions", "isPty")),
-                        impl_->currentSessionOptions.executingSessionOptions.command(language->getObserved("settings", "sessionOptions", "command")),
-                        impl_->currentSessionOptions.executingSessionOptions.arguments(language->getObserved("settings", "sessionOptions", "arguments")),
-                        impl_->currentSessionOptions.executingSessionOptions.environment(
-                            language->getObserved("settings", "sessionOptions", "environmentVariables")),
-                        impl_->currentSessionOptions.executingSessionOptions.exitTimeoutSeconds(
-                            language->getObserved("settings", "sessionOptions", "exitTimeoutSeconds")),
-                        impl_->currentSessionOptions.executingSessionOptions.cleanEnvironment(
-                            language->getObserved("settings", "sessionOptions", "cleanEnvironment"))
+                        impl_->currentSessionOptions.executingSessionOptions.isPty(),
+                        impl_->currentSessionOptions.executingSessionOptions.command(),
+                        impl_->currentSessionOptions.executingSessionOptions.arguments(),
+                        impl_->currentSessionOptions.executingSessionOptions.environment(),
+                        impl_->currentSessionOptions.executingSessionOptions.exitTimeoutSeconds(),
+                        impl_->currentSessionOptions.executingSessionOptions.cleanEnvironment()
                     )
                 )
             ),
-            impl_->currentSessionOptions.orderBy(
-                language->getObserved("settings", "sessionOptions", "orderBy")
-            ),
-            impl_->currentSessionOptions.isStartupSession(
-                language->getObserved("settings", "sessionOptions", "isStartupSession")
-            ),
+            impl_->currentSessionOptions.orderBy(),
+            impl_->currentSessionOptions.isStartupSession(),
             impl_->currentSessionOptions.layout()
         );
 

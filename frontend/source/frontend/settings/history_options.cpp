@@ -25,14 +25,15 @@ namespace
     }
 }
 
-HistoryOptions::HistoryOptions(std::function<void()> const& onChange)
-    : captureMode{
+HistoryOptions::HistoryOptions(SettingFactory const& factory, std::function<void()> const& onChange)
+    : factory_{factory.forGroup(groupKey)}
+    , captureMode{
           std::vector<Persistence::HistoryCaptureMode>{
               Persistence::HistoryCaptureMode::off,
               Persistence::HistoryCaptureMode::simple,
               Persistence::HistoryCaptureMode::smart,
           },
-          language->getObserved("settings", "historyOptions", "captureModeHelpText"),
+          factory_.identity({"historyOptions", "captureMode"}),
           onChange,
           nulloptReset(captureMode, onChange),
           [](Persistence::HistoryCaptureMode const& mode) {
@@ -60,5 +61,5 @@ Nui::ElementRenderer HistoryOptions::render()
 {
     using namespace Nui::Elements;
 
-    return fragment(captureMode(language->getObserved("settings", "historyOptions", "captureMode")));
+    return fragment(captureMode());
 }

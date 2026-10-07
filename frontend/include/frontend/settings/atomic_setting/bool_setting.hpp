@@ -29,7 +29,7 @@ class BoolSetting : public Setting<Disengageable, bool>
 
     using SettingBase::SettingBase;
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using namespace Nui::Elements;

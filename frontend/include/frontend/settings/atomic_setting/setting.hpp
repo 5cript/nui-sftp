@@ -1,6 +1,9 @@
 #pragma once
 
 #include <frontend/classes.hpp>
+#include <frontend/settings/addressable_setting.hpp>
+#include <frontend/settings/search/setting_identity.hpp>
+#include <frontend/settings/search/settings_search_index.hpp>
 #include <utility/language.hpp>
 #include <ids/id.hpp>
 
@@ -52,17 +55,24 @@ class Setting
     using ValueType = ValueT;
     using OutfacingValueType = std::conditional_t<Disengageable, std::optional<ValueType>, ValueType>;
 
+    /**
+     * @brief Constructs the setting and registers it in the settings search for its whole lifetime.
+     *
+     * @param identity Where the setting lives and which language keys describe it.
+     */
     Setting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         Nui::Observed<bool>* externalDisengage = nullptr
     )
-        : state_{}
+        : identity_{std::move(identity)}
+        , registration_{identity_}
+        , state_{}
         , onChange_{std::forward<decltype(onChange)>(onChange)}
         , resetAction_{std::forward<decltype(resetAction)>(resetAction)}
         , externalDisengage_{externalDisengage}
-        , helpText_{std::move(helpText)}
+        , helpText_{identity_.observedHelpText()}
     {
         if (!onChange_)
         {
@@ -76,6 +86,24 @@ class Setting
         }
     }
     virtual ~Setting() = default;
+    Setting(Setting const&) = delete;
+    Setting(Setting&&) = delete;
+    Setting& operator=(Setting const&) = delete;
+    Setting& operator=(Setting&&) = delete;
+
+    /**
+     * @brief Renders the setting row with its label, addressable by its html id, and makes it searchable.
+     */
+    Nui::ElementRenderer operator()()
+    {
+        registration_.markRendered();
+        return addressableSetting(identity_.htmlId(), renderRow(identity_.observedLabel()));
+    }
+
+    SettingIdentity const& identity() const
+    {
+        return identity_;
+    }
 
     Nui::Observed<ValueType>& state()
     {
@@ -299,6 +327,15 @@ class Setting
     }
 
   protected:
+    /**
+     * @brief Renders the row of the concrete setting kind.
+     *
+     * @param labelText The translated label.
+     */
+    virtual Nui::ElementRenderer renderRow(LanguageObservedText labelText) = 0;
+
+    SettingIdentity identity_;
+    SettingsSearchIndex::Registration registration_;
     Nui::Observed<ValueType> state_;
     Nui::Observed<std::optional<ValueType>> inheritedState_;
     Nui::Observed<ValueType> stateWithInheritance_;

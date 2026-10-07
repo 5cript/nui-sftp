@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 
@@ -15,9 +16,16 @@
  */
 struct HistoryOptions : public GroupKeys
 {
+  private:
+    /**
+     * @brief Creates the identities of the settings below.
+     */
+    SettingFactory factory_;
+
+  public:
     ComboSetting<Persistence::HistoryCaptureMode, std::string, true> captureMode;
 
-    HistoryOptions(std::function<void()> const& onChange);
+    HistoryOptions(SettingFactory const& factory, std::function<void()> const& onChange);
 
     void applyToState(Persistence::HistoryOptions& state) const;
     void loadFromState(Persistence::HistoryOptions const& state);

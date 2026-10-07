@@ -10,20 +10,20 @@
 #include <nui/frontend/attributes.hpp>
 
 LayoutSetting::LayoutSetting(
-    LanguageObservedText helpText,
+    SettingIdentity identity,
     std::function<void()> onChange,
     std::function<std::optional<nlohmann::json>()> obtainCurrentLayout,
     ConfirmDialog& confirmDialog,
     InputDialog& newItemDialog
 )
-    : SettingBase{std::move(helpText), std::move(onChange), []() {}}
+    : SettingBase{std::move(identity), std::move(onChange), []() {}}
     , confirmDialog_{&confirmDialog}
     , newItemDialog_{&newItemDialog}
     , selected_{}
     , obtainCurrentLayout_{std::move(obtainCurrentLayout)}
 {}
 
-Nui::ElementRenderer LayoutSetting::operator()()
+Nui::ElementRenderer LayoutSetting::renderRow(LanguageObservedText labelText)
 {
     namespace Snc = ScriptNuiComponents;
     using namespace Nui::Elements;
@@ -36,7 +36,7 @@ Nui::ElementRenderer LayoutSetting::operator()()
     (
         span{
             style = "color: var(--color); margin-right: 10px"
-        }(language->getObserved("settings", "layoutSetting", "layoutKeysLabel")),
+        }(std::move(labelText)),
         div{class_ = "layout-setting-controls"}(
             Snc::select(Snc::SelectOptions<decltype(selected_), decltype(state_)>{
                 .activeOption = selected_,

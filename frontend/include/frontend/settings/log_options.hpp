@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
@@ -17,7 +18,7 @@ struct LogOptions : public GroupKeys
     TextSetting<> logDirectory;
     BoolSetting<> disableFileLogging;
 
-    LogOptions(std::function<void()> const& onChange);
+    LogOptions(SettingFactory const& factory, std::function<void()> const& onChange);
 
     void applyToState(Persistence::LogOptions& state) const;
     void loadFromState(Persistence::LogOptions const& state);

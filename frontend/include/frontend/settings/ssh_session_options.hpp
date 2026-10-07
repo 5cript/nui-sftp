@@ -2,6 +2,7 @@
 
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
@@ -16,6 +17,13 @@
 
 struct SshSessionOptions
 {
+  private:
+    /**
+     * @brief Creates the identities of the server settings.
+     */
+    SettingFactory serverFactory_;
+
+  public:
     TextSetting<> host;
     NumberSetting<int, true> port;
     TextSetting<true> user;
@@ -29,7 +37,11 @@ struct SshSessionOptions
     SshOptions sshOptions;
     SftpOptions sftpOptions;
 
+    /**
+     * @param factory Creates the identities of all settings of the SSH session; it carries no group titles yet.
+     */
     SshSessionOptions(
+        SettingFactory const& factory,
         std::function<void()> const& onChange,
         InputDialog& inputDialog,
         MultiInputDialog& multiInputDialog

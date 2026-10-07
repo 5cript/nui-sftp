@@ -28,7 +28,7 @@ class TextSetting : public Setting<Disengageable, std::string>
 
     using SettingBase::SettingBase;
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
@@ -13,6 +14,23 @@
 
 struct SftpOptions : public GroupKeys
 {
+  private:
+    /**
+     * @brief Creates the identities of the settings below.
+     */
+    SettingFactory factory_;
+
+    /**
+     * @brief Creates the identities of the download options.
+     */
+    SettingFactory downloadFactory_;
+
+    /**
+     * @brief Creates the identities of the upload options.
+     */
+    SettingFactory uploadFactory_;
+
+  public:
     struct DownloadOptions
     {
         TextSetting<true> tempFileSuffix;
@@ -49,7 +67,7 @@ struct SftpOptions : public GroupKeys
     NumberSetting<int, true> bulkConcurrency;
     NumberSetting<int, true> operationTimeoutSeconds;
 
-    SftpOptions(std::function<void()> const& onChange);
+    SftpOptions(SettingFactory const& factory, std::function<void()> const& onChange);
 
     void applyToState(Persistence::SftpOptions& state) const;
     void loadFromState(Persistence::SftpOptions const& state, bool loadRefs);
