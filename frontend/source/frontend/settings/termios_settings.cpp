@@ -1185,6 +1185,7 @@ Nui::ElementRenderer TermiosSettings::render()
                 localFlags.ECHOE("ECHOE"),
                 localFlags.ECHOK("ECHOK"),
                 localFlags.ECHONL("ECHONL"),
+                localFlags.ECHOCTL("ECHOCTL"),
                 localFlags.ECHOPRT("ECHOPRT"),
                 localFlags.ECHOKE("ECHOKE"),
                 localFlags.FLUSHO("FLUSHO"),
