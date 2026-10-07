@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -52,6 +53,8 @@ namespace
         KeyLocations keys;
         // Leading literal parts of calls whose remaining parts are computed at runtime.
         KeyLocations dynamicPrefixes;
+        // Key paths that are used when present but may be absent, like the search tags of a setting.
+        KeyLocations optionalKeys;
     };
 
     // Splits the arguments of a call at top level commas. `position` points behind the opening parenthesis and is
@@ -133,6 +136,96 @@ namespace
         return paths;
     }
 
+    // The literals of a braced list argument like {"sshOptions", "noDelay"}. Empty if any element is computed.
+    KeyPath bracedLiterals(const std::string& argument)
+    {
+        static const std::regex braced(R"re(^[^{]*\{([^{}]*)\}\s*$)re");
+        static const std::regex literal(R"re("([^"\\]+)")re");
+
+        std::smatch match;
+        if (!std::regex_match(argument, match, braced))
+            return {};
+        const auto inner = match[1].str();
+
+        KeyPath result;
+        for (auto it = std::sregex_iterator(inner.begin(), inner.end(), literal); it != std::sregex_iterator{}; ++it)
+            result.push_back((*it)[1].str());
+        const auto elementCount = static_cast<std::size_t>(std::count(inner.begin(), inner.end(), ',')) + 1u;
+        if (result.size() != elementCount)
+            return {};
+        return result;
+    }
+
+    KeyPath belowSettings(KeyPath path)
+    {
+        path.insert(path.begin(), "settings");
+        return path;
+    }
+
+    KeyPath withSuffix(KeyPath path, const std::string& suffix)
+    {
+        path.back() += suffix;
+        return belowSettings(std::move(path));
+    }
+
+    // Collects the keys settings derive from their identities, see SettingFactory: identity({...}) needs a help
+    // text ("<name>HelpText" or the helpTextKey override) and uses the label ("<name>", required only as the
+    // labelKey override) and the search tags ("<name>SearchTags") when present. within({...}) names a title.
+    void extractSettingIdentities(const std::string& content, const std::string& fileStr, LanguageCalls& result)
+    {
+        static const std::regex identityStart(R"re(\.identity\s*\(\s*(?=\{))re", std::regex::ECMAScript);
+        static const std::regex withinStart(R"re(\.within\s*\(\s*(?=\{))re", std::regex::ECMAScript);
+        static const std::regex overrideKey(
+            R"re(\.(labelKey|helpTextKey)\s*=\s*SettingKeyPath\s*(\{[^{}]*\}))re", std::regex::ECMAScript
+        );
+        const auto end = std::sregex_iterator{};
+
+        for (auto it = std::sregex_iterator(content.begin(), content.end(), identityStart); it != end; ++it)
+        {
+            auto position = static_cast<std::size_t>(it->position() + it->length());
+            const auto arguments = splitArguments(content, position);
+            if (arguments.empty())
+                continue;
+            const auto path = bracedLiterals(arguments[0]);
+            if (path.empty())
+                continue;
+
+            const SourceLocation location{fileStr, lineOf(content, it->position())};
+            std::optional<KeyPath> labelOverride;
+            std::optional<KeyPath> helpTextOverride;
+            if (arguments.size() > 1)
+            {
+                for (auto overrideIt = std::sregex_iterator(arguments[1].begin(), arguments[1].end(), overrideKey);
+                     overrideIt != end;
+                     ++overrideIt)
+                {
+                    auto overridePath = bracedLiterals((*overrideIt)[2].str());
+                    if (overridePath.empty())
+                        continue;
+                    ((*overrideIt)[1].str() == "labelKey" ? labelOverride : helpTextOverride) =
+                        belowSettings(std::move(overridePath));
+                }
+            }
+
+            result.keys[helpTextOverride.value_or(withSuffix(path, "HelpText"))].push_back(location);
+            if (labelOverride)
+                result.keys[*labelOverride].push_back(location);
+            else
+                result.optionalKeys[belowSettings(path)].push_back(location);
+            result.optionalKeys[withSuffix(path, "SearchTags")].push_back(location);
+        }
+
+        for (auto it = std::sregex_iterator(content.begin(), content.end(), withinStart); it != end; ++it)
+        {
+            auto position = static_cast<std::size_t>(it->position() + it->length());
+            const auto arguments = splitArguments(content, position);
+            if (arguments.size() != 1)
+                continue;
+            if (auto titleKey = bracedLiterals(arguments[0]); !titleKey.empty())
+                result.keys[belowSettings(std::move(titleKey))].push_back({fileStr, lineOf(content, it->position())});
+        }
+    }
+
     // Extracts all language->get(...) and language->getObserved(...) calls with source locations, including
     // multi-line calls and ternaries choosing between literal keys. Also collects the dot separated message keys of
     // code without access to the language files, which all start with "backend.".
@@ -186,6 +279,8 @@ namespace
                     keyPath.push_back(part);
                 result.keys[std::move(keyPath)].push_back({fileStr, lineOf(content, it->position())});
             }
+
+            extractSettingIdentities(content, fileStr, result);
         }
 
         return result;
@@ -306,7 +401,8 @@ int main()
         {
             if (!isLeafNode(yaml, yamlKey))
                 continue;
-            if (codeKeys.find(yamlKey) == codeKeys.end() && !hasDynamicPrefix(calls.dynamicPrefixes, yamlKey))
+            if (codeKeys.find(yamlKey) == codeKeys.end() && !calls.optionalKeys.contains(yamlKey) &&
+                !hasDynamicPrefix(calls.dynamicPrefixes, yamlKey))
                 unusedArray.push_back(yamlKey);
         }
 
