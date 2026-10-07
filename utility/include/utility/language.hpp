@@ -100,6 +100,61 @@ class LanguageProvider
             );
     }
 
+    /**
+     * @brief Like getObserved, but with the keys given as a path, and a fallback text for keys that exist in no
+     * language.
+     *
+     * @param path The keys from the root of the language file.
+     * @param fallback The text used when neither the language nor English has the key.
+     */
+    auto getObservedByPath(std::vector<std::string> const& path, std::string const& fallback)
+    {
+        std::vector<std::pair<std::string, std::string>> lookupTable;
+        for (auto const& languageKey : languageKeys_)
+            lookupTable.emplace_back(languageKey, findByPathWithFallback(languageKey, path).value_or(fallback));
+        return observe(events_->onLanguageChanged)
+            .generate(
+                std::function<std::string(std::string const&)>{
+                    [lookupTable = std::move(lookupTable), fallback](std::string const& languageKey) -> std::string
+                    {
+                        for (auto const& [key, value] : lookupTable)
+                        {
+                            if (key == languageKey)
+                                return value;
+                        }
+                        return fallback;
+                    }
+                }
+            );
+    }
+
+    /**
+     * @brief Looks up a text by its key path in one language, without falling back to English.
+     */
+    std::optional<std::string> findByPath(std::string const& languageKey, std::vector<std::string> const& path) const
+    {
+        return findPath(languageKey, fmt::format("{}", fmt::join(path, "/")));
+    }
+
+    /**
+     * @brief Looks up a text by its key path, falling back to English when the language lacks it.
+     */
+    std::optional<std::string>
+    findByPathWithFallback(std::string const& languageKey, std::vector<std::string> const& path) const
+    {
+        if (auto text = findByPath(languageKey, path))
+            return text;
+        return findByPath("en_US", path);
+    }
+
+    /**
+     * @brief The language the user interface currently shows.
+     */
+    std::string const& currentLanguage() const
+    {
+        return events_->onLanguageChanged.value();
+    }
+
     template <typename... Args>
     std::string get(Args&&... args)
     {

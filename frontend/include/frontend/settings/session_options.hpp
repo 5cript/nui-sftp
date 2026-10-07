@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/termios_settings.hpp>
 #include <frontend/settings/terminal_options.hpp>
 #include <frontend/settings/queue_options.hpp>
@@ -16,6 +17,13 @@
 
 struct SessionOptions
 {
+  private:
+    /**
+     * @brief Creates the identities of the basic session settings.
+     */
+    SettingFactory basicSettingsFactory_;
+
+  public:
     ComboSetting<Persistence::TerminalEngineType, std::string> terminalEngineType;
     ComboSetting<std::string> icon;
     TextSetting<true> orderBy;
@@ -32,7 +40,11 @@ struct SessionOptions
     ExecutingSessionOptions executingSessionOptions;
     SshSessionOptions sshSessionOptions;
 
+    /**
+     * @param factory Creates the identities of all settings of the session; it carries no group titles yet.
+     */
     SessionOptions(
+        SettingFactory const& factory,
         std::function<void()> const& onChange,
         std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
         ConfirmDialog& confirmDialog,

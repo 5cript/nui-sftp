@@ -33,13 +33,13 @@ class ListSetting : public Setting<Disengageable, ListTypeT<std::string>>
     using SettingBase::observeEngagedToBool;
 
     ListSetting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         InputDialog& inputDialog,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction
     )
         : SettingBase{
-              std::move(helpText),
+              std::move(identity),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction)
           }
@@ -70,7 +70,7 @@ class ListSetting : public Setting<Disengageable, ListTypeT<std::string>>
         setupStateListener();
     }
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;

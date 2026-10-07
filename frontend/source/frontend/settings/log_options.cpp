@@ -8,7 +8,7 @@
 #include <frontend/svgs/incident.hpp>
 #include <frontend/svgs/hide.hpp>
 
-LogOptions::LogOptions(std::function<void()> const& onChange)
+LogOptions::LogOptions(SettingFactory const& factory, std::function<void()> const& onChange)
     : logLevel{
           {
               Log::Level::Trace,
@@ -19,7 +19,7 @@ LogOptions::LogOptions(std::function<void()> const& onChange)
               Log::Level::Critical,
               Log::Level::Off,
           },
-          language->getObserved("settings", "logOptions", "logLevelHelpText"),
+          factory.identity({"logOptions", "logLevel"}),
           onChange,
           [this, onChange]()
           {
@@ -54,7 +54,7 @@ LogOptions::LogOptions(std::function<void()> const& onChange)
           }
       }
     , logDirectory{
-          language->getObserved("settings", "logOptions", "logDirectoryHelpText"),
+          factory.identity({"logOptions", "logDirectory"}),
           [this]()
           {
               onChange_();
@@ -66,7 +66,7 @@ LogOptions::LogOptions(std::function<void()> const& onChange)
           }
       }
     , disableFileLogging{
-          language->getObserved("settings", "logOptions", "disableFileLoggingHelpText"),
+          factory.identity({"logOptions", "disableFileLogging"}),
           [this]()
           {
               onChange_();
@@ -110,8 +110,8 @@ Nui::ElementRenderer LogOptions::render()
     using namespace Nui::Elements;
 
     return fragment(
-        logLevel(language->getObserved("settings", "logOptions", "logLevel")),
-        logDirectory(language->getObserved("settings", "logOptions", "logDirectory")),
-        disableFileLogging(language->getObserved("settings", "logOptions", "disableFileLogging"))
+        logLevel(),
+        logDirectory(),
+        disableFileLogging()
     );
 }

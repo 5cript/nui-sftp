@@ -19,14 +19,14 @@ class LayoutSetting : public Setting<false, std::map<std::string, nlohmann::json
     using ValueType = SettingBase::ValueType;
 
     LayoutSetting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         std::function<void()> onChange,
         std::function<std::optional<nlohmann::json>()> obtainCurrentLayout,
         ConfirmDialog& confirmDialog,
         InputDialog& newItemDialog
     );
 
-    Nui::ElementRenderer operator()();
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override;
 
     void value(ValueType const& value) override
     {

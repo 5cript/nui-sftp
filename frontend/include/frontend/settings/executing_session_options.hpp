@@ -3,6 +3,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
@@ -23,6 +24,7 @@ struct ExecutingSessionOptions
     BoolSetting<> cleanEnvironment;
 
     ExecutingSessionOptions(
+        SettingFactory const& factory,
         std::function<void()> const& onChange,
         InputDialog& inputDialog,
         MultiInputDialog& multiInputDialog

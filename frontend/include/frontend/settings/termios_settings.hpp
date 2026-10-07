@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
@@ -9,6 +10,38 @@
 
 struct TermiosSettings : public GroupKeys
 {
+  private:
+    /**
+     * @brief Creates the identities of the settings below.
+     */
+    SettingFactory factory_;
+
+    /**
+     * @brief Creates the identities of the input flags.
+     */
+    SettingFactory inputFlagsFactory_;
+
+    /**
+     * @brief Creates the identities of the output flags.
+     */
+    SettingFactory outputFlagsFactory_;
+
+    /**
+     * @brief Creates the identities of the control flags.
+     */
+    SettingFactory controlFlagsFactory_;
+
+    /**
+     * @brief Creates the identities of the local flags.
+     */
+    SettingFactory localFlagsFactory_;
+
+    /**
+     * @brief Creates the identities of the control characters.
+     */
+    SettingFactory ccFactory_;
+
+  public:
     struct InputFlags
     {
         BoolSetting<true> IGNBRK;
@@ -111,7 +144,7 @@ struct TermiosSettings : public GroupKeys
 
     Nui::Observed<bool> ccEngaged{false};
 
-    TermiosSettings(std::function<void()> const& onChange);
+    TermiosSettings(SettingFactory const& factory, std::function<void()> const& onChange);
 
     void applyToState(Persistence::Termios& state) const;
     void loadFromState(Persistence::Termios const& state);

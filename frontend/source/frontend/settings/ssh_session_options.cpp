@@ -5,14 +5,22 @@
 
 using namespace std::string_literals;
 
-SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
-    : host{
-          language->getObserved("settings", "sessionSettings", "host"),
+SshSessionOptions::SshSessionOptions(
+    SettingFactory const& factory,
+    std::function<void()> const& onChange,
+    InputDialog& inputDialog,
+    MultiInputDialog& multiInputDialog
+)
+    : serverFactory_{
+          factory.within({"sessionOptions", "basicSettings"}).within({"sessionOptions", "sshSessionServerOptions"})
+      }
+    , host{
+          serverFactory_.identity({"sessionOptions", "host"}),
           onChange,
           valueReset(host, onChange, Persistence::SshSessionOptions{}.host)
       }
     , port{
-          language->getObserved("settings", "sessionSettings", "port"),
+          serverFactory_.identity({"sessionOptions", "port"}),
           onChange,
           nulloptReset(port, onChange),
           {
@@ -21,35 +29,35 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, Inpu
           }
       }
     , user{
-          language->getObserved("settings", "sessionSettings", "user"),
+          serverFactory_.identity({"sessionOptions", "user"}),
           onChange,
           nulloptReset(user, onChange)
       }
     , sshKeyPublic{
-          language->getObserved("settings", "sessionSettings", "sshKeyPublic"),
+          serverFactory_.identity({"sessionOptions", "sshKeyPublic"}),
           PathSettingType::File,
           onChange,
           nulloptReset(sshKeyPublic, onChange)
       }
     , sshKeyPrivate{
-          language->getObserved("settings", "sessionSettings", "sshKeyPrivate"),
+          serverFactory_.identity({"sessionOptions", "sshKeyPrivate"}),
           PathSettingType::File,
           onChange,
           nulloptReset(sshKeyPrivate, onChange)
       }
     , openSftpByDefault{
-          language->getObserved("settings", "sessionSettings", "openSftpByDefault"),
+          serverFactory_.identity({"sessionOptions", "openSftpByDefault"}),
           onChange,
           valueReset(openSftpByDefault, onChange, Persistence::SshSessionOptions{}.openSftpByDefault)
       }
     , remoteFavorites{
-          language->getObserved("settings", "sessionSettings", "remoteFavoritesHelpText"),
+          serverFactory_.identity({"sessionOptions", "remoteFavorites"}),
           inputDialog,
           onChange,
           valueReset(remoteFavorites, onChange, Persistence::SshSessionOptions{}.remoteFavorites)
       }
     , maxReconnectAttempts{
-          language->getObserved("settings", "sessionSettings", "maxReconnectAttempts"),
+          serverFactory_.identity({"sessionOptions", "maxReconnectAttempts"}),
           onChange,
           valueReset(
               maxReconnectAttempts, onChange, Persistence::SshSessionOptions{}.maxReconnectAttempts
@@ -60,7 +68,7 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, Inpu
           }
       }
     , maxReconnectBackoffMs{
-          language->getObserved("settings", "sessionSettings", "maxReconnectBackoffMs"),
+          serverFactory_.identity({"sessionOptions", "maxReconnectBackoffMs"}),
           onChange,
           valueReset(
               maxReconnectBackoffMs, onChange, Persistence::SshSessionOptions{}.maxReconnectBackoffMs
@@ -70,8 +78,8 @@ SshSessionOptions::SshSessionOptions(std::function<void()> const& onChange, Inpu
               .maxValue = 600000,
           }
       }
-    , sshOptions{onChange, inputDialog, multiInputDialog}
-    , sftpOptions{onChange}
+    , sshOptions{factory.within({"sshOptionsGroupName"}), onChange, inputDialog, multiInputDialog}
+    , sftpOptions{factory.within({"sftpOptionsGroupName"}), onChange}
 {}
 
 void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) const

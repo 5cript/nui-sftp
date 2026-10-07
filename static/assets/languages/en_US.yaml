@@ -1,4 +1,3 @@
-language: "Language"
 confirmDialog:
   yes: "Yes"
   no: "No"
@@ -484,16 +483,17 @@ settings:
     sshKeyPublic: "SSH Public Key (Optional, see Help)"
     openSftpByDefault: "Open SFTP Channel by Default"
     remoteFavorites: "Remote Favorites"
-  sessionSettings:
-    host: "Host / IP"
-    port: "Port"
-    user: "User"
-    sshKeyPrivate: "SSH Private Key"
-    sshKeyPublic: "SSH Public Key (Optional, see Help)"
-    openSftpByDefault: "Open SFTP Channel by Default"
+    hostHelpText: "The host name or IP address of the SSH server."
+    portHelpText: "The port the SSH server listens on. Defaults to 22."
+    userHelpText: "The user name to log in with. Without one, the SSH configuration or the local user name is used."
+    sshKeyPrivateHelpText: "The private key file used for public key authentication with this server."
+    sshKeyPublicHelpText: "Optional. The public key belonging to the private key. When set, the server is first asked whether it accepts this key, before the private key is loaded and its passphrase requested."
+    openSftpByDefaultHelpText: "Open an SFTP channel and the file explorer right after connecting."
     remoteFavoritesHelpText: "Favorite directories on the remote server, shown as shortcuts in the remote file explorer's places pane. Scoped to this SSH session because absolute paths only make sense relative to one server."
     maxReconnectAttempts: "Max Reconnect Attempts"
+    maxReconnectAttemptsHelpText: "How often to reconnect automatically after the connection drops. 0 disables automatic retries, -1 retries until cancelled."
     maxReconnectBackoffMs: "Max Reconnect Backoff (ms)"
+    maxReconnectBackoffMsHelpText: "The longest wait between two reconnect attempts, in milliseconds. The wait doubles with every attempt, starting at one second, until it reaches this cap."
   setting:
     resetToDefaultValue: "Reset to default value"
     settingInherits: "Setting inherits"
@@ -785,9 +785,8 @@ settings:
       VWERASEHelpText: "Word erase character"
   general:
     localization:
-      dateTimeFormatHelpText: "The date and time format string used throughout the application, predominantly in the file explorer table view. Uses the fmt::format formatting syntax. https://fmt.dev/12.0/syntax/#chrono-format-specifications"
+      language: "Language"
       languageHelpText: "The language used in the application's user interface."
-      dateTimeFormatString: "Date-Time Format String"
     userInterface:
       themeHelpText: "The overall theme of the application's user interface. A theme is not the light/dark mode. A theme provides a cohesive set of colors for the user interface, including but not limited to light/dark mode."
       darkLightModeHelpText: "Whether to use dark or light mode for the user interface. This is a sub-setting of the theme, which means that the theme can provide different colors for dark and light mode."

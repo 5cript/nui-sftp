@@ -26,7 +26,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
 
     ComboSetting(
         std::vector<ValueType> availableStates,
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         std::function<TransformedType(ValueType const&)> valueTransformer = {},
@@ -34,7 +34,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         std::function<bool()> doLoad = {}
     )
         : SettingBase{
-              std::move(helpText),
+              std::move(identity),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction)
           }
@@ -129,7 +129,7 @@ class ComboSetting : public Setting<Disengageable, ValueType>
         return div{class_ = "combo-setting-option"}(iconRenderer_(option), span{}(transform()));
     }
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;

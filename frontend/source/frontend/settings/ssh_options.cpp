@@ -6,31 +6,37 @@
 
 #include <nui/frontend/elements.hpp>
 
-SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
-    : sshDirectory{
-        language->getObserved("settings", "sshOptions", "sshDirectoryHelpText"),
+SshOptions::SshOptions(
+    SettingFactory const& factory,
+    std::function<void()> const& onChange,
+    InputDialog& inputDialog,
+    MultiInputDialog& multiInputDialog
+)
+    : factory_{factory.forGroup(groupKey)}
+    , sshDirectory{
+        factory_.identity({"sshOptions", "sshDirectory"}),
         PathSettingType::Directory,
         onChange,
         nulloptReset(sshDirectory, onChange),
     }
     , knownHostsFile{
-        language->getObserved("settings", "sshOptions", "knownHostsFileHelpText"),
+        factory_.identity({"sshOptions", "knownHostsFile"}),
         PathSettingType::File,
         onChange,
         nulloptReset(knownHostsFile, onChange),
     }
     , tryAgentForAuthentication{
-        language->getObserved("settings", "sshOptions", "tryAgentForAuthenticationHelpText"),
+        factory_.identity({"sshOptions", "tryAgentForAuthentication"}),
         onChange,
         nulloptReset(tryAgentForAuthentication, onChange),
     }
     , usePublicKeyAutoAuth{
-        language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuthHelpText"),
+        factory_.identity({"sshOptions", "usePublicKeyAutoAuth"}),
         onChange,
         nulloptReset(usePublicKeyAutoAuth, onChange),
     }
     , usePasswordAuth{
-        language->getObserved("settings", "sshOptions", "usePasswordAuthHelpText"),
+        factory_.identity({"sshOptions", "usePasswordAuth"}),
         onChange,
         nulloptReset(usePasswordAuth, onChange),
     }
@@ -42,7 +48,7 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
             Persistence::SshLogVerbosity::Packet,
             Persistence::SshLogVerbosity::Functions
         },
-        language->getObserved("settings", "sshOptions", "logVerbosityHelpText"),
+        factory_.identity({"sshOptions", "logVerbosity"}),
         onChange,
         nulloptReset(logVerbosity, onChange),
         [](Persistence::SshLogVerbosity const& v)
@@ -51,22 +57,22 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
         }
     }
     , keyExchangeAlgorithms{
-        language->getObserved("settings", "sshOptions", "keyExchangeAlgorithmsHelpText"),
+        factory_.identity({"sshOptions", "keyExchangeAlgorithms"}),
         onChange,
         nulloptReset(keyExchangeAlgorithms, onChange),
     }
     , compressionClientToServer{
-        language->getObserved("settings", "sshOptions", "compressionClientToServerHelpText"),
+        factory_.identity({"sshOptions", "compressionClientToServer"}),
         onChange,
         nulloptReset(compressionClientToServer, onChange),
     }
     , compressionServerToClient{
-        language->getObserved("settings", "sshOptions", "compressionServerToClientHelpText"),
+        factory_.identity({"sshOptions", "compressionServerToClient"}),
         onChange,
         nulloptReset(compressionServerToClient, onChange),
     }
     , compressionLevel{
-        language->getObserved("settings", "sshOptions", "compressionLevelHelpText"),
+        factory_.identity({"sshOptions", "compressionLevel"}),
         onChange,
         nulloptReset(compressionLevel, onChange),
         {
@@ -76,53 +82,53 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
         }
     }
     , strictHostKeyCheck{
-        language->getObserved("settings", "sshOptions", "strictHostKeyCheckHelpText"),
+        factory_.identity({"sshOptions", "strictHostKeyCheck"}),
         onChange,
         nulloptReset(strictHostKeyCheck, onChange),
     }
     , proxyCommand{
-        language->getObserved("settings", "sshOptions", "proxyCommandHelpText"),
+        factory_.identity({"sshOptions", "proxyCommand"}),
         onChange,
         nulloptReset(proxyCommand, onChange),
     }
     , proxyJump{
-        language->getObserved("settings", "sshOptions", "proxyJumpHelpText"),
+        factory_.identity({"sshOptions", "proxyJump"}),
         onChange,
         nulloptReset(proxyJump, onChange),
     }
     , gssapiServerIdentity{
-        language->getObserved("settings", "sshOptions", "gssapiServerIdentityHelpText"),
+        factory_.identity({"sshOptions", "gssapiServerIdentity"}),
         onChange,
         nulloptReset(gssapiServerIdentity, onChange),
     }
     , gssapiClientIdentity{
-        language->getObserved("settings", "sshOptions", "gssapiClientIdentityHelpText"),
+        factory_.identity({"sshOptions", "gssapiClientIdentity"}),
         onChange,
         nulloptReset(gssapiClientIdentity, onChange),
     }
     , gssapiDelegateCredentials{
-        language->getObserved("settings", "sshOptions", "gssapiDelegateCredentialsHelpText"),
+        factory_.identity({"sshOptions", "gssapiDelegateCredentials"}),
         onChange,
         nulloptReset(gssapiDelegateCredentials, onChange),
     }
     , noDelay{
-        language->getObserved("settings", "sshOptions", "noDelayHelpText"),
+        factory_.identity({"sshOptions", "noDelay"}),
         onChange,
         nulloptReset(noDelay, onChange),
     }
     , bypassConfig{
-        language->getObserved("settings", "sshOptions", "bypassConfigHelpText"),
+        factory_.identity({"sshOptions", "bypassConfig"}),
         onChange,
         nulloptReset(bypassConfig, onChange),
     }
     , identityAgent{
-        language->getObserved("settings", "sshOptions", "identityAgentHelpText"),
+        factory_.identity({"sshOptions", "identityAgent"}),
         PathSettingType::File,
         onChange,
         nulloptReset(identityAgent, onChange),
     }
     , connectTimeoutSeconds{
-        language->getObserved("settings", "sshOptions", "connectTimeoutSecondsHelpText"),
+        factory_.identity({"sshOptions", "connectTimeoutSeconds"}),
         onChange,
         nulloptReset(connectTimeoutSeconds, onChange),
         {
@@ -131,7 +137,7 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
         }
     }
     , connectTimeoutUSeconds{
-        language->getObserved("settings", "sshOptions", "connectTimeoutUSecondsHelpText"),
+        factory_.identity({"sshOptions", "connectTimeoutUSeconds"}),
         onChange,
         nulloptReset(connectTimeoutUSeconds, onChange),
         {
@@ -140,18 +146,18 @@ SshOptions::SshOptions(std::function<void()> const& onChange, InputDialog& input
         }
     },
     environment{
-        language->getObserved("settings", "sshOptions", "environmentHelpText"),
+        factory_.identity({"sshOptions", "environment"}),
         multiInputDialog,
         onChange,
         nulloptReset(environment, onChange)
     },
     localeEnv{
-        language->getObserved("settings", "sshOptions", "localeEnvHelpText"),
+        factory_.identity({"sshOptions", "localeEnv"}),
         onChange,
         nulloptReset(localeEnv, onChange),
     },
     identities {
-        language->getObserved("settings", "sshOptions", "identitiesHelpText"),
+        factory_.identity({"sshOptions", "identities"}),
         inputDialog,
         onChange,
         nulloptReset(identities, onChange)
@@ -248,29 +254,29 @@ Nui::ElementRenderer SshOptions::render()
     using namespace Nui::Elements;
 
     return fragment(
-        sshDirectory(language->getObserved("settings", "sshOptions", "sshDirectory")),
-        knownHostsFile(language->getObserved("settings", "sshOptions", "knownHostsFile")),
-        tryAgentForAuthentication(language->getObserved("settings", "sshOptions", "tryAgentForAuthentication")),
-        usePublicKeyAutoAuth(language->getObserved("settings", "sshOptions", "usePublicKeyAutoAuth")),
-        usePasswordAuth(language->getObserved("settings", "sshOptions", "usePasswordAuth")),
-        logVerbosity(language->getObserved("settings", "sshOptions", "logVerbosity")),
-        keyExchangeAlgorithms(language->getObserved("settings", "sshOptions", "keyExchangeAlgorithms")),
-        compressionClientToServer(language->getObserved("settings", "sshOptions", "compressionClientToServer")),
-        compressionServerToClient(language->getObserved("settings", "sshOptions", "compressionServerToClient")),
-        compressionLevel(language->getObserved("settings", "sshOptions", "compressionLevel")),
-        strictHostKeyCheck(language->getObserved("settings", "sshOptions", "strictHostKeyCheck")),
-        proxyCommand(language->getObserved("settings", "sshOptions", "proxyCommand")),
-        proxyJump(language->getObserved("settings", "sshOptions", "proxyJump")),
-        gssapiServerIdentity(language->getObserved("settings", "sshOptions", "gssapiServerIdentity")),
-        gssapiClientIdentity(language->getObserved("settings", "sshOptions", "gssapiClientIdentity")),
-        gssapiDelegateCredentials(language->getObserved("settings", "sshOptions", "gssapiDelegateCredentials")),
-        noDelay(language->getObserved("settings", "sshOptions", "noDelay")),
-        bypassConfig(language->getObserved("settings", "sshOptions", "bypassConfig")),
-        identityAgent(language->getObserved("settings", "sshOptions", "identityAgent")),
-        connectTimeoutSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutSeconds")),
-        connectTimeoutUSeconds(language->getObserved("settings", "sshOptions", "connectTimeoutUSeconds")),
-        environment(language->getObserved("settings", "sshOptions", "environment")),
-        localeEnv(language->getObserved("settings", "sshOptions", "localeEnv")),
-        identities(language->getObserved("settings", "sshOptions", "identities"))
+        sshDirectory(),
+        knownHostsFile(),
+        tryAgentForAuthentication(),
+        usePublicKeyAutoAuth(),
+        usePasswordAuth(),
+        logVerbosity(),
+        keyExchangeAlgorithms(),
+        compressionClientToServer(),
+        compressionServerToClient(),
+        compressionLevel(),
+        strictHostKeyCheck(),
+        proxyCommand(),
+        proxyJump(),
+        gssapiServerIdentity(),
+        gssapiClientIdentity(),
+        gssapiDelegateCredentials(),
+        noDelay(),
+        bypassConfig(),
+        identityAgent(),
+        connectTimeoutSeconds(),
+        connectTimeoutUSeconds(),
+        environment(),
+        localeEnv(),
+        identities()
     );
 }

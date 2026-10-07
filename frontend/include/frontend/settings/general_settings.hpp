@@ -3,6 +3,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/log_options.hpp>
+#include <frontend/settings/search/setting_factory.hpp>
 #include <shared_data/theme.hpp>
 
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
@@ -18,6 +19,28 @@
 
 struct GeneralSettings
 {
+  private:
+    /**
+     * @brief Creates the identities of the localization settings.
+     */
+    SettingFactory localizationFactory_;
+
+    /**
+     * @brief Creates the identities of the user interface settings.
+     */
+    SettingFactory userInterfaceFactory_;
+
+    /**
+     * @brief Creates the identities of the local filesystem settings.
+     */
+    SettingFactory localFilesystemFactory_;
+
+    /**
+     * @brief Creates the identities of the file tracking settings.
+     */
+    SettingFactory fileTrackingFactory_;
+
+  public:
     struct Collapsibles
     {
         Nui::Observed<bool> localization{false};
@@ -30,7 +53,10 @@ struct GeneralSettings
     struct Localization
     {
         ComboSetting<std::string, std::string> language;
-        TextSetting<> dateTimeFormat;
+        /**
+         * @brief Persisted as is; not offered in the user interface yet.
+         */
+        std::string dateTimeFormat{};
     } localization;
 
     struct UserInterface
@@ -69,6 +95,7 @@ struct GeneralSettings
     Nui::ListenRemover<decltype(FrontendEvents::darkLightMode)> darkLightModeListener;
 
     GeneralSettings(
+        SettingFactory const& factory,
         std::function<void()> const& onChange,
         FrontendEvents* events,
         InputDialog& inputDialog,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/group_keys.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/text_setting.hpp>
@@ -13,6 +14,13 @@
 
 struct SshOptions : public GroupKeys
 {
+  private:
+    /**
+     * @brief Creates the identities of the settings below.
+     */
+    SettingFactory factory_;
+
+  public:
     PathSetting<true> sshDirectory;
     PathSetting<true> knownHostsFile;
     BoolSetting<true> tryAgentForAuthentication;
@@ -38,7 +46,12 @@ struct SshOptions : public GroupKeys
     TextSetting<true> localeEnv;
     ListSetting<true> identities;
 
-    SshOptions(std::function<void()> const& onChange, InputDialog& inputDialog, MultiInputDialog& multiInputDialog);
+    SshOptions(
+        SettingFactory const& factory,
+        std::function<void()> const& onChange,
+        InputDialog& inputDialog,
+        MultiInputDialog& multiInputDialog
+    );
 
     void applyToState(Persistence::SshOptions& state) const;
     void loadFromState(Persistence::SshOptions const& state, bool loadRefs);

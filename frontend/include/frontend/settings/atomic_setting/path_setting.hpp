@@ -39,14 +39,14 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
     using SettingBase::observeEngagedToBool;
 
     PathSetting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         Type type,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction,
         Nui::Observed<bool>* externalDisengage = nullptr
     )
         : SettingBase{
-              std::move(helpText),
+              std::move(identity),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction),
               externalDisengage
@@ -118,7 +118,7 @@ class PathSetting : public Setting<Disengageable, std::filesystem::path>
         }
     }
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;

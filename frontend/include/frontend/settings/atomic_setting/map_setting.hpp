@@ -34,13 +34,13 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
     using SettingBase::updateStateWithInheritance;
 
     MapSetting(
-        LanguageObservedText helpText,
+        SettingIdentity identity,
         MultiInputDialog& multiInputDialog,
         std::invocable auto&& onChange,
         std::invocable auto&& resetAction
     )
         : SettingBase{
-              std::move(helpText),
+              std::move(identity),
               std::forward<decltype(onChange)>(onChange),
               std::forward<decltype(resetAction)>(resetAction)
           }
@@ -136,7 +136,7 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
         *selfAlive_ = false;
     }
 
-    Nui::ElementRenderer operator()(auto&& labelText)
+    Nui::ElementRenderer renderRow(LanguageObservedText labelText) override
     {
         using namespace Nui::Attributes;
         using Nui::Elements::div;

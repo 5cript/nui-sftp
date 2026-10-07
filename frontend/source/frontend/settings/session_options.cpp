@@ -11,18 +11,20 @@
 using namespace std::string_literals;
 
 SessionOptions::SessionOptions(
+    SettingFactory const& factory,
     std::function<void()> const& onChange,
     std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
     ConfirmDialog& confirmDialog,
     InputDialog& newItemDialog,
     MultiInputDialog& multiInputDialog
 )
-    : terminalEngineType{
+    : basicSettingsFactory_{factory.within({"sessionOptions", "basicSettings"})}
+    , terminalEngineType{
           {
               Persistence::TerminalEngineType::shell,
               Persistence::TerminalEngineType::ssh,
           },
-          language->getObserved("settings", "sessionOptions", "terminalEngineTypeHelpText"),
+          basicSettingsFactory_.identity({"sessionOptions", "terminalEngineType"}),
           onChange,
           valueReset(
               terminalEngineType,
@@ -45,7 +47,7 @@ SessionOptions::SessionOptions(
             }
             return icons;
         }(),
-          language->getObserved("settings", "sessionOptions", "iconHelpText"),
+          basicSettingsFactory_.identity({"sessionOptions", "icon"}),
           onChange,
           valueReset(icon, onChange, Persistence::SessionOptions{}.icon),
             [](std::string const& icon)
@@ -58,28 +60,36 @@ SessionOptions::SessionOptions(
             },
       }
     , orderBy{
-          language->getObserved("settings", "sessionOptions", "orderByHelpText"),
+          basicSettingsFactory_.identity({"sessionOptions", "orderBy"}),
           onChange,
           nulloptReset(orderBy, onChange)
       }
     , isStartupSession{
-          language->getObserved("settings", "sessionOptions", "isStartupSessionHelpText"),
+          basicSettingsFactory_.identity({"sessionOptions", "isStartupSession"}),
           onChange,
           valueReset(isStartupSession, onChange, Persistence::SessionOptions{}.startupSession)
       }
     , layout{
-          language->getObserved("settings", "sessionOptions", "layoutHelpText"),
+          basicSettingsFactory_.identity(
+              {"sessionOptions", "layout"}, {.labelKey = SettingKeyPath{"layoutSetting", "layoutKeysLabel"}}
+          ),
           onChange,
           obtainCurrentLayout,
           confirmDialog,
           newItemDialog
       }
-    , terminalOptions{onChange}
-    , termios{onChange}
-    , queueOptions{onChange}
-    , historyOptions{onChange}
-    , executingSessionOptions{onChange, newItemDialog, multiInputDialog}
-    , sshSessionOptions{onChange, newItemDialog, multiInputDialog}
+    , terminalOptions{factory.within({"terminalOptionsGroupName"}), onChange}
+    , termios{factory.within({"termiosGroupName"}), onChange}
+    , queueOptions{factory.within({"queueOptionsGroupName"}), onChange}
+    , historyOptions{factory.within({"historyOptionsGroupName"}), onChange}
+    , executingSessionOptions{
+          basicSettingsFactory_.within({"sessionOptions", "localSessionOptions"})
+              .forEngine(Persistence::TerminalEngineType::shell),
+          onChange,
+          newItemDialog,
+          multiInputDialog
+      }
+    , sshSessionOptions{factory.forEngine(Persistence::TerminalEngineType::ssh), onChange, newItemDialog, multiInputDialog}
 {}
 
 void SessionOptions::applyToState(Persistence::SessionOptions& state) const

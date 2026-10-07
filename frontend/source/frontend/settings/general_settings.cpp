@@ -4,11 +4,21 @@
 
 using namespace std::string_literals;
 
-GeneralSettings::GeneralSettings(std::function<void()> const& onChange, FrontendEvents* events, InputDialog& inputDialog, MultiInputDialog& multiInputDialog)
-    : localization{
+GeneralSettings::GeneralSettings(
+    SettingFactory const& factory,
+    std::function<void()> const& onChange,
+    FrontendEvents* events,
+    InputDialog& inputDialog,
+    MultiInputDialog& multiInputDialog
+)
+    : localizationFactory_{factory.within({"generalSettings"})}
+    , userInterfaceFactory_{factory.within({"userInterfaceGroupHeader"})}
+    , localFilesystemFactory_{factory.within({"localFilesystemOptionsGroupHeader"})}
+    , fileTrackingFactory_{factory.within({"fileTrackingOptionsGroupHeader"})}
+    , localization{
         .language = {
             {"en_US", "de_DE"},
-            language->getObserved("settings", "general", "localization", "languageHelpText"),
+            localizationFactory_.identity({"general", "localization", "language"}),
             [onChange, this, events]()
             {
                 onChange();
@@ -31,20 +41,11 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 return code;
             },
         },
-        .dateTimeFormat = TextSetting<>{
-            language->getObserved("settings", "general", "localization", "dateTimeFormatHelpText"),
-            onChange,
-            [this, onChange]()
-            {
-                localization.dateTimeFormat.value(Persistence::State{}.localizationOptions.dateTimeFormatString);
-                onChange();
-            },
-        },
     }
     , userInterface{
         .theme = ComboSetting<std::string, std::string>{
             { std::string{Constants::defaultThemeName} },
-            language->getObserved("settings", "general", "userInterface", "themeHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "theme"}),
             [this, events, onChange]()
             {
                 events->selectedTheme = userInterface.theme.value();
@@ -67,7 +68,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
         },
         .darkLightMode = ComboSetting<SharedData::DarkLightMode, std::string>{
             { SharedData::DarkLightMode::System, SharedData::DarkLightMode::Dark, SharedData::DarkLightMode::Light },
-            language->getObserved("settings", "general", "userInterface", "darkLightModeHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "darkLightMode"}),
             [this, events, onChange]() {
                 Log::info("User changed dark/light mode setting in UI, new value: " + std::to_string(static_cast<int>(userInterface.darkLightMode.value())));
                 events->darkLightMode = userInterface.darkLightMode.value();
@@ -97,7 +98,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .showHiddenFilesLocally = BoolSetting<>{
-            language->getObserved("settings", "general", "userInterface", "showHiddenFilesLocallyHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "showHiddenFilesLocally"}),
             onChange,
             [this, onChange]()
             {
@@ -106,7 +107,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .showHiddenFilesRemotely = BoolSetting<>{
-            language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotelyHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "showHiddenFilesRemotely"}),
             onChange,
             [this, onChange]()
             {
@@ -115,7 +116,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .fileGridPathBarOnTop = BoolSetting<>{
-            language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTopHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "fileGridPathBarOnTop"}),
             onChange,
             [this, onChange]()
             {
@@ -126,7 +127,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .fileGridPageSize = NumberSetting<int, true>{
-            language->getObserved("settings", "general", "userInterface", "fileGridPageSizeHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "fileGridPageSize"}),
             onChange,
             [this, onChange]()
             {
@@ -139,7 +140,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .fileGridExtensionIcons = MapSetting<>{
-            language->getObserved("settings", "general", "userInterface", "fileGridExtensionIconsHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "fileGridExtensionIcons"}),
             multiInputDialog,
             onChange,
             [this, onChange]()
@@ -151,7 +152,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             }
         },
         .neverShowAgainDialogs = ListSetting<false, std::set>{
-            language->getObserved("settings", "general", "userInterface", "neverShowAgainDialogsHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "neverShowAgainDialogs"}),
             inputDialog,
             onChange,
             [this, onChange]()
@@ -163,7 +164,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             }
         },
         .localFavorites = ListSetting<>{
-            language->getObserved("settings", "general", "userInterface", "localFavoritesHelpText"),
+            userInterfaceFactory_.identity({"general", "userInterface", "localFavorites"}),
             inputDialog,
             onChange,
             [this, onChange]()
@@ -176,7 +177,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
     , localFilesystemOptions {
         .preventDeletion =
             {
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventDeletionHelpText"),
+                localFilesystemFactory_.identity({"general", "localFilesystemOptions", "preventDeletion"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -186,7 +187,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         .preventRename =
             {
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventRenameHelpText"),
+                localFilesystemFactory_.identity({"general", "localFilesystemOptions", "preventRename"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -196,7 +197,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         .preventCreateFile =
             {
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateFileHelpText"),
+                localFilesystemFactory_.identity({"general", "localFilesystemOptions", "preventCreateFile"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -206,7 +207,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         .preventCreateDirectory =
             {
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateDirectoryHelpText"),
+                localFilesystemFactory_.identity({"general", "localFilesystemOptions", "preventCreateDirectory"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -217,7 +218,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
                 },
             },
         .homeOverride = PathSetting<true>{
-            language->getObserved("settings", "general", "localFilesystemOptions", "homeOverrideHelpText"),
+            localFilesystemFactory_.identity({"general", "localFilesystemOptions", "homeOverride"}),
             PathSettingType::Directory,
             onChange,
             [this, onChange]()
@@ -227,7 +228,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .temporaryDownloadsDirectory = PathSetting<true>{
-            language->getObserved("settings", "general", "localFilesystemOptions", "temporaryDownloadsDirectoryHelpText"),
+            localFilesystemFactory_.identity({"general", "localFilesystemOptions", "temporaryDownloadsDirectory"}),
             PathSettingType::Directory,
             onChange,
             [this, onChange]()
@@ -241,7 +242,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
     }
     , fileTrackingOptions{
         .autoReupload = BoolSetting<>{
-            language->getObserved("settings", "general", "fileTrackingOptions", "autoReuploadHelpText"),
+            fileTrackingFactory_.identity({"general", "fileTrackingOptions", "autoReupload"}),
             onChange,
             [this, onChange]()
             {
@@ -250,7 +251,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .moveRemoteOnLocalMove = BoolSetting<>{
-            language->getObserved("settings", "general", "fileTrackingOptions", "moveRemoteOnLocalMoveHelpText"),
+            fileTrackingFactory_.identity({"general", "fileTrackingOptions", "moveRemoteOnLocalMove"}),
             onChange,
             [this, onChange]()
             {
@@ -259,7 +260,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
         .deleteRemoteOnLocalDelete = BoolSetting<>{
-            language->getObserved("settings", "general", "fileTrackingOptions", "deleteRemoteOnLocalDeleteHelpText"),
+            fileTrackingFactory_.identity({"general", "fileTrackingOptions", "deleteRemoteOnLocalDelete"}),
             onChange,
             [this, onChange]()
             {
@@ -270,7 +271,7 @@ GeneralSettings::GeneralSettings(std::function<void()> const& onChange, Frontend
             },
         },
     }
-    , logOptions(onChange)
+    , logOptions(factory.within({"loggingAndErrorReportingGroupHeader"}), onChange)
     , availableThemesListener{
         Nui::smartListen(
             events->availableThemes,
@@ -310,7 +311,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
 {
     // Localization Options:
     state.localizationOptions.languageCode = localization.language.value();
-    state.localizationOptions.dateTimeFormatString = localization.dateTimeFormat.value();
+    state.localizationOptions.dateTimeFormatString = localization.dateTimeFormat;
 
     // Ui Options
     state.uiOptions.theme = userInterface.theme.value();
@@ -346,7 +347,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
 {
     // Localization Options:
     localization.language.value(state.localizationOptions.languageCode);
-    localization.dateTimeFormat.value(state.localizationOptions.dateTimeFormatString);
+    localization.dateTimeFormat = state.localizationOptions.dateTimeFormatString;
 
     // Ui Options
     userInterface.theme.value(state.uiOptions.theme);
@@ -407,63 +408,34 @@ Nui::ElementRenderer GeneralSettings::render(
     {
         // clang-format off
         auto localizationUi = fragment(
-            localization.language(language->getObserved("language"))//,
-            //localization.dateTimeFormat(language->getObserved("settings", "general", "localization", "dateTimeFormatString"))
+            localization.language()
         );
 
         auto userInterfaceUi = fragment(
-            userInterface.theme(language->getObserved("settings", "general", "userInterface", "theme")),
-            userInterface.darkLightMode(language->getObserved("settings", "general", "userInterface", "darkLightMode")),
-            userInterface.showHiddenFilesLocally(language->getObserved("settings", "general", "userInterface", "showHiddenFilesLocally")),
-            userInterface.showHiddenFilesRemotely(language->getObserved("settings", "general", "userInterface", "showHiddenFilesRemotely")),
-            userInterface.fileGridPathBarOnTop(
-                language->getObserved("settings", "general", "userInterface", "fileGridPathBarOnTop")
-            ),
-            userInterface.fileGridPageSize(
-                language->getObserved("settings", "general", "userInterface", "fileGridPageSize")
-            ),
-            userInterface.fileGridExtensionIcons(
-                language->getObserved("settings", "general", "userInterface", "fileGridExtensionIcons")
-            ),
-            userInterface.neverShowAgainDialogs(
-                language->getObserved("settings", "general", "userInterface", "neverShowAgainDialogs")
-            ),
-            userInterface.localFavorites(
-                language->getObserved("settings", "general", "userInterface", "localFavorites")
-            )
+            userInterface.theme(),
+            userInterface.darkLightMode(),
+            userInterface.showHiddenFilesLocally(),
+            userInterface.showHiddenFilesRemotely(),
+            userInterface.fileGridPathBarOnTop(),
+            userInterface.fileGridPageSize(),
+            userInterface.fileGridExtensionIcons(),
+            userInterface.neverShowAgainDialogs(),
+            userInterface.localFavorites()
         );
 
         auto localFilesystemOptionsUi = fragment(
-            localFilesystemOptions.preventDeletion(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventDeletion")
-            ),
-            localFilesystemOptions.preventRename(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventRename")
-            ),
-            localFilesystemOptions.preventCreateFile(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateFile")
-            ),
-            localFilesystemOptions.preventCreateDirectory(
-                language->getObserved("settings", "general", "localFilesystemOptions", "preventCreateDirectory")
-            ),
-            localFilesystemOptions.homeOverride(
-                language->getObserved("settings", "general", "localFilesystemOptions", "homeOverride")
-            ),
-            localFilesystemOptions.temporaryDownloadsDirectory(
-                language->getObserved("settings", "general", "localFilesystemOptions", "temporaryDownloadsDirectory")
-            )
+            localFilesystemOptions.preventDeletion(),
+            localFilesystemOptions.preventRename(),
+            localFilesystemOptions.preventCreateFile(),
+            localFilesystemOptions.preventCreateDirectory(),
+            localFilesystemOptions.homeOverride(),
+            localFilesystemOptions.temporaryDownloadsDirectory()
         );
 
         auto fileTrackingOptionsUi = fragment(
-            fileTrackingOptions.autoReupload(
-                language->getObserved("settings", "general", "fileTrackingOptions", "autoReupload")
-            ),
-            fileTrackingOptions.moveRemoteOnLocalMove(
-                language->getObserved("settings", "general", "fileTrackingOptions", "moveRemoteOnLocalMove")
-            ),
-            fileTrackingOptions.deleteRemoteOnLocalDelete(
-                language->getObserved("settings", "general", "fileTrackingOptions", "deleteRemoteOnLocalDelete")
-            )
+            fileTrackingOptions.autoReupload(),
+            fileTrackingOptions.moveRemoteOnLocalMove(),
+            fileTrackingOptions.deleteRemoteOnLocalDelete()
         );
         // clang-format on
 

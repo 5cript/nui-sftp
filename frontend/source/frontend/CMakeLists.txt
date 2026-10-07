@@ -126,6 +126,9 @@ target_sources(
         settings/subgroup.cpp
         settings/layout_setting.cpp
         settings/log_options.cpp
+        settings/search/setting_factory.cpp
+        settings/search/setting_identity.cpp
+        settings/search/settings_search_index.cpp
         session/session_helpers.cpp
         command_store/command_store_client.cpp
         session_components/command_panel_helpers.cpp

@@ -21,10 +21,16 @@ namespace
     }
 }
 
-TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
-    : inputFlags{
+TermiosSettings::TermiosSettings(SettingFactory const& factory, std::function<void()> const& onChange)
+    : factory_{factory.forGroup(groupKey)}
+    , inputFlagsFactory_{factory_.within({"termios", "inputFlagsSubgroupTitle"})}
+    , outputFlagsFactory_{factory_.within({"termios", "outputFlagsSubgroupTitle"})}
+    , controlFlagsFactory_{factory_.within({"termios", "controlFlagsSubgroupTitle"})}
+    , localFlagsFactory_{factory_.within({"termios", "localFlagsSubgroupTitle"})}
+    , ccFactory_{factory_.within({"termios", "ccSettingsSubgroupTitle"})}
+    , inputFlags{
             .IGNBRK{
-                language->getObserved("settings", "termios", "inputFlags", "IGNBRKHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IGNBRK"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -33,7 +39,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .BRKINT{
-                language->getObserved("settings", "termios", "inputFlags", "BRKINTHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "BRKINT"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -42,7 +48,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IGNPAR{
-                language->getObserved("settings", "termios", "inputFlags", "IGNPARHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IGNPAR"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -51,7 +57,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .PARMRK{
-                language->getObserved("settings", "termios", "inputFlags", "PARMRKHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "PARMRK"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -60,7 +66,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .INPCK{
-                language->getObserved("settings", "termios", "inputFlags", "INPCKHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "INPCK"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -69,7 +75,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ISTRIP{
-                language->getObserved("settings", "termios", "inputFlags", "ISTRIPHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "ISTRIP"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -78,7 +84,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .INLCR{
-                language->getObserved("settings", "termios", "inputFlags", "INLCRHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "INLCR"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -87,7 +93,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IGNCR{
-                language->getObserved("settings", "termios", "inputFlags", "IGNCRHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IGNCR"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -96,7 +102,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ICRNL{
-                language->getObserved("settings", "termios", "inputFlags", "ICRNLHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "ICRNL"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -105,7 +111,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IUCLC{
-                language->getObserved("settings", "termios", "inputFlags", "IUCLCHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IUCLC"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -114,7 +120,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IXON{
-                language->getObserved("settings", "termios", "inputFlags", "IXONHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IXON"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -123,7 +129,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IXANY{
-                language->getObserved("settings", "termios", "inputFlags", "IXANYHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IXANY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -132,7 +138,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IXOFF{
-                language->getObserved("settings", "termios", "inputFlags", "IXOFFHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IXOFF"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -141,7 +147,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IMAXBEL{
-                language->getObserved("settings", "termios", "inputFlags", "IMAXBELHelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IMAXBEL"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -150,7 +156,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .IUTF8{
-                language->getObserved("settings", "termios", "inputFlags", "IUTF8HelpText"),
+                inputFlagsFactory_.identity({"termios", "inputFlags", "IUTF8"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -161,7 +167,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         }
     , outputFlags{
             .OPOST{
-                language->getObserved("settings", "termios", "outputFlags", "OPOSTHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "OPOST"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -170,7 +176,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .OLCUC{
-                language->getObserved("settings", "termios", "outputFlags", "OLCUCHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "OLCUC"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -179,7 +185,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ONLCR{
-                language->getObserved("settings", "termios", "outputFlags", "ONLCRHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "ONLCR"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -188,7 +194,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .OCRNL{
-                language->getObserved("settings", "termios", "outputFlags", "OCRNLHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "OCRNL"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -197,7 +203,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ONOCR{
-                language->getObserved("settings", "termios", "outputFlags", "ONOCRHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "ONOCR"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -206,7 +212,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ONLRET{
-                language->getObserved("settings", "termios", "outputFlags", "ONLRETHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "ONLRET"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -215,7 +221,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .OFILL{
-                language->getObserved("settings", "termios", "outputFlags", "OFILLHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "OFILL"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -224,7 +230,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .OFDEL{
-                language->getObserved("settings", "termios", "outputFlags", "OFDELHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "OFDEL"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -233,7 +239,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .NLDLY{
-                language->getObserved("settings", "termios", "outputFlags", "NLDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "NLDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -242,7 +248,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .CRDLY{
-                language->getObserved("settings", "termios", "outputFlags", "CRDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "CRDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -251,7 +257,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .TABDLY{
-                language->getObserved("settings", "termios", "outputFlags", "TABDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "TABDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -260,7 +266,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .BSDLY{
-                language->getObserved("settings", "termios", "outputFlags", "BSDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "BSDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -269,7 +275,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .VTDLY{
-                language->getObserved("settings", "termios", "outputFlags", "VTDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "VTDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -278,7 +284,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .FFDLY{
-                language->getObserved("settings", "termios", "outputFlags", "FFDLYHelpText"),
+                outputFlagsFactory_.identity({"termios", "outputFlags", "FFDLY"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -289,7 +295,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         },
         controlFlags{
         .CBAUD{
-            language->getObserved("settings", "termios", "controlFlags", "CBAUDHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CBAUD"}),
             onChange,
             [this, onChange]()
             {
@@ -301,7 +307,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CBAUDEX{
-            language->getObserved("settings", "termios", "controlFlags", "CBAUDEXHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CBAUDEX"}),
             onChange,
             [this, onChange]()
             {
@@ -312,7 +318,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CSIZE{
-            language->getObserved("settings", "termios", "controlFlags", "CSIZEHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CSIZE"}),
             onChange,
             [this, onChange]()
             {
@@ -321,7 +327,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CSTOPB{
-            language->getObserved("settings", "termios", "controlFlags", "CSTOPBHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CSTOPB"}),
             onChange,
             [this, onChange]()
             {
@@ -330,7 +336,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CREAD{
-            language->getObserved("settings", "termios", "controlFlags", "CREADHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CREAD"}),
             onChange,
             [this, onChange]()
             {
@@ -339,7 +345,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .PARENB{
-            language->getObserved("settings", "termios", "controlFlags", "PARENBHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "PARENB"}),
             onChange,
             [this, onChange]()
             {
@@ -348,7 +354,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .PARODD{
-            language->getObserved("settings", "termios", "controlFlags", "PARODDHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "PARODD"}),
             onChange,
             [this, onChange]()
             {
@@ -357,7 +363,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .HUPCL{
-            language->getObserved("settings", "termios", "controlFlags", "HUPCLHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "HUPCL"}),
             onChange,
             [this, onChange]()
             {
@@ -366,7 +372,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CLOCAL{
-            language->getObserved("settings", "termios", "controlFlags", "CLOCALHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CLOCAL"}),
             onChange,
             [this, onChange]()
             {
@@ -375,7 +381,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .LOBLK{
-            language->getObserved("settings", "termios", "controlFlags", "LOBLKHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "LOBLK"}),
             onChange,
             [this, onChange]()
             {
@@ -384,7 +390,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CIBAUD{
-            language->getObserved("settings", "termios", "controlFlags", "CIBAUDHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CIBAUD"}),
             onChange,
             [this, onChange]()
             {
@@ -393,7 +399,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CMSPAR{
-            language->getObserved("settings", "termios", "controlFlags", "CMSPARHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CMSPAR"}),
             onChange,
             [this, onChange]()
             {
@@ -402,7 +408,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .CRTSCTS{
-            language->getObserved("settings", "termios", "controlFlags", "CRTSCTSHelpText"),
+            controlFlagsFactory_.identity({"termios", "controlFlags", "CRTSCTS"}),
             onChange,
             [this, onChange]()
             {
@@ -413,7 +419,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         },
         localFlags{
             .ISIG{
-                language->getObserved("settings", "termios", "localFlags", "ISIGHelpText"),
+                localFlagsFactory_.identity({"termios", "localFlags", "ISIG"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -422,7 +428,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ICANON{
-                language->getObserved("settings", "termios", "localFlags", "ICANONHelpText"),
+                localFlagsFactory_.identity({"termios", "localFlags", "ICANON"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -431,7 +437,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .XCASE{
-                language->getObserved("settings", "termios", "localFlags", "XCASEHelpText"),
+                localFlagsFactory_.identity({"termios", "localFlags", "XCASE"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -440,7 +446,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
             .ECHO{
-                language->getObserved("settings", "termios", "localFlags", "ECHOHelpText"),
+                localFlagsFactory_.identity({"termios", "localFlags", "ECHO"}),
                 onChange,
                 [this, onChange]()
                 {
@@ -449,7 +455,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
                 }
             },
         .ECHOE{
-            language->getObserved("settings", "termios", "localFlags", "ECHOEHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHOE"}),
             onChange,
             [this, onChange]()
             {
@@ -458,7 +464,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .ECHOK{
-            language->getObserved("settings", "termios", "localFlags", "ECHOKHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHOK"}),
             onChange,
             [this, onChange]()
             {
@@ -467,7 +473,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .ECHONL{
-            language->getObserved("settings", "termios", "localFlags", "ECHONLHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHONL"}),
             onChange,
             [this, onChange]()
             {
@@ -476,7 +482,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .ECHOCTL{
-            language->getObserved("settings", "termios", "localFlags", "ECHOCTLHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHOCTL"}),
             onChange,
             [this, onChange]()
             {
@@ -485,7 +491,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .ECHOPRT{
-            language->getObserved("settings", "termios", "localFlags", "ECHOPRTHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHOPRT"}),
             onChange,
             [this, onChange]()
             {
@@ -494,7 +500,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .ECHOKE{
-            language->getObserved("settings", "termios", "localFlags", "ECHOKEHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "ECHOKE"}),
             onChange,
             [this, onChange]()
             {
@@ -503,7 +509,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .FLUSHO{
-            language->getObserved("settings", "termios", "localFlags", "FLUSHOHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "FLUSHO"}),
             onChange,
             [this, onChange]()
             {
@@ -512,7 +518,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .NOFLSH{
-            language->getObserved("settings", "termios", "localFlags", "NOFLSHHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "NOFLSH"}),
             onChange,
             [this, onChange]()
             {
@@ -521,7 +527,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .TOSTOP{
-            language->getObserved("settings", "termios", "localFlags", "TOSTOPHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "TOSTOP"}),
             onChange,
             [this, onChange]()
             {
@@ -530,7 +536,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .PENDIN{
-            language->getObserved("settings", "termios", "localFlags", "PENDINHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "PENDIN"}),
             onChange,
             [this, onChange]()
             {
@@ -539,7 +545,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             }
         },
         .IEXTEN{
-            language->getObserved("settings", "termios", "localFlags", "IEXTENHelpText"),
+            localFlagsFactory_.identity({"termios", "localFlags", "IEXTEN"}),
             onChange,
             [this, onChange]()
             {
@@ -550,7 +556,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
     },
     cc{
         .VDISCARD{
-            language->getObserved("settings", "termios", "cc", "VDISCARDHelpText"),
+            ccFactory_.identity({"termios", "cc", "VDISCARD"}),
             onChange,
             [this, onChange]()
             {
@@ -561,7 +567,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VDSUSP{
-            language->getObserved("settings", "termios", "cc", "VDSUSPHelpText"),
+            ccFactory_.identity({"termios", "cc", "VDSUSP"}),
             onChange,
             [this, onChange]()
             {
@@ -572,7 +578,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VEOF{
-            language->getObserved("settings", "termios", "cc", "VEOFHelpText"),
+            ccFactory_.identity({"termios", "cc", "VEOF"}),
             onChange,
             [this, onChange]()
             {
@@ -583,7 +589,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VEOL{
-            language->getObserved("settings", "termios", "cc", "VEOLHelpText"),
+            ccFactory_.identity({"termios", "cc", "VEOL"}),
             onChange,
             [this, onChange]()
             {
@@ -594,7 +600,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VEOL2{
-            language->getObserved("settings", "termios", "cc", "VEOL2HelpText"),
+            ccFactory_.identity({"termios", "cc", "VEOL2"}),
             onChange,
             [this, onChange]()
             {
@@ -605,7 +611,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VERASE{
-            language->getObserved("settings", "termios", "cc", "VERASEHelpText"),
+            ccFactory_.identity({"termios", "cc", "VERASE"}),
             onChange,
             [this, onChange]()
             {
@@ -616,7 +622,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VINTR{
-            language->getObserved("settings", "termios", "cc", "VINTRHelpText"),
+            ccFactory_.identity({"termios", "cc", "VINTR"}),
             onChange,
             [this, onChange]()
             {
@@ -627,7 +633,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VKILL{
-            language->getObserved("settings", "termios", "cc", "VKILLHelpText"),
+            ccFactory_.identity({"termios", "cc", "VKILL"}),
             onChange,
             [this, onChange]()
             {
@@ -638,7 +644,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VLNEXT{
-            language->getObserved("settings", "termios", "cc", "VLNEXTHelpText"),
+            ccFactory_.identity({"termios", "cc", "VLNEXT"}),
             onChange,
             [this, onChange]()
             {
@@ -649,7 +655,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VMIN{
-            language->getObserved("settings", "termios", "cc", "VMINHelpText"),
+            ccFactory_.identity({"termios", "cc", "VMIN"}),
             onChange,
             [this, onChange]()
             {
@@ -660,7 +666,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VQUIT{
-            language->getObserved("settings", "termios", "cc", "VQUITHelpText"),
+            ccFactory_.identity({"termios", "cc", "VQUIT"}),
             onChange,
             [this, onChange]()
             {
@@ -671,7 +677,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VREPRINT{
-            language->getObserved("settings", "termios", "cc", "VREPRINTHelpText"),
+            ccFactory_.identity({"termios", "cc", "VREPRINT"}),
             onChange,
             [this, onChange]()
             {
@@ -682,7 +688,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VSTART{
-            language->getObserved("settings", "termios", "cc", "VSTARTHelpText"),
+            ccFactory_.identity({"termios", "cc", "VSTART"}),
             onChange,
             [this, onChange]()
             {
@@ -693,7 +699,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VSTATUS{
-            language->getObserved("settings", "termios", "cc", "VSTATUSHelpText"),
+            ccFactory_.identity({"termios", "cc", "VSTATUS"}),
             onChange,
             [this, onChange]()
             {
@@ -704,7 +710,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VSTOP{
-            language->getObserved("settings", "termios", "cc", "VSTOPHelpText"),
+            ccFactory_.identity({"termios", "cc", "VSTOP"}),
             onChange,
             [this, onChange]()
             {
@@ -715,7 +721,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VSUSP{
-            language->getObserved("settings", "termios", "cc", "VSUSPHelpText"),
+            ccFactory_.identity({"termios", "cc", "VSUSP"}),
             onChange,
             [this, onChange]()
             {
@@ -726,7 +732,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VSWTCH{
-            language->getObserved("settings", "termios", "cc", "VSWTCHHelpText"),
+            ccFactory_.identity({"termios", "cc", "VSWTCH"}),
             onChange,
             [this, onChange]()
             {
@@ -737,7 +743,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VTIME{
-            language->getObserved("settings", "termios", "cc", "VTIMEHelpText"),
+            ccFactory_.identity({"termios", "cc", "VTIME"}),
             onChange,
             [this, onChange]()
             {
@@ -748,7 +754,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
             &ccEngaged
         },
         .VWERASE{
-            language->getObserved("settings", "termios", "cc", "VWERASEHelpText"),
+            ccFactory_.identity({"termios", "cc", "VWERASE"}),
             onChange,
             [this, onChange]()
             {
@@ -760,7 +766,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         },
     },
     iSpeed{
-        language->getObserved("settings", "termios", "iSpeedHelpText"),
+        factory_.identity({"termios", "iSpeed"}, {.labelKey = SettingKeyPath{"termios", "iSpeedHelpText"}}),
         onChange,
         nulloptReset(iSpeed, onChange),
         {
@@ -768,7 +774,7 @@ TermiosSettings::TermiosSettings(std::function<void()> const& onChange)
         }
     },
     oSpeed{
-        language->getObserved("settings", "termios", "oSpeedHelpText"),
+        factory_.identity({"termios", "oSpeed"}, {.labelKey = SettingKeyPath{"termios", "oSpeedHelpText"}}),
         onChange,
         nulloptReset(oSpeed, onChange),
         {
@@ -1118,81 +1124,81 @@ Nui::ElementRenderer TermiosSettings::render()
         subgroup(
             {.onChange = onChange_},
             fragment(
-                inputFlags.IGNBRK("IGNBRK"),
-                inputFlags.BRKINT("BRKINT"),
-                inputFlags.IGNPAR("IGNPAR"),
-                inputFlags.PARMRK("PARMRK"),
-                inputFlags.INPCK("INPCK"),
-                inputFlags.ISTRIP("ISTRIP"),
-                inputFlags.INLCR("INLCR"),
-                inputFlags.IGNCR("IGNCR"),
-                inputFlags.ICRNL("ICRNL"),
-                inputFlags.IUCLC("IUCLC"),
-                inputFlags.IXON("IXON"),
-                inputFlags.IXANY("IXANY"),
-                inputFlags.IXOFF("IXOFF"),
-                inputFlags.IMAXBEL("IMAXBEL"),
-                inputFlags.IUTF8("IUTF8")
+                inputFlags.IGNBRK(),
+                inputFlags.BRKINT(),
+                inputFlags.IGNPAR(),
+                inputFlags.PARMRK(),
+                inputFlags.INPCK(),
+                inputFlags.ISTRIP(),
+                inputFlags.INLCR(),
+                inputFlags.IGNCR(),
+                inputFlags.ICRNL(),
+                inputFlags.IUCLC(),
+                inputFlags.IXON(),
+                inputFlags.IXANY(),
+                inputFlags.IXOFF(),
+                inputFlags.IMAXBEL(),
+                inputFlags.IUTF8()
             )
         ),
         h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "outputFlagsSubgroupTitle")),
         subgroup(
             {.onChange = onChange_},
             fragment(
-                outputFlags.OPOST("OPOST"),
-                outputFlags.OLCUC("OLCUC"),
-                outputFlags.ONLCR("ONLCR"),
-                outputFlags.OCRNL("OCRNL"),
-                outputFlags.ONOCR("ONOCR"),
-                outputFlags.ONLRET("ONLRET"),
-                outputFlags.OFILL("OFILL"),
-                outputFlags.OFDEL("OFDEL"),
-                outputFlags.NLDLY("NLDLY"),
-                outputFlags.CRDLY("CRDLY"),
-                outputFlags.TABDLY("TABDLY"),
-                outputFlags.BSDLY("BSDLY"),
-                outputFlags.VTDLY("VTDLY"),
-                outputFlags.FFDLY("FFDLY")
+                outputFlags.OPOST(),
+                outputFlags.OLCUC(),
+                outputFlags.ONLCR(),
+                outputFlags.OCRNL(),
+                outputFlags.ONOCR(),
+                outputFlags.ONLRET(),
+                outputFlags.OFILL(),
+                outputFlags.OFDEL(),
+                outputFlags.NLDLY(),
+                outputFlags.CRDLY(),
+                outputFlags.TABDLY(),
+                outputFlags.BSDLY(),
+                outputFlags.VTDLY(),
+                outputFlags.FFDLY()
             )
         ),
         h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "controlFlagsSubgroupTitle")),
         subgroup(
             {.onChange = onChange_},
             fragment(
-                controlFlags.CBAUD("CBAUD"),
-                controlFlags.CBAUDEX("CBAUDEX"),
-                controlFlags.CSIZE("CSIZE"),
-                controlFlags.CSTOPB("CSTOPB"),
-                controlFlags.CREAD("CREAD"),
-                controlFlags.PARENB("PARENB"),
-                controlFlags.PARODD("PARODD"),
-                controlFlags.HUPCL("HUPCL"),
-                controlFlags.CLOCAL("CLOCAL"),
-                controlFlags.LOBLK("LOBLK"),
-                controlFlags.CIBAUD("CIBAUD"),
-                controlFlags.CMSPAR("CMSPAR"),
-                controlFlags.CRTSCTS("CRTSCTS")
+                controlFlags.CBAUD(),
+                controlFlags.CBAUDEX(),
+                controlFlags.CSIZE(),
+                controlFlags.CSTOPB(),
+                controlFlags.CREAD(),
+                controlFlags.PARENB(),
+                controlFlags.PARODD(),
+                controlFlags.HUPCL(),
+                controlFlags.CLOCAL(),
+                controlFlags.LOBLK(),
+                controlFlags.CIBAUD(),
+                controlFlags.CMSPAR(),
+                controlFlags.CRTSCTS()
             )
         ),
         h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "localFlagsSubgroupTitle")),
         subgroup(
             {.onChange = onChange_},
             fragment(
-                localFlags.ISIG("ISIG"),
-                localFlags.ICANON("ICANON"),
-                localFlags.XCASE("XCASE"),
-                localFlags.ECHO("ECHO"),
-                localFlags.ECHOE("ECHOE"),
-                localFlags.ECHOK("ECHOK"),
-                localFlags.ECHONL("ECHONL"),
-                localFlags.ECHOCTL("ECHOCTL"),
-                localFlags.ECHOPRT("ECHOPRT"),
-                localFlags.ECHOKE("ECHOKE"),
-                localFlags.FLUSHO("FLUSHO"),
-                localFlags.NOFLSH("NOFLSH"),
-                localFlags.TOSTOP("TOSTOP"),
-                localFlags.PENDIN("PENDIN"),
-                localFlags.IEXTEN("IEXTEN")
+                localFlags.ISIG(),
+                localFlags.ICANON(),
+                localFlags.XCASE(),
+                localFlags.ECHO(),
+                localFlags.ECHOE(),
+                localFlags.ECHOK(),
+                localFlags.ECHONL(),
+                localFlags.ECHOCTL(),
+                localFlags.ECHOPRT(),
+                localFlags.ECHOKE(),
+                localFlags.FLUSHO(),
+                localFlags.NOFLSH(),
+                localFlags.TOSTOP(),
+                localFlags.PENDIN(),
+                localFlags.IEXTEN()
             )
         ),
         h1{class_ = "settings-header"}(language->getObserved("settings", "termios", "ccSettingsSubgroupTitle")),
@@ -1201,28 +1207,28 @@ Nui::ElementRenderer TermiosSettings::render()
                 .groupTitle = language->getObserved("settings", "ccSettingsSubgroupTitle"),
                 .onChange = onChange_},
             fragment(
-                cc.VDISCARD("VDISCARD"),
-                cc.VDSUSP("VDSUSP"),
-                cc.VEOF("VEOF"),
-                cc.VEOL("VEOL"),
-                cc.VEOL2("VEOL2"),
-                cc.VERASE("VERASE"),
-                cc.VINTR("VINTR"),
-                cc.VKILL("VKILL"),
-                cc.VLNEXT("VLNEXT"),
-                cc.VMIN("VMIN"),
-                cc.VQUIT("VQUIT"),
-                cc.VREPRINT("VREPRINT"),
-                cc.VSTART("VSTART"),
-                cc.VSTATUS("VSTATUS"),
-                cc.VSTOP("VSTOP"),
-                cc.VSUSP("VSUSP"),
-                cc.VSWTCH("VSWTCH"),
-                cc.VTIME("VTIME"),
-                cc.VWERASE("VWERASE")
+                cc.VDISCARD(),
+                cc.VDSUSP(),
+                cc.VEOF(),
+                cc.VEOL(),
+                cc.VEOL2(),
+                cc.VERASE(),
+                cc.VINTR(),
+                cc.VKILL(),
+                cc.VLNEXT(),
+                cc.VMIN(),
+                cc.VQUIT(),
+                cc.VREPRINT(),
+                cc.VSTART(),
+                cc.VSTATUS(),
+                cc.VSTOP(),
+                cc.VSUSP(),
+                cc.VSWTCH(),
+                cc.VTIME(),
+                cc.VWERASE()
             )
         ),
-        iSpeed(language->getObserved("settings", "termios", "iSpeedHelpText")),
-        oSpeed(language->getObserved("settings", "termios", "oSpeedHelpText"))
+        iSpeed(),
+        oSpeed()
     );
 }
