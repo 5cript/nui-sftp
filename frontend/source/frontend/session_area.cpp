@@ -56,6 +56,7 @@ struct SessionArea::Implementation
     ConfirmDialog* confirmDialog;
     FilePropertyDialog* filePropertyDialog;
     ArchiveTransferDialog* archiveTransferDialog;
+    SnippetImportDialog* snippetImportDialog;
     Toolbar* toolbar;
     CommandStoreClient* commandStoreClient;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
@@ -76,6 +77,7 @@ struct SessionArea::Implementation
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
+        SnippetImportDialog* snippetImportDialog,
         Toolbar* toolbar,
         CommandStoreClient* commandStoreClient
     )
@@ -85,6 +87,7 @@ struct SessionArea::Implementation
         , confirmDialog{confirmDialog}
         , filePropertyDialog{filePropertyDialog}
         , archiveTransferDialog{archiveTransferDialog}
+        , snippetImportDialog{snippetImportDialog}
         , toolbar{toolbar}
         , commandStoreClient{commandStoreClient}
         , sessions{}
@@ -106,6 +109,7 @@ SessionArea::SessionArea(
     ConfirmDialog* confirmDialog,
     FilePropertyDialog* filePropertyDialog,
     ArchiveTransferDialog* archiveTransferDialog,
+    SnippetImportDialog* snippetImportDialog,
     Toolbar* toolbar,
     CommandStoreClient* commandStoreClient
 )
@@ -116,6 +120,7 @@ SessionArea::SessionArea(
           confirmDialog,
           filePropertyDialog,
           archiveTransferDialog,
+          snippetImportDialog,
           toolbar,
           commandStoreClient
       )}
@@ -307,6 +312,7 @@ Session::Params SessionArea::makeSessionParams(
     params.confirmDialog = impl_->confirmDialog;
     params.filePropertyDialog = impl_->filePropertyDialog;
     params.archiveTransferDialog = impl_->archiveTransferDialog;
+    params.snippetImportDialog = impl_->snippetImportDialog;
     params.commandStoreClient = impl_->commandStoreClient;
     params.sessionOptions = std::move(engineOptions);
     params.uiOptions = std::move(uiOptions);

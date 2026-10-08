@@ -24,6 +24,7 @@
 @import "./dialog/confirm_dialog.css";
 @import "./dialog/input_dialog.css";
 @import "./dialog/archive_transfer_dialog.css";
+@import "./dialog/snippet_import_dialog.css";
 
 /* Dont forget to add in frontend CMakeLists.txt OBSERVED_BUNDLE_FILES and copy_styles_to_build_dir.cmake */
 @import "../../../styles/nui-file-explorer/file_grid.css";

@@ -59,6 +59,7 @@ struct MainPage::Implementation
     /// One store client for the whole process; every session records into it and both command panels
     /// read from it.
     CommandStoreClient commandStoreClient;
+    SnippetImportDialog snippetImportDialog;
     SessionArea sessionArea;
     Settings settings;
     Licenses licenses;
@@ -83,7 +84,8 @@ struct MainPage::Implementation
         , notificationCenter{events}
         , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
         , commandStoreClient{}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &toolbar, &commandStoreClient}
+        , snippetImportDialog{"SnippetImportDialog", &commandStoreClient}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &snippetImportDialog, &toolbar, &commandStoreClient}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog, newSessionDialog}
@@ -216,6 +218,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->confirmDialog(),
         impl_->filePropertyDialog(),
         impl_->archiveTransferDialog(),
+        impl_->snippetImportDialog(),
         impl_->directConnectDialog(),
         impl_->newSessionDialog(),
         impl_->multiInputDialog(),

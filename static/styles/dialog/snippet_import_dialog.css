@@ -1,0 +1,356 @@
+/* Snippet import dialog: paste step and review step, in the style of the other dialogs. */
+
+.snippet-import-dialog {
+    --sid-mono: "JetBrains Mono", Inconsolata, "Hack", Consolas, monospace;
+    --sid-row-border: color-mix(in srgb, var(--border-color-fields) 70%, transparent);
+    --sid-conflict-border: color-mix(in srgb, var(--opq-warn) 45%, var(--border-color-fields));
+    --sid-conflict-background: color-mix(in srgb, var(--opq-warn) 5%, var(--background-color));
+    --sid-conflict-head: color-mix(in srgb, var(--opq-warn) 12%, var(--background-color));
+
+    box-sizing: border-box;
+    width: min(820px, 90vw);
+    height: min(680px, calc(100vh - 200px));
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+}
+
+/* Back sits on the left of the footer, Import and Cancel on the right. */
+#SnippetImportDialog .script-nui-dialog-footer > #SnippetImportDialog_no {
+    order: -1;
+    margin-right: auto;
+}
+
+.snippet-import-dialog-step {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.snippet-import-dialog-step-name {
+    align-self: flex-end;
+    margin-bottom: -6px;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+}
+
+.snippet-import-dialog-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.snippet-import-dialog-hint,
+.snippet-import-dialog-status {
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+}
+
+.snippet-import-dialog-status.error {
+    color: var(--opq-red);
+}
+
+/* ---------- Paste step ---------- */
+
+.snippet-import-dialog-target {
+    display: grid;
+    grid-template-columns: 140px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 16px;
+    row-gap: 6px;
+}
+
+.snippet-import-dialog-target > .script-nui-select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.snippet-import-dialog-json-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.snippet-import-dialog-editor {
+    flex: 1 1 auto;
+    min-height: 140px;
+}
+
+/* ---------- Review step ---------- */
+
+.snippet-import-dialog-intro {
+    font-size: 0.875rem;
+}
+
+.snippet-import-dialog-sections-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+/* Conflicts and the table share the height and scroll on their own, so neither hides the other. */
+.snippet-import-dialog-sections {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.snippet-import-dialog-section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.snippet-import-dialog-conflicts {
+    flex: 1 1 0;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--sid-conflict-border);
+    border-radius: 6px;
+    background: var(--sid-conflict-background);
+    overflow: hidden;
+}
+
+.snippet-import-dialog-conflicts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 10px;
+    background: var(--sid-conflict-head);
+    border-bottom: 1px solid var(--sid-conflict-border);
+}
+
+.snippet-import-dialog-apply-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+}
+
+.snippet-import-dialog-apply {
+    height: 24px;
+    padding: 0 9px;
+    font-size: 0.75rem;
+    color: var(--color);
+    background: var(--background-color-fields);
+    border: 1px solid var(--script-nui-components-button-border-color-regular, var(--border-color-fields));
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.snippet-import-dialog-apply:hover {
+    border-color: var(--theme-color);
+}
+
+.snippet-import-dialog-conflict-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.snippet-import-dialog-conflict {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--background-color) 80%, var(--anti-brightness-mixin) 4%);
+    border: 1px solid var(--border-color-fields);
+    border-radius: 6px;
+}
+
+.snippet-import-dialog-conflict-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.snippet-import-dialog-conflict-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.snippet-import-dialog-conflict-folder {
+    font-size: 0.75rem;
+    color: var(--subdued-text);
+}
+
+.snippet-import-dialog-choices {
+    display: flex;
+    gap: 14px;
+    margin-left: auto;
+}
+
+.snippet-import-dialog-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.snippet-import-dialog-choice > input {
+    appearance: none;
+    flex: none;
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    border: 1px solid var(--script-nui-components-checkbox-border-color, #8e8e8e);
+    border-radius: 50%;
+    background: var(--background-color-fields);
+    cursor: pointer;
+}
+
+.snippet-import-dialog-choice > input:checked {
+    border-color: var(--theme-color);
+    background: var(--theme-color);
+    box-shadow: inset 0 0 0 2px var(--background-color-fields);
+}
+
+.snippet-import-dialog-choice > input:focus-visible {
+    outline: 1px solid var(--theme-color);
+    outline-offset: 2px;
+}
+
+.snippet-import-dialog-comparison {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.snippet-import-dialog-comparison-caption {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--color-secondary);
+}
+
+/* Existing (or earlier in the JSON) on the left, pasted on the right. */
+.snippet-import-dialog-sides {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    font-size: 0.8rem;
+}
+
+.snippet-import-dialog-side {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    background: var(--background-color-fields);
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+}
+
+.snippet-import-dialog-side-label {
+    font-size: 0.72rem;
+    color: var(--subdued-text);
+}
+
+.snippet-import-dialog-tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.snippet-import-dialog-tag {
+    padding: 0 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 999px;
+    background: var(--brighter-background);
+    font-size: 0.72rem;
+    line-height: 18px;
+}
+
+.snippet-import-dialog-no-tags {
+    font-size: 0.75rem;
+    font-style: italic;
+    color: var(--subdued-text);
+}
+
+.snippet-import-dialog-results {
+    flex: 1 1 0;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.snippet-import-dialog-table {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    background: var(--background-color-fields);
+    border: 1px solid var(--border-color-fields);
+    border-radius: 6px;
+}
+
+.snippet-import-dialog-row {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr) 90px;
+    column-gap: 12px;
+    align-items: start;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--sid-row-border);
+    font-size: 0.8rem;
+}
+
+.snippet-import-dialog-row.with-folder {
+    grid-template-columns: 160px 120px minmax(0, 1fr) 90px;
+}
+
+.snippet-import-dialog-row:last-child {
+    border-bottom: none;
+}
+
+.snippet-import-dialog-row.head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--background-color-fields);
+    border-bottom: 1px solid var(--border-color-fields);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-secondary);
+}
+
+.snippet-import-dialog-row.identical {
+    color: var(--subdued-text);
+}
+
+.snippet-import-dialog-code {
+    font-family: var(--sid-mono);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
+/* Multi line commands get a small read only box instead of growing the row. */
+.snippet-import-dialog-multiline {
+    box-sizing: border-box;
+    margin: 0;
+    max-height: calc(3 * 1.4em + 6px);
+    overflow: auto;
+    padding: 2px 6px;
+    font-family: var(--sid-mono);
+    font-size: 0.78rem;
+    line-height: 1.4em;
+    white-space: pre;
+    background: color-mix(in srgb, var(--background-color-fields) 70%, var(--brightness-mixin) 30%);
+    border: 1px solid var(--sid-row-border);
+    border-radius: 3px;
+}
+
+.snippet-import-dialog-tally {
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--color-secondary);
+}
