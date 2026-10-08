@@ -12,77 +12,92 @@
         {
             "name": "Logged in users",
             "command": "w",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "safe"
         },
         {
             "name": "Recent logins",
             "command": "last -n 20",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "safe"
         },
         {
             "name": "My identity",
             "command": "id",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "safe"
         },
         {
             "name": "Create user",
             "command": "sudo useradd -m -s /bin/bash {{user}}",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "caution"
         },
         {
             "name": "Set password",
             "command": "sudo passwd {{user}}",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "caution"
         },
         {
             "name": "Lock account",
             "command": "sudo passwd -l {{user}}",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "caution"
         },
         {
             "name": "Unlock account",
             "command": "sudo passwd -u {{user}}",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "caution"
         },
         {
             "name": "Delete user",
             "command": "sudo userdel {{user}}",
-            "tags": ["users"]
+            "tags": ["users"],
+            "danger": "danger"
         },
         {
             "name": "Add user to group",
             "command": "sudo usermod -aG {{group}} {{user}}",
-            "tags": ["groups"]
+            "tags": ["groups"],
+            "danger": "caution"
         },
         {
             "name": "Sudo rights of user",
             "command": "sudo -l -U {{user}}",
-            "tags": ["sudo"]
+            "tags": ["sudo"],
+            "danger": "safe"
         },
         {
             "name": "Edit sudoers",
             "command": "sudo visudo",
-            "tags": ["sudo"]
+            "tags": ["sudo"],
+            "danger": "caution"
         },
         {
             "name": "Change owner recursively",
             "command": "sudo chown -R {{owner}}:{{group}} {{path}}",
-            "tags": ["ownership"]
+            "tags": ["ownership"],
+            "danger": "danger"
         },
         {
             "name": "Make executable",
             "command": "chmod +x {{file}}",
-            "tags": ["permissions"]
+            "tags": ["permissions"],
+            "danger": "caution"
         },
         {
             "name": "Directory permissions to 755",
             "command": "find {{path}} -type d -exec chmod 755 {} +",
-            "tags": ["permissions"]
+            "tags": ["permissions"],
+            "danger": "danger"
         },
         {
             "name": "Permissions along path",
             "command": "namei -l {{path}}",
-            "tags": ["permissions"]
+            "tags": ["permissions"],
+            "danger": "safe"
         }
     ]
 }

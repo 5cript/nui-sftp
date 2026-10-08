@@ -12,47 +12,56 @@
         {
             "name": "Start services",
             "command": "docker compose up -d",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "caution"
         },
         {
             "name": "Stop and remove services",
             "command": "docker compose down",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "caution"
         },
         {
             "name": "Service status",
             "command": "docker compose ps",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "safe"
         },
         {
             "name": "Follow service logs",
             "command": "docker compose logs -f --tail 100 {{service}}",
-            "tags": ["compose", "logs"]
+            "tags": ["compose", "logs"],
+            "danger": "safe"
         },
         {
             "name": "Restart service",
             "command": "docker compose restart {{service}}",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "caution"
         },
         {
             "name": "Shell into service",
             "command": "docker compose exec {{service}} sh",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "safe"
         },
         {
             "name": "Update images and recreate",
             "command": "docker compose pull && docker compose up -d",
-            "tags": ["compose", "update"]
+            "tags": ["compose", "update"],
+            "danger": "caution"
         },
         {
             "name": "Rebuild service",
             "command": "docker compose up -d --build {{service}}",
-            "tags": ["compose", "build"]
+            "tags": ["compose", "build"],
+            "danger": "caution"
         },
         {
             "name": "Show resolved configuration",
             "command": "docker compose config",
-            "tags": ["compose"]
+            "tags": ["compose"],
+            "danger": "safe"
         }
     ]
 }

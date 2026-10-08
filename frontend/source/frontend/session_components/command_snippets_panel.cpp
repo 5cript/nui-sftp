@@ -2,6 +2,7 @@
 #include <frontend/session_components/command_panel_helpers.hpp>
 #include <frontend/notifications.hpp>
 #include <frontend/dialog/snippet_import_dialog.hpp>
+#include <frontend/command_store/danger_level_text.hpp>
 
 #include <command-store/snippet_transfer.hpp>
 
@@ -155,6 +156,34 @@ namespace
     {
         Nui::val::global("navigator")["clipboard"].call<Nui::val>("writeText", textToCopy);
     }
+
+    /// The label of the active (label, key) choice of a select.
+    Nui::ElementRenderer activeChoiceLabel(
+        std::reference_wrapper<Nui::Observed<std::pair<std::string, std::string>>>& active
+    )
+    {
+        return Nui::Elements::span{}(
+            Nui::observe(active.get()).generate([&observed = active.get()]() -> Nui::ElementRenderer {
+                return Nui::Elements::text{observed.value().first}();
+            })
+        );
+    }
+
+    /// The label of a (label, key) choice in a select's list.
+    Nui::ElementRenderer choiceLabel(std::pair<std::string, std::string> const& choice)
+    {
+        return Nui::Elements::span{}(choice.first);
+    }
+
+    /// The card's classes; a caution or danger rating tints the Run button.
+    std::string cardClass(std::optional<CommandStore::DangerLevel> danger)
+    {
+        if (danger == CommandStore::DangerLevel::Caution)
+            return "cmds-card cmds-card-caution";
+        if (danger == CommandStore::DangerLevel::Danger)
+            return "cmds-card cmds-card-danger";
+        return "cmds-card";
+    }
 }
 
 struct CommandSnippetsPanel::Implementation
@@ -187,6 +216,9 @@ struct CommandSnippetsPanel::Implementation
     std::vector<std::pair<std::string, std::string>> editorFolderChoices{};
     /// The chosen (label, id); the id tells folders of the same name apart.
     Nui::Observed<std::pair<std::string, std::string>> editorFolderChoice{};
+    /// Danger level choices of the select, (label, stored name), the empty name meaning unrated.
+    std::vector<std::pair<std::string, std::string>> editorDangerChoices{};
+    Nui::Observed<std::pair<std::string, std::string>> editorDangerChoice{};
     /// Observed so the detected-variables badges can follow the textarea live.
     Nui::Observed<std::string> editorCommand{};
     ScriptNuiComponents::TagBox editorTags{{
@@ -409,6 +441,17 @@ struct CommandSnippetsPanel::Implementation
         });
         editorFolderChoice = active != editorFolderChoices.end() ? *active : editorFolderChoices.front();
 
+        editorDangerChoices.clear();
+        for (const auto level : {std::optional<CommandStore::DangerLevel>{},
+                                 std::optional{CommandStore::DangerLevel::Safe},
+                                 std::optional{CommandStore::DangerLevel::Caution},
+                                 std::optional{CommandStore::DangerLevel::Danger}})
+            editorDangerChoices.emplace_back(dangerLevelText(level), std::string{CommandStore::toString(level)});
+        const auto activeDanger = std::ranges::find_if(editorDangerChoices, [&snippet](auto const& choice) {
+            return choice.second == CommandStore::toString(snippet.danger);
+        });
+        editorDangerChoice = activeDanger != editorDangerChoices.end() ? *activeDanger : editorDangerChoices.front();
+
         editorValidationShown = false;
         editorVisible = true;
     }
@@ -469,6 +512,7 @@ struct CommandSnippetsPanel::Implementation
             .folder = editorFolderId,
             .tags = editorTags.tags(),
             .favorite = editorFavorite,
+            .danger = CommandStore::dangerLevelFromString(editorDangerChoice.value().second),
         });
         editorVisible = false;
     }
@@ -481,6 +525,9 @@ struct CommandSnippetsPanel::Implementation
         const auto variables = Utility::CommandTemplate::parseVariables(snippet.command);
         if (variables.empty())
         {
+            // Without a variable form, nothing else stands between the click and a dangerous command.
+            if (execute && snippet.danger == CommandStore::DangerLevel::Danger)
+                return confirmDangerousRun(snippet);
             runInTerminal(snippet.command, execute);
             client->bumpSnippetUse(snippet.id);
             return;
@@ -511,6 +558,29 @@ struct CommandSnippetsPanel::Implementation
         runInTerminal(Utility::CommandTemplate::substitute(variableFormCommand, variableFormValues), execute);
         client->bumpSnippetUse(variableFormSnippetId);
         variableFormVisible = false;
+    }
+
+    void confirmDangerousRun(CommandStore::Snippet const& snippet)
+    {
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = std::string{language->get("commandSnippetsPanel", "confirmDangerousRunHeader")},
+            .text = fmt::format(
+                fmt::runtime(std::string{language->get("commandSnippetsPanel", "confirmDangerousRunText")}),
+                snippet.name,
+                snippet.command
+            ),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::No,
+            .onClose =
+                [this, id = snippet.id, command = snippet.command](std::optional<ConfirmDialog::Button> button) {
+                    if (!button || *button != ConfirmDialog::Button::Yes || connectionLost->value())
+                        return;
+                    runInTerminal(command, true);
+                    client->bumpSnippetUse(id);
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                },
+        });
     }
 
     void deleteSnippet(CommandStore::Snippet const& snippet)
@@ -662,6 +732,7 @@ struct CommandSnippetsPanel::Implementation
                 .folder = folder != folders.end() ? folder->name : std::string{},
                 .tags = snippet->tags,
                 .favorite = snippet->favorite,
+                .danger = snippet->danger,
             });
         }
         const auto document = CommandStore::SnippetTransfer::toJson(exported);
@@ -922,7 +993,7 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(SnippetCar
         tagPillElements.push_back(span{class_ = "cmds-tag"}(tag));
 
     // clang-format off
-    return div{class_ = "cmds-card"}(
+    return div{class_ = cardClass(snippet.danger)}(
         div{class_ = "cmds-card-header"}(
             CommandPanels::highlightedText(snippet.name, card.loweredQuery, "cmds-card-name"),
             div{class_ = "cmds-card-actions"}(
@@ -1096,22 +1167,21 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderEditor()
                         [this](std::pair<std::string, std::string> const& choice, Nui::WebApi::MouseEvent const&) {
                             editorFolderId = choice.second;
                         },
-                    .activeRenderer =
-                        [](std::reference_wrapper<Nui::Observed<std::pair<std::string, std::string>>>& active) {
-                            return span{}(
-                                Nui::observe(active.get()).generate([&observed = active.get()]() -> Nui::ElementRenderer {
-                                    return Nui::Elements::text{observed.value().first}();
-                                })
-                            );
-                        },
-                    .elementRenderer =
-                        [](std::pair<std::string, std::string> const& choice) {
-                            return span{}(choice.first);
-                        },
+                    .activeRenderer = activeChoiceLabel,
+                    .elementRenderer = choiceLabel,
                 }
             ),
             label{}(language->get("commandSnippetsPanel", "tagsLabel")),
             editorTags(),
+            label{}(language->get("commandSnippetsPanel", "dangerLabel")),
+            ScriptNuiComponents::select(
+                ScriptNuiComponents::SelectOptions<decltype(editorDangerChoice), decltype(editorDangerChoices)>{
+                    .activeOption = editorDangerChoice,
+                    .options = editorDangerChoices,
+                    .activeRenderer = activeChoiceLabel,
+                    .elementRenderer = choiceLabel,
+                }
+            ),
             // No class_ in component attributes, it would override the component's own class.
             ScriptNuiComponents::checkbox({
                 .isChecked = editorFavorite,

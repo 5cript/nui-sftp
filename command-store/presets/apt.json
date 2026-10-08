@@ -12,82 +12,98 @@
         {
             "name": "Update and upgrade",
             "command": "sudo apt update && sudo apt upgrade",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Upgradable packages",
             "command": "apt list --upgradable",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "safe"
         },
         {
             "name": "Search package",
             "command": "apt search {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package details",
             "command": "apt show {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Versions and sources",
             "command": "apt-cache policy {{package}}",
-            "tags": ["versions"]
+            "tags": ["versions"],
+            "danger": "safe"
         },
         {
             "name": "Install package",
             "command": "sudo apt install {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Reinstall package",
             "command": "sudo apt install --reinstall {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Remove package",
             "command": "sudo apt remove {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Remove package and configuration",
             "command": "sudo apt purge {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Remove unused packages",
             "command": "sudo apt autoremove",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Clean package cache",
             "command": "sudo apt clean",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Installed packages",
             "command": "apt list --installed",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package owning file",
             "command": "dpkg -S {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Files of package",
             "command": "dpkg -L {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Hold package version",
             "command": "sudo apt-mark hold {{package}}",
-            "tags": ["versions"]
+            "tags": ["versions"],
+            "danger": "caution"
         },
         {
             "name": "Release held package",
             "command": "sudo apt-mark unhold {{package}}",
-            "tags": ["versions"]
+            "tags": ["versions"],
+            "danger": "caution"
         }
     ]
 }

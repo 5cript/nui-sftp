@@ -12,67 +12,80 @@
         {
             "name": "Free space",
             "command": "df -h",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "safe"
         },
         {
             "name": "Free inodes",
             "command": "df -i",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "safe"
         },
         {
             "name": "Block devices",
             "command": "lsblk -f",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "safe"
         },
         {
             "name": "Mounted filesystems",
             "command": "findmnt",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "safe"
         },
         {
             "name": "Disk health (smartmontools)",
             "command": "sudo smartctl -H -A {{device}}",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "safe"
         },
         {
             "name": "Biggest directories",
             "command": "du -xh --max-depth=1 {{path}} 2>/dev/null | sort -h | tail -20",
-            "tags": ["usage"]
+            "tags": ["usage"],
+            "danger": "safe"
         },
         {
             "name": "Biggest files",
             "command": "find {{path}} -xdev -type f -size +{{megabytes}}M -exec ls -lh {} + | sort -k5 -h | tail -20",
-            "tags": ["usage"]
+            "tags": ["usage"],
+            "danger": "safe"
         },
         {
             "name": "Deleted files still open",
             "command": "sudo lsof +L1",
-            "tags": ["usage"]
+            "tags": ["usage"],
+            "danger": "safe"
         },
         {
             "name": "Find files by name",
             "command": "find {{path}} -iname \"*{{pattern}}*\"",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Recently modified files",
             "command": "find {{path}} -type f -mmin -{{minutes}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Search text in files",
             "command": "grep -rn \"{{pattern}}\" {{path}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Mount device",
             "command": "sudo mount {{device}} {{mountPoint}}",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "caution"
         },
         {
             "name": "Unmount",
             "command": "sudo umount {{mountPoint}}",
-            "tags": ["disk"]
+            "tags": ["disk"],
+            "danger": "caution"
         }
     ]
 }

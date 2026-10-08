@@ -14,8 +14,9 @@
 /**
  * @brief The JSON format snippets are copied and pasted in; shared by frontend and backend.
  *
- * {"version": 1, "snippets": [{"name", "command", "folder", "tags", "favorite"}]}, where folder is
- * a folder name. A bare array of entries or a single entry object is accepted as well.
+ * {"version": 1, "snippets": [{"name", "command", "folder", "tags", "danger", "favorite"}]}, where
+ * folder is a folder name and danger one of "safe", "caution" and "danger", left out when unrated.
+ * A bare array of entries or a single entry object is accepted as well.
  */
 namespace CommandStore::SnippetTransfer
 {
@@ -92,6 +93,7 @@ namespace CommandStore::SnippetTransfer
             }
             if (const auto favorite = entry.find("favorite"); favorite != entry.end() && favorite->is_boolean())
                 snippet.favorite = favorite->get<bool>();
+            snippet.danger = dangerLevelFromString(stringOr(entry, "danger"));
             return snippet;
         }
 
@@ -170,6 +172,8 @@ namespace CommandStore::SnippetTransfer
             entry["command"] = snippet.command;
             entry["folder"] = snippet.folder;
             entry["tags"] = snippet.tags;
+            if (snippet.danger)
+                entry["danger"] = std::string{toString(*snippet.danger)};
             entry["favorite"] = snippet.favorite;
             entries.push_back(std::move(entry));
         }
@@ -193,6 +197,7 @@ namespace CommandStore::SnippetTransfer
                 {"folder", entry.snippet.folder},
                 {"tags", entry.snippet.tags},
                 {"favorite", entry.snippet.favorite},
+                {"danger", std::string{toString(entry.snippet.danger)}},
                 {"folderId", entry.folderId},
                 {"replaces", entry.replaces},
             });

@@ -12,97 +12,116 @@
         {
             "name": "Status",
             "command": "git status -sb",
-            "tags": ["status"]
+            "tags": ["status"],
+            "danger": "safe"
         },
         {
             "name": "Compact history",
             "command": "git log --oneline --graph --decorate -n 30",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "safe"
         },
         {
             "name": "History of file",
             "command": "git log -p --follow -n 10 -- {{file}}",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "safe"
         },
         {
             "name": "Fetch and prune",
             "command": "git fetch --all --prune",
-            "tags": ["remote"]
+            "tags": ["remote"],
+            "danger": "safe"
         },
         {
             "name": "Pull with rebase",
             "command": "git pull --rebase",
-            "tags": ["remote"]
+            "tags": ["remote"],
+            "danger": "caution"
         },
         {
             "name": "Push",
             "command": "git push",
-            "tags": ["remote"]
+            "tags": ["remote"],
+            "danger": "caution"
         },
         {
             "name": "Remotes",
             "command": "git remote -v",
-            "tags": ["remote"]
+            "tags": ["remote"],
+            "danger": "safe"
         },
         {
             "name": "Switch branch",
             "command": "git switch {{branch}}",
-            "tags": ["branches"]
+            "tags": ["branches"],
+            "danger": "caution"
         },
         {
             "name": "Create branch",
             "command": "git switch -c {{branch}}",
-            "tags": ["branches"]
+            "tags": ["branches"],
+            "danger": "safe"
         },
         {
             "name": "Branches with upstream",
             "command": "git branch -vv",
-            "tags": ["branches"]
+            "tags": ["branches"],
+            "danger": "safe"
         },
         {
             "name": "Unstaged changes",
             "command": "git diff",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "safe"
         },
         {
             "name": "Staged changes",
             "command": "git diff --staged",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "safe"
         },
         {
             "name": "Commit staged changes",
             "command": "git commit -m \"{{message}}\"",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "caution"
         },
         {
             "name": "Undo last commit, keep changes",
             "command": "git reset --soft HEAD~1",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "caution"
         },
         {
             "name": "Stash changes",
             "command": "git stash push -m \"{{message}}\"",
-            "tags": ["stash"]
+            "tags": ["stash"],
+            "danger": "caution"
         },
         {
             "name": "Restore stash",
             "command": "git stash pop",
-            "tags": ["stash"]
+            "tags": ["stash"],
+            "danger": "caution"
         },
         {
             "name": "Discard changes of file",
             "command": "git restore {{file}}",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "danger"
         },
         {
             "name": "Who changed these lines",
             "command": "git blame -L {{fromLine}},{{toLine}} {{file}}",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "safe"
         },
         {
             "name": "Untracked files that clean would remove",
             "command": "git clean -nd",
-            "tags": ["changes"]
+            "tags": ["changes"],
+            "danger": "safe"
         }
     ]
 }

@@ -12,62 +12,74 @@
         {
             "name": "Generate Ed25519 key",
             "command": "ssh-keygen -t ed25519 -C \"{{comment}}\"",
-            "tags": ["keys"]
+            "tags": ["keys"],
+            "danger": "caution"
         },
         {
             "name": "Install public key on host",
             "command": "ssh-copy-id {{user}}@{{host}}",
-            "tags": ["keys"]
+            "tags": ["keys"],
+            "danger": "caution"
         },
         {
             "name": "Key fingerprint",
             "command": "ssh-keygen -lf {{keyFile}}",
-            "tags": ["keys"]
+            "tags": ["keys"],
+            "danger": "safe"
         },
         {
             "name": "Keys in agent",
             "command": "ssh-add -l",
-            "tags": ["keys"]
+            "tags": ["keys"],
+            "danger": "safe"
         },
         {
             "name": "Authorized keys",
             "command": "cat ~/.ssh/authorized_keys",
-            "tags": ["keys"]
+            "tags": ["keys"],
+            "danger": "safe"
         },
         {
             "name": "Local port forward",
             "command": "ssh -N -L {{localPort}}:{{targetHost}}:{{targetPort}} {{user}}@{{host}}",
-            "tags": ["tunnels"]
+            "tags": ["tunnels"],
+            "danger": "safe"
         },
         {
             "name": "Remote port forward",
             "command": "ssh -N -R {{remotePort}}:localhost:{{localPort}} {{user}}@{{host}}",
-            "tags": ["tunnels"]
+            "tags": ["tunnels"],
+            "danger": "caution"
         },
         {
             "name": "SOCKS proxy",
             "command": "ssh -N -D {{localPort}} {{user}}@{{host}}",
-            "tags": ["tunnels"]
+            "tags": ["tunnels"],
+            "danger": "safe"
         },
         {
             "name": "Connect through jump host",
             "command": "ssh -J {{jumpUser}}@{{jumpHost}} {{user}}@{{host}}",
-            "tags": ["connect"]
+            "tags": ["connect"],
+            "danger": "safe"
         },
         {
             "name": "Effective client configuration",
             "command": "ssh -G {{host}}",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "safe"
         },
         {
             "name": "Forget host key",
             "command": "ssh-keygen -R {{host}}",
-            "tags": ["known hosts"]
+            "tags": ["known hosts"],
+            "danger": "caution"
         },
         {
             "name": "Check server configuration",
             "command": "sudo sshd -t",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "safe"
         }
     ]
 }

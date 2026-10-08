@@ -12,77 +12,92 @@
         {
             "name": "Upgrade",
             "command": "sudo pacman -Syu",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Available updates",
             "command": "pacman -Qu",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "safe"
         },
         {
             "name": "Search package",
             "command": "pacman -Ss {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package details",
             "command": "pacman -Si {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Installed package details",
             "command": "pacman -Qi {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Install package",
             "command": "sudo pacman -S {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Remove package with dependencies",
             "command": "sudo pacman -Rns {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Remove orphans",
             "command": "sudo pacman -Rns $(pacman -Qtdq)",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Clean cache of uninstalled packages",
             "command": "sudo pacman -Sc",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Explicitly installed packages",
             "command": "pacman -Qe",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package owning file",
             "command": "pacman -Qo {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Files of package",
             "command": "pacman -Ql {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package providing file",
             "command": "sudo pacman -Fy && pacman -F {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "caution"
         },
         {
             "name": "Check package files",
             "command": "sudo pacman -Qkk {{package}}",
-            "tags": ["verify"]
+            "tags": ["verify"],
+            "danger": "safe"
         },
         {
             "name": "Recent pacman log",
             "command": "tail -n 50 /var/log/pacman.log",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "safe"
         }
     ]
 }

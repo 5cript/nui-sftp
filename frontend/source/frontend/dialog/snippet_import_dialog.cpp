@@ -1,6 +1,7 @@
 #include <frontend/dialog/snippet_import_dialog.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <frontend/command_store/command_store_client.hpp>
+#include <frontend/command_store/danger_level_text.hpp>
 #include <frontend/components/code_editor.hpp>
 #include <frontend/notifications.hpp>
 
@@ -84,7 +85,12 @@ namespace
     std::string resolutionKey(PlannedSnippet const& planned)
     {
         return fmt::format(
-            "{}\n{}\n{}\n{}", planned.snippet.folder, planned.snippet.name, planned.snippet.command, planned.snippet.tags
+            "{}\n{}\n{}\n{}\n{}",
+            planned.snippet.folder,
+            planned.snippet.name,
+            planned.snippet.command,
+            planned.snippet.tags,
+            CommandStore::toString(planned.snippet.danger)
         );
     }
 
@@ -135,6 +141,18 @@ namespace
         for (auto const& tag : tags)
             pills.push_back(span{class_ = "snippet-import-dialog-tag"}(tag));
         return listOf("snippet-import-dialog-tag-list", std::move(pills));
+    }
+
+    Nui::ElementRenderer dangerView(std::optional<CommandStore::DangerLevel> level)
+    {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::span;
+
+        return span{
+            class_ = "snippet-import-dialog-danger",
+            "data-danger"_attr = std::string{CommandStore::toString(level)},
+        }(dangerLevelText(level));
     }
 }
 
@@ -653,11 +671,12 @@ Nui::ElementRenderer SnippetImportDialog::Implementation::conflictCard(std::size
     auto const* earlier = planned.existing ? nullptr : &plan->snippets[*planned.earlierEntry].snippet;
     auto const& otherCommand = earlier ? earlier->command : planned.existing->command;
     auto const& otherTags = earlier ? earlier->tags : planned.existing->tags;
+    const auto otherDanger = earlier ? earlier->danger : planned.existing->danger;
 
     const auto otherTitle = language->get("snippetImportDialog", planned.existing ? "existing" : "earlier");
     const auto pastedTitle =
         language->get("snippetImportDialog", source == SnippetImportDialog::Source::Preset ? "preset" : "pasted");
-    // Only what differs is compared; a conflict differs in the command, the tags or both.
+    // Only what differs is compared; a conflict differs in the command, the tags, the danger level or several.
     const auto sides = [&](std::string const& caption, Nui::ElementRenderer other, Nui::ElementRenderer pasted)
     {
         return div{
@@ -689,6 +708,9 @@ Nui::ElementRenderer SnippetImportDialog::Implementation::conflictCard(std::size
         )),
         shownIf(otherTags != planned.snippet.tags, sides(
             language->get("snippetImportDialog", "tagsCaption"), tagsView(otherTags), tagsView(planned.snippet.tags)
+        )),
+        shownIf(otherDanger != planned.snippet.danger, sides(
+            language->get("snippetImportDialog", "dangerCaption"), dangerView(otherDanger), dangerView(planned.snippet.danger)
         ))
     );
     // clang-format on

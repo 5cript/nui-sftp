@@ -12,57 +12,68 @@
         {
             "name": "Status (ufw)",
             "command": "sudo ufw status verbose",
-            "tags": ["ufw"]
+            "tags": ["ufw"],
+            "danger": "safe"
         },
         {
             "name": "Allow port (ufw)",
             "command": "sudo ufw allow {{port}}/tcp",
-            "tags": ["ufw"]
+            "tags": ["ufw"],
+            "danger": "caution"
         },
         {
             "name": "Allow address on port (ufw)",
             "command": "sudo ufw allow from {{address}} to any port {{port}}",
-            "tags": ["ufw"]
+            "tags": ["ufw"],
+            "danger": "caution"
         },
         {
             "name": "Remove allowed port (ufw)",
             "command": "sudo ufw delete allow {{port}}/tcp",
-            "tags": ["ufw"]
+            "tags": ["ufw"],
+            "danger": "danger"
         },
         {
             "name": "Configuration (firewalld)",
             "command": "sudo firewall-cmd --list-all",
-            "tags": ["firewalld"]
+            "tags": ["firewalld"],
+            "danger": "safe"
         },
         {
             "name": "Open port (firewalld)",
             "command": "sudo firewall-cmd --permanent --add-port={{port}}/tcp && sudo firewall-cmd --reload",
-            "tags": ["firewalld"]
+            "tags": ["firewalld"],
+            "danger": "caution"
         },
         {
             "name": "Close port (firewalld)",
             "command": "sudo firewall-cmd --permanent --remove-port={{port}}/tcp && sudo firewall-cmd --reload",
-            "tags": ["firewalld"]
+            "tags": ["firewalld"],
+            "danger": "danger"
         },
         {
             "name": "Ruleset (nftables)",
             "command": "sudo nft list ruleset",
-            "tags": ["nftables"]
+            "tags": ["nftables"],
+            "danger": "safe"
         },
         {
             "name": "Rules (iptables)",
             "command": "sudo iptables -L -n -v --line-numbers",
-            "tags": ["iptables"]
+            "tags": ["iptables"],
+            "danger": "safe"
         },
         {
             "name": "Jail status (fail2ban)",
             "command": "sudo fail2ban-client status {{jail}}",
-            "tags": ["fail2ban"]
+            "tags": ["fail2ban"],
+            "danger": "safe"
         },
         {
             "name": "Unban address (fail2ban)",
             "command": "sudo fail2ban-client set {{jail}} unbanip {{address}}",
-            "tags": ["fail2ban"]
+            "tags": ["fail2ban"],
+            "danger": "caution"
         }
     ]
 }

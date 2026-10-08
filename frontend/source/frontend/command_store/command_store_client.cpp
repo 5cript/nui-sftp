@@ -115,6 +115,7 @@ namespace
             .folder = value["folder"].as<std::string>(),
             .tags = {},
             .favorite = value["favorite"].as<bool>(),
+            .danger = dangerLevelFromString(value["danger"].as<std::string>()),
             .uses = asInt64(value["uses"]),
             .lastUsed = asInt64(value["lastUsed"]),
         };
@@ -162,6 +163,7 @@ namespace
         value.set("folder", snippet.folder);
         value.set("tags", tags);
         value.set("favorite", snippet.favorite);
+        value.set("danger", std::string{toString(snippet.danger)});
         return value;
     }
 

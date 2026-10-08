@@ -12,52 +12,62 @@
         {
             "name": "Host information",
             "command": "hostnamectl",
-            "tags": ["host"]
+            "tags": ["host"],
+            "danger": "safe"
         },
         {
             "name": "Set host name",
             "command": "sudo hostnamectl set-hostname {{hostname}}",
-            "tags": ["host"]
+            "tags": ["host"],
+            "danger": "caution"
         },
         {
             "name": "Time and synchronization",
             "command": "timedatectl",
-            "tags": ["time"]
+            "tags": ["time"],
+            "danger": "safe"
         },
         {
             "name": "Set time zone",
             "command": "sudo timedatectl set-timezone {{timezone}}",
-            "tags": ["time"]
+            "tags": ["time"],
+            "danger": "caution"
         },
         {
             "name": "Locale and keyboard",
             "command": "localectl",
-            "tags": ["host"]
+            "tags": ["host"],
+            "danger": "safe"
         },
         {
             "name": "Previous boots",
             "command": "sudo journalctl --list-boots --no-pager | tail -10",
-            "tags": ["power"]
+            "tags": ["power"],
+            "danger": "safe"
         },
         {
             "name": "Reboot in minutes",
             "command": "sudo shutdown -r +{{minutes}}",
-            "tags": ["power"]
+            "tags": ["power"],
+            "danger": "caution"
         },
         {
             "name": "Cancel scheduled shutdown",
             "command": "sudo shutdown -c",
-            "tags": ["power"]
+            "tags": ["power"],
+            "danger": "caution"
         },
         {
             "name": "Reboot now",
             "command": "sudo systemctl reboot",
-            "tags": ["power"]
+            "tags": ["power"],
+            "danger": "danger"
         },
         {
             "name": "Power off",
             "command": "sudo systemctl poweroff",
-            "tags": ["power"]
+            "tags": ["power"],
+            "danger": "danger"
         }
     ]
 }

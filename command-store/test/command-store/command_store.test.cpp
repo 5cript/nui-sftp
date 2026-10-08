@@ -3,6 +3,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <unistd.h>
 
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -448,9 +450,11 @@ namespace
             .folder = "folder-1",
             .tags = {"files", "quick"},
             .favorite = true,
+            .danger = CommandStore::DangerLevel::Caution,
         });
         ASSERT_TRUE(stored.has_value()) << stored.error().message;
         EXPECT_FALSE(stored->id.empty());
+        EXPECT_EQ(stored->danger, CommandStore::DangerLevel::Caution);
 
         const auto snippets = listSnippets();
         ASSERT_TRUE(snippets.has_value());
@@ -462,6 +466,7 @@ namespace
         EXPECT_EQ(snippet.folder, "folder-1");
         EXPECT_EQ(snippet.tags, (std::vector<std::string>{"files", "quick"}));
         EXPECT_TRUE(snippet.favorite);
+        EXPECT_EQ(snippet.danger, CommandStore::DangerLevel::Caution);
         EXPECT_EQ(snippet.uses, 0);
         EXPECT_EQ(snippet.lastUsed, 0);
     }
@@ -705,6 +710,63 @@ namespace
         ASSERT_TRUE(snippets.has_value());
         ASSERT_EQ(snippets->size(), 1u);
         EXPECT_EQ(snippets->front().tags, (std::vector<std::string>{"files"}));
+    }
+
+    TEST_F(CommandStoreTests, UnratedSnippetStaysUnrated)
+    {
+        openStore();
+        ASSERT_TRUE(upsertSnippet({.name = "List", .command = "ls"}).has_value());
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().danger, std::nullopt);
+    }
+
+    TEST_F(CommandStoreTests, VersionOneDatabaseIsMigratedKeepingItsSnippets)
+    {
+        {
+            sqlite3* rawDatabase = nullptr;
+            ASSERT_EQ(sqlite3_open(databaseFile().string().c_str(), &rawDatabase), SQLITE_OK);
+            const std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database{rawDatabase, &sqlite3_close};
+            ASSERT_EQ(
+                sqlite3_exec(
+                    database.get(),
+                    "CREATE TABLE history (id INTEGER PRIMARY KEY, host TEXT NOT NULL, command TEXT NOT NULL, "
+                    "first_run INTEGER NOT NULL, last_run INTEGER NOT NULL, runs INTEGER NOT NULL DEFAULT 1, "
+                    "pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0, UNIQUE(host, command));"
+                    "CREATE TABLE snippet_folders (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+                    "icon TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0);"
+                    "CREATE TABLE snippets (id TEXT PRIMARY KEY, name TEXT NOT NULL, command TEXT NOT NULL, "
+                    "folder TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', "
+                    "favorite INTEGER NOT NULL DEFAULT 0, uses INTEGER NOT NULL DEFAULT 0, "
+                    "last_used INTEGER NOT NULL DEFAULT 0);"
+                    "INSERT INTO snippets(id, name, command) VALUES('old', 'Old', 'ls');"
+                    "PRAGMA user_version = 1;",
+                    nullptr,
+                    nullptr,
+                    nullptr
+                ),
+                SQLITE_OK
+            );
+        }
+
+        openStore();
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value()) << snippets.error().message;
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().id, "old");
+        EXPECT_EQ(snippets->front().danger, std::nullopt);
+
+        auto changed = snippets->front();
+        changed.danger = CommandStore::DangerLevel::Danger;
+        ASSERT_TRUE(upsertSnippet(changed).has_value());
+        closeStore();
+
+        openStore();
+        const auto reopened = listSnippets();
+        ASSERT_TRUE(reopened.has_value());
+        ASSERT_EQ(reopened->size(), 1u);
+        EXPECT_EQ(reopened->front().danger, CommandStore::DangerLevel::Danger);
     }
 
     TEST_F(CommandStoreTests, ReadOnlyDatabaseFileFailsToOpen)

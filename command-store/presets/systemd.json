@@ -12,67 +12,80 @@
         {
             "name": "Service status",
             "command": "systemctl status {{unit}} --no-pager",
-            "tags": ["status"]
+            "tags": ["status"],
+            "danger": "safe"
         },
         {
             "name": "Restart service",
             "command": "sudo systemctl restart {{unit}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "caution"
         },
         {
             "name": "Start service",
             "command": "sudo systemctl start {{unit}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "caution"
         },
         {
             "name": "Stop service",
             "command": "sudo systemctl stop {{unit}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "danger"
         },
         {
             "name": "Enable and start service",
             "command": "sudo systemctl enable --now {{unit}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "caution"
         },
         {
             "name": "Disable and stop service",
             "command": "sudo systemctl disable --now {{unit}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "danger"
         },
         {
             "name": "Failed units",
             "command": "systemctl --failed",
-            "tags": ["status"]
+            "tags": ["status"],
+            "danger": "safe"
         },
         {
             "name": "Running services",
             "command": "systemctl list-units --type=service --state=running",
-            "tags": ["status"]
+            "tags": ["status"],
+            "danger": "safe"
         },
         {
             "name": "Timers",
             "command": "systemctl list-timers",
-            "tags": ["timers"]
+            "tags": ["timers"],
+            "danger": "safe"
         },
         {
             "name": "Show unit file",
             "command": "systemctl cat {{unit}}",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "safe"
         },
         {
             "name": "Edit unit override",
             "command": "sudo systemctl edit {{unit}}",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "caution"
         },
         {
             "name": "Reload unit files",
             "command": "sudo systemctl daemon-reload",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "caution"
         },
         {
             "name": "Slowest units at boot",
             "command": "systemd-analyze blame | head -20",
-            "tags": ["boot"]
+            "tags": ["boot"],
+            "danger": "safe"
         }
     ]
 }

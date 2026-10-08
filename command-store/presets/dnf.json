@@ -12,67 +12,80 @@
         {
             "name": "Upgrade",
             "command": "sudo dnf upgrade --refresh",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Available updates",
             "command": "dnf check-update",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "safe"
         },
         {
             "name": "Search package",
             "command": "dnf search {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package details",
             "command": "dnf info {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Install package",
             "command": "sudo dnf install {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Remove package",
             "command": "sudo dnf remove {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Remove unused packages",
             "command": "sudo dnf autoremove",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Clean package cache",
             "command": "sudo dnf clean all",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Installed packages",
             "command": "dnf list --installed",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package providing file",
             "command": "dnf provides {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Files of package",
             "command": "rpm -ql {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Transaction history",
             "command": "dnf history",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "safe"
         },
         {
             "name": "Undo transaction",
             "command": "sudo dnf history undo {{transaction}}",
-            "tags": ["history"]
+            "tags": ["history"],
+            "danger": "danger"
         }
     ]
 }

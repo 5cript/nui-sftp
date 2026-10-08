@@ -12,52 +12,62 @@
         {
             "name": "Update and upgrade",
             "command": "apk update && apk upgrade",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Upgradable packages",
             "command": "apk version -l '<'",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "safe"
         },
         {
             "name": "Search package",
             "command": "apk search {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package details",
             "command": "apk info -a {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Install package",
             "command": "apk add {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Install without cache",
             "command": "apk add --no-cache {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Remove package",
             "command": "apk del {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Installed packages",
             "command": "apk info",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package owning file",
             "command": "apk info --who-owns {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Files of package",
             "command": "apk info -L {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         }
     ]
 }

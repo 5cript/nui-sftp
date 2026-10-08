@@ -289,6 +289,7 @@
     background-color: color-mix(in srgb, var(--color) 3%, var(--background-color));
 }
 
+
 .cmds-card-header {
     display: flex;
     align-items: center;
@@ -455,6 +456,23 @@
 
 .cmds-run:hover {
     filter: brightness(1.2);
+}
+
+/* Only the Run button of a caution or danger snippet hints at the rating. */
+.cmds-card-caution .cmds-run {
+    background-color: color-mix(
+        in srgb,
+        var(--script-nui-components-toast-warning, #e0a02e) 55%,
+        var(--background-color)
+    );
+}
+
+.cmds-card-danger .cmds-run {
+    background-color: color-mix(
+        in srgb,
+        var(--script-nui-components-toast-error, #d9534f) 55%,
+        var(--background-color)
+    );
 }
 
 .cmds-run:disabled,
