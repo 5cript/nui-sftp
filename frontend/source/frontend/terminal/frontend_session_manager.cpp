@@ -41,7 +41,7 @@ struct FrontendSessionManager::Implementation
     Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
     std::function<void(Ids::ChannelId const&, std::optional<std::string> const&, std::string const&)>
         onCommandExecuted;
-    /// Target of sendToLastInteracted; updated on every keystroke or focus in any channel.
+    /// Target of sendToLastInteracted; updated on every keystroke, focus or tab click of any channel.
     std::optional<Ids::ChannelId> lastInteractedChannel{};
 
     /// Looks up the channel pointed to by a pending shared creation id.

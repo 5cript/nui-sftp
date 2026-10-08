@@ -1,5 +1,7 @@
 import { NuiWidget } from './nui_widget';
+import { announceTerminalTabActivation } from './terminal';
 import { ChannelId } from '../ids.tsx';
+import { Message } from '@lumino/messaging';
 
 /**
  * A local-shell terminal panel, sibling to the SSH Terminal panel inside the
@@ -36,6 +38,11 @@ class LocalShellTerminal extends NuiWidget {
         this.title.closable = true;
         this.title.caption = shellName;
         this.title.className = 'local-shell-widget';
+    }
+
+    protected onActivateRequest(msg: Message): void {
+        super.onActivateRequest(msg);
+        announceTerminalTabActivation(this.node);
     }
 }
 
