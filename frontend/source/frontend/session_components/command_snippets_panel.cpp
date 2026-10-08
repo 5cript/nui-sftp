@@ -225,13 +225,17 @@ struct CommandSnippetsPanel::Implementation
         , connectionLost{connectionLost}
     {}
 
+    /// The tags of the snippets in the selected folder, Favorites or All, so the bar stays short.
     void rebuildTagPills()
     {
         std::set<std::string> allTags{};
         for (auto const& snippet : client->snippets().value())
-            allTags.insert(snippet.tags.begin(), snippet.tags.end());
+        {
+            if (inSelection(snippet))
+                allTags.insert(snippet.tags.begin(), snippet.tags.end());
+        }
 
-        // Drop filter tags that no longer exist on any snippet.
+        // Drop filter tags that no snippet in the selection carries.
         std::erase_if(selectedTags.value(), [&allTags](std::string const& tag) {
             return !allTags.contains(tag);
         });
@@ -265,26 +269,26 @@ struct CommandSnippetsPanel::Implementation
                });
     }
 
+    /// Whether the snippet belongs to the selected sidebar entry.
+    bool inSelection(CommandStore::Snippet const& snippet) const
+    {
+        auto const& selection = folderSelection.value();
+        if (selection == selectionFavorites)
+            return snippet.favorite;
+        if (selection == selectionUnfiled)
+            return isUnfiled(snippet);
+        return selection == selectionAll || folderSelectionKey(snippet.folder) == selection;
+    }
+
     /// The snippets passing folder, tag and search filters, ordered by name (client order).
     std::vector<CommandStore::Snippet const*> visibleSnippets() const
     {
         const auto loweredQuery = lowercased(searchQuery.value());
-        const auto& selection = folderSelection.value();
 
         std::vector<CommandStore::Snippet const*> visible{};
         for (auto const& snippet : client->snippets().value())
         {
-            if (selection == selectionFavorites)
-            {
-                if (!snippet.favorite)
-                    continue;
-            }
-            else if (selection == selectionUnfiled)
-            {
-                if (!isUnfiled(snippet))
-                    continue;
-            }
-            else if (selection != selectionAll && folderSelectionKey(snippet.folder) != selection)
+            if (!inSelection(snippet))
                 continue;
 
             const bool hasAllTags = std::ranges::all_of(selectedTags.value(), [&snippet](std::string const& tag) {
@@ -1143,10 +1147,15 @@ CommandSnippetsPanel::CommandSnippetsPanel(
             implementation->refreshCards();
             Nui::globalEventContext.executeActiveEventsImmediately();
         });
-        // Folders decide which snippets count as unfiled.
-        impl_->foldersListener = Nui::smartListen(impl_->client->folders(), refresh);
+        // The tag bar follows the selection; folders decide which snippets count as unfiled.
+        const auto rescope = [implementation](auto const&) {
+            implementation->rebuildTagPills();
+            implementation->refreshCards();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        };
+        impl_->foldersListener = Nui::smartListen(impl_->client->folders(), rescope);
         impl_->searchListener = Nui::smartListen(impl_->searchQuery, refresh);
-        impl_->folderSelectionListener = Nui::smartListen(impl_->folderSelection, refresh);
+        impl_->folderSelectionListener = Nui::smartListen(impl_->folderSelection, rescope);
         impl_->tagsListener = Nui::smartListen(impl_->selectedTags, refresh);
     }
 }
