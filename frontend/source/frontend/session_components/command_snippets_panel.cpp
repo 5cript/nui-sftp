@@ -1246,7 +1246,12 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderVariableForm()
                     [this](Nui::val event) {
                         const auto key = event["key"].as<std::string>();
                         if (key == "Enter")
+                        {
+                            // Submitting focuses the terminal, which would otherwise get this Enter's
+                            // keypress and send an extra newline.
+                            event.call<void>("preventDefault");
                             submitVariableForm(variableFormExecute);
+                        }
                         else if (key == "Escape")
                             variableFormVisible = false;
                     },
