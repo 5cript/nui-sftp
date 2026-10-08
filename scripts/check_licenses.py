@@ -71,6 +71,9 @@ NO_CMAKE_DECLARATION_NORM = {
     "boost",         # transitively via roar / many headers
     "webkitgtk",     # detected via pkg_search_module, not find_package
     "ui5sapicons",   # vendored inside dependencies/5cript-nui-components
+    "simpleicons",      # icon SVGs vendored in static/assets/icons
+    "fontawesomefree",  # icon SVGs vendored in static/assets/icons
+    "twemoji",          # icon SVG vendored in static/assets/icons
 }
 
 FIND_PACKAGE_RE = re.compile(r"\bfind_package\s*\(\s*([A-Za-z0-9_\-]+)")

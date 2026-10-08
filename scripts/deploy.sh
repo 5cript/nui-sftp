@@ -27,10 +27,6 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
-# Optional: extracted icons.tar.gz, copied into assets/icons/. Without it the
-# installed app only finds the per-user copy from scripts/fetch_icons.sh.
-ICONS_SOURCE="${ICONS_SOURCE:-}"
-
 # On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
 # Also set a variable for future reference.
 
@@ -62,21 +58,12 @@ fi
 
 # Assets (Images, icons, language files)...
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
-cp "${SOURCE_DIRECTORY}/static/assets/icons/file.png" "${INSTALL_TARGET}/assets/icons/"
 cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/icons/"
 
 # Generated Windows .ico (only present on Windows builds; used by the Inno Setup
 # installer as SetupIconFile and Start Menu shortcut icon).
 if [ -f "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" ]; then
     cp "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" "${INSTALL_TARGET}/assets/icons/"
-fi
-
-# Icon bundle (file type and OS folder icons).
-if [ -n "${ICONS_SOURCE}" ] && [ -d "${ICONS_SOURCE}" ]; then
-    cp -r "${ICONS_SOURCE}/." "${INSTALL_TARGET}/assets/icons/"
-fi
-if [ ! -d "${INSTALL_TARGET}/assets/icons/os_folders" ]; then
-    echo -e "\e[33mWarning: no icon bundle installed, set ICONS_SOURCE to an extracted icons.tar.gz\e[0m"
 fi
 
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
