@@ -10,6 +10,7 @@
 #include <backend/inspector_environment.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
+#include <constants/persistence.hpp>
 #include <utility/resources.hpp>
 #include <version.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
@@ -324,7 +325,12 @@ void Main::show()
 
 void Main::registerCommandStore()
 {
-    auto store = CommandStore::Store::open(window_.getExecutor(), programDir_ / "command_store.db");
+    // User data directory: the program directory is read-only in installed packages.
+    const auto databaseFile = Nui::resolvePath(Constants::commandStorePath);
+    std::error_code directoryError;
+    std::filesystem::create_directories(databaseFile.parent_path(), directoryError);
+
+    auto store = CommandStore::Store::open(window_.getExecutor(), databaseFile);
     if (!store)
     {
         Log::error("Failed to open the command store, history and snippets are unavailable: {}", store.error().message);

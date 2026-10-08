@@ -441,9 +441,12 @@ namespace CommandStore
         std::size_t historyCap
     )
     {
+        // sqlite expects UTF-8, path::string() is the ANSI code page on Windows.
+        const auto utf8DatabaseFile = databaseFile.u8string();
+        const std::string databasePath(utf8DatabaseFile.begin(), utf8DatabaseFile.end());
         sqlite3* rawDatabase = nullptr;
         const int opened = sqlite3_open_v2(
-            databaseFile.string().c_str(), &rawDatabase, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr
+            databasePath.c_str(), &rawDatabase, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr
         );
         Sqlite::DatabaseHandle database{rawDatabase};
         if (opened != SQLITE_OK)
@@ -451,7 +454,7 @@ namespace CommandStore
             return Sqlite::failure(Error{
                 fmt::format(
                     "Could not open command store database '{}': {}",
-                    databaseFile.string(),
+                    databasePath,
                     database ? sqlite3_errmsg(database.get()) : "out of memory"
                 ),
                 database ? sqlite3_extended_errcode(database.get()) : SQLITE_NOMEM,
