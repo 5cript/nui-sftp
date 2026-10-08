@@ -154,6 +154,7 @@ target_sources(
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
         components/progress_bar.cpp
+        components/code_editor.cpp
         onboarding/onboarding.cpp
         file_explorer/side_model.cpp
         file_explorer/remote_side_model.cpp
@@ -273,6 +274,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/command_history_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/command_snippets_panel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/code_editor.css"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretdown.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretleft.png"
         "${CMAKE_SOURCE_DIR}/static/styles/images/caretright.png"
@@ -321,6 +323,19 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_history.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_snippets.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/code_editor.ts"
+)
+
+add_custom_command(
+    TARGET ${PROJECT_NAME}-parcel
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin/monaco"
+    COMMAND ${CMAKE_COMMAND}
+        "-DMONACO_DIR=${CMAKE_BINARY_DIR}/node_modules/monaco-editor"
+        "-DDESTINATION=${CMAKE_BINARY_DIR}/bin/monaco"
+        -P "${CMAKE_SOURCE_DIR}/_cmake/copy_monaco_workers.cmake"
+    COMMENT "Copying prebuilt monaco workers"
+    VERBATIM
 )
 
 target_include_directories(

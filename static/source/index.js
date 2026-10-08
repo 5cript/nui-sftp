@@ -1,5 +1,6 @@
 import { ContentPanelManager } from "./content_panel_manager.ts";
 import "./addressable_setting.ts";
+import "./code_editor.ts";
 
 (() => {
     globalThis.generateId = () => {
