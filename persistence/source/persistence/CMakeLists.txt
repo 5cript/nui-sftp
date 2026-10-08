@@ -4,6 +4,7 @@ add_library(
         state/state.cpp
         state/session_options.cpp
         state/termios.cpp
+        state/ui_options.cpp
         state_holder.cpp
 )
 

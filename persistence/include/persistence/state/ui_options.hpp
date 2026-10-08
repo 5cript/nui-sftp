@@ -63,4 +63,11 @@ namespace Persistence
             onboardingCompleted,
             fileGridExtensionIcons)
     )
+
+    /**
+     * @brief Rewrites file type icon paths of earlier versions to where the icon bundle has these icons.
+     * @param uiOptions Options whose fileGridExtensionIcons are updated in place.
+     * @return Whether any path was rewritten.
+     */
+    bool updateOutdatedExtensionIconPaths(UiOptions& uiOptions);
 }
