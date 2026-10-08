@@ -27,9 +27,8 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
-# Optional: directory containing extra icons (e.g. extracted icons.tar.gz).
-# When set, all contents are copied into assets/icons/ and folder_main.png is
-# placed directly in assets/icons/ for quick access.
+# Optional: extracted icons.tar.gz, copied into assets/icons/. Without it the
+# installed app only finds the per-user copy from scripts/fetch_icons.sh.
 ICONS_SOURCE="${ICONS_SOURCE:-}"
 
 # On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
@@ -72,13 +71,12 @@ if [ -f "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" ]; then
     cp "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" "${INSTALL_TARGET}/assets/icons/"
 fi
 
-# Extra icons bundle (e.g. OS folder icons).
+# Icon bundle (file type and OS folder icons).
 if [ -n "${ICONS_SOURCE}" ] && [ -d "${ICONS_SOURCE}" ]; then
     cp -r "${ICONS_SOURCE}/." "${INSTALL_TARGET}/assets/icons/"
-    # Also expose folder_main directly in assets/icons/ for easy lookup.
-    if [ -f "${ICONS_SOURCE}/os_folders/windows/11/folder_main.png" ]; then
-        cp "${ICONS_SOURCE}/os_folders/windows/11/folder_main.png" "${INSTALL_TARGET}/assets/icons/folder_main.png"
-    fi
+fi
+if [ ! -d "${INSTALL_TARGET}/assets/icons/os_folders" ]; then
+    echo -e "\e[33mWarning: no icon bundle installed, set ICONS_SOURCE to an extracted icons.tar.gz\e[0m"
 fi
 
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
