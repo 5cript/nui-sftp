@@ -1268,7 +1268,13 @@ CommandSnippetsPanel::CommandSnippetsPanel(
         };
         impl_->foldersListener = Nui::smartListen(impl_->client->folders(), rescope);
         impl_->searchListener = Nui::smartListen(impl_->searchQuery, refresh);
-        impl_->folderSelectionListener = Nui::smartListen(impl_->folderSelection, rescope);
+        // A tag picked in one folder is no filter for the next, even when the tag name exists there.
+        impl_->folderSelectionListener = Nui::smartListen(impl_->folderSelection, [implementation](auto const&) {
+            implementation->selectedTags.value().clear();
+            implementation->rebuildTagPills();
+            implementation->refreshCards();
+            Nui::globalEventContext.executeActiveEventsImmediately();
+        });
         impl_->tagsListener = Nui::smartListen(impl_->selectedTags, refresh);
     }
 }
