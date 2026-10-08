@@ -27,7 +27,7 @@ crypto++, webkitgtk on Linux) are pulled from the distro or MSYS2.
 ```bash
 git clone https://github.com/5cript/nui-sftp.git
 cd nui-sftp
-./setup.sh   # equivalent to: git submodule update --init --recursive
+./setup.sh   # submodules, plus the icon bundle via scripts/fetch_icons.sh
 ```
 
 All twelve submodules under [dependencies/](dependencies/) (Nui, roar, gimo,
