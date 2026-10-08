@@ -1,0 +1,73 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Processes",
+        "icon": "sys-monitor",
+        "description": {
+            "en_US": "CPU and memory hogs, process lookup and background jobs.",
+            "de_DE": "CPU- und Speicherfresser, Prozesssuche und Hintergrundjobs."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Top CPU users",
+            "command": "ps aux --sort=-%cpu | head -15",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "Top memory users",
+            "command": "ps aux --sort=-%mem | head -15",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "Memory",
+            "command": "free -h",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "Uptime and load",
+            "command": "uptime",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "Find process",
+            "command": "pgrep -af {{pattern}}",
+            "tags": ["lookup"]
+        },
+        {
+            "name": "Process tree",
+            "command": "ps -ef --forest",
+            "tags": ["lookup"]
+        },
+        {
+            "name": "Open files of process",
+            "command": "sudo lsof -p {{pid}}",
+            "tags": ["lookup"]
+        },
+        {
+            "name": "Terminate process",
+            "command": "kill {{pid}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Terminate by name",
+            "command": "pkill -f {{pattern}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Run past logout",
+            "command": "nohup {{command}} > {{logFile}} 2>&1 &",
+            "tags": ["background"]
+        },
+        {
+            "name": "Repeat command",
+            "command": "watch -n {{seconds}} '{{command}}'",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "System information",
+            "command": "uname -a\ncat /etc/os-release\nlscpu | head -15",
+            "tags": ["system"]
+        }
+    ]
+}

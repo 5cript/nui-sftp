@@ -1,0 +1,78 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Kubernetes",
+        "icon": "cloud",
+        "description": {
+            "en_US": "kubectl for contexts, pods, logs, rollouts and port forwarding.",
+            "de_DE": "kubectl für Kontexte, Pods, Logs, Rollouts und Portweiterleitung."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Current context",
+            "command": "kubectl config current-context",
+            "tags": ["context"]
+        },
+        {
+            "name": "Switch namespace",
+            "command": "kubectl config set-context --current --namespace={{namespace}}",
+            "tags": ["context"]
+        },
+        {
+            "name": "List pods",
+            "command": "kubectl get pods -o wide",
+            "tags": ["pods"]
+        },
+        {
+            "name": "Everything in namespace",
+            "command": "kubectl get all",
+            "tags": ["overview"]
+        },
+        {
+            "name": "Describe pod",
+            "command": "kubectl describe pod {{pod}}",
+            "tags": ["pods"]
+        },
+        {
+            "name": "Follow pod logs",
+            "command": "kubectl logs -f {{pod}}",
+            "tags": ["pods", "logs"]
+        },
+        {
+            "name": "Shell into pod",
+            "command": "kubectl exec -it {{pod}} -- sh",
+            "tags": ["pods"]
+        },
+        {
+            "name": "Port forward",
+            "command": "kubectl port-forward {{pod}} {{localPort}}:{{podPort}}",
+            "tags": ["network"]
+        },
+        {
+            "name": "Restart deployment",
+            "command": "kubectl rollout restart deployment/{{deployment}}",
+            "tags": ["deployments"]
+        },
+        {
+            "name": "Rollout status",
+            "command": "kubectl rollout status deployment/{{deployment}}",
+            "tags": ["deployments"]
+        },
+        {
+            "name": "Scale deployment",
+            "command": "kubectl scale deployment/{{deployment}} --replicas={{replicas}}",
+            "tags": ["deployments"]
+        },
+        {
+            "name": "Recent events",
+            "command": "kubectl get events --sort-by=.lastTimestamp",
+            "tags": ["overview"]
+        },
+        {
+            "name": "Node usage (metrics-server)",
+            "command": "kubectl top nodes",
+            "tags": ["monitoring"]
+        }
+    ]
+}

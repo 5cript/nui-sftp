@@ -1,0 +1,58 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Docker Compose",
+        "icon": "org-chart",
+        "description": {
+            "en_US": "Start, update and debug the services of a compose project.",
+            "de_DE": "Dienste eines Compose-Projekts starten, aktualisieren und debuggen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Start services",
+            "command": "docker compose up -d",
+            "tags": ["compose"]
+        },
+        {
+            "name": "Stop and remove services",
+            "command": "docker compose down",
+            "tags": ["compose"]
+        },
+        {
+            "name": "Service status",
+            "command": "docker compose ps",
+            "tags": ["compose"]
+        },
+        {
+            "name": "Follow service logs",
+            "command": "docker compose logs -f --tail 100 {{service}}",
+            "tags": ["compose", "logs"]
+        },
+        {
+            "name": "Restart service",
+            "command": "docker compose restart {{service}}",
+            "tags": ["compose"]
+        },
+        {
+            "name": "Shell into service",
+            "command": "docker compose exec {{service}} sh",
+            "tags": ["compose"]
+        },
+        {
+            "name": "Update images and recreate",
+            "command": "docker compose pull && docker compose up -d",
+            "tags": ["compose", "update"]
+        },
+        {
+            "name": "Rebuild service",
+            "command": "docker compose up -d --build {{service}}",
+            "tags": ["compose", "build"]
+        },
+        {
+            "name": "Show resolved configuration",
+            "command": "docker compose config",
+            "tags": ["compose"]
+        }
+    ]
+}

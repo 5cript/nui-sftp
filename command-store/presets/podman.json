@@ -1,0 +1,83 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Podman",
+        "icon": "it-instance",
+        "description": {
+            "en_US": "Daemonless containers and pods with Podman.",
+            "de_DE": "Container und Pods ohne Daemon mit Podman."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Running containers",
+            "command": "podman ps",
+            "tags": ["containers"]
+        },
+        {
+            "name": "All containers",
+            "command": "podman ps -a --format \"table {{.Names}}\\t{{.Image}}\\t{{.Status}}\"",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Follow container logs",
+            "command": "podman logs -f --tail 200 {{container}}",
+            "tags": ["logs"]
+        },
+        {
+            "name": "Shell into container",
+            "command": "podman exec -it {{container}} sh",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Restart container",
+            "command": "podman restart {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Stop container",
+            "command": "podman stop {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Inspect container",
+            "command": "podman inspect {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Pods",
+            "command": "podman pod ps",
+            "tags": ["pods"]
+        },
+        {
+            "name": "Resource usage",
+            "command": "podman stats --no-stream",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "List images",
+            "command": "podman images",
+            "tags": ["images"]
+        },
+        {
+            "name": "Pull image",
+            "command": "podman pull {{image}}",
+            "tags": ["images"]
+        },
+        {
+            "name": "Run throwaway container",
+            "command": "podman run --rm -it {{image}} sh",
+            "tags": ["images"]
+        },
+        {
+            "name": "Disk usage",
+            "command": "podman system df",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Remove unused data",
+            "command": "podman system prune",
+            "tags": ["cleanup"]
+        }
+    ]
+}

@@ -1,0 +1,68 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Logs",
+        "icon": "document-text",
+        "description": {
+            "en_US": "journalctl and the classic log files.",
+            "de_DE": "journalctl und die klassischen Logdateien."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Follow service log",
+            "command": "sudo journalctl -u {{unit}} -f",
+            "tags": ["journal"]
+        },
+        {
+            "name": "Service log since boot",
+            "command": "sudo journalctl -u {{unit}} -b --no-pager",
+            "tags": ["journal"]
+        },
+        {
+            "name": "Errors since boot",
+            "command": "sudo journalctl -p err -b --no-pager",
+            "tags": ["journal", "errors"]
+        },
+        {
+            "name": "Last hour",
+            "command": "sudo journalctl --since \"1 hour ago\" --no-pager",
+            "tags": ["journal"]
+        },
+        {
+            "name": "End of previous boot",
+            "command": "sudo journalctl -b -1 -n 100 --no-pager",
+            "tags": ["journal", "boot"]
+        },
+        {
+            "name": "Kernel messages",
+            "command": "sudo dmesg -T | tail -50",
+            "tags": ["kernel"]
+        },
+        {
+            "name": "Failed SSH logins",
+            "command": "sudo journalctl _COMM=sshd _COMM=sshd-session --no-pager | grep -i failed",
+            "tags": ["journal", "security"]
+        },
+        {
+            "name": "Journal disk usage",
+            "command": "sudo journalctl --disk-usage",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Shrink journal",
+            "command": "sudo journalctl --vacuum-time={{age}}",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Follow all logs",
+            "command": "sudo journalctl -f",
+            "tags": ["journal"]
+        },
+        {
+            "name": "Search log files",
+            "command": "sudo grep -rni \"{{pattern}}\" /var/log",
+            "tags": ["files"]
+        }
+    ]
+}

@@ -1,0 +1,48 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Cron",
+        "icon": "date-time",
+        "description": {
+            "en_US": "Scheduled jobs in crontabs and cron directories.",
+            "de_DE": "Geplante Aufgaben in Crontabs und Cron-Verzeichnissen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "My crontab",
+            "command": "crontab -l",
+            "tags": ["crontab"]
+        },
+        {
+            "name": "Edit my crontab",
+            "command": "crontab -e",
+            "tags": ["crontab"]
+        },
+        {
+            "name": "Crontab of user",
+            "command": "sudo crontab -l -u {{user}}",
+            "tags": ["crontab"]
+        },
+        {
+            "name": "Edit crontab of user",
+            "command": "sudo crontab -e -u {{user}}",
+            "tags": ["crontab"]
+        },
+        {
+            "name": "System crontab",
+            "command": "cat /etc/crontab",
+            "tags": ["system"]
+        },
+        {
+            "name": "System cron directories",
+            "command": "ls -l /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly",
+            "tags": ["system"]
+        },
+        {
+            "name": "Cron log of today",
+            "command": "sudo journalctl -u cron -u crond -u cronie --since today --no-pager",
+            "tags": ["logs"]
+        }
+    ]
+}

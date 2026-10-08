@@ -1,0 +1,108 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Git",
+        "icon": "source-code",
+        "description": {
+            "en_US": "Everyday repository work on the server.",
+            "de_DE": "Alltägliche Arbeit mit Repositories auf dem Server."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Status",
+            "command": "git status -sb",
+            "tags": ["status"]
+        },
+        {
+            "name": "Compact history",
+            "command": "git log --oneline --graph --decorate -n 30",
+            "tags": ["history"]
+        },
+        {
+            "name": "History of file",
+            "command": "git log -p --follow -n 10 -- {{file}}",
+            "tags": ["history"]
+        },
+        {
+            "name": "Fetch and prune",
+            "command": "git fetch --all --prune",
+            "tags": ["remote"]
+        },
+        {
+            "name": "Pull with rebase",
+            "command": "git pull --rebase",
+            "tags": ["remote"]
+        },
+        {
+            "name": "Push",
+            "command": "git push",
+            "tags": ["remote"]
+        },
+        {
+            "name": "Remotes",
+            "command": "git remote -v",
+            "tags": ["remote"]
+        },
+        {
+            "name": "Switch branch",
+            "command": "git switch {{branch}}",
+            "tags": ["branches"]
+        },
+        {
+            "name": "Create branch",
+            "command": "git switch -c {{branch}}",
+            "tags": ["branches"]
+        },
+        {
+            "name": "Branches with upstream",
+            "command": "git branch -vv",
+            "tags": ["branches"]
+        },
+        {
+            "name": "Unstaged changes",
+            "command": "git diff",
+            "tags": ["changes"]
+        },
+        {
+            "name": "Staged changes",
+            "command": "git diff --staged",
+            "tags": ["changes"]
+        },
+        {
+            "name": "Commit staged changes",
+            "command": "git commit -m \"{{message}}\"",
+            "tags": ["changes"]
+        },
+        {
+            "name": "Undo last commit, keep changes",
+            "command": "git reset --soft HEAD~1",
+            "tags": ["changes"]
+        },
+        {
+            "name": "Stash changes",
+            "command": "git stash push -m \"{{message}}\"",
+            "tags": ["stash"]
+        },
+        {
+            "name": "Restore stash",
+            "command": "git stash pop",
+            "tags": ["stash"]
+        },
+        {
+            "name": "Discard changes of file",
+            "command": "git restore {{file}}",
+            "tags": ["changes"]
+        },
+        {
+            "name": "Who changed these lines",
+            "command": "git blame -L {{fromLine}},{{toLine}} {{file}}",
+            "tags": ["history"]
+        },
+        {
+            "name": "Untracked files that clean would remove",
+            "command": "git clean -nd",
+            "tags": ["changes"]
+        }
+    ]
+}

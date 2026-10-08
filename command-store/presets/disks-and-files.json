@@ -1,0 +1,78 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Disks & Files",
+        "icon": "documents",
+        "description": {
+            "en_US": "Find what fills the disk and where files are.",
+            "de_DE": "Herausfinden, was die Platte füllt und wo Dateien liegen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Free space",
+            "command": "df -h",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Free inodes",
+            "command": "df -i",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Block devices",
+            "command": "lsblk -f",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Mounted filesystems",
+            "command": "findmnt",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Disk health (smartmontools)",
+            "command": "sudo smartctl -H -A {{device}}",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Biggest directories",
+            "command": "du -xh --max-depth=1 {{path}} 2>/dev/null | sort -h | tail -20",
+            "tags": ["usage"]
+        },
+        {
+            "name": "Biggest files",
+            "command": "find {{path}} -xdev -type f -size +{{megabytes}}M -exec ls -lh {} + | sort -k5 -h | tail -20",
+            "tags": ["usage"]
+        },
+        {
+            "name": "Deleted files still open",
+            "command": "sudo lsof +L1",
+            "tags": ["usage"]
+        },
+        {
+            "name": "Find files by name",
+            "command": "find {{path}} -iname \"*{{pattern}}*\"",
+            "tags": ["search"]
+        },
+        {
+            "name": "Recently modified files",
+            "command": "find {{path}} -type f -mmin -{{minutes}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Search text in files",
+            "command": "grep -rn \"{{pattern}}\" {{path}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Mount device",
+            "command": "sudo mount {{device}} {{mountPoint}}",
+            "tags": ["disk"]
+        },
+        {
+            "name": "Unmount",
+            "command": "sudo umount {{mountPoint}}",
+            "tags": ["disk"]
+        }
+    ]
+}

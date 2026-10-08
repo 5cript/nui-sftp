@@ -57,6 +57,7 @@ struct SessionArea::Implementation
     FilePropertyDialog* filePropertyDialog;
     ArchiveTransferDialog* archiveTransferDialog;
     SnippetImportDialog* snippetImportDialog;
+    SnippetPresetsDialog* snippetPresetsDialog;
     Toolbar* toolbar;
     CommandStoreClient* commandStoreClient;
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
@@ -78,6 +79,7 @@ struct SessionArea::Implementation
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
         SnippetImportDialog* snippetImportDialog,
+        SnippetPresetsDialog* snippetPresetsDialog,
         Toolbar* toolbar,
         CommandStoreClient* commandStoreClient
     )
@@ -88,6 +90,7 @@ struct SessionArea::Implementation
         , filePropertyDialog{filePropertyDialog}
         , archiveTransferDialog{archiveTransferDialog}
         , snippetImportDialog{snippetImportDialog}
+        , snippetPresetsDialog{snippetPresetsDialog}
         , toolbar{toolbar}
         , commandStoreClient{commandStoreClient}
         , sessions{}
@@ -110,6 +113,7 @@ SessionArea::SessionArea(
     FilePropertyDialog* filePropertyDialog,
     ArchiveTransferDialog* archiveTransferDialog,
     SnippetImportDialog* snippetImportDialog,
+    SnippetPresetsDialog* snippetPresetsDialog,
     Toolbar* toolbar,
     CommandStoreClient* commandStoreClient
 )
@@ -121,6 +125,7 @@ SessionArea::SessionArea(
           filePropertyDialog,
           archiveTransferDialog,
           snippetImportDialog,
+          snippetPresetsDialog,
           toolbar,
           commandStoreClient
       )}
@@ -313,6 +318,7 @@ Session::Params SessionArea::makeSessionParams(
     params.filePropertyDialog = impl_->filePropertyDialog;
     params.archiveTransferDialog = impl_->archiveTransferDialog;
     params.snippetImportDialog = impl_->snippetImportDialog;
+    params.snippetPresetsDialog = impl_->snippetPresetsDialog;
     params.commandStoreClient = impl_->commandStoreClient;
     params.sessionOptions = std::move(engineOptions);
     params.uiOptions = std::move(uiOptions);

@@ -1,0 +1,63 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "System",
+        "icon": "it-host",
+        "description": {
+            "en_US": "Host name, time, and restarting or shutting down the machine.",
+            "de_DE": "Hostname, Zeit sowie Neustart und Herunterfahren der Maschine."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Host information",
+            "command": "hostnamectl",
+            "tags": ["host"]
+        },
+        {
+            "name": "Set host name",
+            "command": "sudo hostnamectl set-hostname {{hostname}}",
+            "tags": ["host"]
+        },
+        {
+            "name": "Time and synchronization",
+            "command": "timedatectl",
+            "tags": ["time"]
+        },
+        {
+            "name": "Set time zone",
+            "command": "sudo timedatectl set-timezone {{timezone}}",
+            "tags": ["time"]
+        },
+        {
+            "name": "Locale and keyboard",
+            "command": "localectl",
+            "tags": ["host"]
+        },
+        {
+            "name": "Previous boots",
+            "command": "sudo journalctl --list-boots --no-pager | tail -10",
+            "tags": ["power"]
+        },
+        {
+            "name": "Reboot in minutes",
+            "command": "sudo shutdown -r +{{minutes}}",
+            "tags": ["power"]
+        },
+        {
+            "name": "Cancel scheduled shutdown",
+            "command": "sudo shutdown -c",
+            "tags": ["power"]
+        },
+        {
+            "name": "Reboot now",
+            "command": "sudo systemctl reboot",
+            "tags": ["power"]
+        },
+        {
+            "name": "Power off",
+            "command": "sudo systemctl poweroff",
+            "tags": ["power"]
+        }
+    ]
+}

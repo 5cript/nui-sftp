@@ -1,0 +1,63 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "apk",
+        "icon": "product",
+        "description": {
+            "en_US": "Package management on Alpine Linux, also inside containers.",
+            "de_DE": "Paketverwaltung unter Alpine Linux, auch in Containern."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Update and upgrade",
+            "command": "apk update && apk upgrade",
+            "tags": ["update"]
+        },
+        {
+            "name": "Upgradable packages",
+            "command": "apk version -l '<'",
+            "tags": ["update"]
+        },
+        {
+            "name": "Search package",
+            "command": "apk search {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package details",
+            "command": "apk info -a {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Install package",
+            "command": "apk add {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Install without cache",
+            "command": "apk add --no-cache {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Remove package",
+            "command": "apk del {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Installed packages",
+            "command": "apk info",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package owning file",
+            "command": "apk info --who-owns {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Files of package",
+            "command": "apk info -L {{package}}",
+            "tags": ["search"]
+        }
+    ]
+}

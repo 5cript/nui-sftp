@@ -1,0 +1,93 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "APT",
+        "icon": "product",
+        "description": {
+            "en_US": "Package management on Debian and Ubuntu.",
+            "de_DE": "Paketverwaltung unter Debian und Ubuntu."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Update and upgrade",
+            "command": "sudo apt update && sudo apt upgrade",
+            "tags": ["update"]
+        },
+        {
+            "name": "Upgradable packages",
+            "command": "apt list --upgradable",
+            "tags": ["update"]
+        },
+        {
+            "name": "Search package",
+            "command": "apt search {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package details",
+            "command": "apt show {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Versions and sources",
+            "command": "apt-cache policy {{package}}",
+            "tags": ["versions"]
+        },
+        {
+            "name": "Install package",
+            "command": "sudo apt install {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Reinstall package",
+            "command": "sudo apt install --reinstall {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Remove package",
+            "command": "sudo apt remove {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Remove package and configuration",
+            "command": "sudo apt purge {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Remove unused packages",
+            "command": "sudo apt autoremove",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Clean package cache",
+            "command": "sudo apt clean",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Installed packages",
+            "command": "apt list --installed",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package owning file",
+            "command": "dpkg -S {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Files of package",
+            "command": "dpkg -L {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Hold package version",
+            "command": "sudo apt-mark hold {{package}}",
+            "tags": ["versions"]
+        },
+        {
+            "name": "Release held package",
+            "command": "sudo apt-mark unhold {{package}}",
+            "tags": ["versions"]
+        }
+    ]
+}

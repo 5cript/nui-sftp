@@ -1,0 +1,68 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Tmux",
+        "icon": "screen-split-two",
+        "description": {
+            "en_US": "Keep sessions running on the server and come back to them later.",
+            "de_DE": "Sitzungen auf dem Server weiterlaufen lassen und später zurückkehren."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Attach or create session",
+            "command": "tmux new -A -s {{session}}",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "New session",
+            "command": "tmux new -s {{session}}",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "Attach to session",
+            "command": "tmux attach -t {{session}}",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "List sessions",
+            "command": "tmux ls",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "Rename session",
+            "command": "tmux rename-session -t {{session}} {{newName}}",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "Kill session",
+            "command": "tmux kill-session -t {{session}}",
+            "tags": ["sessions"]
+        },
+        {
+            "name": "Run command in background session",
+            "command": "tmux new -d -s {{session}} '{{command}}'",
+            "tags": ["background"]
+        },
+        {
+            "name": "Type command into session",
+            "command": "tmux send-keys -t {{session}} '{{command}}' Enter",
+            "tags": ["background"]
+        },
+        {
+            "name": "Print recent pane output",
+            "command": "tmux capture-pane -p -S -{{lines}} -t {{session}}",
+            "tags": ["output"]
+        },
+        {
+            "name": "Reload configuration",
+            "command": "tmux source-file ~/.tmux.conf",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Kill all sessions",
+            "command": "tmux kill-server",
+            "tags": ["sessions"]
+        }
+    ]
+}

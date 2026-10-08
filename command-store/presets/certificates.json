@@ -1,0 +1,63 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Certificates",
+        "icon": "locked",
+        "description": {
+            "en_US": "Check, create and renew TLS certificates with openssl and certbot.",
+            "de_DE": "TLS-Zertifikate mit openssl und certbot prüfen, erstellen und erneuern."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Certificate of server",
+            "command": "openssl s_client -connect {{host}}:{{port}} -servername {{host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates",
+            "tags": ["inspect"]
+        },
+        {
+            "name": "Certificate details",
+            "command": "openssl x509 -in {{certificate}} -noout -text",
+            "tags": ["inspect"]
+        },
+        {
+            "name": "Expiry date",
+            "command": "openssl x509 -in {{certificate}} -noout -enddate",
+            "tags": ["inspect"]
+        },
+        {
+            "name": "Key matches certificate",
+            "command": "openssl x509 -noout -pubkey -in {{certificate}} | sha256sum\nopenssl pkey -pubout -in {{key}} | sha256sum",
+            "tags": ["inspect"]
+        },
+        {
+            "name": "Self-signed certificate",
+            "command": "openssl req -x509 -newkey rsa:4096 -nodes -keyout {{name}}.key -out {{name}}.crt -days 365 -subj \"/CN={{name}}\"",
+            "tags": ["create"]
+        },
+        {
+            "name": "Certificate signing request",
+            "command": "openssl req -new -newkey rsa:2048 -nodes -keyout {{name}}.key -out {{name}}.csr -subj \"/CN={{name}}\"",
+            "tags": ["create"]
+        },
+        {
+            "name": "Managed certificates (certbot)",
+            "command": "sudo certbot certificates",
+            "tags": ["certbot"]
+        },
+        {
+            "name": "Test renewal (certbot)",
+            "command": "sudo certbot renew --dry-run",
+            "tags": ["certbot"]
+        },
+        {
+            "name": "Random secret",
+            "command": "openssl rand -base64 {{bytes}}",
+            "tags": ["secrets"]
+        },
+        {
+            "name": "File checksum",
+            "command": "sha256sum {{file}}",
+            "tags": ["checksums"]
+        }
+    ]
+}

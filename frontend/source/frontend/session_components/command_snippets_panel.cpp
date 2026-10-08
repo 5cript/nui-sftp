@@ -26,6 +26,7 @@
 #include <ui5-sap-icons/icons/folder.hpp>
 #include <ui5-sap-icons/icons/inbox.hpp>
 #include <ui5-sap-icons/icons/list.hpp>
+#include <ui5-sap-icons/icons/grid.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/elements/nil.hpp>
@@ -155,6 +156,7 @@ struct CommandSnippetsPanel::Implementation
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
     SnippetImportDialog* snippetImportDialog;
+    SnippetPresetsDialog* snippetPresetsDialog;
     std::function<void(std::string const&, bool)> runInTerminal;
     Nui::Observed<bool>* connectionLost;
 
@@ -210,6 +212,7 @@ struct CommandSnippetsPanel::Implementation
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
         SnippetImportDialog* snippetImportDialog,
+        SnippetPresetsDialog* snippetPresetsDialog,
         std::function<void(std::string const&, bool)> runInTerminal,
         Nui::Observed<bool>* connectionLost
     )
@@ -217,6 +220,7 @@ struct CommandSnippetsPanel::Implementation
         , events{events}
         , confirmDialog{confirmDialog}
         , snippetImportDialog{snippetImportDialog}
+        , snippetPresetsDialog{snippetPresetsDialog}
         , runInTerminal{std::move(runInTerminal)}
         , connectionLost{connectionLost}
     {}
@@ -772,7 +776,15 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
                       [this](Nui::val) {
                           newFolderInputVisible = true;
                       },
-              }(Ui5Icons::add(), span{}(language->get("commandSnippetsPanel", "newFolder")))}
+              }(Ui5Icons::add(), span{}(language->get("commandSnippetsPanel", "newFolder")))},
+        button{
+            class_ = "cmds-new-folder cmds-more-folders",
+            title = language->get("commandSnippetsPanel", "moreFoldersTooltip"),
+            onClick =
+                [this](Nui::val) {
+                    snippetPresetsDialog->open();
+                },
+        }(Ui5Icons::grid(), span{}(language->get("commandSnippetsPanel", "moreFolders")))
     );
 }
 
@@ -1104,11 +1116,18 @@ CommandSnippetsPanel::CommandSnippetsPanel(
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
     SnippetImportDialog* snippetImportDialog,
+    SnippetPresetsDialog* snippetPresetsDialog,
     std::function<void(std::string const&, bool)> runInTerminal,
     Nui::Observed<bool>* connectionLost
 )
     : impl_{std::make_unique<Implementation>(
-          commandStoreClient, events, confirmDialog, snippetImportDialog, std::move(runInTerminal), connectionLost
+          commandStoreClient,
+          events,
+          confirmDialog,
+          snippetImportDialog,
+          snippetPresetsDialog,
+          std::move(runInTerminal),
+          connectionLost
       )}
 {
     // A null client means the backend store failed to open; the panel then only shows a notice.
