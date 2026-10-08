@@ -1231,7 +1231,13 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderVariableForm()
                 focusWhenMounted(fields.empty()),
                 onInput =
                     [this, variable](Nui::val event) {
-                        variableFormValues[variable] = event["target"]["value"].as<std::string>();
+                        // A cleared field counts as unfilled, so Insert keeps its {{variable}} instead of
+                        // splicing in nothing, which turns "rsync --delete src/ {{destination}}/" into "src/ /".
+                        auto value = event["target"]["value"].as<std::string>();
+                        if (value.empty())
+                            variableFormValues.erase(variable);
+                        else
+                            variableFormValues[variable] = std::move(value);
                         variableFormPreview =
                             Utility::CommandTemplate::substitute(variableFormCommand, variableFormValues);
                     },
