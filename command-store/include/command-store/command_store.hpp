@@ -120,6 +120,11 @@ namespace CommandStore
         void deleteSnippet(std::string id, std::function<void(Result<void>)> onComplete = {});
 
         /**
+         * @brief Deletes the snippets with the given ids in one transaction; unknown ids are ignored.
+         */
+        void deleteSnippets(std::vector<std::string> ids, std::function<void(Result<void>)> onComplete = {});
+
+        /**
          * @brief Increments a snippet's use counter and stamps lastUsed. Fails when no snippet with
          *        the given id exists.
          *

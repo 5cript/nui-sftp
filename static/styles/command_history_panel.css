@@ -292,6 +292,10 @@
     background-color: color-mix(in srgb, var(--color) 12%, transparent);
 }
 
+.cmdh-action-danger:hover svg {
+    fill: var(--opq-red);
+}
+
 .cmdh-action:hover svg {
     fill: var(--color);
 }

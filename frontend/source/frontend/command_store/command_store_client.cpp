@@ -493,6 +493,36 @@ void CommandStoreClient::deleteSnippet(std::string id)
     );
 }
 
+void CommandStoreClient::deleteSnippets(std::vector<std::string> const& ids)
+{
+    // Back to front, so that the erased positions stay valid.
+    for (std::size_t index = impl_->snippets.value().size(); index != 0; --index)
+    {
+        if (std::ranges::find(ids, impl_->snippets.value()[index - 1].id) == ids.end())
+            continue;
+
+        impl_->snippets.erase(impl_->snippets.cbegin() + static_cast<std::ptrdiff_t>(index - 1));
+    }
+    impl_->snippets.eventContext().sync();
+
+    auto identifiers = Nui::val::array();
+    for (std::size_t index = 0; index != ids.size(); ++index)
+        identifiers.set(index, ids[index]);
+
+    auto parameters = Nui::val::object();
+    parameters.set("ids", identifiers);
+
+    Nui::RpcClient::callWithBackChannel(
+        "CommandStore::deleteSnippets",
+        [this](Nui::val response) {
+            // The removed snippets are gone locally; only the database knows what actually survived.
+            if (!impl_->succeeded(response, "deleteSnippets"))
+                reloadSnippets();
+        },
+        parameters
+    );
+}
+
 void CommandStoreClient::bumpSnippetUse(std::string id)
 {
     const auto existing = indexOf(impl_->snippets.value(), hasId(id));

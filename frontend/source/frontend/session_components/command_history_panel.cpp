@@ -17,6 +17,7 @@
 #include <ui5-sap-icons/icons/copy.hpp>
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/decline.hpp>
+#include <ui5-sap-icons/icons/clear-all.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/elements/nil.hpp>
@@ -311,6 +312,31 @@ struct CommandHistoryPanel::Implementation
                     if (!button || *button != ConfirmDialog::Button::Yes)
                         return;
                     client->deleteHistory(ids);
+                    selectedIds.value().clear();
+                    selectedIds.modify();
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                },
+        });
+    }
+
+    void clearAll()
+    {
+        const auto count = client->history().value().size();
+        if (count == 0)
+            return;
+
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = std::string{language->get("commandHistoryPanel", "confirmClearHeader")},
+            .text = fmt::format(
+                fmt::runtime(std::string{language->get("commandHistoryPanel", "confirmClearText")}), count
+            ),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .onClose =
+                [this](std::optional<ConfirmDialog::Button> button) {
+                    if (!button || *button != ConfirmDialog::Button::Yes)
+                        return;
+                    client->clearHistory();
                     selectedIds.value().clear();
                     selectedIds.modify();
                     Nui::globalEventContext.executeActiveEventsImmediately();
@@ -683,7 +709,14 @@ Nui::ElementRenderer CommandHistoryPanel::operator()()
                                 impl_->refreshRows();
                             },
                     }
-                )
+                ),
+                button{
+                    class_ = "cmdh-action cmdh-action-danger",
+                    title = language->get("commandHistoryPanel", "clearTooltip"),
+                    onClick = [this](Nui::val) {
+                        impl_->clearAll();
+                    },
+                }(Ui5Icons::clear_all())
             ),
             ScriptNuiComponents::pillList({
                 .pills = impl_->hostPills,

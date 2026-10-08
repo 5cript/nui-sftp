@@ -27,6 +27,7 @@
 #include <ui5-sap-icons/icons/inbox.hpp>
 #include <ui5-sap-icons/icons/list.hpp>
 #include <ui5-sap-icons/icons/grid.hpp>
+#include <ui5-sap-icons/icons/clear-all.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/elements/nil.hpp>
@@ -502,9 +503,41 @@ struct CommandSnippetsPanel::Implementation
                         if (snippet.folder == id)
                             containedIds.push_back(snippet.id);
                     }
-                    for (auto const& snippetId : containedIds)
-                        client->deleteSnippet(snippetId);
+                    client->deleteSnippets(containedIds);
                     client->deleteFolder(id);
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                },
+        });
+    }
+
+    /**
+     * @brief Deletes the snippets of a folder, or of Unfiled when folderId is empty; the folder stays.
+     */
+    void clearFolder(std::string const& folderId, std::string const& folderName)
+    {
+        std::vector<std::string> containedIds{};
+        for (auto const& snippet : client->snippets().value())
+        {
+            if (folderId.empty() ? isUnfiled(snippet) : snippet.folder == folderId)
+                containedIds.push_back(snippet.id);
+        }
+        if (containedIds.empty())
+            return;
+
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = std::string{language->get("commandSnippetsPanel", "confirmClearFolderHeader")},
+            .text = fmt::format(
+                fmt::runtime(std::string{language->get("commandSnippetsPanel", "confirmClearFolderText")}),
+                containedIds.size(),
+                folderName
+            ),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .onClose =
+                [this, containedIds](std::optional<ConfirmDialog::Button> button) {
+                    if (!button || *button != ConfirmDialog::Button::Yes)
+                        return;
+                    client->deleteSnippets(containedIds);
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 },
         });
@@ -668,6 +701,18 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
         );
     };
 
+    const auto clearButton = [this](std::string const& folderId, std::string const& folderName) {
+        return Nui::ElementRenderer{button{
+            class_ = "cmds-action cmds-action-danger",
+            title = language->get("commandSnippetsPanel", "clearFolderTooltip"),
+            onClick =
+                [this, folderId, folderName](Nui::val event) {
+                    event.call<void>("stopPropagation");
+                    clearFolder(folderId, folderName);
+                },
+        }(Ui5Icons::clear_all())};
+    };
+
     std::vector<Nui::ElementRenderer> entries{};
     entries.reserve(client->folders().value().size() + 4);
     entries.push_back(sidebarEntry(
@@ -723,6 +768,7 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
             folder.name,
             count,
             span{class_ = "cmds-folder-actions"}(
+                count == 0 ? Nui::nil() : clearButton(folder.id, folder.name),
                 button{
                     class_ = "cmds-action",
                     title = language->get("commandSnippetsPanel", "renameFolderTooltip"),
@@ -749,7 +795,11 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderSidebar()
         Ui5Icons::inbox(),
         std::string{language->get("commandSnippetsPanel", "unfiled")},
         unfiledCount,
-        Nui::nil()
+        unfiledCount == 0
+            ? Nui::nil()
+            : Nui::ElementRenderer{span{class_ = "cmds-folder-actions"}(
+                  clearButton(std::string{}, std::string{language->get("commandSnippetsPanel", "unfiled")})
+              )}
     ));
 
     return div{class_ = "cmds-sidebar"}(

@@ -28,6 +28,7 @@ namespace CommandStore
         void registerListSnippets();
         void registerUpsertSnippet();
         void registerDeleteSnippet();
+        void registerDeleteSnippets();
         void registerBumpSnippetUse();
         void registerListFolders();
         void registerUpsertFolder();
