@@ -73,8 +73,8 @@ class TerminalChannel
     /**
      * @brief Sets the callback fired when the user interacts with this terminal.
      *
-     * Fired on every keystroke and whenever the xterm widget gains focus. Used to track the
-     * last-interacted terminal of a session. Set it before open(), the handlers are registered
+     * Fired on every keystroke, whenever the xterm widget gains focus and when the user clicks
+     * the terminal's dock tab. Used to track the last-interacted terminal of a session. Set it before open(), the handlers are registered
      * there.
      */
     void setOnInteracted(std::function<void()> onInteracted);

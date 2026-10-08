@@ -165,12 +165,15 @@ globalThis.terminalUtility.registerOscHandler = (id, code, cb) => {
         return true;
     });
 };
-// The textarea only exists once the terminal has opened on its host, which may still be pending
-// (createTerminal waits for the host to be connected), so attachment retries until then. The
-// returned disposable detaches the listener or cancels a pending attachment.
-globalThis.terminalUtility.registerFocusListener = (id, cb) => {
+// Calls back when the terminal gains focus or its dock tab is clicked (terminal-tab-activated,
+// dispatched on the channel element by the Lumino widget). The textarea only exists once the
+// terminal has opened on its host, which may still be pending (createTerminal waits for the host
+// to be connected), so attachment retries until then. The returned disposable detaches the
+// listeners or cancels a pending attachment.
+globalThis.terminalUtility.registerInteractionListener = (id, cb) => {
     let disposed = false;
-    let attachedTo = undefined;
+    let textarea = undefined;
+    let channelElement = undefined;
     const attach = () => {
         if (disposed)
             return;
@@ -181,16 +184,19 @@ globalThis.terminalUtility.registerFocusListener = (id, cb) => {
             requestAnimationFrame(attach);
             return;
         }
-        attachedTo = terminal.textarea;
-        attachedTo.addEventListener("focus", cb);
+        textarea = terminal.textarea;
+        textarea.addEventListener("focus", cb);
+        channelElement = terminal.element?.closest(".terminal-channel") ?? undefined;
+        channelElement?.addEventListener("terminal-tab-activated", cb);
     };
     attach();
     return {
         dispose: () => {
             disposed = true;
-            if (attachedTo)
-                attachedTo.removeEventListener("focus", cb);
-            attachedTo = undefined;
+            textarea?.removeEventListener("focus", cb);
+            channelElement?.removeEventListener("terminal-tab-activated", cb);
+            textarea = undefined;
+            channelElement = undefined;
         }
     };
 };
@@ -260,7 +266,8 @@ struct TerminalChannel::Implementation
     std::function<void(Ids::ChannelId, std::string const&)> onLockedUserInput;
     Persistence::HistoryCaptureMode captureMode{Persistence::HistoryCaptureMode::off};
     std::function<void(std::string const&)> onCommandExecuted{};
-    /// Fired on every keystroke and on focus; marks this channel as the last-interacted one.
+    /// Fired on every keystroke, on focus and on a click on its tab; marks this channel as the
+    /// last-interacted one.
     std::function<void()> onInteracted{};
     /// Hides the echo of the shell integration bootstrap from the user.
     Utility::EchoSuppressor echoSuppressor{};
@@ -285,8 +292,8 @@ struct TerminalChannel::Implementation
     Nui::val onResizeDisposable{Nui::val::undefined()};
     /// Same story for the OSC 633 handler of the smart capture mode.
     Nui::val oscHandlerDisposable{Nui::val::undefined()};
-    /// Same story for the focus listener that feeds onInteracted.
-    Nui::val onFocusDisposable{Nui::val::undefined()};
+    /// Same story for the focus and tab listener that feeds onInteracted.
+    Nui::val onInteractionDisposable{Nui::val::undefined()};
     TerminalEngine* engine;
 
     Nui::val terminal() const
@@ -553,8 +560,8 @@ void TerminalChannel::open(
         );
     }
 
-    impl_->onFocusDisposable = terminalUtility().call<Nui::val>(
-        "registerFocusListener",
+    impl_->onInteractionDisposable = terminalUtility().call<Nui::val>(
+        "registerInteractionListener",
         impl_->termId,
         Nui::bind(
             [this, aliveWeak = std::weak_ptr<bool>(impl_->alive)](Nui::val)
@@ -651,10 +658,10 @@ void TerminalChannel::dispose(std::function<void()> onComplete, bool closeBacken
             impl_->oscHandlerDisposable.call<void>("dispose");
             impl_->oscHandlerDisposable = Nui::val::undefined();
         }
-        if (!impl_->onFocusDisposable.isUndefined() && !impl_->onFocusDisposable.isNull())
+        if (!impl_->onInteractionDisposable.isUndefined() && !impl_->onInteractionDisposable.isNull())
         {
-            impl_->onFocusDisposable.call<void>("dispose");
-            impl_->onFocusDisposable = Nui::val::undefined();
+            impl_->onInteractionDisposable.call<void>("dispose");
+            impl_->onInteractionDisposable = Nui::val::undefined();
         }
 
         auto term = impl_->terminal();
