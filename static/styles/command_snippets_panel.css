@@ -254,6 +254,21 @@
     overflow-y: auto;
 }
 
+/* All and Favorites are grouped by folder; the header spans the whole row of the grid. */
+.cmds-group-header {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    padding: 0 2px 3px;
+    border-bottom: 1px solid var(--border-color-fields);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-secondary);
+}
+
+.cmds-group-header:first-child {
+    margin-top: 0;
+}
+
 .cmds-empty {
     flex: 1 1 auto;
     padding: 24px 8px;
