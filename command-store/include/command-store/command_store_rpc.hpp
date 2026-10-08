@@ -32,6 +32,7 @@ namespace CommandStore
         void registerListFolders();
         void registerUpsertFolder();
         void registerDeleteFolder();
+        void registerImportSnippets();
 
       private:
         Store* store_;

@@ -22,6 +22,8 @@ namespace
 {
     using CommandStore::HistoryEntry;
     using CommandStore::HistoryQuery;
+    using CommandStore::ImportEntry;
+    using CommandStore::ImportSummary;
     using CommandStore::Result;
     using CommandStore::Snippet;
     using CommandStore::SnippetFolder;
@@ -186,6 +188,16 @@ namespace
                 [&](auto&& onComplete)
                 {
                     store_->deleteFolder(std::move(id), std::forward<decltype(onComplete)>(onComplete));
+                }
+            );
+        }
+
+        Result<ImportSummary> importSnippets(std::vector<ImportEntry> entries)
+        {
+            return await<ImportSummary>(
+                [&](auto&& onComplete)
+                {
+                    store_->importSnippets(std::move(entries), std::forward<decltype(onComplete)>(onComplete));
                 }
             );
         }
@@ -518,6 +530,135 @@ namespace
         ASSERT_TRUE(snippets.has_value());
         ASSERT_EQ(snippets->size(), 1u);
         EXPECT_EQ(snippets->front().folder, "");
+    }
+
+    TEST_F(CommandStoreTests, ImportCreatesMissingFoldersByName)
+    {
+        openStore();
+        ASSERT_TRUE(upsertFolder({.name = "Existing", .position = 4}).has_value());
+
+        const auto summary = importSnippets({
+            {.snippet = {.name = "List", .command = "ls", .folder = "Files", .tags = {"quick"}, .favorite = true}},
+            {.snippet = {.name = "Copy", .command = "cp {{a}} {{b}}", .folder = "Files"}},
+        });
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->added, 2);
+        EXPECT_EQ(summary->replaced, 0);
+        EXPECT_EQ(summary->foldersCreated, 1);
+
+        const auto folders = listFolders();
+        ASSERT_TRUE(folders.has_value());
+        ASSERT_EQ(folders->size(), 2u);
+        EXPECT_EQ(folders->back().name, "Files");
+        EXPECT_EQ(folders->back().position, 5);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 2u);
+        for (auto const& snippet : *snippets)
+            EXPECT_EQ(snippet.folder, folders->back().id);
+        EXPECT_EQ(snippets->back().name, "List");
+        EXPECT_EQ(snippets->back().tags, (std::vector<std::string>{"quick"}));
+        EXPECT_TRUE(snippets->back().favorite);
+    }
+
+    TEST_F(CommandStoreTests, ImportReusesExistingFolderWithSameName)
+    {
+        openStore();
+        const auto folder = upsertFolder({.name = "Files"});
+        ASSERT_TRUE(folder.has_value());
+
+        const auto summary = importSnippets({{.snippet = {.name = "List", .command = "ls", .folder = "Files"}}});
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->foldersCreated, 0);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().folder, folder->id);
+    }
+
+    TEST_F(CommandStoreTests, ImportPrefersTheFolderIdOverTheFolderName)
+    {
+        openStore();
+        const auto folder = upsertFolder({.name = "Target"});
+        ASSERT_TRUE(folder.has_value());
+
+        const auto summary = importSnippets({
+            {.snippet = {.name = "List", .command = "ls", .folder = "Target"}, .folderId = folder->id},
+        });
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->foldersCreated, 0);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().folder, folder->id);
+    }
+
+    TEST_F(CommandStoreTests, ImportIntoAMissingFolderIdFailsWithoutWriting)
+    {
+        openStore();
+        const auto summary = importSnippets({
+            {.snippet = {.name = "Fine", .command = "true"}},
+            {.snippet = {.name = "List", .command = "ls"}, .folderId = "deleted-folder"},
+        });
+        EXPECT_FALSE(summary.has_value());
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        EXPECT_TRUE(snippets->empty());
+    }
+
+    TEST_F(CommandStoreTests, ImportReplacesASnippetKeepingItsUsage)
+    {
+        openStore();
+        const auto stored = upsertSnippet({.name = "List", .command = "ls"});
+        ASSERT_TRUE(stored.has_value());
+        ASSERT_TRUE(bumpSnippetUse(stored->id, 500).has_value());
+
+        const auto summary = importSnippets({
+            {.snippet = {.name = "List", .command = "ls -la", .tags = {"new"}}, .replaces = stored->id},
+        });
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->added, 0);
+        EXPECT_EQ(summary->replaced, 1);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().id, stored->id);
+        EXPECT_EQ(snippets->front().command, "ls -la");
+        EXPECT_EQ(snippets->front().tags, (std::vector<std::string>{"new"}));
+        EXPECT_EQ(snippets->front().uses, 1);
+    }
+
+    TEST_F(CommandStoreTests, ImportAddsEverythingItIsGiven)
+    {
+        openStore();
+        ASSERT_TRUE(upsertSnippet({.name = "List", .command = "ls"}).has_value());
+
+        const auto summary = importSnippets({{.snippet = {.name = "List", .command = "ls"}}});
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->added, 1);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        EXPECT_EQ(snippets->size(), 2u);
+    }
+
+    TEST_F(CommandStoreTests, ImportWithoutFolderGoesToRoot)
+    {
+        openStore();
+        const auto summary = importSnippets({{.snippet = {.name = "List", .command = "ls"}}});
+        ASSERT_TRUE(summary.has_value()) << summary.error().message;
+        EXPECT_EQ(summary->foldersCreated, 0);
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().folder, "");
+        EXPECT_FALSE(snippets->front().id.empty());
     }
 
     TEST_F(CommandStoreTests, DataSurvivesReopening)
