@@ -11,6 +11,7 @@
 #include "test_archive_upload_operation.hpp"
 #include "test_file_tracking.hpp"
 #include "test_shell_integration.hpp"
+#include "test_ui_options.hpp"
 
 #include <log/log.hpp>
 

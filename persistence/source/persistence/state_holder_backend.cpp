@@ -169,6 +169,12 @@ namespace Persistence
             }
         }
 
+        if (updateOutdatedExtensionIconPaths(stateCache_.uiOptions))
+        {
+            Log::info("Updated file type icon paths of an earlier version.");
+            mustSave = true;
+        }
+
         bool hasMissingDefaults = false;
         auto termiosDefault = stateCache_.termios.find("default");
         if (termiosDefault == stateCache_.termios.end())
