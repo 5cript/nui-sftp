@@ -41,8 +41,10 @@
 #include <algorithm>
 #include <ctime>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace std::string_literals;
@@ -59,8 +61,12 @@ namespace
     constexpr char const* selectionUnfiled = "unfiled";
 
     /// A card with everything it displays, so an unchanged card compares equal.
+    /// A snippet card, or the header of a folder group when groupHeader is set.
     struct SnippetCard
     {
+        /// Identifies the entry across refreshes: the snippet id, or "group:" and the folder id.
+        std::string key{};
+        std::optional<std::string> groupHeader{};
         CommandStore::Snippet snippet{};
         std::string timeLabel{};
         std::string loweredQuery{};
@@ -313,21 +319,75 @@ struct CommandSnippetsPanel::Implementation
         return visible;
     }
 
+    /**
+     * @brief All and Favorites span many folders, so their cards are grouped under a header per
+     *        folder, in sidebar order with Unfiled last.
+     */
+    std::vector<std::pair<std::string, std::vector<CommandStore::Snippet const*>>>
+    groupByFolder(std::vector<CommandStore::Snippet const*> const& snippets) const
+    {
+        std::vector<std::pair<std::string, std::vector<CommandStore::Snippet const*>>> groups{};
+        for (auto const& folder : client->folders().value())
+            groups.emplace_back(folder.id, std::vector<CommandStore::Snippet const*>{});
+        groups.emplace_back(std::string{}, std::vector<CommandStore::Snippet const*>{});
+
+        for (auto const* snippet : snippets)
+        {
+            const auto folderId = isUnfiled(*snippet) ? std::string{} : snippet->folder;
+            const auto group = std::ranges::find_if(groups, [&folderId](auto const& candidate) {
+                return candidate.first == folderId;
+            });
+            group->second.push_back(snippet);
+        }
+        std::erase_if(groups, [](auto const& group) {
+            return group.second.empty();
+        });
+        return groups;
+    }
+
+    std::string folderName(std::string const& folderId) const
+    {
+        auto const& folders = client->folders().value();
+        const auto folder = std::ranges::find_if(folders, [&folderId](CommandStore::SnippetFolder const& candidate) {
+            return candidate.id == folderId;
+        });
+        return folder != folders.end() ? folder->name : std::string{language->get("commandSnippetsPanel", "unfiled")};
+    }
+
     void refreshCards()
     {
         const auto loweredQuery = lowercased(searchQuery.value());
         const auto nowEpoch = static_cast<std::int64_t>(std::time(nullptr));
         std::vector<SnippetCard> target{};
-        for (auto const* snippet : visibleSnippets())
-        {
+        const auto addCard = [&](CommandStore::Snippet const& snippet) {
             target.push_back(SnippetCard{
-                .snippet = *snippet,
-                .timeLabel = snippet->lastUsed > 0 ? relativeTime(snippet->lastUsed, nowEpoch) : std::string{},
+                .key = snippet.id,
+                .snippet = snippet,
+                .timeLabel = snippet.lastUsed > 0 ? relativeTime(snippet.lastUsed, nowEpoch) : std::string{},
                 .loweredQuery = loweredQuery,
             });
+        };
+
+        const auto visible = visibleSnippets();
+        if (folderSelection.value() == selectionAll || folderSelection.value() == selectionFavorites)
+        {
+            for (auto const& [folderId, snippets] : groupByFolder(visible))
+            {
+                target.push_back(SnippetCard{
+                    .key = fmt::format("group:{}", folderId),
+                    .groupHeader = folderName(folderId),
+                });
+                for (auto const* snippet : snippets)
+                    addCard(*snippet);
+            }
+        }
+        else
+        {
+            for (auto const* snippet : visible)
+                addCard(*snippet);
         }
         CommandPanels::updateKeyed(cards, std::move(target), [](SnippetCard const& card) -> std::string const& {
-            return card.snippet.id;
+            return card.key;
         });
     }
 
@@ -849,6 +909,9 @@ Nui::ElementRenderer CommandSnippetsPanel::Implementation::renderCard(SnippetCar
     using Nui::Elements::div;
     using Nui::Elements::span;
     using Nui::Attributes::title;
+
+    if (card.groupHeader)
+        return div{class_ = "cmds-group-header"}(*card.groupHeader);
 
     auto const& snippet = card.snippet;
     const auto variables = Utility::CommandTemplate::parseVariables(snippet.command);
