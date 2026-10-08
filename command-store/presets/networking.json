@@ -12,72 +12,86 @@
         {
             "name": "Addresses",
             "command": "ip -brief address",
-            "tags": ["interfaces"]
+            "tags": ["interfaces"],
+            "danger": "safe"
         },
         {
             "name": "Routes",
             "command": "ip route",
-            "tags": ["interfaces"]
+            "tags": ["interfaces"],
+            "danger": "safe"
         },
         {
             "name": "Listening ports",
             "command": "sudo ss -tulpn",
-            "tags": ["ports"]
+            "tags": ["ports"],
+            "danger": "safe"
         },
         {
             "name": "Established connections",
             "command": "ss -tnp state established",
-            "tags": ["ports"]
+            "tags": ["ports"],
+            "danger": "safe"
         },
         {
             "name": "Process using port",
             "command": "sudo lsof -i :{{port}}",
-            "tags": ["ports"]
+            "tags": ["ports"],
+            "danger": "safe"
         },
         {
             "name": "Port reachable",
             "command": "nc -zv {{host}} {{port}}",
-            "tags": ["ports"]
+            "tags": ["ports"],
+            "danger": "safe"
         },
         {
             "name": "Ping",
             "command": "ping -c 4 {{host}}",
-            "tags": ["reachability"]
+            "tags": ["reachability"],
+            "danger": "safe"
         },
         {
             "name": "Trace path",
             "command": "tracepath {{host}}",
-            "tags": ["reachability"]
+            "tags": ["reachability"],
+            "danger": "safe"
         },
         {
             "name": "DNS lookup",
             "command": "dig +short {{name}}",
-            "tags": ["dns"]
+            "tags": ["dns"],
+            "danger": "safe"
         },
         {
             "name": "Reverse DNS lookup",
             "command": "dig +short -x {{address}}",
-            "tags": ["dns"]
+            "tags": ["dns"],
+            "danger": "safe"
         },
         {
             "name": "Resolve with system resolver",
             "command": "getent ahosts {{name}}",
-            "tags": ["dns"]
+            "tags": ["dns"],
+            "danger": "safe"
         },
         {
             "name": "Public IP address (ifconfig.me)",
             "command": "curl -s https://ifconfig.me",
-            "tags": ["http"]
+            "tags": ["http"],
+            "danger": "safe"
         },
         {
             "name": "HTTP response headers",
             "command": "curl -sSI {{url}}",
-            "tags": ["http"]
+            "tags": ["http"],
+            "danger": "safe"
         },
         {
             "name": "HTTP timing",
             "command": "curl -o /dev/null -s -w \"dns %{time_namelookup}s  connect %{time_connect}s  total %{time_total}s\\n\" {{url}}",
-            "tags": ["http"]
+            "tags": ["http"],
+            "danger": "safe"
         }
     ]
 }

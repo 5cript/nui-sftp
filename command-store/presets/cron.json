@@ -12,37 +12,44 @@
         {
             "name": "My crontab",
             "command": "crontab -l",
-            "tags": ["crontab"]
+            "tags": ["crontab"],
+            "danger": "safe"
         },
         {
             "name": "Edit my crontab",
             "command": "crontab -e",
-            "tags": ["crontab"]
+            "tags": ["crontab"],
+            "danger": "caution"
         },
         {
             "name": "Crontab of user",
             "command": "sudo crontab -l -u {{user}}",
-            "tags": ["crontab"]
+            "tags": ["crontab"],
+            "danger": "safe"
         },
         {
             "name": "Edit crontab of user",
             "command": "sudo crontab -e -u {{user}}",
-            "tags": ["crontab"]
+            "tags": ["crontab"],
+            "danger": "caution"
         },
         {
             "name": "System crontab",
             "command": "cat /etc/crontab",
-            "tags": ["system"]
+            "tags": ["system"],
+            "danger": "safe"
         },
         {
             "name": "System cron directories",
             "command": "ls -l /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly",
-            "tags": ["system"]
+            "tags": ["system"],
+            "danger": "safe"
         },
         {
             "name": "Cron log of today",
             "command": "sudo journalctl -u cron -u crond -u cronie --since today --no-pager",
-            "tags": ["logs"]
+            "tags": ["logs"],
+            "danger": "safe"
         }
     ]
 }

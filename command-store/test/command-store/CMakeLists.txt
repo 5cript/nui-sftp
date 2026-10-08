@@ -9,12 +9,14 @@ add_executable(
 )
 
 find_package(GTest CONFIG REQUIRED)
+include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/sqlite3.cmake")
 
 target_link_libraries(
     nui-sftp-command-store-test
     PUBLIC
         command-store
         utility
+        SQLite3::SQLite3
         GTest::gtest
         GTest::gtest_main
 )

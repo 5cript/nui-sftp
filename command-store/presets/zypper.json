@@ -12,67 +12,80 @@
         {
             "name": "Refresh and update",
             "command": "sudo zypper refresh && sudo zypper update",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Distribution upgrade (Tumbleweed)",
             "command": "sudo zypper dist-upgrade",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "caution"
         },
         {
             "name": "Available updates",
             "command": "zypper list-updates",
-            "tags": ["update"]
+            "tags": ["update"],
+            "danger": "safe"
         },
         {
             "name": "Search package",
             "command": "zypper search {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Package details",
             "command": "zypper info {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Install package",
             "command": "sudo zypper install {{package}}",
-            "tags": ["install"]
+            "tags": ["install"],
+            "danger": "caution"
         },
         {
             "name": "Remove package with dependencies",
             "command": "sudo zypper remove --clean-deps {{package}}",
-            "tags": ["remove"]
+            "tags": ["remove"],
+            "danger": "caution"
         },
         {
             "name": "Package providing file",
             "command": "zypper search --provides {{file}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Files of package",
             "command": "rpm -ql {{package}}",
-            "tags": ["search"]
+            "tags": ["search"],
+            "danger": "safe"
         },
         {
             "name": "Repositories",
             "command": "zypper repos -d",
-            "tags": ["repositories"]
+            "tags": ["repositories"],
+            "danger": "safe"
         },
         {
             "name": "Clean package cache",
             "command": "sudo zypper clean --all",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Lock package version",
             "command": "sudo zypper addlock {{package}}",
-            "tags": ["versions"]
+            "tags": ["versions"],
+            "danger": "caution"
         },
         {
             "name": "Release locked package",
             "command": "sudo zypper removelock {{package}}",
-            "tags": ["versions"]
+            "tags": ["versions"],
+            "danger": "caution"
         }
     ]
 }

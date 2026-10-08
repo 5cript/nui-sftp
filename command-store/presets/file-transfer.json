@@ -12,42 +12,50 @@
         {
             "name": "Copy to host (rsync)",
             "command": "rsync -avzP {{source}} {{user}}@{{host}}:{{destination}}",
-            "tags": ["rsync"]
+            "tags": ["rsync"],
+            "danger": "caution"
         },
         {
             "name": "Copy from host (rsync)",
             "command": "rsync -avzP {{user}}@{{host}}:{{source}} {{destination}}",
-            "tags": ["rsync"]
+            "tags": ["rsync"],
+            "danger": "caution"
         },
         {
             "name": "Mirror directory, preview",
             "command": "rsync -avzn --delete {{source}}/ {{destination}}/",
-            "tags": ["rsync"]
+            "tags": ["rsync"],
+            "danger": "safe"
         },
         {
             "name": "Mirror directory",
             "command": "rsync -avz --delete {{source}}/ {{destination}}/",
-            "tags": ["rsync"]
+            "tags": ["rsync"],
+            "danger": "danger"
         },
         {
             "name": "Copy to host (scp)",
             "command": "scp {{file}} {{user}}@{{host}}:{{destination}}",
-            "tags": ["scp"]
+            "tags": ["scp"],
+            "danger": "caution"
         },
         {
             "name": "Download file",
             "command": "curl -fLO {{url}}",
-            "tags": ["download"]
+            "tags": ["download"],
+            "danger": "caution"
         },
         {
             "name": "Resume download",
             "command": "wget -c {{url}}",
-            "tags": ["download"]
+            "tags": ["download"],
+            "danger": "caution"
         },
         {
             "name": "Serve directory on localhost over HTTP",
             "command": "python3 -m http.server --bind 127.0.0.1 {{port}}",
-            "tags": ["http"]
+            "tags": ["http"],
+            "danger": "caution"
         }
     ]
 }

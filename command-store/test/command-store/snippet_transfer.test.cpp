@@ -7,6 +7,7 @@
 
 namespace
 {
+    using CommandStore::DangerLevel;
     using CommandStore::TransferSnippet;
     using CommandStore::SnippetTransfer::ParseError;
     using CommandStore::SnippetTransfer::parse;
@@ -20,6 +21,9 @@ namespace
         const std::vector<TransferSnippet> snippets{
             {.name = "List", .command = "ls {{directory}}", .folder = "Files", .tags = {"quick"}, .favorite = true},
             {.name = "Uptime", .command = "uptime"},
+            {.name = "Prune", .command = "docker system prune", .danger = DangerLevel::Caution},
+            {.name = "Wipe", .command = "rm -rf build", .danger = DangerLevel::Danger},
+            {.name = "Disk", .command = "df -h", .danger = DangerLevel::Safe},
         };
         const auto parsed = parse(toJson(snippets).dump(2));
         ASSERT_TRUE(parsed.has_value());
@@ -110,5 +114,39 @@ namespace
         EXPECT_EQ(snippet.folder, "Files");
         EXPECT_EQ(snippet.tags, (std::vector<std::string>{"a", "b"}));
         EXPECT_FALSE(snippet.favorite);
+    }
+
+    TEST_F(SnippetTransferTests, UnratedSnippetsLeaveTheDangerOut)
+    {
+        const auto document = toJson({{.name = "List", .command = "ls"}, {.name = "Wipe", .command = "rm -rf build", .danger = DangerLevel::Danger}});
+        EXPECT_FALSE(document["snippets"][0].contains("danger"));
+        EXPECT_EQ(document["snippets"][1]["danger"], "danger");
+    }
+
+    TEST_F(SnippetTransferTests, UnknownDangerLevelsAreUnrated)
+    {
+        const auto parsed = parse(
+            R"([{"name": "A", "command": "a", "danger": "extreme"}, {"name": "B", "command": "b", "danger": 2}, {"name": "C", "command": "c", "danger": "caution"}])"
+        );
+        ASSERT_TRUE(parsed.has_value());
+        ASSERT_EQ(parsed->size(), 3u);
+        EXPECT_EQ((*parsed)[0].danger, std::nullopt);
+        EXPECT_EQ((*parsed)[1].danger, std::nullopt);
+        EXPECT_EQ((*parsed)[2].danger, DangerLevel::Caution);
+    }
+
+    TEST_F(SnippetTransferTests, ImportEntriesCarryTheDangerLevel)
+    {
+        using CommandStore::ImportEntry;
+        using CommandStore::SnippetTransfer::importEntriesFromJson;
+        using CommandStore::SnippetTransfer::importEntriesToJson;
+
+        const std::vector<ImportEntry> entries{
+            {.snippet = {.name = "Wipe", .command = "rm -rf build", .danger = DangerLevel::Danger}, .folderId = "f"},
+            {.snippet = {.name = "List", .command = "ls"}, .replaces = "r"},
+        };
+        const auto parsed = importEntriesFromJson(importEntriesToJson(entries));
+        ASSERT_TRUE(parsed.has_value());
+        EXPECT_EQ(*parsed, entries);
     }
 }

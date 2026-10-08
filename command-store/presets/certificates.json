@@ -12,52 +12,62 @@
         {
             "name": "Certificate of server",
             "command": "openssl s_client -connect {{host}}:{{port}} -servername {{host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates",
-            "tags": ["inspect"]
+            "tags": ["inspect"],
+            "danger": "safe"
         },
         {
             "name": "Certificate details",
             "command": "openssl x509 -in {{certificate}} -noout -text",
-            "tags": ["inspect"]
+            "tags": ["inspect"],
+            "danger": "safe"
         },
         {
             "name": "Expiry date",
             "command": "openssl x509 -in {{certificate}} -noout -enddate",
-            "tags": ["inspect"]
+            "tags": ["inspect"],
+            "danger": "safe"
         },
         {
             "name": "Key matches certificate",
             "command": "openssl x509 -noout -pubkey -in {{certificate}} | sha256sum\nopenssl pkey -pubout -in {{key}} | sha256sum",
-            "tags": ["inspect"]
+            "tags": ["inspect"],
+            "danger": "safe"
         },
         {
             "name": "Self-signed certificate",
             "command": "openssl req -x509 -newkey rsa:4096 -nodes -keyout {{name}}.key -out {{name}}.crt -days 365 -subj \"/CN={{name}}\"",
-            "tags": ["create"]
+            "tags": ["create"],
+            "danger": "caution"
         },
         {
             "name": "Certificate signing request",
             "command": "openssl req -new -newkey rsa:2048 -nodes -keyout {{name}}.key -out {{name}}.csr -subj \"/CN={{name}}\"",
-            "tags": ["create"]
+            "tags": ["create"],
+            "danger": "caution"
         },
         {
             "name": "Managed certificates (certbot)",
             "command": "sudo certbot certificates",
-            "tags": ["certbot"]
+            "tags": ["certbot"],
+            "danger": "safe"
         },
         {
             "name": "Test renewal (certbot)",
             "command": "sudo certbot renew --dry-run",
-            "tags": ["certbot"]
+            "tags": ["certbot"],
+            "danger": "safe"
         },
         {
             "name": "Random secret",
             "command": "openssl rand -base64 {{bytes}}",
-            "tags": ["secrets"]
+            "tags": ["secrets"],
+            "danger": "safe"
         },
         {
             "name": "File checksum",
             "command": "sha256sum {{file}}",
-            "tags": ["checksums"]
+            "tags": ["checksums"],
+            "danger": "safe"
         }
     ]
 }

@@ -21,7 +21,7 @@ namespace CommandStore::SnippetImport
     {
         /** @brief No snippet of that name in the target folder. */
         New,
-        /** @brief A snippet of that name with the same command and tags exists; it is skipped. */
+        /** @brief A snippet of that name with the same command, tags and danger level exists; it is skipped. */
         Identical,
         /** @brief A snippet of that name exists but differs; the user decides. */
         NameConflict,
@@ -105,12 +105,12 @@ namespace CommandStore::SnippetImport
     {
         inline bool sameContent(TransferSnippet const& pasted, Snippet const& stored)
         {
-            return pasted.command == stored.command && pasted.tags == stored.tags;
+            return pasted.command == stored.command && pasted.tags == stored.tags && pasted.danger == stored.danger;
         }
 
         inline bool sameContent(TransferSnippet const& pasted, TransferSnippet const& earlier)
         {
-            return pasted.command == earlier.command && pasted.tags == earlier.tags;
+            return pasted.command == earlier.command && pasted.tags == earlier.tags && pasted.danger == earlier.danger;
         }
 
         inline void appendUnique(std::vector<std::string>& names, std::string const& name)
@@ -325,6 +325,7 @@ namespace CommandStore::SnippetImport
                             .folder = planned.snippet.folder,
                             .tags = existing.tags,
                             .favorite = true,
+                            .danger = existing.danger,
                         },
                     .folderId = planned.folderId,
                     .replaces = existing.id,

@@ -12,62 +12,74 @@
         {
             "name": "Top CPU users",
             "command": "ps aux --sort=-%cpu | head -15",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "Top memory users",
             "command": "ps aux --sort=-%mem | head -15",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "Memory",
             "command": "free -h",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "Uptime and load",
             "command": "uptime",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "Find process",
             "command": "pgrep -af {{pattern}}",
-            "tags": ["lookup"]
+            "tags": ["lookup"],
+            "danger": "safe"
         },
         {
             "name": "Process tree",
             "command": "ps -ef --forest",
-            "tags": ["lookup"]
+            "tags": ["lookup"],
+            "danger": "safe"
         },
         {
             "name": "Open files of process",
             "command": "sudo lsof -p {{pid}}",
-            "tags": ["lookup"]
+            "tags": ["lookup"],
+            "danger": "safe"
         },
         {
             "name": "Terminate process",
             "command": "kill {{pid}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "caution"
         },
         {
             "name": "Terminate by name",
             "command": "pkill -f {{pattern}}",
-            "tags": ["control"]
+            "tags": ["control"],
+            "danger": "danger"
         },
         {
             "name": "Run past logout",
             "command": "nohup {{command}} > {{logFile}} 2>&1 &",
-            "tags": ["background"]
+            "tags": ["background"],
+            "danger": "caution"
         },
         {
             "name": "Repeat command",
             "command": "watch -n {{seconds}} '{{command}}'",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "System information",
             "command": "uname -a\ncat /etc/os-release\nlscpu | head -15",
-            "tags": ["system"]
+            "tags": ["system"],
+            "danger": "safe"
         }
     ]
 }

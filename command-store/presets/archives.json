@@ -12,47 +12,56 @@
         {
             "name": "Create tar.gz",
             "command": "tar -czf {{archiveName}}.tar.gz {{path}}",
-            "tags": ["tar"]
+            "tags": ["tar"],
+            "danger": "caution"
         },
         {
             "name": "Create tar.zst",
             "command": "tar --zstd -cf {{archiveName}}.tar.zst {{path}}",
-            "tags": ["tar"]
+            "tags": ["tar"],
+            "danger": "caution"
         },
         {
             "name": "Extract tar archive",
             "command": "tar -xf {{archive}} -C {{destination}}",
-            "tags": ["tar"]
+            "tags": ["tar"],
+            "danger": "caution"
         },
         {
             "name": "List tar archive",
             "command": "tar -tf {{archive}}",
-            "tags": ["tar"]
+            "tags": ["tar"],
+            "danger": "safe"
         },
         {
             "name": "Create zip",
             "command": "zip -r {{archiveName}}.zip {{path}}",
-            "tags": ["zip"]
+            "tags": ["zip"],
+            "danger": "caution"
         },
         {
             "name": "Extract zip",
             "command": "unzip {{archive}} -d {{destination}}",
-            "tags": ["zip"]
+            "tags": ["zip"],
+            "danger": "caution"
         },
         {
             "name": "List zip",
             "command": "unzip -l {{archive}}",
-            "tags": ["zip"]
+            "tags": ["zip"],
+            "danger": "safe"
         },
         {
             "name": "Compress file, keep original",
             "command": "gzip -k {{file}}",
-            "tags": ["gzip"]
+            "tags": ["gzip"],
+            "danger": "safe"
         },
         {
             "name": "Copy directory to host as stream",
             "command": "tar -czf - {{path}} | ssh {{user}}@{{host}} \"tar -xzf - -C {{destination}}\"",
-            "tags": ["tar", "ssh"]
+            "tags": ["tar", "ssh"],
+            "danger": "caution"
         }
     ]
 }

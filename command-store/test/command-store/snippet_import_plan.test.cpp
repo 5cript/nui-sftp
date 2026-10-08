@@ -7,6 +7,7 @@
 
 namespace
 {
+    using CommandStore::DangerLevel;
     using CommandStore::Snippet;
     using CommandStore::SnippetFolder;
     using CommandStore::TransferSnippet;
@@ -123,6 +124,22 @@ namespace
         // Only the first may overwrite the stored snippet, or the second would silently undo it.
         EXPECT_TRUE(result.snippets[0].canReplace());
         EXPECT_FALSE(result.snippets[1].canReplace());
+    }
+
+    TEST_F(SnippetImportPlanTests, OtherDangerLevelIsAConflict)
+    {
+        const auto result = plan(
+            {
+                {.name = "List", .command = "ls", .folder = "Files", .tags = {"quick"}, .danger = DangerLevel::Safe},
+                {.name = "List", .command = "ls", .folder = "Files", .tags = {"quick"}},
+            },
+            stored_,
+            folders_,
+            Target{}
+        );
+        ASSERT_EQ(result.snippets.size(), 2u);
+        EXPECT_EQ(result.snippets[0].status, Status::NameConflict);
+        EXPECT_EQ(result.snippets[1].status, Status::Identical);
     }
 
     TEST_F(SnippetImportPlanTests, SameNameInAnotherFolderIsNew)
@@ -291,6 +308,31 @@ namespace
         EXPECT_EQ(decision.entries[0].snippet.command, "ls");
         EXPECT_EQ(decision.entries[0].snippet.tags, (std::vector<std::string>{"quick"}));
         EXPECT_TRUE(decision.entries[0].snippet.favorite);
+    }
+
+    TEST_F(SnippetImportPlanTests, MergedFavoriteKeepsTheStoredDangerLevel)
+    {
+        stored_[0].danger = DangerLevel::Caution;
+        const auto result = plan(
+            {{.name = "List",
+              .command = "ls",
+              .folder = "Files",
+              .tags = {"quick"},
+              .favorite = true,
+              .danger = DangerLevel::Caution}},
+            stored_,
+            folders_,
+            Target{}
+        );
+        const auto decision = decide(
+            result,
+            [](std::size_t)
+            {
+                return Resolution::Skip;
+            }
+        );
+        ASSERT_EQ(decision.entries.size(), 1u);
+        EXPECT_EQ(decision.entries[0].snippet.danger, DangerLevel::Caution);
     }
 
     TEST_F(SnippetImportPlanTests, DecideNeverUnfavorites)

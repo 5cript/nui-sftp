@@ -99,6 +99,7 @@ namespace
                 SCOPED_TRACE(snippet.name);
                 EXPECT_TRUE(snippetNames.insert(snippet.name).second) << "duplicate snippet name";
                 EXPECT_FALSE(Utility::CommandTemplate::findUnmatchedBrace(snippet.command).has_value());
+                EXPECT_TRUE(snippet.danger.has_value()) << "every shipped snippet is rated";
             }
         }
     }

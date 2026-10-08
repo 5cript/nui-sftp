@@ -12,52 +12,62 @@
         {
             "name": "Reattach or create session",
             "command": "screen -dRR {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "New session",
             "command": "screen -S {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "List sessions",
             "command": "screen -ls",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Reattach session",
             "command": "screen -r {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Run command in background session",
             "command": "screen -dmS {{session}} {{command}}",
-            "tags": ["background"]
+            "tags": ["background"],
+            "danger": "caution"
         },
         {
             "name": "Type command into session",
             "command": "screen -S {{session}} -p 0 -X stuff '{{command}}^M'",
-            "tags": ["background"]
+            "tags": ["background"],
+            "danger": "caution"
         },
         {
             "name": "Session with log file",
             "command": "screen -L -Logfile {{logFile}} -S {{session}}",
-            "tags": ["output"]
+            "tags": ["output"],
+            "danger": "safe"
         },
         {
             "name": "Kill session",
             "command": "screen -S {{session}} -X quit",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "caution"
         },
         {
             "name": "Remove dead sessions",
             "command": "screen -wipe",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Serial console",
             "command": "screen {{device}} {{baudRate}}",
-            "tags": ["serial"]
+            "tags": ["serial"],
+            "danger": "safe"
         }
     ]
 }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace CommandStore
@@ -65,6 +66,57 @@ namespace CommandStore
     };
 
     /**
+     * @brief How much harm running a snippet can do; snippets may also be left unrated.
+     */
+    enum class DangerLevel
+    {
+        /** @brief Only reads or inspects. */
+        Safe,
+        /** @brief Changes state, but can be undone or asks before acting. */
+        Caution,
+        /** @brief Destructive, irreversible or able to lock the user out. */
+        Danger,
+    };
+
+    /**
+     * @brief The name a danger level is stored and transferred as.
+     */
+    constexpr std::string_view toString(DangerLevel level)
+    {
+        switch (level)
+        {
+            case DangerLevel::Safe:
+                return "safe";
+            case DangerLevel::Caution:
+                return "caution";
+            case DangerLevel::Danger:
+                return "danger";
+        }
+        return {};
+    }
+
+    /**
+     * @brief Reads a danger level by name; unknown names, including the empty one, mean unrated.
+     */
+    constexpr std::optional<DangerLevel> dangerLevelFromString(std::string_view name)
+    {
+        for (const auto level : {DangerLevel::Safe, DangerLevel::Caution, DangerLevel::Danger})
+        {
+            if (toString(level) == name)
+                return level;
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * @brief The stored and transferred name of an optional danger level, empty when unrated.
+     */
+    constexpr std::string_view toString(std::optional<DangerLevel> level)
+    {
+        return level ? toString(*level) : std::string_view{};
+    }
+
+    /**
      * @brief A folder grouping snippets.
      */
     struct SnippetFolder
@@ -105,6 +157,9 @@ namespace CommandStore
         /** @brief User-marked favorite. */
         bool favorite{false};
 
+        /** @brief How dangerous running the snippet is; unset when unrated. */
+        std::optional<DangerLevel> danger{};
+
         /** @brief How often this snippet was run. */
         std::int64_t uses{0};
 
@@ -133,6 +188,9 @@ namespace CommandStore
 
         /** @brief User-marked favorite. */
         bool favorite{false};
+
+        /** @brief How dangerous running the snippet is; unset when unrated. */
+        std::optional<DangerLevel> danger{};
 
         bool operator==(TransferSnippet const&) const = default;
     };

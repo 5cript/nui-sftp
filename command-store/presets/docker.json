@@ -12,92 +12,110 @@
         {
             "name": "Running containers",
             "command": "docker ps",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "safe"
         },
         {
             "name": "All containers",
             "command": "docker ps -a --format \"table {{.Names}}\\t{{.Image}}\\t{{.Status}}\"",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "safe"
         },
         {
             "name": "Follow container logs",
             "command": "docker logs -f --tail 200 {{container}}",
-            "tags": ["logs"]
+            "tags": ["logs"],
+            "danger": "safe"
         },
         {
             "name": "Shell into container",
             "command": "docker exec -it {{container}} sh",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "safe"
         },
         {
             "name": "Restart container",
             "command": "docker restart {{container}}",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "caution"
         },
         {
             "name": "Stop container",
             "command": "docker stop {{container}}",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "caution"
         },
         {
             "name": "Inspect container",
             "command": "docker inspect {{container}}",
-            "tags": ["containers"]
+            "tags": ["containers"],
+            "danger": "safe"
         },
         {
             "name": "Resource usage",
             "command": "docker stats --no-stream",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         },
         {
             "name": "Copy file out of container",
             "command": "docker cp {{container}}:{{path}} .",
-            "tags": ["files"]
+            "tags": ["files"],
+            "danger": "caution"
         },
         {
             "name": "List images",
             "command": "docker images",
-            "tags": ["images"]
+            "tags": ["images"],
+            "danger": "safe"
         },
         {
             "name": "Pull image",
             "command": "docker pull {{image}}",
-            "tags": ["images"]
+            "tags": ["images"],
+            "danger": "caution"
         },
         {
             "name": "Run throwaway container",
             "command": "docker run --rm -it {{image}} sh",
-            "tags": ["images"]
+            "tags": ["images"],
+            "danger": "caution"
         },
         {
             "name": "List volumes",
             "command": "docker volume ls",
-            "tags": ["volumes"]
+            "tags": ["volumes"],
+            "danger": "safe"
         },
         {
             "name": "List networks",
             "command": "docker network ls",
-            "tags": ["networks"]
+            "tags": ["networks"],
+            "danger": "safe"
         },
         {
             "name": "Start Docker daemon",
             "command": "sudo systemctl start docker",
-            "tags": ["daemon"]
+            "tags": ["daemon"],
+            "danger": "caution"
         },
         {
             "name": "Disk usage",
             "command": "docker system df",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "safe"
         },
         {
             "name": "Remove unused images",
             "command": "docker image prune",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         },
         {
             "name": "Remove unused data",
             "command": "docker system prune",
-            "tags": ["cleanup"]
+            "tags": ["cleanup"],
+            "danger": "caution"
         }
     ]
 }

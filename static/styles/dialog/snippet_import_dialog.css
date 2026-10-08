@@ -354,3 +354,15 @@
     font-size: 0.75rem;
     color: var(--color-secondary);
 }
+
+.snippet-import-dialog-danger {
+    font-size: 0.8rem;
+}
+
+.snippet-import-dialog-danger[data-danger="caution"] {
+    color: var(--script-nui-components-toast-warning, #e0a02e);
+}
+
+.snippet-import-dialog-danger[data-danger="danger"] {
+    color: var(--script-nui-components-toast-error, #d9534f);
+}

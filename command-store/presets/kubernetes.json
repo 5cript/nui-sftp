@@ -12,67 +12,80 @@
         {
             "name": "Current context",
             "command": "kubectl config current-context",
-            "tags": ["context"]
+            "tags": ["context"],
+            "danger": "safe"
         },
         {
             "name": "Switch namespace",
             "command": "kubectl config set-context --current --namespace={{namespace}}",
-            "tags": ["context"]
+            "tags": ["context"],
+            "danger": "caution"
         },
         {
             "name": "List pods",
             "command": "kubectl get pods -o wide",
-            "tags": ["pods"]
+            "tags": ["pods"],
+            "danger": "safe"
         },
         {
             "name": "Everything in namespace",
             "command": "kubectl get all",
-            "tags": ["overview"]
+            "tags": ["overview"],
+            "danger": "safe"
         },
         {
             "name": "Describe pod",
             "command": "kubectl describe pod {{pod}}",
-            "tags": ["pods"]
+            "tags": ["pods"],
+            "danger": "safe"
         },
         {
             "name": "Follow pod logs",
             "command": "kubectl logs -f {{pod}}",
-            "tags": ["pods", "logs"]
+            "tags": ["pods", "logs"],
+            "danger": "safe"
         },
         {
             "name": "Shell into pod",
             "command": "kubectl exec -it {{pod}} -- sh",
-            "tags": ["pods"]
+            "tags": ["pods"],
+            "danger": "safe"
         },
         {
             "name": "Port forward",
             "command": "kubectl port-forward {{pod}} {{localPort}}:{{podPort}}",
-            "tags": ["network"]
+            "tags": ["network"],
+            "danger": "safe"
         },
         {
             "name": "Restart deployment",
             "command": "kubectl rollout restart deployment/{{deployment}}",
-            "tags": ["deployments"]
+            "tags": ["deployments"],
+            "danger": "caution"
         },
         {
             "name": "Rollout status",
             "command": "kubectl rollout status deployment/{{deployment}}",
-            "tags": ["deployments"]
+            "tags": ["deployments"],
+            "danger": "safe"
         },
         {
             "name": "Scale deployment",
             "command": "kubectl scale deployment/{{deployment}} --replicas={{replicas}}",
-            "tags": ["deployments"]
+            "tags": ["deployments"],
+            "danger": "danger"
         },
         {
             "name": "Recent events",
             "command": "kubectl get events --sort-by=.lastTimestamp",
-            "tags": ["overview"]
+            "tags": ["overview"],
+            "danger": "safe"
         },
         {
             "name": "Node usage (metrics-server)",
             "command": "kubectl top nodes",
-            "tags": ["monitoring"]
+            "tags": ["monitoring"],
+            "danger": "safe"
         }
     ]
 }

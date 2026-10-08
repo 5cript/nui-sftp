@@ -68,6 +68,7 @@ namespace CommandStore
                 .folder = statement.columnText(3),
                 .tags = tagsFromJson(statement.columnText(4)),
                 .favorite = statement.columnBool(5),
+                .danger = dangerLevelFromString(statement.columnText(8)),
                 .uses = statement.columnInt64(6),
                 .lastUsed = statement.columnInt64(7),
             };
@@ -106,7 +107,7 @@ namespace CommandStore
         {
             return Sqlite::Statement::prepare(
                        database,
-                       "SELECT id, name, command, folder, tags, favorite, uses, last_used FROM snippets "
+                       "SELECT id, name, command, folder, tags, favorite, uses, last_used, danger FROM snippets "
                        "ORDER BY name COLLATE NOCASE ASC, id ASC"
             )
                 .and_then(
@@ -139,12 +140,12 @@ namespace CommandStore
         {
             return Sqlite::Statement::prepare(
                        database,
-                       "INSERT INTO snippets(id, name, command, folder, tags, favorite, uses, last_used) "
-                       "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
+                       "INSERT INTO snippets(id, name, command, folder, tags, favorite, uses, last_used, danger) "
+                       "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) "
                        "ON CONFLICT(id) DO UPDATE SET "
                        "name = excluded.name, command = excluded.command, folder = excluded.folder, "
-                       "tags = excluded.tags, favorite = excluded.favorite "
-                       "RETURNING id, name, command, folder, tags, favorite, uses, last_used"
+                       "tags = excluded.tags, favorite = excluded.favorite, danger = excluded.danger "
+                       "RETURNING id, name, command, folder, tags, favorite, uses, last_used, danger"
             )
                 .and_then(
                     [&](Sqlite::Statement upsert) -> Result<Snippet>
@@ -156,7 +157,8 @@ namespace CommandStore
                             .bind(5, tagsToJson(snippet.tags))
                             .bind(6, static_cast<std::int64_t>(snippet.favorite ? 1 : 0))
                             .bind(7, snippet.uses)
-                            .bind(8, snippet.lastUsed);
+                            .bind(8, snippet.lastUsed)
+                            .bind(9, std::string{toString(snippet.danger)});
                         return upsert.step().and_then(
                             [&](bool hasRow) -> Result<Snippet>
                             {
@@ -229,6 +231,16 @@ namespace CommandStore
             PRAGMA user_version = 1;
         )sql";
 
+        constexpr char const* schemaVersion2 = R"sql(
+            ALTER TABLE snippets ADD COLUMN danger TEXT NOT NULL DEFAULT '';
+            PRAGMA user_version = 2;
+        )sql";
+
+        /**
+         * @brief The migration steps, each taking the schema from its index to the next version.
+         */
+        constexpr char const* migrations[] = {schemaVersion1, schemaVersion2};
+
         Result<void> migrate(sqlite3* database)
         {
             return Sqlite::Statement::prepare(database, "PRAGMA user_version")
@@ -246,19 +258,19 @@ namespace CommandStore
                 .and_then(
                     [database](std::int64_t version) -> Result<void>
                     {
-                        if (version >= 1)
+                        if (version >= static_cast<std::int64_t>(std::size(migrations)))
                             return {};
                         return Sqlite::Transaction::begin(database)
                             .and_then(
-                                [database](Sqlite::Transaction transaction)
+                                [database, version](Sqlite::Transaction transaction) -> Result<void>
                                 {
-                                    return Sqlite::execute(database, schemaVersion1)
-                                        .and_then(
-                                            [&transaction]()
-                                            {
-                                                return transaction.commit();
-                                            }
-                                        );
+                                    for (auto step = static_cast<std::size_t>(version); step < std::size(migrations);
+                                         ++step)
+                                    {
+                                        if (auto migrated = Sqlite::execute(database, migrations[step]); !migrated)
+                                            return migrated;
+                                    }
+                                    return transaction.commit();
                                 }
                             );
                     }
@@ -411,6 +423,7 @@ namespace CommandStore
                             .folder = folderId,
                             .tags = entry.snippet.tags,
                             .favorite = entry.snippet.favorite,
+                            .danger = entry.snippet.danger,
                         }
                     );
                 });

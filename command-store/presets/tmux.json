@@ -12,57 +12,68 @@
         {
             "name": "Attach or create session",
             "command": "tmux new -A -s {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "New session",
             "command": "tmux new -s {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Attach to session",
             "command": "tmux attach -t {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "List sessions",
             "command": "tmux ls",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Rename session",
             "command": "tmux rename-session -t {{session}} {{newName}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "safe"
         },
         {
             "name": "Kill session",
             "command": "tmux kill-session -t {{session}}",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "caution"
         },
         {
             "name": "Run command in background session",
             "command": "tmux new -d -s {{session}} '{{command}}'",
-            "tags": ["background"]
+            "tags": ["background"],
+            "danger": "caution"
         },
         {
             "name": "Type command into session",
             "command": "tmux send-keys -t {{session}} '{{command}}' Enter",
-            "tags": ["background"]
+            "tags": ["background"],
+            "danger": "caution"
         },
         {
             "name": "Print recent pane output",
             "command": "tmux capture-pane -p -S -{{lines}} -t {{session}}",
-            "tags": ["output"]
+            "tags": ["output"],
+            "danger": "safe"
         },
         {
             "name": "Reload configuration",
             "command": "tmux source-file ~/.tmux.conf",
-            "tags": ["configuration"]
+            "tags": ["configuration"],
+            "danger": "safe"
         },
         {
             "name": "Kill all sessions",
             "command": "tmux kill-server",
-            "tags": ["sessions"]
+            "tags": ["sessions"],
+            "danger": "danger"
         }
     ]
 }

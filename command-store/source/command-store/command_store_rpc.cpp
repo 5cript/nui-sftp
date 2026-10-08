@@ -54,6 +54,7 @@ namespace CommandStore
                 {"folder", snippet.folder},
                 {"tags", snippet.tags},
                 {"favorite", snippet.favorite},
+                {"danger", std::string{toString(snippet.danger)}},
                 {"uses", snippet.uses},
                 {"lastUsed", snippet.lastUsed},
             };
@@ -79,6 +80,7 @@ namespace CommandStore
             if (json.contains("tags") && json["tags"].is_array())
                 snippet.tags = json["tags"].get<std::vector<std::string>>();
             snippet.favorite = json.value("favorite", false);
+            snippet.danger = dangerLevelFromString(json.value("danger", std::string{}));
             snippet.uses = json.value("uses", std::int64_t{0});
             snippet.lastUsed = json.value("lastUsed", std::int64_t{0});
             return snippet;
