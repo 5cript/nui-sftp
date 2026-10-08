@@ -12,6 +12,8 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <map>
 #include <ranges>
 #include <string_view>
 #include <type_traits>
@@ -98,6 +100,101 @@ namespace CommandStore
                     return rows;
                 rows.push_back(reader(statement));
             }
+        }
+
+        Result<std::vector<Snippet>> selectSnippets(sqlite3* database)
+        {
+            return Sqlite::Statement::prepare(
+                       database,
+                       "SELECT id, name, command, folder, tags, favorite, uses, last_used FROM snippets "
+                       "ORDER BY name COLLATE NOCASE ASC, id ASC"
+            )
+                .and_then(
+                    [](Sqlite::Statement list)
+                    {
+                        return fetchAll(list, readSnippet);
+                    }
+                );
+        }
+
+        Result<std::vector<SnippetFolder>> selectFolders(sqlite3* database)
+        {
+            return Sqlite::Statement::prepare(
+                       database,
+                       "SELECT id, name, icon, position FROM snippet_folders "
+                       "ORDER BY position ASC, name COLLATE NOCASE ASC, id ASC"
+            )
+                .and_then(
+                    [](Sqlite::Statement list)
+                    {
+                        return fetchAll(list, readFolder);
+                    }
+                );
+        }
+
+        /**
+         * @brief Inserts or updates by id, which must be set. Updates never touch uses/lastUsed.
+         */
+        Result<Snippet> writeSnippet(sqlite3* database, Snippet const& snippet)
+        {
+            return Sqlite::Statement::prepare(
+                       database,
+                       "INSERT INTO snippets(id, name, command, folder, tags, favorite, uses, last_used) "
+                       "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
+                       "ON CONFLICT(id) DO UPDATE SET "
+                       "name = excluded.name, command = excluded.command, folder = excluded.folder, "
+                       "tags = excluded.tags, favorite = excluded.favorite "
+                       "RETURNING id, name, command, folder, tags, favorite, uses, last_used"
+            )
+                .and_then(
+                    [&](Sqlite::Statement upsert) -> Result<Snippet>
+                    {
+                        upsert.bind(1, snippet.id)
+                            .bind(2, snippet.name)
+                            .bind(3, snippet.command)
+                            .bind(4, snippet.folder)
+                            .bind(5, tagsToJson(snippet.tags))
+                            .bind(6, static_cast<std::int64_t>(snippet.favorite ? 1 : 0))
+                            .bind(7, snippet.uses)
+                            .bind(8, snippet.lastUsed);
+                        return upsert.step().and_then(
+                            [&](bool hasRow) -> Result<Snippet>
+                            {
+                                if (!hasRow)
+                                    return Sqlite::failure("snippet upsert returned no row");
+                                return readSnippet(upsert);
+                            }
+                        );
+                    }
+                );
+        }
+
+        /**
+         * @brief Inserts or updates by id, which must be set.
+         */
+        Result<SnippetFolder> writeFolder(sqlite3* database, SnippetFolder const& folder)
+        {
+            return Sqlite::Statement::prepare(
+                       database,
+                       "INSERT INTO snippet_folders(id, name, icon, position) VALUES(?1, ?2, ?3, ?4) "
+                       "ON CONFLICT(id) DO UPDATE SET "
+                       "name = excluded.name, icon = excluded.icon, position = excluded.position "
+                       "RETURNING id, name, icon, position"
+            )
+                .and_then(
+                    [&](Sqlite::Statement upsert) -> Result<SnippetFolder>
+                    {
+                        upsert.bind(1, folder.id).bind(2, folder.name).bind(3, folder.icon).bind(4, folder.position);
+                        return upsert.step().and_then(
+                            [&](bool hasRow) -> Result<SnippetFolder>
+                            {
+                                if (!hasRow)
+                                    return Sqlite::failure("folder upsert returned no row");
+                                return readFolder(upsert);
+                            }
+                        );
+                    }
+                );
         }
 
         constexpr char const* schemaVersion1 = R"sql(
@@ -258,6 +355,70 @@ namespace CommandStore
                             .transform([](bool) {});
                     }
                 );
+        }
+
+        /**
+         * @brief Stores decided import entries; runs inside the caller's transaction.
+         */
+        Result<ImportSummary> importSnippets(std::vector<ImportEntry> const& entries)
+        {
+            auto folders = selectFolders(database.get());
+            if (!folders)
+                return Sqlite::failure(std::move(folders.error()));
+
+            std::map<std::string, std::string> folderIds{};
+            auto nextPosition = std::int64_t{0};
+            for (auto const& folder : *folders)
+            {
+                folderIds.try_emplace(folder.name, folder.id);
+                nextPosition = std::max(nextPosition, folder.position + 1);
+            }
+
+            ImportSummary summary{};
+            const auto folderOf = [&](ImportEntry const& entry) -> Result<std::string> {
+                if (!entry.folderId.empty())
+                {
+                    if (std::ranges::none_of(*folders, [&entry](SnippetFolder const& folder) {
+                            return folder.id == entry.folderId;
+                        }))
+                        return Sqlite::failure(fmt::format("import target folder {} does not exist", entry.folderId));
+                    return entry.folderId;
+                }
+                if (entry.snippet.folder.empty())
+                    return std::string{};
+                if (const auto known = folderIds.find(entry.snippet.folder); known != folderIds.end())
+                    return known->second;
+                return writeFolder(
+                           database.get(),
+                           SnippetFolder{.id = generateId(), .name = entry.snippet.folder, .position = nextPosition++}
+                )
+                    .transform([&](SnippetFolder const& created) {
+                        folderIds.emplace(created.name, created.id);
+                        ++summary.foldersCreated;
+                        return created.id;
+                    });
+            };
+
+            for (auto const& entry : entries)
+            {
+                auto written = folderOf(entry).and_then([&](std::string const& folderId) {
+                    return writeSnippet(
+                        database.get(),
+                        Snippet{
+                            .id = entry.replaces.empty() ? generateId() : entry.replaces,
+                            .name = entry.snippet.name,
+                            .command = entry.snippet.command,
+                            .folder = folderId,
+                            .tags = entry.snippet.tags,
+                            .favorite = entry.snippet.favorite,
+                        }
+                    );
+                });
+                if (!written)
+                    return Sqlite::failure(std::move(written.error()));
+                ++(entry.replaces.empty() ? summary.added : summary.replaced);
+            }
+            return summary;
         }
     };
 
@@ -534,20 +695,7 @@ namespace CommandStore
             *impl_->strand,
             [impl = impl_, onComplete = std::move(onComplete)]()
             {
-                complete<std::vector<Snippet>>(
-                    onComplete,
-                    Sqlite::Statement::prepare(
-                        impl->database.get(),
-                        "SELECT id, name, command, folder, tags, favorite, uses, last_used FROM snippets "
-                        "ORDER BY name COLLATE NOCASE ASC, id ASC"
-                    )
-                        .and_then(
-                            [](Sqlite::Statement list)
-                            {
-                                return fetchAll(list, readSnippet);
-                            }
-                        )
-                );
+                complete<std::vector<Snippet>>(onComplete, selectSnippets(impl->database.get()));
             }
         );
     }
@@ -561,39 +709,7 @@ namespace CommandStore
                 if (snippet.id.empty())
                     snippet.id = generateId();
 
-                complete<Snippet>(
-                    onComplete,
-                    Sqlite::Statement::prepare(
-                        impl->database.get(),
-                        "INSERT INTO snippets(id, name, command, folder, tags, favorite, uses, last_used) "
-                        "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
-                        "ON CONFLICT(id) DO UPDATE SET "
-                        "name = excluded.name, command = excluded.command, folder = excluded.folder, "
-                        "tags = excluded.tags, favorite = excluded.favorite "
-                        "RETURNING id, name, command, folder, tags, favorite, uses, last_used"
-                    )
-                        .and_then(
-                            [&](Sqlite::Statement upsert) -> Result<Snippet>
-                            {
-                                upsert.bind(1, snippet.id)
-                                    .bind(2, snippet.name)
-                                    .bind(3, snippet.command)
-                                    .bind(4, snippet.folder)
-                                    .bind(5, tagsToJson(snippet.tags))
-                                    .bind(6, static_cast<std::int64_t>(snippet.favorite ? 1 : 0))
-                                    .bind(7, snippet.uses)
-                                    .bind(8, snippet.lastUsed);
-                                return upsert.step().and_then(
-                                    [&](bool hasRow) -> Result<Snippet>
-                                    {
-                                        if (!hasRow)
-                                            return Sqlite::failure("snippet upsert returned no row");
-                                        return readSnippet(upsert);
-                                    }
-                                );
-                            }
-                        )
-                );
+                complete<Snippet>(onComplete, writeSnippet(impl->database.get(), snippet));
             }
         );
     }
@@ -657,20 +773,7 @@ namespace CommandStore
             *impl_->strand,
             [impl = impl_, onComplete = std::move(onComplete)]()
             {
-                complete<std::vector<SnippetFolder>>(
-                    onComplete,
-                    Sqlite::Statement::prepare(
-                        impl->database.get(),
-                        "SELECT id, name, icon, position FROM snippet_folders "
-                        "ORDER BY position ASC, name COLLATE NOCASE ASC, id ASC"
-                    )
-                        .and_then(
-                            [](Sqlite::Statement list)
-                            {
-                                return fetchAll(list, readFolder);
-                            }
-                        )
-                );
+                complete<std::vector<SnippetFolder>>(onComplete, selectFolders(impl->database.get()));
             }
         );
     }
@@ -684,28 +787,32 @@ namespace CommandStore
                 if (folder.id.empty())
                     folder.id = generateId();
 
-                complete<SnippetFolder>(
+                complete<SnippetFolder>(onComplete, writeFolder(impl->database.get(), folder));
+            }
+        );
+    }
+
+    void Store::importSnippets(std::vector<ImportEntry> entries, std::function<void(Result<ImportSummary>)> onComplete)
+    {
+        boost::asio::dispatch(
+            *impl_->strand,
+            [impl = impl_, entries = std::move(entries), onComplete = std::move(onComplete)]()
+            {
+                complete<ImportSummary>(
                     onComplete,
-                    Sqlite::Statement::prepare(
-                        impl->database.get(),
-                        "INSERT INTO snippet_folders(id, name, icon, position) VALUES(?1, ?2, ?3, ?4) "
-                        "ON CONFLICT(id) DO UPDATE SET "
-                        "name = excluded.name, icon = excluded.icon, position = excluded.position "
-                        "RETURNING id, name, icon, position"
-                    )
+                    Sqlite::Transaction::begin(impl->database.get())
                         .and_then(
-                            [&](Sqlite::Statement upsert) -> Result<SnippetFolder>
+                            [&](Sqlite::Transaction transaction)
                             {
-                                upsert.bind(1, folder.id)
-                                    .bind(2, folder.name)
-                                    .bind(3, folder.icon)
-                                    .bind(4, folder.position);
-                                return upsert.step().and_then(
-                                    [&](bool hasRow) -> Result<SnippetFolder>
+                                return impl->importSnippets(entries).and_then(
+                                    [&](ImportSummary summary)
                                     {
-                                        if (!hasRow)
-                                            return Sqlite::failure("folder upsert returned no row");
-                                        return readFolder(upsert);
+                                        return transaction.commit().transform(
+                                            [summary]()
+                                            {
+                                                return summary;
+                                            }
+                                        );
                                     }
                                 );
                             }

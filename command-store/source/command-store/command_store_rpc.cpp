@@ -1,4 +1,7 @@
 #include <command-store/command_store_rpc.hpp>
+#include <command-store/snippet_transfer.hpp>
+
+#include <fmt/format.h>
 
 #include <array>
 #include <chrono>
@@ -94,7 +97,7 @@ namespace CommandStore
         /**
          * @brief Every handler StoreRpc registers; kept in sync with its register functions.
          */
-        constexpr std::array<std::string_view, 12> methodNames{
+        constexpr std::array<std::string_view, 13> methodNames{
             "CommandStore::recordExecution",
             "CommandStore::listHistory",
             "CommandStore::setHistoryFlags",
@@ -107,6 +110,7 @@ namespace CommandStore
             "CommandStore::listFolders",
             "CommandStore::upsertFolder",
             "CommandStore::deleteFolder",
+            "CommandStore::importSnippets",
         };
 
         /**
@@ -147,6 +151,7 @@ namespace CommandStore
         registerListFolders();
         registerUpsertFolder();
         registerDeleteFolder();
+        registerImportSnippets();
     }
 
     void StoreRpc::registerRecordExecution()
@@ -405,6 +410,45 @@ namespace CommandStore
                     store_->deleteFolder(
                         parameters["id"].get<std::string>(),
                         replySuccess(shareReply(std::move(reply)))
+                    );
+                }
+            );
+    }
+
+    void StoreRpc::registerImportSnippets()
+    {
+        on("CommandStore::importSnippets")
+            .perform(
+                [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
+                {
+                    if (!RpcHelper::ParameterVerifyView{reply, "CommandStore::importSnippets", parameters}.hasValueDeep(
+                            "entries"
+                        ))
+                        return;
+
+                    auto entries = SnippetTransfer::importEntriesFromJson(parameters["entries"]);
+                    if (!entries)
+                    {
+                        return reply.error(fmt::format(
+                            "invalid import entry {} (error {})",
+                            entries.error().entryIndex,
+                            static_cast<int>(entries.error().error)
+                        ));
+                    }
+
+                    store_->importSnippets(
+                        std::move(*entries),
+                        [reply = shareReply(std::move(reply))](Result<ImportSummary> result)
+                        {
+                            if (!result)
+                                return reply->error(result.error().message);
+                            (*reply)({
+                                {"success", true},
+                                {"added", result->added},
+                                {"replaced", result->replaced},
+                                {"foldersCreated", result->foldersCreated},
+                            });
+                        }
                     );
                 }
             );

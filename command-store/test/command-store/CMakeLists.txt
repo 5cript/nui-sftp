@@ -3,6 +3,8 @@ include(GoogleTest)
 add_executable(
     nui-sftp-command-store-test
     command_store.test.cpp
+    snippet_transfer.test.cpp
+    snippet_import_plan.test.cpp
 )
 
 find_package(GTest CONFIG REQUIRED)

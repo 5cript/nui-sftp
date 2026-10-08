@@ -144,6 +144,19 @@ namespace CommandStore
          */
         void deleteFolder(std::string id, std::function<void(Result<void>)> onComplete = {});
 
+        /**
+         * @brief Stores decided import entries in one transaction, all or nothing.
+         *
+         * Folders given by name are matched by name and created when missing. An entry with
+         * replaces set overwrites that snippet, keeping its usage counters.
+         *
+         * @param onComplete Receives the counts of added and replaced snippets and created folders.
+         */
+        void importSnippets(
+            std::vector<ImportEntry> entries,
+            std::function<void(Result<ImportSummary>)> onComplete = {}
+        );
+
       private:
         struct Implementation;
 

@@ -115,6 +115,64 @@ namespace CommandStore
     };
 
     /**
+     * @brief A snippet as exported and imported, with its folder by name instead of id.
+     */
+    struct TransferSnippet
+    {
+        /** @brief Display name. */
+        std::string name{};
+
+        /** @brief The command template, may contain {{variables}}. */
+        std::string command{};
+
+        /** @brief Name of the containing folder; empty means root. */
+        std::string folder{};
+
+        /** @brief Free-form tags. */
+        std::vector<std::string> tags{};
+
+        /** @brief User-marked favorite. */
+        bool favorite{false};
+
+        bool operator==(TransferSnippet const&) const = default;
+    };
+
+    /**
+     * @brief One snippet to store in an import, with its target already decided.
+     */
+    struct ImportEntry
+    {
+        /** @brief The snippet; its folder name is only used when folderId is empty. */
+        TransferSnippet snippet{};
+
+        /**
+         * @brief Id of the target folder. When empty, a non-empty snippet.folder names the folder,
+         *        which is created when missing; otherwise the snippet goes to the root.
+         */
+        std::string folderId{};
+
+        /** @brief Id of an existing snippet to overwrite; empty adds a new snippet. */
+        std::string replaces{};
+
+        bool operator==(ImportEntry const&) const = default;
+    };
+
+    /**
+     * @brief Outcome of an import.
+     */
+    struct ImportSummary
+    {
+        /** @brief Snippets that were added. */
+        std::int64_t added{0};
+
+        /** @brief Existing snippets that were overwritten. */
+        std::int64_t replaced{0};
+
+        /** @brief Folders created because no folder of that name existed. */
+        std::int64_t foldersCreated{0};
+    };
+
+    /**
      * @brief Error reported by store operations.
      */
     struct Error
