@@ -25,6 +25,25 @@ namespace SecureShell
             target.clear();
         }
 
+        /**
+         * @brief Describes why reading a key file failed, libssh only returns SSH_EOF or SSH_ERROR for it.
+         * @param importResult Return value of ssh_pki_import_pubkey_file or ssh_pki_import_privkey_file.
+         * @param keyKind "public" or "private".
+         * @param keyFile The key file that was read.
+         */
+        std::string
+        describeKeyImportFailure(int importResult, std::string_view keyKind, std::filesystem::path const& keyFile)
+        {
+            if (importResult == SSH_EOF)
+                return fmt::format("Cannot open the {} key file '{}'", keyKind, u8Path(keyFile));
+            if (keyKind == "private")
+                return fmt::format(
+                    "Cannot load the private key file '{}', it is not a valid key or the passphrase is wrong",
+                    u8Path(keyFile)
+                );
+            return fmt::format("The public key file '{}' is not a valid key", u8Path(keyFile));
+        }
+
         void removeFromContainer(auto& container, auto* ptr, bool isBackElement)
         {
             if (isBackElement && container.back().get() == ptr)
@@ -600,6 +619,7 @@ namespace SecureShell
             );
         }
 
+        std::optional<std::string> keyFailure{};
         if (result.result != SSH_AUTH_SUCCESS && sessionOptions.sshKeyPrivate)
         {
             const auto sshKeyPrivate = sessionOptions.sshKeyPrivate.value();
@@ -645,6 +665,13 @@ namespace SecureShell
                     return static_cast<ssh::Session&>(*session).userauthPublickey(privateKey.underlying());
                 }
             );
+
+            if (result.index == 1 && result.result != SSH_OK)
+                keyFailure = describeKeyImportFailure(result.result, "public", *maybeSshKeyPublic);
+            else if (result.index == 2 && result.result == SSH_AUTH_DENIED)
+                keyFailure = fmt::format("The server does not accept the public key '{}'", u8Path(*maybeSshKeyPublic));
+            else if (result.index == 3 && result.result != SSH_OK)
+                keyFailure = describeKeyImportFailure(result.result, "private", sshKeyPrivate);
         }
 
         const auto usePasswordAuth = !sshOptions.usePasswordAuth || sshOptions.usePasswordAuth.value();
@@ -697,6 +724,9 @@ namespace SecureShell
             secureWipe(buf);
         }
 
+        if (keyFailure && result.result == SSH_EOF)
+            return std::unexpected(fmt::format("Failed to authenticate: {}", *keyFailure));
+
         if (result.result != SSH_AUTH_SUCCESS)
         {
             std::string authResult = "";
@@ -715,9 +745,11 @@ namespace SecureShell
                     authResult = "Authentication again";
                     break;
                 default:
-                    authResult = "Unknown authentication result";
+                    authResult = fmt::format("Unknown authentication result {}", result.result);
                     break;
             }
+            if (keyFailure)
+                return std::unexpected(fmt::format("Failed to authenticate: {}\n{}", authResult, *keyFailure));
             return std::unexpected(fmt::format("Failed to authenticate: {}", authResult));
         }
 

@@ -2,6 +2,7 @@
 
 #include "common_fixture.hpp"
 #include <ssh/session.hpp>
+#include <ssh/u8_path.hpp>
 #include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
@@ -252,6 +253,41 @@ namespace SecureShell::Test
         );
 
         EXPECT_FALSE(session.has_value());
+    }
+
+    TEST_F(SshSessionTests, ConnectWithUnreadableKeyFileNamesTheKeyFile)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        const auto missingKey = programDirectory / "temp" / "missing_key";
+        auto options = getSessionOptions(result->port);
+        options.sshKeyPrivate = missingKey;
+        options.sshOptions->usePasswordAuth = false;
+
+        auto session = makeSession(
+            options,
+            +[](char const*, char*, std::size_t, int, int, void*)
+            {
+                return -1;
+            },
+            nullptr,
+            nullptr,
+            nullptr,
+            []() {}
+        );
+
+        ASSERT_FALSE(session.has_value());
+        const auto& error = session.error();
+        EXPECT_NE(error.find("Cannot open the private key file"), std::string::npos) << error;
+        EXPECT_NE(error.find(u8Path(missingKey)), std::string::npos) << error;
+        EXPECT_EQ(error.find("Unknown authentication result"), std::string::npos) << error;
     }
 
     TEST_F(SshSessionTests, ConnectFailsWithWrongPortWithinTheTimeout)
