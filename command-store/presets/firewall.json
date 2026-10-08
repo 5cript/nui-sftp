@@ -1,0 +1,68 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Firewall",
+        "icon": "shield",
+        "description": {
+            "en_US": "ufw, firewalld, nftables and fail2ban.",
+            "de_DE": "ufw, firewalld, nftables und fail2ban."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Status (ufw)",
+            "command": "sudo ufw status verbose",
+            "tags": ["ufw"]
+        },
+        {
+            "name": "Allow port (ufw)",
+            "command": "sudo ufw allow {{port}}/tcp",
+            "tags": ["ufw"]
+        },
+        {
+            "name": "Allow address on port (ufw)",
+            "command": "sudo ufw allow from {{address}} to any port {{port}}",
+            "tags": ["ufw"]
+        },
+        {
+            "name": "Remove allowed port (ufw)",
+            "command": "sudo ufw delete allow {{port}}/tcp",
+            "tags": ["ufw"]
+        },
+        {
+            "name": "Configuration (firewalld)",
+            "command": "sudo firewall-cmd --list-all",
+            "tags": ["firewalld"]
+        },
+        {
+            "name": "Open port (firewalld)",
+            "command": "sudo firewall-cmd --permanent --add-port={{port}}/tcp && sudo firewall-cmd --reload",
+            "tags": ["firewalld"]
+        },
+        {
+            "name": "Close port (firewalld)",
+            "command": "sudo firewall-cmd --permanent --remove-port={{port}}/tcp && sudo firewall-cmd --reload",
+            "tags": ["firewalld"]
+        },
+        {
+            "name": "Ruleset (nftables)",
+            "command": "sudo nft list ruleset",
+            "tags": ["nftables"]
+        },
+        {
+            "name": "Rules (iptables)",
+            "command": "sudo iptables -L -n -v --line-numbers",
+            "tags": ["iptables"]
+        },
+        {
+            "name": "Jail status (fail2ban)",
+            "command": "sudo fail2ban-client status {{jail}}",
+            "tags": ["fail2ban"]
+        },
+        {
+            "name": "Unban address (fail2ban)",
+            "command": "sudo fail2ban-client set {{jail}} unbanip {{address}}",
+            "tags": ["fail2ban"]
+        }
+    ]
+}

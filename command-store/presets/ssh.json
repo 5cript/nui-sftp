@@ -1,0 +1,73 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "SSH",
+        "icon": "key",
+        "description": {
+            "en_US": "Keys, tunnels, jump hosts and known hosts.",
+            "de_DE": "Schlüssel, Tunnel, Jump-Hosts und bekannte Hosts."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Generate Ed25519 key",
+            "command": "ssh-keygen -t ed25519 -C \"{{comment}}\"",
+            "tags": ["keys"]
+        },
+        {
+            "name": "Install public key on host",
+            "command": "ssh-copy-id {{user}}@{{host}}",
+            "tags": ["keys"]
+        },
+        {
+            "name": "Key fingerprint",
+            "command": "ssh-keygen -lf {{keyFile}}",
+            "tags": ["keys"]
+        },
+        {
+            "name": "Keys in agent",
+            "command": "ssh-add -l",
+            "tags": ["keys"]
+        },
+        {
+            "name": "Authorized keys",
+            "command": "cat ~/.ssh/authorized_keys",
+            "tags": ["keys"]
+        },
+        {
+            "name": "Local port forward",
+            "command": "ssh -N -L {{localPort}}:{{targetHost}}:{{targetPort}} {{user}}@{{host}}",
+            "tags": ["tunnels"]
+        },
+        {
+            "name": "Remote port forward",
+            "command": "ssh -N -R {{remotePort}}:localhost:{{localPort}} {{user}}@{{host}}",
+            "tags": ["tunnels"]
+        },
+        {
+            "name": "SOCKS proxy",
+            "command": "ssh -N -D {{localPort}} {{user}}@{{host}}",
+            "tags": ["tunnels"]
+        },
+        {
+            "name": "Connect through jump host",
+            "command": "ssh -J {{jumpUser}}@{{jumpHost}} {{user}}@{{host}}",
+            "tags": ["connect"]
+        },
+        {
+            "name": "Effective client configuration",
+            "command": "ssh -G {{host}}",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Forget host key",
+            "command": "ssh-keygen -R {{host}}",
+            "tags": ["known hosts"]
+        },
+        {
+            "name": "Check server configuration",
+            "command": "sudo sshd -t",
+            "tags": ["configuration"]
+        }
+    ]
+}

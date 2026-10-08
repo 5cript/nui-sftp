@@ -1,0 +1,58 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Archives",
+        "icon": "attachment-zip-file",
+        "description": {
+            "en_US": "Pack, unpack and stream tar and zip archives.",
+            "de_DE": "tar- und zip-Archive packen, entpacken und streamen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Create tar.gz",
+            "command": "tar -czf {{archiveName}}.tar.gz {{path}}",
+            "tags": ["tar"]
+        },
+        {
+            "name": "Create tar.zst",
+            "command": "tar --zstd -cf {{archiveName}}.tar.zst {{path}}",
+            "tags": ["tar"]
+        },
+        {
+            "name": "Extract tar archive",
+            "command": "tar -xf {{archive}} -C {{destination}}",
+            "tags": ["tar"]
+        },
+        {
+            "name": "List tar archive",
+            "command": "tar -tf {{archive}}",
+            "tags": ["tar"]
+        },
+        {
+            "name": "Create zip",
+            "command": "zip -r {{archiveName}}.zip {{path}}",
+            "tags": ["zip"]
+        },
+        {
+            "name": "Extract zip",
+            "command": "unzip {{archive}} -d {{destination}}",
+            "tags": ["zip"]
+        },
+        {
+            "name": "List zip",
+            "command": "unzip -l {{archive}}",
+            "tags": ["zip"]
+        },
+        {
+            "name": "Compress file, keep original",
+            "command": "gzip -k {{file}}",
+            "tags": ["gzip"]
+        },
+        {
+            "name": "Copy directory to host as stream",
+            "command": "tar -czf - {{path}} | ssh {{user}}@{{host}} \"tar -xzf - -C {{destination}}\"",
+            "tags": ["tar", "ssh"]
+        }
+    ]
+}

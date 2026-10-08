@@ -27,14 +27,29 @@ class SnippetImportDialog
      */
     Nui::ElementRenderer operator()();
 
+    /** @brief Where the snippets come from; names the incoming side of a conflict. */
+    enum class Source
+    {
+        Pasted,
+        Preset,
+    };
+
     struct OpenOptions
     {
         /** @brief The preselected target; the user can change it in the dialog. */
         CommandStore::SnippetImport::Target target{};
+
+        /** @brief JSON the editor starts with instead of being empty. */
+        std::string text{};
+
+        /** @brief Starts at the review step when the text holds snippets. */
+        bool startAtReview{false};
+
+        Source source{Source::Pasted};
     };
 
     /**
-     * @brief Opens the dialog at its first step with an empty editor.
+     * @brief Opens the dialog, by default at its first step with an empty editor.
      */
     void open(OpenOptions options);
 

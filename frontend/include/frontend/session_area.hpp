@@ -8,6 +8,7 @@
 #include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
 #include <frontend/dialog/snippet_import_dialog.hpp>
+#include <frontend/dialog/snippet_presets_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -24,6 +25,7 @@ class SessionArea
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
         SnippetImportDialog* snippetImportDialog,
+        SnippetPresetsDialog* snippetPresetsDialog,
         Toolbar* toolbar,
         CommandStoreClient* commandStoreClient
     );

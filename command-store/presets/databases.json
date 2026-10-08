@@ -1,0 +1,73 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Databases",
+        "icon": "database",
+        "description": {
+            "en_US": "PostgreSQL and MySQL or MariaDB administration on the server.",
+            "de_DE": "PostgreSQL- und MySQL- oder MariaDB-Verwaltung auf dem Server."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Connect (PostgreSQL)",
+            "command": "sudo -u postgres psql",
+            "tags": ["postgres"]
+        },
+        {
+            "name": "List databases (PostgreSQL)",
+            "command": "sudo -u postgres psql -l",
+            "tags": ["postgres"]
+        },
+        {
+            "name": "Database sizes (PostgreSQL)",
+            "command": "sudo -u postgres psql -c \"SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database ORDER BY pg_database_size(datname) DESC\"",
+            "tags": ["postgres"]
+        },
+        {
+            "name": "Active queries (PostgreSQL)",
+            "command": "sudo -u postgres psql -c \"SELECT pid, usename, datname, state, query FROM pg_stat_activity WHERE state <> 'idle'\"",
+            "tags": ["postgres"]
+        },
+        {
+            "name": "Dump database (PostgreSQL)",
+            "command": "sudo -u postgres pg_dump -Fc {{database}} > {{database}}.dump",
+            "tags": ["postgres", "backup"]
+        },
+        {
+            "name": "Restore dump (PostgreSQL)",
+            "command": "sudo -u postgres pg_restore -d {{database}} < {{dumpFile}}",
+            "tags": ["postgres", "backup"]
+        },
+        {
+            "name": "Connect (MySQL)",
+            "command": "sudo mysql",
+            "tags": ["mysql"]
+        },
+        {
+            "name": "List databases (MySQL)",
+            "command": "sudo mysql -e \"SHOW DATABASES\"",
+            "tags": ["mysql"]
+        },
+        {
+            "name": "Database sizes (MySQL)",
+            "command": "sudo mysql -e \"SELECT table_schema, ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS mb FROM information_schema.tables GROUP BY table_schema ORDER BY mb DESC\"",
+            "tags": ["mysql"]
+        },
+        {
+            "name": "Running queries (MySQL)",
+            "command": "sudo mysql -e \"SHOW FULL PROCESSLIST\"",
+            "tags": ["mysql"]
+        },
+        {
+            "name": "Dump database (MySQL)",
+            "command": "sudo mysqldump --single-transaction {{database}} > {{database}}.sql",
+            "tags": ["mysql", "backup"]
+        },
+        {
+            "name": "Restore dump (MySQL)",
+            "command": "sudo mysql {{database}} < {{dumpFile}}",
+            "tags": ["mysql", "backup"]
+        }
+    ]
+}

@@ -60,6 +60,7 @@ struct MainPage::Implementation
     /// read from it.
     CommandStoreClient commandStoreClient;
     SnippetImportDialog snippetImportDialog;
+    SnippetPresetsDialog snippetPresetsDialog;
     SessionArea sessionArea;
     Settings settings;
     Licenses licenses;
@@ -85,7 +86,8 @@ struct MainPage::Implementation
         , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
         , commandStoreClient{}
         , snippetImportDialog{"SnippetImportDialog", &commandStoreClient}
-        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &snippetImportDialog, &toolbar, &commandStoreClient}
+        , snippetPresetsDialog{"SnippetPresetsDialog", &commandStoreClient, &snippetImportDialog}
+        , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &snippetImportDialog, &snippetPresetsDialog, &toolbar, &commandStoreClient}
         , settings{stateHolder, events, [this](){
             return sessionArea.getActiveSessionLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog, newSessionDialog}
@@ -219,6 +221,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->filePropertyDialog(),
         impl_->archiveTransferDialog(),
         impl_->snippetImportDialog(),
+        impl_->snippetPresetsDialog(),
         impl_->directConnectDialog(),
         impl_->newSessionDialog(),
         impl_->multiInputDialog(),

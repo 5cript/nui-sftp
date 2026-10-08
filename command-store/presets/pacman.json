@@ -1,0 +1,88 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Pacman",
+        "icon": "product",
+        "description": {
+            "en_US": "Package management on Arch Linux and its derivatives.",
+            "de_DE": "Paketverwaltung unter Arch Linux und Ableitungen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Upgrade",
+            "command": "sudo pacman -Syu",
+            "tags": ["update"]
+        },
+        {
+            "name": "Available updates",
+            "command": "pacman -Qu",
+            "tags": ["update"]
+        },
+        {
+            "name": "Search package",
+            "command": "pacman -Ss {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package details",
+            "command": "pacman -Si {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Installed package details",
+            "command": "pacman -Qi {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Install package",
+            "command": "sudo pacman -S {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Remove package with dependencies",
+            "command": "sudo pacman -Rns {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Remove orphans",
+            "command": "sudo pacman -Rns $(pacman -Qtdq)",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Clean cache of uninstalled packages",
+            "command": "sudo pacman -Sc",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Explicitly installed packages",
+            "command": "pacman -Qe",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package owning file",
+            "command": "pacman -Qo {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Files of package",
+            "command": "pacman -Ql {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package providing file",
+            "command": "sudo pacman -Fy && pacman -F {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Check package files",
+            "command": "sudo pacman -Qkk {{package}}",
+            "tags": ["verify"]
+        },
+        {
+            "name": "Recent pacman log",
+            "command": "tail -n 50 /var/log/pacman.log",
+            "tags": ["history"]
+        }
+    ]
+}

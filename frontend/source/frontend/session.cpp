@@ -165,6 +165,7 @@ struct Session::Implementation
               params.events,
               params.confirmDialog,
               params.snippetImportDialog,
+              params.snippetPresetsDialog,
               [this](std::string const& command, bool execute)
               {
                   runInTerminal(command, execute);

@@ -1,0 +1,135 @@
+/* Preset folders dialog: a grid of cards, one per shipped folder. */
+
+.snippet-presets-dialog {
+    --spd-mono: "JetBrains Mono", Inconsolata, "Hack", Consolas, monospace;
+
+    box-sizing: border-box;
+    width: min(880px, 90vw);
+    height: min(640px, calc(100vh - 200px));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+}
+
+.snippet-presets-dialog-intro {
+    font-size: 0.875rem;
+    color: var(--color-secondary);
+}
+
+.snippet-presets-dialog-grid-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.snippet-presets-dialog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 10px;
+}
+
+.snippet-presets-dialog-card {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--background-color) 80%, var(--anti-brightness-mixin) 4%);
+    border: 1px solid var(--border-color-fields);
+    border-radius: 6px;
+}
+
+.snippet-presets-dialog-card:hover {
+    border-color: color-mix(in srgb, var(--theme-color) 50%, var(--border-color-fields));
+}
+
+.snippet-presets-dialog-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.snippet-presets-dialog-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--theme-color) 14%, var(--background-color-fields));
+}
+
+.snippet-presets-dialog-icon svg {
+    width: 14px;
+    height: 14px;
+    fill: var(--theme-color);
+}
+
+.snippet-presets-dialog-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.snippet-presets-dialog-badge {
+    flex: none;
+    margin-left: auto;
+    padding: 0 8px;
+    border: 1px solid var(--border-color-fields);
+    border-radius: 999px;
+    background: var(--brighter-background);
+    font-size: 0.7rem;
+    line-height: 18px;
+    color: var(--color-secondary);
+}
+
+.snippet-presets-dialog-description {
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+}
+
+.snippet-presets-dialog-samples {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 8px;
+    background: var(--background-color-fields);
+    border: 1px solid var(--border-color-fields);
+    border-radius: 4px;
+}
+
+.snippet-presets-dialog-sample {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--spd-mono);
+    font-size: 0.74rem;
+    line-height: 1.45em;
+}
+
+.snippet-presets-dialog-card-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--subdued-text);
+}
+
+.snippet-presets-dialog-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snippet-presets-dialog-status:not(:empty)::before {
+    content: "· ";
+}

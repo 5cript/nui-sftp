@@ -1,0 +1,78 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "DNF",
+        "icon": "product",
+        "description": {
+            "en_US": "Package management on Fedora, RHEL and their relatives.",
+            "de_DE": "Paketverwaltung unter Fedora, RHEL und Verwandten."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Upgrade",
+            "command": "sudo dnf upgrade --refresh",
+            "tags": ["update"]
+        },
+        {
+            "name": "Available updates",
+            "command": "dnf check-update",
+            "tags": ["update"]
+        },
+        {
+            "name": "Search package",
+            "command": "dnf search {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package details",
+            "command": "dnf info {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Install package",
+            "command": "sudo dnf install {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Remove package",
+            "command": "sudo dnf remove {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Remove unused packages",
+            "command": "sudo dnf autoremove",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Clean package cache",
+            "command": "sudo dnf clean all",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Installed packages",
+            "command": "dnf list --installed",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package providing file",
+            "command": "dnf provides {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Files of package",
+            "command": "rpm -ql {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Transaction history",
+            "command": "dnf history",
+            "tags": ["history"]
+        },
+        {
+            "name": "Undo transaction",
+            "command": "sudo dnf history undo {{transaction}}",
+            "tags": ["history"]
+        }
+    ]
+}

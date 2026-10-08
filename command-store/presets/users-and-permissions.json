@@ -1,0 +1,88 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Users & Permissions",
+        "icon": "user-settings",
+        "description": {
+            "en_US": "Accounts, groups, ownership and sudo rights.",
+            "de_DE": "Konten, Gruppen, Besitzer und sudo-Rechte."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Logged in users",
+            "command": "w",
+            "tags": ["users"]
+        },
+        {
+            "name": "Recent logins",
+            "command": "last -n 20",
+            "tags": ["users"]
+        },
+        {
+            "name": "My identity",
+            "command": "id",
+            "tags": ["users"]
+        },
+        {
+            "name": "Create user",
+            "command": "sudo useradd -m -s /bin/bash {{user}}",
+            "tags": ["users"]
+        },
+        {
+            "name": "Set password",
+            "command": "sudo passwd {{user}}",
+            "tags": ["users"]
+        },
+        {
+            "name": "Lock account",
+            "command": "sudo passwd -l {{user}}",
+            "tags": ["users"]
+        },
+        {
+            "name": "Unlock account",
+            "command": "sudo passwd -u {{user}}",
+            "tags": ["users"]
+        },
+        {
+            "name": "Delete user",
+            "command": "sudo userdel {{user}}",
+            "tags": ["users"]
+        },
+        {
+            "name": "Add user to group",
+            "command": "sudo usermod -aG {{group}} {{user}}",
+            "tags": ["groups"]
+        },
+        {
+            "name": "Sudo rights of user",
+            "command": "sudo -l -U {{user}}",
+            "tags": ["sudo"]
+        },
+        {
+            "name": "Edit sudoers",
+            "command": "sudo visudo",
+            "tags": ["sudo"]
+        },
+        {
+            "name": "Change owner recursively",
+            "command": "sudo chown -R {{owner}}:{{group}} {{path}}",
+            "tags": ["ownership"]
+        },
+        {
+            "name": "Make executable",
+            "command": "chmod +x {{file}}",
+            "tags": ["permissions"]
+        },
+        {
+            "name": "Directory permissions to 755",
+            "command": "find {{path}} -type d -exec chmod 755 {} +",
+            "tags": ["permissions"]
+        },
+        {
+            "name": "Permissions along path",
+            "command": "namei -l {{path}}",
+            "tags": ["permissions"]
+        }
+    ]
+}

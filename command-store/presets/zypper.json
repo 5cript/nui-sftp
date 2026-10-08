@@ -1,0 +1,78 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "zypper",
+        "icon": "product",
+        "description": {
+            "en_US": "Package management on openSUSE and SUSE Linux Enterprise.",
+            "de_DE": "Paketverwaltung unter openSUSE und SUSE Linux Enterprise."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Refresh and update",
+            "command": "sudo zypper refresh && sudo zypper update",
+            "tags": ["update"]
+        },
+        {
+            "name": "Distribution upgrade (Tumbleweed)",
+            "command": "sudo zypper dist-upgrade",
+            "tags": ["update"]
+        },
+        {
+            "name": "Available updates",
+            "command": "zypper list-updates",
+            "tags": ["update"]
+        },
+        {
+            "name": "Search package",
+            "command": "zypper search {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Package details",
+            "command": "zypper info {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Install package",
+            "command": "sudo zypper install {{package}}",
+            "tags": ["install"]
+        },
+        {
+            "name": "Remove package with dependencies",
+            "command": "sudo zypper remove --clean-deps {{package}}",
+            "tags": ["remove"]
+        },
+        {
+            "name": "Package providing file",
+            "command": "zypper search --provides {{file}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Files of package",
+            "command": "rpm -ql {{package}}",
+            "tags": ["search"]
+        },
+        {
+            "name": "Repositories",
+            "command": "zypper repos -d",
+            "tags": ["repositories"]
+        },
+        {
+            "name": "Clean package cache",
+            "command": "sudo zypper clean --all",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Lock package version",
+            "command": "sudo zypper addlock {{package}}",
+            "tags": ["versions"]
+        },
+        {
+            "name": "Release locked package",
+            "command": "sudo zypper removelock {{package}}",
+            "tags": ["versions"]
+        }
+    ]
+}

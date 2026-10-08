@@ -1,0 +1,53 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "File Transfer",
+        "icon": "upload",
+        "description": {
+            "en_US": "rsync, scp and downloads between machines.",
+            "de_DE": "rsync, scp und Downloads zwischen Rechnern."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Copy to host (rsync)",
+            "command": "rsync -avzP {{source}} {{user}}@{{host}}:{{destination}}",
+            "tags": ["rsync"]
+        },
+        {
+            "name": "Copy from host (rsync)",
+            "command": "rsync -avzP {{user}}@{{host}}:{{source}} {{destination}}",
+            "tags": ["rsync"]
+        },
+        {
+            "name": "Mirror directory, preview",
+            "command": "rsync -avzn --delete {{source}}/ {{destination}}/",
+            "tags": ["rsync"]
+        },
+        {
+            "name": "Mirror directory",
+            "command": "rsync -avz --delete {{source}}/ {{destination}}/",
+            "tags": ["rsync"]
+        },
+        {
+            "name": "Copy to host (scp)",
+            "command": "scp {{file}} {{user}}@{{host}}:{{destination}}",
+            "tags": ["scp"]
+        },
+        {
+            "name": "Download file",
+            "command": "curl -fLO {{url}}",
+            "tags": ["download"]
+        },
+        {
+            "name": "Resume download",
+            "command": "wget -c {{url}}",
+            "tags": ["download"]
+        },
+        {
+            "name": "Serve directory on localhost over HTTP",
+            "command": "python3 -m http.server --bind 127.0.0.1 {{port}}",
+            "tags": ["http"]
+        }
+    ]
+}

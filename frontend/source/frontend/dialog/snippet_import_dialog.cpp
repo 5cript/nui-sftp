@@ -145,6 +145,7 @@ struct SnippetImportDialog::Implementation
     std::unique_ptr<ScriptNuiComponents::Dialog> dialog{};
 
     Target target{};
+    SnippetImportDialog::Source source{SnippetImportDialog::Source::Pasted};
     /** @brief Target choices of the select, (label, choice id); observed, the folders change. */
     Nui::Observed<std::vector<std::pair<std::string, std::string>>> targetChoices{};
     Nui::Observed<std::pair<std::string, std::string>> targetChoice{};
@@ -654,7 +655,8 @@ Nui::ElementRenderer SnippetImportDialog::Implementation::conflictCard(std::size
     auto const& otherTags = earlier ? earlier->tags : planned.existing->tags;
 
     const auto otherTitle = language->get("snippetImportDialog", planned.existing ? "existing" : "earlier");
-    const auto pastedTitle = language->get("snippetImportDialog", "pasted");
+    const auto pastedTitle =
+        language->get("snippetImportDialog", source == SnippetImportDialog::Source::Preset ? "preset" : "pasted");
     // Only what differs is compared; a conflict differs in the command, the tags or both.
     const auto sides = [&](std::string const& caption, Nui::ElementRenderer other, Nui::ElementRenderer pasted)
     {
@@ -844,7 +846,8 @@ Nui::ElementRenderer SnippetImportDialog::operator()()
 void SnippetImportDialog::open(OpenOptions options)
 {
     impl_->target = std::move(options.target);
-    impl_->draft.clear();
+    impl_->source = options.source;
+    impl_->draft = options.text;
     impl_->resolutions.clear();
     impl_->step = Step::Paste;
     impl_->isOpen = true;
@@ -852,6 +855,7 @@ void SnippetImportDialog::open(OpenOptions options)
     impl_->editor.emplace(
         Components::CodeEditor::Settings{
             .language = "json",
+            .initialValue = std::move(options.text),
             .onChange = [this](std::string const& changed)
             {
                 impl_->draft = changed;
@@ -879,5 +883,8 @@ void SnippetImportDialog::open(OpenOptions options)
         .mayCloseWithoutButton = false,
     });
     impl_->replan();
-    impl_->editor->focus();
+    if (options.startAtReview && impl_->plan && !impl_->plan->snippets.empty())
+        impl_->goTo(Step::Review);
+    else
+        impl_->editor->focus();
 }

@@ -1,0 +1,103 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Docker",
+        "icon": "shipping-status",
+        "description": {
+            "en_US": "Inspect, enter and clean up containers and images.",
+            "de_DE": "Container und Images untersuchen, betreten und aufräumen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Running containers",
+            "command": "docker ps",
+            "tags": ["containers"]
+        },
+        {
+            "name": "All containers",
+            "command": "docker ps -a --format \"table {{.Names}}\\t{{.Image}}\\t{{.Status}}\"",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Follow container logs",
+            "command": "docker logs -f --tail 200 {{container}}",
+            "tags": ["logs"]
+        },
+        {
+            "name": "Shell into container",
+            "command": "docker exec -it {{container}} sh",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Restart container",
+            "command": "docker restart {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Stop container",
+            "command": "docker stop {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Inspect container",
+            "command": "docker inspect {{container}}",
+            "tags": ["containers"]
+        },
+        {
+            "name": "Resource usage",
+            "command": "docker stats --no-stream",
+            "tags": ["monitoring"]
+        },
+        {
+            "name": "Copy file out of container",
+            "command": "docker cp {{container}}:{{path}} .",
+            "tags": ["files"]
+        },
+        {
+            "name": "List images",
+            "command": "docker images",
+            "tags": ["images"]
+        },
+        {
+            "name": "Pull image",
+            "command": "docker pull {{image}}",
+            "tags": ["images"]
+        },
+        {
+            "name": "Run throwaway container",
+            "command": "docker run --rm -it {{image}} sh",
+            "tags": ["images"]
+        },
+        {
+            "name": "List volumes",
+            "command": "docker volume ls",
+            "tags": ["volumes"]
+        },
+        {
+            "name": "List networks",
+            "command": "docker network ls",
+            "tags": ["networks"]
+        },
+        {
+            "name": "Start Docker daemon",
+            "command": "sudo systemctl start docker",
+            "tags": ["daemon"]
+        },
+        {
+            "name": "Disk usage",
+            "command": "docker system df",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Remove unused images",
+            "command": "docker image prune",
+            "tags": ["cleanup"]
+        },
+        {
+            "name": "Remove unused data",
+            "command": "docker system prune",
+            "tags": ["cleanup"]
+        }
+    ]
+}

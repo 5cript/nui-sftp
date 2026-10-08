@@ -3,6 +3,7 @@
 #include <frontend/command_store/command_store_client.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/snippet_import_dialog.hpp>
+#include <frontend/dialog/snippet_presets_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 
 #include <nui/event_system/observed_value.hpp>
@@ -28,6 +29,7 @@ class CommandSnippetsPanel
      * @param events Frontend event hub; not owned.
      * @param confirmDialog Dialog for destructive confirmations; not owned.
      * @param snippetImportDialog Dialog for importing pasted snippets; not owned.
+     * @param snippetPresetsDialog Dialog offering the shipped preset folders; not owned.
      * @param runInTerminal Sends a command to the owning session's last interacted terminal.
      *                      The bool decides whether the command runs immediately (true) or is
      *                      only inserted for editing (false).
@@ -39,6 +41,7 @@ class CommandSnippetsPanel
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
         SnippetImportDialog* snippetImportDialog,
+        SnippetPresetsDialog* snippetPresetsDialog,
         std::function<void(std::string const&, bool)> runInTerminal,
         Nui::Observed<bool>* connectionLost
     );

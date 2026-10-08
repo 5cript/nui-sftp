@@ -1,0 +1,83 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Networking",
+        "icon": "world",
+        "description": {
+            "en_US": "Addresses, ports, DNS and HTTP checks.",
+            "de_DE": "Adressen, Ports, DNS und HTTP-Prüfungen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Addresses",
+            "command": "ip -brief address",
+            "tags": ["interfaces"]
+        },
+        {
+            "name": "Routes",
+            "command": "ip route",
+            "tags": ["interfaces"]
+        },
+        {
+            "name": "Listening ports",
+            "command": "sudo ss -tulpn",
+            "tags": ["ports"]
+        },
+        {
+            "name": "Established connections",
+            "command": "ss -tnp state established",
+            "tags": ["ports"]
+        },
+        {
+            "name": "Process using port",
+            "command": "sudo lsof -i :{{port}}",
+            "tags": ["ports"]
+        },
+        {
+            "name": "Port reachable",
+            "command": "nc -zv {{host}} {{port}}",
+            "tags": ["ports"]
+        },
+        {
+            "name": "Ping",
+            "command": "ping -c 4 {{host}}",
+            "tags": ["reachability"]
+        },
+        {
+            "name": "Trace path",
+            "command": "tracepath {{host}}",
+            "tags": ["reachability"]
+        },
+        {
+            "name": "DNS lookup",
+            "command": "dig +short {{name}}",
+            "tags": ["dns"]
+        },
+        {
+            "name": "Reverse DNS lookup",
+            "command": "dig +short -x {{address}}",
+            "tags": ["dns"]
+        },
+        {
+            "name": "Resolve with system resolver",
+            "command": "getent ahosts {{name}}",
+            "tags": ["dns"]
+        },
+        {
+            "name": "Public IP address (ifconfig.me)",
+            "command": "curl -s https://ifconfig.me",
+            "tags": ["http"]
+        },
+        {
+            "name": "HTTP response headers",
+            "command": "curl -sSI {{url}}",
+            "tags": ["http"]
+        },
+        {
+            "name": "HTTP timing",
+            "command": "curl -o /dev/null -s -w \"dns %{time_namelookup}s  connect %{time_connect}s  total %{time_total}s\\n\" {{url}}",
+            "tags": ["http"]
+        }
+    ]
+}

@@ -1,0 +1,78 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "systemd",
+        "icon": "process",
+        "description": {
+            "en_US": "Start, stop and inspect services and timers.",
+            "de_DE": "Dienste und Timer starten, stoppen und untersuchen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Service status",
+            "command": "systemctl status {{unit}} --no-pager",
+            "tags": ["status"]
+        },
+        {
+            "name": "Restart service",
+            "command": "sudo systemctl restart {{unit}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Start service",
+            "command": "sudo systemctl start {{unit}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Stop service",
+            "command": "sudo systemctl stop {{unit}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Enable and start service",
+            "command": "sudo systemctl enable --now {{unit}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Disable and stop service",
+            "command": "sudo systemctl disable --now {{unit}}",
+            "tags": ["control"]
+        },
+        {
+            "name": "Failed units",
+            "command": "systemctl --failed",
+            "tags": ["status"]
+        },
+        {
+            "name": "Running services",
+            "command": "systemctl list-units --type=service --state=running",
+            "tags": ["status"]
+        },
+        {
+            "name": "Timers",
+            "command": "systemctl list-timers",
+            "tags": ["timers"]
+        },
+        {
+            "name": "Show unit file",
+            "command": "systemctl cat {{unit}}",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Edit unit override",
+            "command": "sudo systemctl edit {{unit}}",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Reload unit files",
+            "command": "sudo systemctl daemon-reload",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Slowest units at boot",
+            "command": "systemd-analyze blame | head -20",
+            "tags": ["boot"]
+        }
+    ]
+}

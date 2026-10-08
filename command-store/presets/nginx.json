@@ -1,0 +1,53 @@
+{
+    "version": 1,
+    "preset": {
+        "name": "Nginx",
+        "icon": "internet-browser",
+        "description": {
+            "en_US": "Test and reload the configuration, read the logs.",
+            "de_DE": "Konfiguration testen und neu laden, Logs lesen."
+        }
+    },
+    "snippets": [
+        {
+            "name": "Test configuration",
+            "command": "sudo nginx -t",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Reload",
+            "command": "sudo nginx -t && sudo systemctl reload nginx",
+            "tags": ["control"]
+        },
+        {
+            "name": "Effective configuration",
+            "command": "sudo nginx -T",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Configuration files and server names",
+            "command": "sudo nginx -T 2>/dev/null | grep -E \"^# configuration file|^\\s*server_name\"",
+            "tags": ["configuration"]
+        },
+        {
+            "name": "Follow access log",
+            "command": "sudo tail -f /var/log/nginx/access.log",
+            "tags": ["logs"]
+        },
+        {
+            "name": "Follow error log",
+            "command": "sudo tail -f /var/log/nginx/error.log",
+            "tags": ["logs"]
+        },
+        {
+            "name": "Top client addresses",
+            "command": "sudo awk '{print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head -20",
+            "tags": ["logs"]
+        },
+        {
+            "name": "Status code counts",
+            "command": "sudo awk '{print $9}' /var/log/nginx/access.log | sort | uniq -c | sort -rn",
+            "tags": ["logs"]
+        }
+    ]
+}
