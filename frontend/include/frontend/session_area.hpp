@@ -7,6 +7,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
+#include <frontend/dialog/snippet_import_dialog.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -22,6 +23,7 @@ class SessionArea
         ConfirmDialog* confirmDialog,
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog,
+        SnippetImportDialog* snippetImportDialog,
         Toolbar* toolbar,
         CommandStoreClient* commandStoreClient
     );

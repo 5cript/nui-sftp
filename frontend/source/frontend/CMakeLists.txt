@@ -110,6 +110,7 @@ target_sources(
         dialog/direct_connect_dialog.cpp
         dialog/dialog_buttons_keyboard_support.cpp
         dialog/archive_transfer_dialog.cpp
+        dialog/snippet_import_dialog.cpp
         settings/general_settings.cpp
         settings/addressable_setting.cpp
         settings/optional_converters.cpp
@@ -252,6 +253,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/file_property_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/dialog/snippet_import_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/multi_input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/new_session_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/direct_connect_dialog.css"

@@ -1,6 +1,9 @@
 #include <frontend/session_components/command_snippets_panel.hpp>
 #include <frontend/session_components/command_panel_helpers.hpp>
 #include <frontend/notifications.hpp>
+#include <frontend/dialog/snippet_import_dialog.hpp>
+
+#include <command-store/snippet_transfer.hpp>
 
 #include <utility/command_template.hpp>
 #include <utility/language.hpp>
@@ -32,7 +35,6 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <ctime>
@@ -152,6 +154,7 @@ struct CommandSnippetsPanel::Implementation
     CommandStoreClient* client;
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
+    SnippetImportDialog* snippetImportDialog;
     std::function<void(std::string const&, bool)> runInTerminal;
     Nui::Observed<bool>* connectionLost;
 
@@ -206,12 +209,14 @@ struct CommandSnippetsPanel::Implementation
         CommandStoreClient* client,
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
+        SnippetImportDialog* snippetImportDialog,
         std::function<void(std::string const&, bool)> runInTerminal,
         Nui::Observed<bool>* connectionLost
     )
         : client{client}
         , events{events}
         , confirmDialog{confirmDialog}
+        , snippetImportDialog{snippetImportDialog}
         , runInTerminal{std::move(runInTerminal)}
         , connectionLost{connectionLost}
     {}
@@ -542,24 +547,23 @@ struct CommandSnippetsPanel::Implementation
     void copyVisibleSnippets() const
     {
         const auto& folders = client->folders().value();
-        auto exported = nlohmann::ordered_json::array();
         const auto visible = visibleSnippets();
+        std::vector<CommandStore::TransferSnippet> exported{};
+        exported.reserve(visible.size());
         for (auto const* snippet : visible)
         {
             const auto folder = std::ranges::find_if(folders, [snippet](CommandStore::SnippetFolder const& candidate) {
                 return candidate.id == snippet->folder;
             });
-            auto entry = nlohmann::ordered_json::object();
-            entry["name"] = snippet->name;
-            entry["command"] = snippet->command;
-            entry["folder"] = folder != folders.end() ? folder->name : std::string{};
-            entry["tags"] = snippet->tags;
-            entry["favorite"] = snippet->favorite;
-            exported.push_back(std::move(entry));
+            exported.push_back(CommandStore::TransferSnippet{
+                .name = snippet->name,
+                .command = snippet->command,
+                .folder = folder != folders.end() ? folder->name : std::string{},
+                .tags = snippet->tags,
+                .favorite = snippet->favorite,
+            });
         }
-        auto document = nlohmann::ordered_json::object();
-        document["version"] = 1;
-        document["snippets"] = std::move(exported);
+        const auto document = CommandStore::SnippetTransfer::toJson(exported);
 
         Nui::val::global("navigator")["clipboard"]
             .call<Nui::val>("writeText", document.dump(2))
@@ -586,6 +590,21 @@ struct CommandSnippetsPanel::Implementation
                     std::placeholders::_1
                 )
             );
+    }
+
+    /**
+     * @brief Imports into the selected folder or Unfiled; All and Favorites take the folders the
+     *        pasted JSON names.
+     */
+    void openImport()
+    {
+        auto const& selection = folderSelection.value();
+        auto target = CommandStore::SnippetImport::Target{};
+        if (selection == selectionUnfiled)
+            target.folderId = std::string{};
+        else if (selection.starts_with("folder:"))
+            target.folderId = selection.substr(7);
+        snippetImportDialog->open({.target = std::move(target)});
     }
 
     Nui::ElementRenderer renderSidebar();
@@ -1084,11 +1103,12 @@ CommandSnippetsPanel::CommandSnippetsPanel(
     CommandStoreClient* commandStoreClient,
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
+    SnippetImportDialog* snippetImportDialog,
     std::function<void(std::string const&, bool)> runInTerminal,
     Nui::Observed<bool>* connectionLost
 )
     : impl_{std::make_unique<Implementation>(
-          commandStoreClient, events, confirmDialog, std::move(runInTerminal), connectionLost
+          commandStoreClient, events, confirmDialog, snippetImportDialog, std::move(runInTerminal), connectionLost
       )}
 {
     // A null client means the backend store failed to open; the panel then only shows a notice.
@@ -1176,6 +1196,13 @@ Nui::ElementRenderer CommandSnippetsPanel::operator()()
                         impl_->copyVisibleSnippets();
                     },
                 }(Ui5Icons::copy(), span{}(language->get("commandSnippetsPanel", "copySnippets"))),
+                button{
+                    class_ = "cmds-button",
+                    title = language->get("commandSnippetsPanel", "importSnippetsTooltip"),
+                    onClick = [this](Nui::val) {
+                        impl_->openImport();
+                    },
+                }(Ui5Icons::paste(), span{}(language->get("commandSnippetsPanel", "importSnippets"))),
                 button{
                     class_ = "cmds-button cmds-button-primary",
                     title = language->get("commandSnippetsPanel", "newSnippetTooltip"),

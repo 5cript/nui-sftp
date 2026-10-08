@@ -11,6 +11,7 @@
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
+#include <frontend/dialog/snippet_import_dialog.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/command_store/command_store_client.hpp>
@@ -38,6 +39,7 @@ class Session
         ConfirmDialog* confirmDialog = nullptr;
         FilePropertyDialog* filePropertyDialog = nullptr;
         ArchiveTransferDialog* archiveTransferDialog = nullptr;
+        SnippetImportDialog* snippetImportDialog = nullptr;
         /** @brief The process global command store; commands executed in this session are recorded there. */
         CommandStoreClient* commandStoreClient = nullptr;
 

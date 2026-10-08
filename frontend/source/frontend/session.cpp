@@ -164,6 +164,7 @@ struct Session::Implementation
               params.commandStoreClient,
               params.events,
               params.confirmDialog,
+              params.snippetImportDialog,
               [this](std::string const& command, bool execute)
               {
                   runInTerminal(command, execute);

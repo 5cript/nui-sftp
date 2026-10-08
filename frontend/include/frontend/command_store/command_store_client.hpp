@@ -123,6 +123,18 @@ class CommandStoreClient
      */
     void deleteFolder(std::string id);
 
+    /**
+     * @brief Stores decided import entries in one transaction, then reloads snippets and folders.
+     *
+     * @param onImported Receives the counts of added and replaced snippets and created folders.
+     * @param onFailed Called after the failure was reported; nothing was stored.
+     */
+    void importSnippets(
+        std::vector<CommandStore::ImportEntry> entries,
+        std::function<void(CommandStore::ImportSummary const&)> onImported = {},
+        std::function<void()> onFailed = {}
+    );
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;

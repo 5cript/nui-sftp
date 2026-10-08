@@ -1,8 +1,10 @@
 #include <frontend/command_store/command_store_client.hpp>
 
+#include <command-store/snippet_transfer.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
+#include <nui/frontend/api/json.hpp>
 #include <nui/rpc.hpp>
 
 #include <fmt/format.h>
@@ -582,6 +584,39 @@ void CommandStoreClient::deleteFolder(std::string id)
                 reloadFolders();
                 reloadSnippets();
             }
+        },
+        parameters
+    );
+}
+
+void CommandStoreClient::importSnippets(
+    std::vector<ImportEntry> entries,
+    std::function<void(ImportSummary const&)> onImported,
+    std::function<void()> onFailed
+)
+{
+    auto parameters = Nui::val::object();
+    parameters.set("entries", Nui::JSON::parse(SnippetTransfer::importEntriesToJson(entries).dump()));
+
+    Nui::RpcClient::callWithBackChannel(
+        "CommandStore::importSnippets",
+        [this, onImported = std::move(onImported), onFailed = std::move(onFailed)](Nui::val response) {
+            if (!impl_->succeeded(response, "importSnippets"))
+            {
+                if (onFailed)
+                    onFailed();
+                return;
+            }
+
+            const ImportSummary summary{
+                .added = asInt64(response["added"]),
+                .replaced = asInt64(response["replaced"]),
+                .foldersCreated = asInt64(response["foldersCreated"]),
+            };
+            reloadFolders();
+            reloadSnippets();
+            if (onImported)
+                onImported(summary);
         },
         parameters
     );
