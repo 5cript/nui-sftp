@@ -97,7 +97,7 @@ namespace CommandStore
         /**
          * @brief Every handler StoreRpc registers; kept in sync with its register functions.
          */
-        constexpr std::array<std::string_view, 13> methodNames{
+        constexpr std::array<std::string_view, 14> methodNames{
             "CommandStore::recordExecution",
             "CommandStore::listHistory",
             "CommandStore::setHistoryFlags",
@@ -106,6 +106,7 @@ namespace CommandStore
             "CommandStore::listSnippets",
             "CommandStore::upsertSnippet",
             "CommandStore::deleteSnippet",
+            "CommandStore::deleteSnippets",
             "CommandStore::bumpSnippetUse",
             "CommandStore::listFolders",
             "CommandStore::upsertFolder",
@@ -147,6 +148,7 @@ namespace CommandStore
         registerListSnippets();
         registerUpsertSnippet();
         registerDeleteSnippet();
+        registerDeleteSnippets();
         registerBumpSnippetUse();
         registerListFolders();
         registerUpsertFolder();
@@ -326,6 +328,25 @@ namespace CommandStore
 
                     store_->deleteSnippet(
                         parameters["id"].get<std::string>(),
+                        replySuccess(shareReply(std::move(reply)))
+                    );
+                }
+            );
+    }
+
+    void StoreRpc::registerDeleteSnippets()
+    {
+        on("CommandStore::deleteSnippets")
+            .perform(
+                [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
+                {
+                    if (!RpcHelper::ParameterVerifyView{reply, "CommandStore::deleteSnippets", parameters}.hasValueDeep(
+                            "ids"
+                        ))
+                        return;
+
+                    store_->deleteSnippets(
+                        parameters["ids"].get<std::vector<std::string>>(),
                         replySuccess(shareReply(std::move(reply)))
                     );
                 }

@@ -104,6 +104,11 @@ class CommandStoreClient
     void deleteSnippet(std::string id);
 
     /**
+     * @brief Deletes several snippets; the list updates once instead of once per snippet.
+     */
+    void deleteSnippets(std::vector<std::string> const& ids);
+
+    /**
      * @brief Counts one run of a snippet and stamps its last use.
      */
     void bumpSnippetUse(std::string id);

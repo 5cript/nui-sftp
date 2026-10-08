@@ -152,6 +152,16 @@ namespace
             );
         }
 
+        Result<void> deleteSnippets(std::vector<std::string> ids)
+        {
+            return await<void>(
+                [&](auto&& onComplete)
+                {
+                    store_->deleteSnippets(std::move(ids), std::forward<decltype(onComplete)>(onComplete));
+                }
+            );
+        }
+
         Result<void> bumpSnippetUse(std::string id, std::int64_t nowEpoch)
         {
             return await<void>(
@@ -494,6 +504,22 @@ namespace
         const auto snippets = listSnippets();
         ASSERT_TRUE(snippets.has_value());
         EXPECT_TRUE(snippets->empty());
+    }
+
+    TEST_F(CommandStoreTests, DeleteSnippetsRemovesOnlyTheGivenIds)
+    {
+        openStore();
+        const auto first = upsertSnippet({.name = "List", .command = "ls"});
+        const auto second = upsertSnippet({.name = "Top", .command = "top"});
+        const auto kept = upsertSnippet({.name = "Free", .command = "free -h"});
+        ASSERT_TRUE(first.has_value() && second.has_value() && kept.has_value());
+
+        EXPECT_TRUE(deleteSnippets({first->id, second->id, "unknown"}).has_value());
+
+        const auto snippets = listSnippets();
+        ASSERT_TRUE(snippets.has_value());
+        ASSERT_EQ(snippets->size(), 1u);
+        EXPECT_EQ(snippets->front().id, kept->id);
     }
 
     TEST_F(CommandStoreTests, FoldersRoundTripAndOrderByPosition)

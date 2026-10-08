@@ -736,6 +736,48 @@ namespace CommandStore
         );
     }
 
+    void Store::deleteSnippets(std::vector<std::string> ids, std::function<void(Result<void>)> onComplete)
+    {
+        boost::asio::dispatch(
+            *impl_->strand,
+            [impl = impl_, ids = std::move(ids), onComplete = std::move(onComplete)]()
+            {
+                complete<void>(
+                    onComplete,
+                    Sqlite::Transaction::begin(impl->database.get())
+                        .and_then(
+                            [&](Sqlite::Transaction transaction)
+                            {
+                                return Sqlite::Statement::prepare(
+                                           impl->database.get(), "DELETE FROM snippets WHERE id = ?1"
+                                )
+                                    .and_then(
+                                        [&](Sqlite::Statement remove) -> Result<void>
+                                        {
+                                            for (auto const& id : ids)
+                                            {
+                                                remove.bind(1, id);
+                                                auto stepped = remove.step();
+                                                if (!stepped)
+                                                    return Sqlite::failure(std::move(stepped.error()));
+                                                remove.reset();
+                                            }
+                                            return {};
+                                        }
+                                    )
+                                    .and_then(
+                                        [&]()
+                                        {
+                                            return transaction.commit();
+                                        }
+                                    );
+                            }
+                        )
+                );
+            }
+        );
+    }
+
     void Store::bumpSnippetUse(std::string id, std::int64_t nowEpoch, std::function<void(Result<void>)> onComplete)
     {
         boost::asio::dispatch(
