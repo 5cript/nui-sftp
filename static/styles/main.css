@@ -202,6 +202,7 @@
 :root[data-theme="light"] {
     /* Dark / Light */
     --theme-color: #48a814;
+    --brighter-background: #f0f0f0;
     --background-color: #e0e0e0;
     --background-color-fields: #cdcdcd;
     --color: black;
