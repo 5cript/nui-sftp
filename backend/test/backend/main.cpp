@@ -12,6 +12,7 @@
 #include "test_file_tracking.hpp"
 #include "test_shell_integration.hpp"
 #include "test_ui_options.hpp"
+#include "test_environment.hpp"
 
 #include <log/log.hpp>
 

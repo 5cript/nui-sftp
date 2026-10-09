@@ -38,6 +38,14 @@ namespace Utility
                 g_free(p);
         }
     };
+    struct GStrvDeleter
+    {
+        void operator()(gchar** strings) const noexcept
+        {
+            if (strings)
+                g_strfreev(strings);
+        }
+    };
     struct GObjectDeleter
     {
         template <typename T>
@@ -51,6 +59,7 @@ namespace Utility
     using GErrorPtr = std::unique_ptr<GError, GErrorDeleter>;
     using GVariantPtr = std::unique_ptr<GVariant, GVariantDeleter>;
     using GcharPtr = std::unique_ptr<gchar, GFreeDeleter>;
+    using GStrvPtr = std::unique_ptr<gchar*, GStrvDeleter>;
 
     /**
      *  @brief Owning unique_ptr for any GObject-derived type (GDBusConnection, GUnixFDList,
