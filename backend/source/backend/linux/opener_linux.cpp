@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <backend/process/environment.hpp>
 #include <utility/localized_message.hpp>
 
 #include <utility/fd_guard.hpp>
@@ -321,6 +322,30 @@ namespace
     }
 
     /**
+     *  @brief Launch context that starts programs with the host environment instead of the AppImage one.
+     */
+    Utility::GObjectPtr<GAppLaunchContext> hostLaunchContext()
+    {
+        Utility::GObjectPtr<GAppLaunchContext> context{g_app_launch_context_new()};
+        Environment hostEnvironment;
+        hostEnvironment.loadFromCurrent();
+        auto const& variables = hostEnvironment.environment();
+
+        const Utility::GStrvPtr currentNames{g_listenv()};
+        for (auto** name = currentNames.get(); *name != nullptr; ++name)
+        {
+            if (!variables.contains(*name))
+                g_app_launch_context_unsetenv(context.get(), *name);
+        }
+        for (auto const& [name, value] : variables)
+        {
+            if (!name.empty())
+                g_app_launch_context_setenv(context.get(), name.c_str(), value.c_str());
+        }
+        return context;
+    }
+
+    /**
      *  @brief Ask the system's default handler (via the shared MIME DB / GAppInfo) to open
      *         @p path. Used for directories in openInFileManager, where the portal's
      *         OpenDirectory method is spec'd to open the fd's *parent* -- not useful when
@@ -333,8 +358,9 @@ namespace
         if (!uri)
             return std::unexpected{Utility::consumeGError(uriErrRaw, "g_filename_to_uri failed")};
 
+        auto context = hostLaunchContext();
         GError* launchErrRaw = nullptr;
-        const gboolean launched = g_app_info_launch_default_for_uri(uri.get(), nullptr, &launchErrRaw);
+        const gboolean launched = g_app_info_launch_default_for_uri(uri.get(), context.get(), &launchErrRaw);
         Log::info("Opener: launching file manager for URI '{}'", uri.get());
         if (!launched)
             return std::unexpected{Utility::consumeGError(launchErrRaw, "launch failed")};
