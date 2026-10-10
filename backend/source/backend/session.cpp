@@ -581,11 +581,11 @@ void Session::registerRpcSftpListDirectory()
                         if (!result.has_value())
                         {
                             const auto& error = result.error();
-                            return reply.error(
-                                error.message.empty()
-                                    ? SecureShell::SftpError::sftpErrorToComprehensible(error.sftpError)
-                                    : error.message
-                            );
+                            if (!error.message.empty())
+                                return reply.error(error.message);
+                            if (error.sftpError != SSH_FX_OK)
+                                return reply.error(SecureShell::SftpError::sftpErrorToComprehensible(error.sftpError));
+                            return reply.error("");
                         }
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
