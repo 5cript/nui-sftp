@@ -114,12 +114,19 @@ namespace Test
                 pty_->write(data);
                 written = true;
             }};
-            waitUntil(
+            const bool completed = waitUntil(
                 [&]() {
                     return written.load();
                 },
                 std::chrono::seconds{30}
             );
+            if (!completed)
+            {
+                // Ending the shell closes the slave, which fails the blocked write so the writer can be joined.
+                ADD_FAILURE() << "The shell did not take " << data.size() << " byte(s) of input.";
+                boost::system::error_code terminateError;
+                process_->terminate(terminateError);
+            }
             writer.join();
         }
 
