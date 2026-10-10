@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -85,9 +86,13 @@ namespace PTY
         std::vector<TerminalProcess> listProcesses(std::string const& terminalName)
         {
             std::vector<TerminalProcess> processes;
+            // The range-for increment throws, a /proc read error ends the scan with what was found so far.
             std::error_code iterationError;
-            for (auto const& entry : std::filesystem::directory_iterator("/proc", iterationError))
+            for (std::filesystem::directory_iterator iterator{"/proc", iterationError}, end;
+                 !iterationError && iterator != end;
+                 iterator.increment(iterationError))
             {
+                auto const& entry = *iterator;
                 const auto id = entry.path().filename().string();
                 if (id.empty() ||
                     !std::all_of(
@@ -113,7 +118,10 @@ namespace PTY
                     continue;
                 std::string cmdline;
                 std::getline(cmdlineFile, cmdline, '\0');
-                processes.push_back(TerminalProcess{.pid = std::stoi(id), .cmdline = std::move(cmdline)});
+                int pid = 0;
+                if (std::from_chars(id.data(), id.data() + id.size(), pid).ec != std::errc{})
+                    continue;
+                processes.push_back(TerminalProcess{.pid = pid, .cmdline = std::move(cmdline)});
             }
             return processes;
         }
