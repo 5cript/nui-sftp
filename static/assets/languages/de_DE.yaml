@@ -71,6 +71,7 @@ newSessionDialog:
 sideModel:
   failedToListDirectory: "Verzeichnis auflisten fehlgeschlagen"
   failedToListDirectoryText: "Beim Auflisten des Inhalts des Verzeichnisses '{}' ist ein Fehler aufgetreten."
+  failedToListDirectoryReasonText: "Beim Auflisten des Inhalts des Verzeichnisses '{}' ist ein Fehler aufgetreten: {}"
 remoteSideModel:
   newDirectory: "Neues Verzeichnis"
   enterNewDirectoryName: "Geben Sie den Namen des neuen Verzeichnisses ein"
@@ -1073,6 +1074,7 @@ places:
   documents: "Dokumente"
   downloads: "Downloads"
   home: "Persönlicher Ordner"
+  movies: "Filme"
   music: "Musik"
   pictures: "Bilder"
   videos: "Videos"

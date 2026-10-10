@@ -809,7 +809,10 @@ void LocalSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
     });
 }
 
-void LocalSideModel::onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries)
+void LocalSideModel::onDirectoryListing(
+    std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
+    std::string const& reason
+)
 {
     if (currentPath_.value().has_parent_path())
     {
@@ -822,7 +825,7 @@ void LocalSideModel::onDirectoryListing(std::optional<std::vector<SharedData::Di
             }
         );
     }
-    SideModel::onDirectoryListing(directoryEntries);
+    SideModel::onDirectoryListing(directoryEntries, reason);
 }
 
 void LocalSideModel::navigateTo(std::filesystem::path const& path)

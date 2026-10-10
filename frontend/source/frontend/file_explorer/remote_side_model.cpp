@@ -1226,7 +1226,8 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     preNavigatePath_ = currentPath_.value();
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
-        currentPath_.value(), std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1)
+        currentPath_.value(),
+        std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1, std::placeholders::_2)
     );
 }
 
@@ -1461,27 +1462,70 @@ void RemoteSideModel::onFileWatchAdded(
 void RemoteSideModel::setRemoteHome(std::filesystem::path home)
 {
     remoteHome_ = std::move(home);
+    remoteHomeDirectories_.reset();
 }
 
 void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
 {
     if (remoteHome_.empty())
         return callback({});
+    if (remoteHomeDirectories_)
+        return callback(existingDefaultPlaces());
 
-    const std::vector<std::pair<std::string, std::string>> defaults = {
-        {"home", remoteHome_.generic_string()},
-        {"desktop", (remoteHome_ / "Desktop").generic_string()},
-        {"downloads", (remoteHome_ / "Downloads").generic_string()},
-        {"documents", (remoteHome_ / "Documents").generic_string()},
-        {"pictures", (remoteHome_ / "Pictures").generic_string()},
-        {"videos", (remoteHome_ / "Videos").generic_string()},
-        {"music", (remoteHome_ / "Music").generic_string()},
+    fileEngine_->listDirectory(
+        remoteHome_,
+        [this, home = remoteHome_, callback = std::move(callback)](
+            std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
+        )
+        {
+            if (home != remoteHome_)
+                return callback({});
+
+            remoteHomeDirectories_.emplace();
+            if (!entries)
+                Log::warn("Failed to list the remote home directory for the default places: {}", info);
+            else
+            {
+                for (auto const& entry : *entries)
+                {
+                    const bool isDirectory =
+                        entry.isDirectory() || (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
+                    if (isDirectory)
+                        remoteHomeDirectories_->push_back(entry.path.filename().generic_string());
+                }
+            }
+            callback(existingDefaultPlaces());
+        }
+    );
+}
+
+std::vector<RemoteSideModel::PlaceEntry> RemoteSideModel::existingDefaultPlaces() const
+{
+    const std::vector<std::pair<std::string, std::string>> candidates = {
+        {"desktop", "Desktop"},
+        {"downloads", "Downloads"},
+        {"documents", "Documents"},
+        {"pictures", "Pictures"},
+        {"videos", "Videos"},
+        {"movies", "Movies"},
+        {"music", "Music"},
     };
 
-    std::vector<PlaceEntry> entries;
-    entries.reserve(defaults.size());
-    for (auto const& [kind, path] : defaults)
-        entries.push_back({.icon = iconForPlaceKind(kind), .name = placeDisplayName(kind, kind), .path = path});
-
-    callback(std::move(entries));
+    std::vector<PlaceEntry> entries{
+        {.icon = iconForPlaceKind("home"),
+            .name = placeDisplayName("home", "home"),
+            .path = remoteHome_.generic_string()}
+    };
+    for (auto const& [kind, directoryName] : candidates)
+    {
+        if (!remoteHomeDirectories_ ||
+            std::ranges::find(*remoteHomeDirectories_, directoryName) == remoteHomeDirectories_->end())
+            continue;
+        entries.push_back(
+            {.icon = iconForPlaceKind(kind),
+                .name = placeDisplayName(kind, kind),
+                .path = (remoteHome_ / directoryName).generic_string()}
+        );
+    }
+    return entries;
 }

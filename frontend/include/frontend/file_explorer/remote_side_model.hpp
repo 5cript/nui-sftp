@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -159,7 +160,14 @@ class RemoteSideModel
     );
 
   private:
+    std::vector<PlaceEntry> existingDefaultPlaces() const;
+
+  private:
     std::filesystem::path remoteHome_;
+    /**
+     * @brief Names of the directories in the remote home, listed once per home to filter the default places.
+     */
+    std::optional<std::vector<std::string>> remoteHomeDirectories_;
     SideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;

@@ -111,7 +111,10 @@ class SideModel : public NuiFileExplorer::ISideModel
     // Design smell:
     virtual bool isComplete() const;
 
-    virtual void onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries);
+    virtual void onDirectoryListing(
+        std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
+        std::string const& reason = {}
+    );
 
   protected:
     std::shared_ptr<FileEngine> fileEngine_{nullptr};

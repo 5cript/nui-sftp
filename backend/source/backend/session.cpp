@@ -574,11 +574,18 @@ void Session::registerRpcSftpListDirectory()
                     {
                         auto fut = channel->listDirectory(path);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to list directory: timeout");
+                            return reply.error("Timed out");
 
                         const auto result = fut.get();
                         if (!result.has_value())
-                            return reply.error("Failed to list directory: " + result.error().message);
+                        {
+                            const auto& error = result.error();
+                            return reply.error(
+                                error.message.empty()
+                                    ? SecureShell::SftpError::sftpErrorToComprehensible(error.sftpError)
+                                    : error.message
+                            );
+                        }
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
                         reply({{"entries", *result}});
