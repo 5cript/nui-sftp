@@ -40,6 +40,21 @@ class FileEngine
     void
     homeDirectory(std::function<void(std::optional<std::filesystem::path> const&, std::string const& info)> onComplete);
 
+    /**
+     * @brief Asks the backend for the XDG user directories configured on the server.
+     *
+     * @param home The remote home directory.
+     * @param onComplete Receives pairs of XDG name (such as "DESKTOP") and path, or std::nullopt and the reason on
+     * failure.
+     */
+    void userDirectories(
+        std::filesystem::path const& home,
+        std::function<void(
+            std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const&,
+            std::string const& info
+        )> onComplete
+    );
+
     void
     createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
     void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);

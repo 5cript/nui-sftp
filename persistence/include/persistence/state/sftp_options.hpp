@@ -71,10 +71,18 @@ namespace Persistence
         // How many of those a single bulk transfer may occupy.
         std::optional<int> bulkConcurrency{std::nullopt};
         std::optional<std::chrono::seconds> operationTimeout{std::nullopt};
+        // Whether ~/.config/user-dirs.dirs is read on the server to find the default places.
+        std::optional<bool> readUserDirectories{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(
         SftpOptions,
         (),
-        (downloadOptions, uploadOptions, defaultDirectory, concurrency, bulkConcurrency, operationTimeout)
+        (downloadOptions,
+            uploadOptions,
+            defaultDirectory,
+            concurrency,
+            bulkConcurrency,
+            operationTimeout,
+            readUserDirectories)
     )
 }

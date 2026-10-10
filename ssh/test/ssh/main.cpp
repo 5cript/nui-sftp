@@ -4,6 +4,7 @@
 #include "test_ssh_session.hpp"
 #include "test_sftp.hpp"
 #include "test_sftp_in_strand.hpp"
+#include "test_user_directories.hpp"
 
 #include <utility/node/node.hpp>
 

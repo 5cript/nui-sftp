@@ -349,7 +349,8 @@ namespace Persistence
                     },
                 .concurrency = defaultSftpConcurrency,
                 .bulkConcurrency = defaultBulkConcurrency,
-                .operationTimeout = 5s
+                .operationTimeout = 5s,
+                .readUserDirectories = true,
             };
 #pragma clang diagnostic pop
             addWarning(LoadWarningKind::AddedDefaultSftpOptions);

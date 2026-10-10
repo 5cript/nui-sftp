@@ -153,6 +153,56 @@ void FileEngine::homeDirectory(
     );
 }
 
+void FileEngine::userDirectories(
+    std::filesystem::path const& home,
+    std::function<
+        void(std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const&, std::string const& info)>
+        onComplete
+)
+{
+    lazyOpen(
+        [this, home, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot read user directories, no sftp channel");
+                onComplete(std::nullopt, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::userDirectories", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error") || !val.hasOwnProperty("directories"))
+                    {
+                        const auto error = val.hasOwnProperty("error") ? val["error"].as<std::string>()
+                                                                       : std::string{"No directories"};
+                        Log::warn("(Frontend) Failed to read user directories: {}", error);
+                        onComplete(std::nullopt, error);
+                        return;
+                    }
+
+                    std::vector<std::pair<std::string, std::filesystem::path>> directories;
+                    const auto list = val["directories"];
+                    const auto length = list["length"].as<int>();
+                    directories.reserve(length);
+                    for (int index = 0; index < length; ++index)
+                    {
+                        directories.emplace_back(
+                            list[index]["name"].as<std::string>(),
+                            std::filesystem::path{list[index]["path"].as<std::string>()}
+                        );
+                    }
+                    onComplete(std::move(directories), "Success");
+                },
+                channelId.value().value(),
+                home.generic_string()
+            );
+        }
+    );
+}
+
 void FileEngine::createDirectory(
     std::filesystem::path const& path,
     std::function<void(bool, std::string const& info)> onComplete

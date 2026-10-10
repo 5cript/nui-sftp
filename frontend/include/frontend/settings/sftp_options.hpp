@@ -66,6 +66,7 @@ struct SftpOptions : public GroupKeys
     // How many of those a single bulk transfer may occupy.
     NumberSetting<int, true> bulkConcurrency;
     NumberSetting<int, true> operationTimeoutSeconds;
+    BoolSetting<true> readUserDirectories;
 
     SftpOptions(SettingFactory const& factory, std::function<void()> const& onChange);
 

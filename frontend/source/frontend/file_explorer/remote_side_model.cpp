@@ -24,7 +24,9 @@
 #include <nui/rpc.hpp>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
+#include <string_view>
 
 using namespace std::string_literals;
 
@@ -1459,19 +1461,75 @@ void RemoteSideModel::onFileWatchAdded(
 
 // --- IPlacesProvider ---
 
-void RemoteSideModel::setRemoteHome(std::filesystem::path home)
+namespace
+{
+    struct PlaceCandidate
+    {
+        std::string_view kind;
+        /**
+         * @brief The name in user-dirs.dirs, such as DESKTOP for XDG_DESKTOP_DIR. Empty when XDG has no such entry.
+         */
+        std::string_view userDirectoryName;
+        std::string_view directoryName;
+    };
+
+    constexpr std::array<PlaceCandidate, 7> placeCandidates{{
+        {"desktop", "DESKTOP", "Desktop"},
+        {"downloads", "DOWNLOAD", "Downloads"},
+        {"documents", "DOCUMENTS", "Documents"},
+        {"pictures", "PICTURES", "Pictures"},
+        {"videos", "VIDEOS", "Videos"},
+        {"movies", "", "Movies"},
+        {"music", "MUSIC", "Music"},
+    }};
+}
+
+void RemoteSideModel::setRemoteHome(std::filesystem::path home, bool readUserDirectories)
 {
     remoteHome_ = std::move(home);
-    remoteHomeDirectories_.reset();
+    readUserDirectories_ = readUserDirectories;
+    remotePlaces_.reset();
 }
 
 void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
 {
     if (remoteHome_.empty())
         return callback({});
-    if (remoteHomeDirectories_)
-        return callback(existingDefaultPlaces());
+    if (remotePlaces_)
+        return callback(defaultPlaceEntries());
+    if (!readUserDirectories_)
+        return placesFromHomeListing(std::move(callback));
 
+    fileEngine_->userDirectories(
+        remoteHome_,
+        [this, home = remoteHome_, callback = std::move(callback)](
+            std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const& directories,
+            std::string const&
+        )
+        {
+            if (home != remoteHome_)
+                return callback({});
+            if (!directories || directories->empty())
+                return placesFromHomeListing(callback);
+
+            remotePlaces_.emplace();
+            for (auto const& candidate : placeCandidates)
+            {
+                if (candidate.userDirectoryName.empty())
+                    continue;
+                const auto directory = std::ranges::find(
+                    *directories, candidate.userDirectoryName, &std::pair<std::string, std::filesystem::path>::first
+                );
+                if (directory != directories->end())
+                    remotePlaces_->emplace_back(std::string{candidate.kind}, directory->second);
+            }
+            callback(defaultPlaceEntries());
+        }
+    );
+}
+
+void RemoteSideModel::placesFromHomeListing(std::function<void(std::vector<PlaceEntry>)> callback)
+{
     fileEngine_->listDirectory(
         remoteHome_,
         [this, home = remoteHome_, callback = std::move(callback)](
@@ -1481,50 +1539,46 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
             if (home != remoteHome_)
                 return callback({});
 
-            remoteHomeDirectories_.emplace();
+            remotePlaces_.emplace();
             if (!entries)
-                Log::warn("Failed to list the remote home directory for the default places: {}", info);
-            else
             {
-                for (auto const& entry : *entries)
-                {
-                    const bool isDirectory =
-                        entry.isDirectory() || (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
-                    if (isDirectory)
-                        remoteHomeDirectories_->push_back(entry.path.filename().generic_string());
-                }
+                Log::warn("Failed to list the remote home directory for the default places: {}", info);
+                return callback(defaultPlaceEntries());
             }
-            callback(existingDefaultPlaces());
+
+            for (auto const& candidate : placeCandidates)
+            {
+                const auto exists = std::ranges::any_of(
+                    *entries,
+                    [&candidate](SharedData::DirectoryEntry const& entry)
+                    {
+                        const bool isDirectory = entry.isDirectory() ||
+                            (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
+                        return isDirectory && entry.path.filename().generic_string() == candidate.directoryName;
+                    }
+                );
+                if (exists)
+                    remotePlaces_->emplace_back(std::string{candidate.kind}, remoteHome_ / candidate.directoryName);
+            }
+            callback(defaultPlaceEntries());
         }
     );
 }
 
-std::vector<RemoteSideModel::PlaceEntry> RemoteSideModel::existingDefaultPlaces() const
+std::vector<RemoteSideModel::PlaceEntry> RemoteSideModel::defaultPlaceEntries() const
 {
-    const std::vector<std::pair<std::string, std::string>> candidates = {
-        {"desktop", "Desktop"},
-        {"downloads", "Downloads"},
-        {"documents", "Documents"},
-        {"pictures", "Pictures"},
-        {"videos", "Videos"},
-        {"movies", "Movies"},
-        {"music", "Music"},
-    };
-
     std::vector<PlaceEntry> entries{
         {.icon = iconForPlaceKind("home"),
             .name = placeDisplayName("home", "home"),
             .path = remoteHome_.generic_string()}
     };
-    for (auto const& [kind, directoryName] : candidates)
+    if (!remotePlaces_)
+        return entries;
+
+    for (auto const& [kind, path] : *remotePlaces_)
     {
-        if (!remoteHomeDirectories_ ||
-            std::ranges::find(*remoteHomeDirectories_, directoryName) == remoteHomeDirectories_->end())
-            continue;
         entries.push_back(
-            {.icon = iconForPlaceKind(kind),
-                .name = placeDisplayName(kind, kind),
-                .path = (remoteHome_ / directoryName).generic_string()}
+            {.icon = iconForPlaceKind(kind), .name = placeDisplayName(kind, kind), .path = path.generic_string()}
         );
     }
     return entries;

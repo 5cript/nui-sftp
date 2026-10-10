@@ -124,6 +124,15 @@ class Session
     void registerRpcSftpHomeDirectory();
 
     /**
+     * Handles calls from the frontend to read the XDG user directories over sftp with the following payload:
+     * {
+     *     sftpChannelId: string,
+     *     home: string
+     * }
+     */
+    void registerRpcSftpUserDirectories();
+
+    /**
      * Handles calls from the frontend to create a directory over sftp with the following payload:
      * {
      *     sftpChannelId: string,

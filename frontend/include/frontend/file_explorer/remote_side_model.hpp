@@ -54,7 +54,13 @@ class RemoteSideModel
     }
     void requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback) override;
 
-    void setRemoteHome(std::filesystem::path home);
+    /**
+     * @brief Sets the remote home directory the default places are derived from.
+     *
+     * @param home The remote home directory.
+     * @param readUserDirectories Whether the places come from the user-dirs.dirs file of the server when it has one.
+     */
+    void setRemoteHome(std::filesystem::path home, bool readUserDirectories);
 
     // --- IFavoritesProvider ---
     NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
@@ -160,14 +166,16 @@ class RemoteSideModel
     );
 
   private:
-    std::vector<PlaceEntry> existingDefaultPlaces() const;
+    void placesFromHomeListing(std::function<void(std::vector<PlaceEntry>)> callback);
+    std::vector<PlaceEntry> defaultPlaceEntries() const;
 
   private:
     std::filesystem::path remoteHome_;
+    bool readUserDirectories_{true};
     /**
-     * @brief Names of the directories in the remote home, listed once per home to filter the default places.
+     * @brief Kind and path of the default places besides home, determined once per home.
      */
-    std::optional<std::vector<std::string>> remoteHomeDirectories_;
+    std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> remotePlaces_;
     SideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;

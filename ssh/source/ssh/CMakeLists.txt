@@ -9,6 +9,7 @@ add_library(
         sftp_session.cpp
         file_stream.cpp
         file_information.cpp
+        user_directories.cpp
 )
 
 target_include_directories(

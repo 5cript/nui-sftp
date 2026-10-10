@@ -95,6 +95,26 @@ const fakeFilesystem = finalizeFakeFs({
                     const mod = size % repeatable.length;
                     return repeatable.repeat(division) + repeatable.slice(0, mod);
                 })())
+            ]),
+            directory({ name: 'deutsch' }, [
+                directory({ name: '.config' }, [
+                    file('user-dirs.dirs', [
+                        '# This file is written by xdg-user-dirs-update',
+                        'XDG_DESKTOP_DIR="$HOME/Schreibtisch"',
+                        'XDG_DOWNLOAD_DIR="$HOME/Downloads"',
+                        'XDG_TEMPLATES_DIR="$HOME/"',
+                        'XDG_DOCUMENTS_DIR="$HOME/Dokumente"',
+                        'XDG_MUSIC_DIR="/srv/musik"',
+                        'XDG_PICTURES_DIR="$HOME/Bilder"',
+                        'XDG_VIDEOS_DIR="$HOME/Videos"',
+                        ''
+                    ].join('\n'))
+                ]),
+                directory({ name: 'Schreibtisch' }, []),
+                directory({ name: 'Downloads' }, []),
+                directory({ name: 'Dokumente' }, []),
+                directory({ name: 'Bilder' }, []),
+                directory({ name: 'Videos' }, [])
             ])
         ]),
         directory({ name: 'Users' }, [

@@ -10,6 +10,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/session.hpp>
+#include <ssh/user_directories.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -298,6 +299,21 @@ namespace SecureShell
          */
         std::expected<std::filesystem::path, Error> homeDirectoryInStrand();
 
+        /**
+         * @brief Reads the XDG user directories from <home>/.config/user-dirs.dirs. A missing file yields no
+         * directories instead of an error.
+         *
+         * @param home The home directory of the user, see homeDirectory.
+         * @return std::future<std::expected<std::vector<UserDirectory>, Error>>
+         */
+        std::future<std::expected<std::vector<UserDirectory>, Error>>
+        userDirectories(std::filesystem::path const& home);
+
+        /**
+         * @brief In-strand variant of userDirectories. Must be called from within the processing thread.
+         */
+        std::expected<std::vector<UserDirectory>, Error> userDirectoriesInStrand(std::filesystem::path const& home);
+
         std::future<std::expected<sftp_limits_struct, Error>> limits();
 
         /**
@@ -355,6 +371,12 @@ namespace SecureShell
         createSymLinkInStrand(std::filesystem::path const& target, std::filesystem::path const& linkPath);
 
       private:
+        /**
+         * @brief Reads a file into a string, stopping after maximumSize bytes.
+         */
+        std::expected<std::string, Error>
+        readSmallFileInStrand(std::filesystem::path const& path, std::size_t maximumSize);
+
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();
 
