@@ -30,8 +30,8 @@ namespace
     constexpr std::int64_t burstWindowMilliseconds = 3000;
 
     /**
-     * @brief Messages arriving this soon after a toast fold into it: they go to the log, but do not toast. One
-     *        failure often logs several related errors at once.
+     * @brief Messages arriving this soon after a toast fold into it unless they are more severe: they go to the log,
+     *        but do not toast. One failure often logs several related errors at once.
      */
     constexpr std::int64_t foldWindowMilliseconds = 250;
 
@@ -79,6 +79,7 @@ struct NotificationCenter::Implementation
     std::uint64_t nextId{1};
     /// When the toasts of the current burst window were shown.
     std::deque<std::int64_t> recentToasts{};
+    NotificationSeverity lastToastSeverity{NotificationSeverity::Info};
 
     explicit Implementation(FrontendEvents* events)
         : events{events}
@@ -141,11 +142,13 @@ struct NotificationCenter::Implementation
 
         while (!recentToasts.empty() && now - recentToasts.front() >= burstWindowMilliseconds)
             recentToasts.pop_front();
-        if (!recentToasts.empty() && now - recentToasts.back() < foldWindowMilliseconds)
+        if (!recentToasts.empty() && now - recentToasts.back() < foldWindowMilliseconds &&
+            severity <= lastToastSeverity)
             return;
         if (recentToasts.size() >= maximumToastsPerBurst)
             return;
         recentToasts.push_back(now);
+        lastToastSeverity = severity;
 
         toast.show({
             .message = std::move(message),
