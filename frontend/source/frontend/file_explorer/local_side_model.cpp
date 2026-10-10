@@ -670,8 +670,7 @@ void LocalSideModel::onDropExternal(
     bool issueWebkitWarning
 )
 {
-    if (issueWebkitWarning &&
-        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s))
+    if (issueWebkitWarning && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s)
     {
         confirmDialog_->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Primary,

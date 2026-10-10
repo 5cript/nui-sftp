@@ -3,6 +3,7 @@
 
 #include <nui/frontend/api/console.hpp>
 #include <nui/frontend/api/json.hpp>
+#include <nui/frontend/rpc_client.hpp>
 
 #include <climits>
 
@@ -95,7 +96,22 @@ namespace NuiFileExplorer
             Nui::val::global("chrome")["webview"].call<void>(
                 "postMessageWithAdditionalObjects", msg.dump(), files.val()
             );
-            result.delegatedToWebView2 = true;
+            result.delegatedToBackend = true;
+            return result;
+        }
+
+        // WKWebView hides the paths, the backend read them from the dragging pasteboard.
+        if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "wkwebview"s)
+        {
+            nlohmann::json claim = {
+                {"isLeft", sideModel.isLeft()},
+                {"dropMetadata", sideModel.dropMetadata()},
+            };
+            if (result.internalDropSubdir)
+                claim["subdir"] = *result.internalDropSubdir;
+
+            Nui::RpcClient::call("NativeFileDrop::claim", Nui::JSON::parse(claim.dump()));
+            result.delegatedToBackend = true;
             return result;
         }
 
@@ -208,9 +224,7 @@ namespace NuiFileExplorer
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
                     result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = extractedLink}});
-                    result.issueWebkitWarning =
-                        (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s ||
-                            STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s);
+                    result.issueWebkitWarning = STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s;
                     return result;
                 }
             }
@@ -223,13 +237,11 @@ namespace NuiFileExplorer
             // Improper fix of: https://www.cve.org/CVERecord?id=CVE-2025-13947
 
             auto uriList = dataTransferOpt->getData("text/uri-list");
-            if (!uriList.empty() &&
-                (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s))
+            if (!uriList.empty() && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s)
             {
                 Nui::WebApi::Console::log("URI list dropped: " + uriList);
             }
-            result.issueWebkitWarning =
-                (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkit"s);
+            result.issueWebkitWarning = STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s;
             return result;
         }
 

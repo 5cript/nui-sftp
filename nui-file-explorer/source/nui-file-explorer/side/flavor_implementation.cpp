@@ -31,7 +31,7 @@ namespace NuiFileExplorer
         if (!eventExtracted.has_value())
             return;
 
-        if (eventExtracted->delegatedToWebView2)
+        if (eventExtracted->delegatedToBackend)
             return;
 
         if (eventExtracted->externDroppedItems.has_value())
