@@ -551,7 +551,11 @@ namespace SecureShell
         if (optionResult != SSH_OK || user == nullptr || user.get()[0] == '\0')
             return std::unexpected(Error{.message = "Server did not report a home directory and the user is unknown"});
 
-        return pathFromU8(fmt::format("/home/{}", user.get()));
+        const auto guess = pathFromU8(fmt::format("/home/{}", user.get()));
+        const auto information = statInStrand(guess);
+        if (information && information->isDirectory())
+            return guess;
+        return std::filesystem::path{"/"};
     }
 
     std::future<std::expected<std::filesystem::path, SftpSession::Error>> SftpSession::homeDirectory()

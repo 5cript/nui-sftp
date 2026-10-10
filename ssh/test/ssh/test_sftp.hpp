@@ -294,6 +294,20 @@ namespace SecureShell::Test
         EXPECT_FALSE(listResult->empty());
     }
 
+    TEST_F(SftpTests, HomeDirectoryFallsBackToRootWhenGuessedHomeIsMissing)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        serverStartResult->command("realpathDotFailure");
+        serverStartResult->command("removeHome");
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/");
+    }
+
     TEST_F(SftpTests, CanReadUserDirectories)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
