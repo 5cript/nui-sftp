@@ -139,4 +139,30 @@ namespace Utility::Tests
         const auto line = ShellIntegration::remoteBootstrap();
         EXPECT_EQ(std::ranges::count(line, '\''), 2);
     }
+
+    TEST_F(ShellIntegrationTests, EnvironmentBootstrapFitsTheMacTypeahead)
+    {
+        // A macOS tty drops typeahead past 1024 bytes, the typed line must stay far below that.
+        for (auto const kind : {ShellKind::Bash, ShellKind::Sh, ShellKind::Zsh, ShellKind::Fish})
+        {
+            const auto line = ShellIntegration::environmentBootstrap(kind);
+            EXPECT_FALSE(line.empty());
+            EXPECT_LT(line.size(), 128u) << line;
+            EXPECT_NE(line.find(ShellIntegration::bootstrapVariable), std::string::npos) << line;
+        }
+        EXPECT_TRUE(ShellIntegration::environmentBootstrap(ShellKind::Unknown).empty());
+    }
+
+    TEST_F(ShellIntegrationTests, EnvironmentBootstrapCarriesTheHistoryMarker)
+    {
+        // The bash bootstrap deletes the history line that mentions __nui_preexec, which the typed eval
+        // does through the name of the variable.
+        EXPECT_NE(ShellIntegration::environmentBootstrap(ShellKind::Bash).find("__nui_preexec"), std::string::npos);
+    }
+
+    TEST_F(ShellIntegrationTests, EnvironmentBootstrapUnsetsTheVariable)
+    {
+        EXPECT_NE(ShellIntegration::environmentBootstrap(ShellKind::Bash).find("unset __nui_preexec_bootstrap"), std::string::npos);
+        EXPECT_NE(ShellIntegration::environmentBootstrap(ShellKind::Fish).find("set -e __nui_preexec_bootstrap"), std::string::npos);
+    }
 }
