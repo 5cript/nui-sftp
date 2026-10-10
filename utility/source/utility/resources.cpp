@@ -208,6 +208,14 @@ findFilesInSearchPaths(std::filesystem::path const& relativeRoot, std::filesyste
     return findFilesInSearchPaths(getSearchPath(relativeRoot), relativePattern);
 }
 
+std::filesystem::path resourceRoot(std::filesystem::path const& programDirectory)
+{
+    const auto contents = programDirectory.parent_path();
+    if (programDirectory.filename() == "MacOS" && contents.filename() == "Contents")
+        return contents / "Resources";
+    return contents;
+}
+
 std::optional<std::filesystem::path>
 mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPathString)
 {

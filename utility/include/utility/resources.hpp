@@ -7,6 +7,13 @@
 
 bool isCanonical(std::filesystem::path const& path);
 
+/**
+ * @brief Directory holding frontend, assets and themes for the running program.
+ * @details This is the parent of the program directory, or Contents/Resources inside a macOS app bundle.
+ * @param programDirectory Directory of the executable.
+ */
+std::filesystem::path resourceRoot(std::filesystem::path const& programDirectory);
+
 bool pointsToWithinDir(std::filesystem::path const& relativeRoot, std::filesystem::path const& path);
 
 std::vector<std::filesystem::path>

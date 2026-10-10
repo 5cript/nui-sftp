@@ -27,6 +27,12 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
+if [ "$(uname -s)" = "Darwin" ]; then
+    INSTALL_TARGET="${INSTALL_TARGET}" BUILD_DIRECTORY="${BUILD_DIRECTORY}" SOURCE_DIRECTORY="${SOURCE_DIRECTORY}" \
+        OMIT_FRONTEND="${OMIT_FRONTEND}" bash "${SCRIPT_DIR}/deploy_macos.sh"
+    exit 0
+fi
+
 # On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
 # Also set a variable for future reference.
 

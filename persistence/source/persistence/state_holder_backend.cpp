@@ -609,7 +609,7 @@ namespace Persistence
 
     void StateHolder::loadLanguageFiles(std::function<void(std::optional<nlohmann::json> const&)> const& onLoadComplete)
     {
-        const auto files = findFilesInSearchPaths(programDirectory_.parent_path(), "assets/languages/*.yaml");
+        const auto files = findFilesInSearchPaths(resourceRoot(programDirectory_), "assets/languages/*.yaml");
         if (files.empty())
         {
             Log::error("No language files found in any search path.");
