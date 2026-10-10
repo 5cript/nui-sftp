@@ -489,17 +489,15 @@ void FileTrackingPanel::startWatching(
                 return;
             }
 
-            if (action == "Moved")
+            const auto oldLocalPath =
+                std::filesystem::path{directory} / payload["oldFilename"].as<std::string>();
+            // An atomic save renames a temporary from outside the tracked item over it, a change of its content.
+            if (action == "Moved" && isTracked(oldLocalPath))
             {
                 if (!it->moveRemoteOnLocalMove || !impl_->operationQueue)
                     return;
 
-                const auto& oldFilename = payload["oldFilename"].as<std::string>();
-
-                std::filesystem::path oldLocalPath = std::filesystem::path{directory} / oldFilename;
                 std::filesystem::path newLocalPath = std::filesystem::path{directory} / filename;
-                if (!isTracked(oldLocalPath))
-                    return;
 
                 std::filesystem::path oldRelPath = oldLocalPath.lexically_relative(instanceDir);
                 std::filesystem::path newRelPath = newLocalPath.lexically_relative(instanceDir);
