@@ -711,6 +711,9 @@ settings:
     operationTimeoutSeconds: "Timeout für Operationen (Sekunden)"
     operationTimeoutSecondsHelpText: "Timeout für einzelne SFTP Operationen in Sekunden."
     operationTimeoutSecondsSearchTags: "Zeitlimit, warten, hängt"
+    readUserDirectories: "Benutzerverzeichnisse lesen"
+    readUserDirectoriesHelpText: "Liest beim Öffnen von SFTP ~/.config/user-dirs.dirs auf dem Server, damit die Orte auf die eigenen, gegebenenfalls übersetzten Ordner des Servers wie Schreibtisch oder Downloads zeigen. Ist die Option aus oder fehlt die Datei, zeigen die Orte die üblichen Ordner, die im Persönlichen Ordner vorhanden sind."
+    readUserDirectoriesSearchTags: "Orte, xdg, user-dirs, Schreibtisch, Downloads, Dokumente, lokalisiert, übersetzt"
 
     defaultDirectory: "Standardverzeichnis"
     defaultDirectoryHelpText: "Das Standardverzeichnis, das beim Start von SFTP Dateiübertragungen geöffnet wird."

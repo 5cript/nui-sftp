@@ -61,6 +61,7 @@ void Session::start()
             self->registerRpcChannelPtyResize();
             self->registerRpcSftpListDirectory();
             self->registerRpcSftpHomeDirectory();
+            self->registerRpcSftpUserDirectories();
             self->registerRpcSftpCreateDirectory();
             self->registerRpcSftpCreateFile();
             self->registerRpcSftpAddDownloadOperation();
@@ -621,6 +622,46 @@ void Session::registerRpcSftpHomeDirectory()
                         const auto home = Utility::pathToUtf8Generic(*result);
                         Log::info("Remote home directory is '{}'", home);
                         reply({{"path", home}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpUserDirectories()
+{
+    on(fmt::format("Session::{}::sftp::userDirectories", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::string const& home
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [home](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto fut = channel->userDirectories(Utility::pathFromUtf8(home));
+                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            return reply.error("Failed to read user directories: timeout");
+
+                        const auto result = fut.get();
+                        if (!result.has_value())
+                            return reply.error("Failed to read user directories: " + result.error().toString());
+
+                        auto directories = nlohmann::json::array();
+                        for (auto const& directory : *result)
+                        {
+                            directories.push_back(
+                                {{"name", directory.name}, {"path", Utility::pathToUtf8Generic(directory.path)}}
+                            );
+                        }
+                        Log::info("Read {} user directories in '{}'", directories.size(), home);
+                        reply({{"directories", std::move(directories)}});
                     },
                     std::move(reply)
                 );

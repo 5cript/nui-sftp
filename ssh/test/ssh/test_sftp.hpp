@@ -294,6 +294,48 @@ namespace SecureShell::Test
         EXPECT_FALSE(listResult->empty());
     }
 
+    TEST_F(SftpTests, CanReadUserDirectories)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->userDirectories("/home/deutsch");
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+
+        std::vector<std::pair<std::string, std::string>> directories;
+        for (auto const& directory : *result)
+            directories.emplace_back(directory.name, directory.path.generic_string());
+        EXPECT_EQ(
+            directories,
+            (std::vector<std::pair<std::string, std::string>>{
+                {"DESKTOP", "/home/deutsch/Schreibtisch"},
+                {"DOWNLOAD", "/home/deutsch/Downloads"},
+                {"DOCUMENTS", "/home/deutsch/Dokumente"},
+                {"MUSIC", "/srv/musik"},
+                {"PICTURES", "/home/deutsch/Bilder"},
+                {"VIDEOS", "/home/deutsch/Videos"},
+            })
+        );
+    }
+
+    TEST_F(SftpTests, MissingUserDirectoriesFileYieldsNoDirectories)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->userDirectories("/home/test");
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(result->empty());
+
+        auto listFut = sftp->listDirectory("/home/test");
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        EXPECT_TRUE(listFut.get().has_value());
+    }
+
     TEST_F(SftpTests, CanRenameFile)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

@@ -738,6 +738,9 @@ settings:
     operationTimeoutSeconds: "Operation Timeout (Seconds)"
     operationTimeoutSecondsHelpText: "The time the server may take for responses before timing out."
     operationTimeoutSecondsSearchTags: "timeout, wait, hang, stuck"
+    readUserDirectories: "Read User Directories"
+    readUserDirectoriesHelpText: "Reads ~/.config/user-dirs.dirs on the server when SFTP opens, so the places point at the server's own, possibly translated, folders such as Desktop or Downloads. When off, or when the file does not exist, the places show the usual folders that exist in the home directory."
+    readUserDirectoriesSearchTags: "places, xdg, user-dirs, desktop, downloads, documents, localized, translated"
 
     defaultDirectory: "Default Directory"
     defaultDirectoryHelpText: "The default directory to open when starting SFTP file transfers. If {user} is used, it will be replaced with the name of the SSH user."

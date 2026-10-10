@@ -4,6 +4,7 @@
 #include <ssh/u8_path.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 
@@ -559,6 +560,63 @@ namespace SecureShell
             [this]()
             {
                 return homeDirectoryInStrand();
+            }
+        );
+    }
+
+    std::expected<std::string, SftpSession::Error>
+    SftpSession::readSmallFileInStrand(std::filesystem::path const& path, std::size_t maximumSize)
+    {
+        assert(strand_->withinProcessingThread());
+        const std::unique_ptr<sftp_file_struct, decltype(&sftp_close)> file{
+            sftp_open(session_, u8Path(path).c_str(), O_RDONLY, 0), sftp_close
+        };
+        if (file == nullptr)
+            return std::unexpected(lastError());
+
+        std::string content;
+        std::array<char, 4096> buffer{};
+        while (content.size() < maximumSize)
+        {
+            const auto bytesRead =
+                sftp_read(file.get(), buffer.data(), std::min(buffer.size(), maximumSize - content.size()));
+            if (bytesRead < 0)
+                return std::unexpected(lastError());
+            if (bytesRead == 0)
+                break;
+            content.append(buffer.data(), static_cast<std::size_t>(bytesRead));
+        }
+        return content;
+    }
+
+    std::expected<std::vector<UserDirectory>, SftpSession::Error>
+    SftpSession::userDirectoriesInStrand(std::filesystem::path const& home)
+    {
+        constexpr std::size_t maximumFileSize = 64u * 1024u;
+        return readSmallFileInStrand(home / ".config" / "user-dirs.dirs", maximumFileSize)
+            .transform(
+                [&home](std::string const& content)
+                {
+                    return parseUserDirectories(content, home);
+                }
+            )
+            .or_else(
+                [](Error const& error) -> std::expected<std::vector<UserDirectory>, Error>
+                {
+                    if (error.sftpError == SSH_FX_NO_SUCH_FILE)
+                        return std::vector<UserDirectory>{};
+                    return std::unexpected(error);
+                }
+            );
+    }
+
+    std::future<std::expected<std::vector<UserDirectory>, SftpSession::Error>>
+    SftpSession::userDirectories(std::filesystem::path const& home)
+    {
+        return performPromise(
+            [this, home]()
+            {
+                return userDirectoriesInStrand(home);
             }
         );
     }

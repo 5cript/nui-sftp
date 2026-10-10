@@ -725,7 +725,9 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                     );
                 }
                 remoteSideModel()->engine()->homeDirectory(
-                    [this](std::optional<std::filesystem::path> const& home, std::string const& info)
+                    [this, readUserDirectories = opts.sftpOptions->readUserDirectories.value_or(true)](
+                        std::optional<std::filesystem::path> const& home, std::string const& info
+                    )
                     {
                         if (!home)
                         {
@@ -735,7 +737,7 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                         if (!remoteSideModel())
                             return;
 
-                        remoteSideModel()->setRemoteHome(*home);
+                        remoteSideModel()->setRemoteHome(*home, readUserDirectories);
                         // A snapshot restore or the user may have navigated already.
                         if (remoteFileGridSide()->path().empty())
                             remoteFileGridSide()->path(*home);

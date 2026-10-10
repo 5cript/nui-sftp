@@ -177,6 +177,11 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
             .minValue = 1,
             .maxValue = 60000,
         }
+    }
+    , readUserDirectories{
+        factory_.identity({"sftpOptions", "readUserDirectories"}),
+        onChange,
+        nulloptReset(readUserDirectories, onChange),
     },
     onChange_{onChange}
 {}
@@ -235,6 +240,7 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                                                      : std::optional<std::chrono::seconds>{std::nullopt};
     }
     assignIfValid(state.defaultDirectory, defaultDirectory);
+    state.readUserDirectories = readUserDirectories.value();
 }
 
 void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
@@ -309,6 +315,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
     );
     defaultDirectory.value(state.defaultDirectory);
+    readUserDirectories.value(state.readUserDirectories);
 }
 
 void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
@@ -377,6 +384,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
     operationTimeoutSeconds.inherit(
         state.operationTimeout ? static_cast<int>(state.operationTimeout->count()) : std::optional<int>{std::nullopt}
     );
+    readUserDirectories.inherit(state.readUserDirectories);
 }
 
 Nui::ElementRenderer SftpOptions::render()
@@ -419,6 +427,7 @@ Nui::ElementRenderer SftpOptions::render()
         defaultDirectory(),
         concurrency(),
         bulkConcurrency(),
-        operationTimeoutSeconds()
+        operationTimeoutSeconds(),
+        readUserDirectories()
     );
 }

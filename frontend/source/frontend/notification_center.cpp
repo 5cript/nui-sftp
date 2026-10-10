@@ -29,6 +29,12 @@ namespace
     constexpr std::size_t maximumToastsPerBurst = 4;
     constexpr std::int64_t burstWindowMilliseconds = 3000;
 
+    /**
+     * @brief Messages arriving this soon after a toast fold into it: they go to the log, but do not toast. One
+     *        failure often logs several related errors at once.
+     */
+    constexpr std::int64_t foldWindowMilliseconds = 250;
+
     std::int64_t nowMilliseconds()
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -135,6 +141,8 @@ struct NotificationCenter::Implementation
 
         while (!recentToasts.empty() && now - recentToasts.front() >= burstWindowMilliseconds)
             recentToasts.pop_front();
+        if (!recentToasts.empty() && now - recentToasts.back() < foldWindowMilliseconds)
+            return;
         if (recentToasts.size() >= maximumToastsPerBurst)
             return;
         recentToasts.push_back(now);
