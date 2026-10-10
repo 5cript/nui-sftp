@@ -1,6 +1,6 @@
 # nui-sftp
 
-This project contains a cross platform (Linux & Windows) SSH and SFTP workbench.
+This project contains a cross platform (Linux, Windows & macOS) SSH and SFTP workbench.
 
 ![AppImage](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/session.png)
 
@@ -62,11 +62,22 @@ flatpak install nui-sftp-flatpak-x86_64_0.1.1.flatpak
 
 > **Note:** Local shells do not work inside the flatpak due to sandbox restrictions. If you need the local shell feature, use the AppImage or the AUR package instead.
 
-## Apple Computers
+## macOS
 
-macOS support for Apple Silicon is in progress ([#203](https://github.com/5cript/nui-sftp/issues/203)).
-It builds and runs its tests on macOS, release disk images are not published yet.
-The app bundle is only ad-hoc signed, so the first start needs right-click > Open.
+nui-sftp runs on Apple Silicon Macs (arm64) with macOS 15.2 or newer.
+
+Download `nui-sftp-macos-arm64_<version>.dmg` from the releases section, open it and drag nui-sftp into the Applications folder.
+
+The app is not signed with an Apple Developer ID, so Gatekeeper blocks the first start:
+1. Start nui-sftp from Applications. macOS reports that it cannot verify the app; close that dialog.
+2. Open System Settings > Privacy & Security, scroll down to Security and click "Open Anyway" next to the message about nui-sftp, then confirm.
+
+Alternatively remove the quarantine flag the download received, then nui-sftp starts like any other app:
+```bash
+xattr -dr com.apple.quarantine /Applications/nui-sftp.app
+```
+
+Settings, logs and the command history live in `~/Library/Application Support/nui-sftp`.
 
 ## Other
 
