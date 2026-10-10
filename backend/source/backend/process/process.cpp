@@ -241,7 +241,7 @@ bool Process::exit(std::optional<std::chrono::seconds> exitWaitTimeout)
     return true;
 }
 
-#ifdef __linux__
+#ifndef _WIN32
 void Process::signal(int signal)
 {
     kill(impl_->child->id(), signal);

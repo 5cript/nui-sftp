@@ -14,6 +14,7 @@
 #include "test_ui_options.hpp"
 #include "test_environment.hpp"
 #include "test_termios.hpp"
+#include "test_fork_pool.hpp"
 
 #include <log/log.hpp>
 

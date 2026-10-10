@@ -49,7 +49,8 @@ else()
         backend
         PRIVATE
             file_tracking/instance_lock_nix.cpp
-            pty/linux/pty.cpp
+            pty/posix/pty.cpp
+            pty/posix/process_list.cpp
             linux/main_linux.cpp
             linux/opener_linux.cpp
             process/fork_pool.cpp

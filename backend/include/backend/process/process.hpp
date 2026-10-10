@@ -56,7 +56,7 @@ class Process : public std::enable_shared_from_this<Process>
 
     void terminate();
 
-#ifdef __linux__
+#ifndef _WIN32
     void signal(int signal);
 #endif
 

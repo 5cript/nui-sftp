@@ -32,7 +32,7 @@
 #include <unordered_map>
 #include <cstdlib>
 
-#ifdef __linux__
+#ifndef _WIN32
 #    include <signal.h>
 #    include <unistd.h>
 #endif
@@ -45,7 +45,7 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace Nui;
 
-#ifdef __linux__
+#ifndef _WIN32
 volatile sig_atomic_t sigchld[10] = {0};
 #endif
 
@@ -353,7 +353,7 @@ void Main::registerInitialWarningGetter()
             Log::debug("Received request for initial persistence load warning.");
 
             const bool runningAsRoot =
-#ifdef __linux__
+#ifndef _WIN32
                 ::geteuid() == 0;
 #else
                 false;
@@ -393,7 +393,7 @@ void Main::startChildSignalTimer()
     if (shuttingDown_)
         return;
 
-#ifdef __linux__
+#ifndef _WIN32
     childSignalTimer_.expires_after(200ms);
     childSignalTimer_.async_wait(
         [this](boost::system::error_code const& ec)
@@ -430,7 +430,7 @@ int main(int const argc, char const* const* argv)
     if (!options->enableDevTools)
         removeRemoteInspectorEnvironment();
 
-#ifdef __linux__
+#ifndef _WIN32
 
     boost::asio::thread_pool ioPool{4};
     ForkPool forkPool;
@@ -458,17 +458,19 @@ int main(int const argc, char const* const* argv)
         },
         .sa_mask = {},
         .sa_flags = SA_SIGINFO,
+#    ifdef __linux__
         .sa_restorer = nullptr,
+#    endif
     };
 
     sigaction(SIGCHLD, &sa, nullptr);
-
-    setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
 #    pragma clang diagnostic pop
+#else
+    ForkPool* forkPoolPtr = nullptr;
 #endif
 
-#ifdef _WIN32
-    ForkPool* forkPoolPtr = nullptr;
+#ifdef __linux__
+    setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
 #endif
 
     ssh_init();
