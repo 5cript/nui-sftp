@@ -24,4 +24,9 @@ else()
     target_link_options(core-target INTERFACE $<$<CONFIG:RELEASE>:-s;-static-libgcc;-static-libstdc++>)
 endif()
 target_compile_features(core-target INTERFACE cxx_std_23)
+
+# Set for the macOS backend and for the frontend built for its WKWebView, where __APPLE__ is not defined.
+if (APPLE OR (EMSCRIPTEN AND BROWSER_ENGINE STREQUAL "wkwebview"))
+    target_compile_definitions(core-target INTERFACE NUI_SFTP_MACOS=1)
+endif()
 target_compile_definitions(core-target INTERFACE JSON_DIAGNOSTICS=1)

@@ -5,6 +5,15 @@
 
 namespace Persistence
 {
+    std::filesystem::path defaultShell()
+    {
+#ifdef NUI_SFTP_MACOS
+        return "/bin/zsh";
+#else
+        return "/usr/bin/bash";
+#endif
+    }
+
     ExecutingSessionOptions defaultMsys2SessionOption()
     {
         ExecutingSessionOptions option{};
@@ -31,6 +40,28 @@ namespace Persistence
         return option;
     }
 
+    ExecutingSessionOptions defaultZshSessionOption()
+    {
+        ExecutingSessionOptions option{};
+        option.command = "/bin/zsh";
+        // A login shell like Terminal.app starts, so ~/.zprofile (Homebrew's PATH) is read.
+        option.arguments = {std::vector<std::string>{"-l", "-i"}};
+        option.environment = {std::map<std::string, std::string>{
+            {"TERM", "xterm-256color"},
+        }};
+        option.exitTimeoutSeconds = 3;
+        return option;
+    }
+
+    ExecutingSessionOptions defaultShellSessionOption()
+    {
+#ifdef NUI_SFTP_MACOS
+        return defaultZshSessionOption();
+#else
+        return defaultBashSessionOption();
+#endif
+    }
+
     SessionOptions SessionOptions::create(std::optional<std::string> icon, TerminalEngineType type)
     {
         if (type == TerminalEngineType::shell)
@@ -38,7 +69,7 @@ namespace Persistence
             return SessionOptions{
                 .type = TerminalEngineType::shell,
                 .icon = icon.value_or(""),
-                .engine = defaultBashSessionOption(),
+                .engine = defaultShellSessionOption(),
                 .terminalOptions = Reference{"default"},
                 .termios = Reference{"default"},
                 .queueOptions = Reference{"default"},
