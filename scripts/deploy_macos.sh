@@ -1,6 +1,6 @@
 #!/bin/bash
 # Assembles nui-sftp.app from a macOS build, called by deploy.sh.
-# Layout: Contents/MacOS/nui-sftp, Contents/Resources/{frontend,assets,themes}, Contents/Frameworks/*.dylib.
+# Layout: Contents/MacOS/nui-sftp, Contents/Resources/{frontend,assets,themes}.
 # The bundle is ad-hoc signed, there is no Developer ID yet.
 
 set -e
@@ -15,7 +15,7 @@ RESOURCES="${CONTENTS}/Resources"
 echo -e "Assembling \e[32m${BUNDLE}\e[0m"
 
 rm -rf "${BUNDLE}"
-mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Frameworks" "${RESOURCES}/frontend" "${RESOURCES}/assets/icons" "${RESOURCES}/themes"
+mkdir -p "${CONTENTS}/MacOS" "${RESOURCES}/frontend" "${RESOURCES}/assets/icons" "${RESOURCES}/themes"
 
 cp "${BUILD_DIRECTORY}/bin/nui-sftp" "${CONTENTS}/MacOS/nui-sftp"
 cp "${BUILD_DIRECTORY}/generated/Info.plist" "${CONTENTS}/Info.plist"
@@ -28,12 +28,15 @@ if [ "$OMIT_FRONTEND" = false ]; then
     cp -R "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${RESOURCES}/frontend"
 fi
 
-# Homebrew libraries (boost, libssh, openssl, fmt, ...) move into the bundle, system libraries stay.
-dylibbundler --overwrite-files --bundle-deps --create-dir \
-    --fix-file "${CONTENTS}/MacOS/nui-sftp" \
-    --dest-dir "${CONTENTS}/Frameworks" \
-    --install-path "@executable_path/../Frameworks/" \
-    >/dev/null
+# Everything but the OS is linked statically (scripts/macos/build_dependencies.sh), libc++ included.
+LINKED_LIBRARIES=$(otool -L "${CONTENTS}/MacOS/nui-sftp" | tail -n +2 | awk '{print $1}')
+FOREIGN_LIBRARIES=$(grep -E -v '^(/usr/lib/|/System/Library/)' <<< "${LINKED_LIBRARIES}" || true)
+FOREIGN_LIBRARIES+=$(grep -E '^/usr/lib/libc\+\+' <<< "${LINKED_LIBRARIES}" || true)
+if [ -n "${FOREIGN_LIBRARIES}" ]; then
+    echo "nui-sftp links libraries that are not part of the app or the OS:" >&2
+    echo "${FOREIGN_LIBRARIES}" >&2
+    exit 1
+fi
 
 codesign --force --deep --sign - "${BUNDLE}"
 codesign --verify --deep --strict "${BUNDLE}"
