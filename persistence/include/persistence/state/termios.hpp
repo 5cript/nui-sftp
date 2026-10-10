@@ -177,26 +177,31 @@ namespace Persistence
 
         struct CC : public DefaultMissingMember
         {
-            unsigned char VDISCARD_{3};
-            unsigned char VDSUSP_{28};
-            unsigned char VEOF_{127};
-            unsigned char VEOL_{21};
-            unsigned char VEOL2_{4};
-            unsigned char VERASE_{0};
-            unsigned char VINTR_{1};
-            unsigned char VKILL_{0};
-            unsigned char VLNEXT_{17};
-            unsigned char VMIN_{19};
-            unsigned char VQUIT_{26};
-            unsigned char VREPRINT_{0};
-            unsigned char VSTART_{18};
-            unsigned char VSTATUS_{15};
-            unsigned char VSTOP_{23};
-            unsigned char VSUSP_{22};
+            unsigned char VDISCARD_{15};
+            unsigned char VDSUSP_{25};
+            unsigned char VEOF_{4};
+            unsigned char VEOL_{0};
+            unsigned char VEOL2_{0};
+            unsigned char VERASE_{127};
+            unsigned char VINTR_{3};
+            unsigned char VKILL_{21};
+            unsigned char VLNEXT_{22};
+            unsigned char VMIN_{1};
+            unsigned char VQUIT_{28};
+            unsigned char VREPRINT_{18};
+            unsigned char VSTART_{17};
+            unsigned char VSTATUS_{20};
+            unsigned char VSTOP_{19};
+            unsigned char VSUSP_{26};
             unsigned char VSWTCH_{0};
             unsigned char VTIME_{0};
-            unsigned char VWERASE_{0};
+            unsigned char VWERASE_{23};
 
+            /**
+             * @brief Builds the c_cc array of a termios struct.
+             *
+             * @return NCCS characters, indexed by the V* constants of termios.h.
+             */
             std::vector<unsigned char> assemble() const;
         };
         std::optional<CC> cc{std::nullopt};
