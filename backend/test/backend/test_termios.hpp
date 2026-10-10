@@ -3,6 +3,7 @@
 #include <persistence/state/termios.hpp>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <map>
@@ -65,4 +66,30 @@ namespace Test
         EXPECT_EQ(characters[VMIN], 1u);
     }
 #endif
+
+    TEST(TermiosTests, MisassignedControlCharactersOfEarlierVersionsAreReplaced)
+    {
+        auto termios = Persistence::Termios::saneDefaults();
+        termios.cc = nlohmann::json::parse(
+                         R"({"VDISCARD":3,"VDSUSP":28,"VEOF":127,"VEOL":21,"VEOL2":4,"VERASE":0,"VINTR":1,"VKILL":0,
+                             "VLNEXT":17,"VMIN":19,"VQUIT":26,"VREPRINT":0,"VSTART":18,"VSTATUS":15,"VSTOP":23,
+                             "VSUSP":22,"VSWTCH":0,"VTIME":0,"VWERASE":0})"
+        )
+                         .get<Persistence::Termios::CC>();
+
+        EXPECT_TRUE(Persistence::updateMisassignedControlCharacters(termios));
+        EXPECT_EQ(nlohmann::json(*termios.cc), nlohmann::json(Persistence::Termios::CC{}));
+    }
+
+    TEST(TermiosTests, CustomizedOrAbsentControlCharactersAreKept)
+    {
+        auto customized = Persistence::Termios::saneDefaults();
+        customized.cc->VEOF_ = 127;
+        EXPECT_FALSE(Persistence::updateMisassignedControlCharacters(customized));
+        EXPECT_EQ(customized.cc->VEOF_, 127u);
+
+        Persistence::Termios absent{};
+        EXPECT_FALSE(Persistence::updateMisassignedControlCharacters(absent));
+        EXPECT_FALSE(absent.cc.has_value());
+    }
 }

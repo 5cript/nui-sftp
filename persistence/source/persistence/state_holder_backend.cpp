@@ -175,6 +175,23 @@ namespace Persistence
             mustSave = true;
         }
 
+        for (auto& [name, termios] : stateCache_.termios)
+        {
+            if (updateMisassignedControlCharacters(termios))
+            {
+                Log::info("Replaced the misassigned control characters of termios profile '{}'.", name);
+                mustSave = true;
+            }
+        }
+        for (auto& [name, session] : stateCache_.sessions)
+        {
+            if (updateMisassignedControlCharacters(session.termios.value()))
+            {
+                Log::info("Replaced the misassigned control characters of session '{}'.", name);
+                mustSave = true;
+            }
+        }
+
         bool hasMissingDefaults = false;
         auto termiosDefault = stateCache_.termios.find("default");
         if (termiosDefault == stateCache_.termios.end())

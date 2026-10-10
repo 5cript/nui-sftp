@@ -231,4 +231,11 @@ namespace Persistence
     void from_json(nlohmann::json const& j, Termios::CC& cc);
     void to_json(nlohmann::json& j, Termios const& termios);
     void from_json(nlohmann::json const& j, Termios& termios);
+
+    /**
+     * @brief Replaces the control characters that earlier versions saved under the wrong names with the defaults.
+     * @param termios Termios whose control characters are updated in place if they are exactly the earlier defaults.
+     * @return Whether the control characters were replaced.
+     */
+    bool updateMisassignedControlCharacters(Termios& termios);
 }
