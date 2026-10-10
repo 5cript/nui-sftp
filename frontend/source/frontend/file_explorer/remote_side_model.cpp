@@ -1458,22 +1458,24 @@ void RemoteSideModel::onFileWatchAdded(
 
 // --- IPlacesProvider ---
 
-void RemoteSideModel::setRemoteUsername(std::string username)
+void RemoteSideModel::setRemoteHome(std::filesystem::path home)
 {
-    remoteUsername_ = std::move(username);
+    remoteHome_ = std::move(home);
 }
 
 void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
 {
-    const std::string home = "/home/" + remoteUsername_;
+    if (remoteHome_.empty())
+        return callback({});
+
     const std::vector<std::pair<std::string, std::string>> defaults = {
-        {"home", home},
-        {"desktop", home + "/Desktop"},
-        {"downloads", home + "/Downloads"},
-        {"documents", home + "/Documents"},
-        {"pictures", home + "/Pictures"},
-        {"videos", home + "/Videos"},
-        {"music", home + "/Music"},
+        {"home", remoteHome_.generic_string()},
+        {"desktop", (remoteHome_ / "Desktop").generic_string()},
+        {"downloads", (remoteHome_ / "Downloads").generic_string()},
+        {"documents", (remoteHome_ / "Documents").generic_string()},
+        {"pictures", (remoteHome_ / "Pictures").generic_string()},
+        {"videos", (remoteHome_ / "Videos").generic_string()},
+        {"music", (remoteHome_ / "Music").generic_string()},
     };
 
     std::vector<PlaceEntry> entries;

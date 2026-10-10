@@ -215,6 +215,85 @@ namespace SecureShell::Test
         EXPECT_GT(result.value().size, 0);
     }
 
+    TEST_F(SftpTests, HomeDirectoryIsLoginDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/home/test");
+    }
+
+    TEST_F(SftpTests, HomeDirectoryIsNotAssumedToBeInHome)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        serverStartResult->command("macHome");
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/Users/test");
+
+        auto listFut = sftp->listDirectory(*result);
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        const auto listResult = listFut.get();
+        ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
+        EXPECT_FALSE(listResult->empty());
+    }
+
+    TEST_F(SftpTests, HomeDirectoryFallsBackWhenServerAnswersRelativePath)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        serverStartResult->command("macHome");
+        serverStartResult->command("realpathDotRelative");
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/home/test");
+    }
+
+    TEST_F(SftpTests, HomeDirectoryFallsBackWhenServerAnswersEmptyPath)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        serverStartResult->command("macHome");
+        serverStartResult->command("realpathDotEmpty");
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/home/test");
+    }
+
+    TEST_F(SftpTests, HomeDirectoryFallsBackWhenServerFailsToCanonicalize)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        serverStartResult->command("macHome");
+        serverStartResult->command("realpathDotFailure");
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->homeDirectory();
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        EXPECT_EQ(result->generic_string(), "/home/test");
+
+        auto listFut = sftp->listDirectory(*result);
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        const auto listResult = listFut.get();
+        ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
+        EXPECT_FALSE(listResult->empty());
+    }
+
     TEST_F(SftpTests, CanRenameFile)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

@@ -97,6 +97,11 @@ const fakeFilesystem = finalizeFakeFs({
                 })())
             ])
         ]),
+        directory({ name: 'Users' }, [
+            directory({ name: 'test' }, [
+                file('mac.txt', 'Fake mac content')
+            ])
+        ]),
         directory({ name: 'etc' }, [
             file('passwd', 'Fake passwd content'),
             file('hosts', 'Fake hosts content')
@@ -132,7 +137,9 @@ class Handle {
     }
 }
 
-const defaultPath = '/home/test';
+let defaultPath = '/home/test';
+// 'conforming', 'relative', 'empty' or 'failure'. Emulates servers answering REALPATH "." incorrectly.
+let realpathDotMode = 'conforming';
 
 const resolveFileName = (path) => {
     if (path === '.') {
@@ -333,6 +340,13 @@ const server = new Server({
                 });
 
                 sftpStream.on('REALPATH', (reqid, path) => {
+                    if (path === '.' && realpathDotMode !== 'conforming') {
+                        if (realpathDotMode === 'failure')
+                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        const filename = realpathDotMode === 'relative' ? 'test' : '';
+                        return sftpStream.name(reqid, [{ filename, longname: filename, attrs: {} }]);
+                    }
+
                     path = resolveFileName(path);
 
                     const result = fakeFilesystem.find(path);
@@ -685,6 +699,19 @@ server.on('error', (error) => {
 });
 
 const cli = new CommandLineInterface(logMessage);
+
+cli.on('macHome', () => {
+    defaultPath = '/Users/test';
+});
+cli.on('realpathDotRelative', () => {
+    realpathDotMode = 'relative';
+});
+cli.on('realpathDotEmpty', () => {
+    realpathDotMode = 'empty';
+});
+cli.on('realpathDotFailure', () => {
+    realpathDotMode = 'failure';
+});
 
 cli.on('exit', () => {
     logMessage('').end();

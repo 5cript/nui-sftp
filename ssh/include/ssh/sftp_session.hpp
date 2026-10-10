@@ -285,6 +285,19 @@ namespace SecureShell
         std::expected<std::weak_ptr<FileStream>, Error>
         openFileInStrand(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions);
 
+        /**
+         * @brief Determines the directory the server starts the user in, which is the home directory on conforming
+         * servers. Falls back to /home/<user> when the server does not answer with an absolute path.
+         *
+         * @return std::future<std::expected<std::filesystem::path, Error>>
+         */
+        std::future<std::expected<std::filesystem::path, Error>> homeDirectory();
+
+        /**
+         * @brief In-strand variant of homeDirectory. Must be called from within the processing thread.
+         */
+        std::expected<std::filesystem::path, Error> homeDirectoryInStrand();
+
         std::future<std::expected<sftp_limits_struct, Error>> limits();
 
         /**

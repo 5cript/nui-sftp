@@ -715,15 +715,34 @@ void Session::openSftp(std::string const& username, bool forceOpen)
             {
                 remoteSideModel()->operationQueue(&impl_->operationQueue);
                 remoteSideModel()->setFileTracking(&impl_->fileTrackingPanel);
-                remoteSideModel()->setRemoteUsername(username);
-                remoteFileGridSide()->path(
-                    fmt::format(
-                        fmt::runtime(opts.sftpOptions->defaultDirectory.value_or("/home/{user}").generic_string()),
-                        fmt::arg("user", username)
-                    )
+                if (opts.sftpOptions->defaultDirectory)
+                {
+                    remoteFileGridSide()->path(
+                        fmt::format(
+                            fmt::runtime(opts.sftpOptions->defaultDirectory->generic_string()),
+                            fmt::arg("user", username)
+                        )
+                    );
+                }
+                remoteSideModel()->engine()->homeDirectory(
+                    [this](std::optional<std::filesystem::path> const& home, std::string const& info)
+                    {
+                        if (!home)
+                        {
+                            Log::error("Failed to determine the remote home directory: {}", info);
+                            return;
+                        }
+                        if (!remoteSideModel())
+                            return;
+
+                        remoteSideModel()->setRemoteHome(*home);
+                        // A snapshot restore or the user may have navigated already.
+                        if (remoteFileGridSide()->path().empty())
+                            remoteFileGridSide()->path(*home);
+                        if (auto* places = remoteFileGridSide()->places(); places)
+                            places->reloadDefaultPlaces();
+                    }
                 );
-                if (auto* places = remoteFileGridSide()->places(); places)
-                    places->reloadDefaultPlaces();
             }
             openLocalFilesystem();
         }

@@ -53,7 +53,7 @@ class RemoteSideModel
     }
     void requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback) override;
 
-    void setRemoteUsername(std::string username);
+    void setRemoteHome(std::filesystem::path home);
 
     // --- IFavoritesProvider ---
     NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
@@ -159,7 +159,7 @@ class RemoteSideModel
     );
 
   private:
-    std::string remoteUsername_;
+    std::filesystem::path remoteHome_;
     SideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;

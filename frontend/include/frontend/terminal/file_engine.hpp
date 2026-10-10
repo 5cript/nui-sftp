@@ -32,6 +32,14 @@ class FileEngine
             onComplete
     );
 
+    /**
+     * @brief Asks the backend for the remote home directory.
+     *
+     * @param onComplete Receives the home directory, or std::nullopt and the reason on failure.
+     */
+    void
+    homeDirectory(std::function<void(std::optional<std::filesystem::path> const&, std::string const& info)> onComplete);
+
     void
     createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
     void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
