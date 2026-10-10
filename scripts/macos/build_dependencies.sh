@@ -90,7 +90,8 @@ fetch() {
         mv "${file}.part" "${file}"
     fi
     echo "${sha256}  ${file}" | shasum -a 256 -c - >/dev/null || {
-        echo "Checksum mismatch for ${file}" >&2
+        echo "Checksum mismatch for ${file}, removed it" >&2
+        rm -f "${file}"
         exit 1
     }
     echo "${file}"
@@ -100,6 +101,8 @@ fetch() {
 unpack() {
     local archive="$1" name="$2"
     local directory="${WORK}/${name}"
+    # An argument substitution ignores set -e, a failed fetch arrives here as an empty path.
+    [ -f "${archive}" ] || exit 1
     rm -rf "${directory}"
     mkdir -p "${directory}"
     case "${archive}" in
