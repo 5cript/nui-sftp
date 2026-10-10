@@ -10,7 +10,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/session.hpp>
-#include <ssh/user_directories.hpp>
+#include <utility/user_directories.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -304,15 +304,16 @@ namespace SecureShell
          * directories instead of an error.
          *
          * @param home The home directory of the user, see homeDirectory.
-         * @return std::future<std::expected<std::vector<UserDirectory>, Error>>
+         * @return std::future<std::expected<std::vector<Utility::UserDirectory>, Error>>
          */
-        std::future<std::expected<std::vector<UserDirectory>, Error>>
+        std::future<std::expected<std::vector<Utility::UserDirectory>, Error>>
         userDirectories(std::filesystem::path const& home);
 
         /**
          * @brief In-strand variant of userDirectories. Must be called from within the processing thread.
          */
-        std::expected<std::vector<UserDirectory>, Error> userDirectoriesInStrand(std::filesystem::path const& home);
+        std::expected<std::vector<Utility::UserDirectory>, Error>
+        userDirectoriesInStrand(std::filesystem::path const& home);
 
         std::future<std::expected<sftp_limits_struct, Error>> limits();
 

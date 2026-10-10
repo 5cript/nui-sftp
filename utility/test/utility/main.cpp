@@ -6,6 +6,7 @@
 #include "test_localized_message.hpp"
 #include "test_shell_integration.hpp"
 #include "test_typed_line_buffer.hpp"
+#include "test_user_directories.hpp"
 #include "test_utf8.hpp"
 
 #include <gtest/gtest.h>

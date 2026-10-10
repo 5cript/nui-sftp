@@ -8,6 +8,7 @@ add_library(
         typed_line_buffer.cpp
         temporary_directory.cpp
         utf8.cpp
+        user_directories.cpp
 )
 
 target_include_directories(utility PUBLIC ${CMAKE_SOURCE_DIR}/utility/include)

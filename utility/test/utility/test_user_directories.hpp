@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/user_directories.hpp>
+#include <utility/user_directories.hpp>
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace SecureShell::Test
+namespace Utility::Test
 {
     namespace
     {

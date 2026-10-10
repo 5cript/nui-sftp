@@ -1,10 +1,10 @@
-#include <ssh/user_directories.hpp>
-#include <ssh/u8_path.hpp>
+#include <utility/user_directories.hpp>
+#include <utility/path_utf.hpp>
 
 #include <optional>
 #include <ranges>
 
-namespace SecureShell
+namespace Utility
 {
     namespace
     {
@@ -53,7 +53,7 @@ namespace SecureShell
 
     std::vector<UserDirectory> parseUserDirectories(std::string_view content, std::filesystem::path const& home)
     {
-        auto homeString = u8Path(home);
+        auto homeString = pathToUtf8Generic(home);
         while (homeString.size() > 1 && homeString.ends_with('/'))
             homeString.pop_back();
         const std::string_view homePrefix = homeString == "/" ? std::string_view{} : std::string_view{homeString};
@@ -90,7 +90,7 @@ namespace SecureShell
 
             directories.push_back({
                 .name = std::string{key.substr(prefix.size(), key.size() - prefix.size() - suffix.size())},
-                .path = pathFromU8(*expanded),
+                .path = pathFromUtf8(*expanded),
             });
         }
         return directories;

@@ -589,7 +589,7 @@ namespace SecureShell
         return content;
     }
 
-    std::expected<std::vector<UserDirectory>, SftpSession::Error>
+    std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>
     SftpSession::userDirectoriesInStrand(std::filesystem::path const& home)
     {
         constexpr std::size_t maximumFileSize = 64u * 1024u;
@@ -597,20 +597,20 @@ namespace SecureShell
             .transform(
                 [&home](std::string const& content)
                 {
-                    return parseUserDirectories(content, home);
+                    return Utility::parseUserDirectories(content, home);
                 }
             )
             .or_else(
-                [](Error const& error) -> std::expected<std::vector<UserDirectory>, Error>
+                [](Error const& error) -> std::expected<std::vector<Utility::UserDirectory>, Error>
                 {
                     if (error.sftpError == SSH_FX_NO_SUCH_FILE)
-                        return std::vector<UserDirectory>{};
+                        return std::vector<Utility::UserDirectory>{};
                     return std::unexpected(error);
                 }
             );
     }
 
-    std::future<std::expected<std::vector<UserDirectory>, SftpSession::Error>>
+    std::future<std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>>
     SftpSession::userDirectories(std::filesystem::path const& home)
     {
         return performPromise(
