@@ -288,7 +288,8 @@ namespace SecureShell
 
         /**
          * @brief Determines the directory the server starts the user in, which is the home directory on conforming
-         * servers. Falls back to /home/<user> when the server does not answer with an absolute path.
+         * servers. Falls back to /home/<user> when the server does not answer with an absolute path, or to / when that
+         * does not exist either.
          *
          * @return std::future<std::expected<std::filesystem::path, Error>>
          */

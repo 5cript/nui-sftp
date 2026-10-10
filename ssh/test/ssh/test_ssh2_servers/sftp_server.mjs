@@ -732,6 +732,9 @@ cli.on('realpathDotEmpty', () => {
 cli.on('realpathDotFailure', () => {
     realpathDotMode = 'failure';
 });
+cli.on('removeHome', () => {
+    fakeFilesystem.find('/home').removeChild('test');
+});
 
 cli.on('exit', () => {
     logMessage('').end();

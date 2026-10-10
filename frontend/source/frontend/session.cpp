@@ -729,13 +729,15 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                         std::optional<std::filesystem::path> const& home, std::string const& info
                     )
                     {
+                        if (!remoteSideModel())
+                            return;
                         if (!home)
                         {
                             Log::error("Failed to determine the remote home directory: {}", info);
+                            if (remoteFileGridSide()->path().empty())
+                                remoteFileGridSide()->path("/");
                             return;
                         }
-                        if (!remoteSideModel())
-                            return;
 
                         remoteSideModel()->setRemoteHome(*home, readUserDirectories);
                         // A snapshot restore or the user may have navigated already.

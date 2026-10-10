@@ -53,8 +53,10 @@ void SideModel::onDirectoryListing(
             .text = std::move(text),
             .buttons = ConfirmDialog::Button::Ok,
         });
-        // undo the navigation:
-        if (currentPath_.value() != preNavigatePath_)
+        // undo the navigation, an initial navigation has nowhere to go back to:
+        if (preNavigatePath_.empty())
+            currentPath_ = preNavigatePath_;
+        else if (currentPath_.value() != preNavigatePath_)
         {
             currentPath_ = preNavigatePath_;
             navigateTo(currentPath_.value());
