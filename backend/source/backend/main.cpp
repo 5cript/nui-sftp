@@ -93,7 +93,7 @@ namespace
             .scheme = schemeName,
             .allowedOrigins = {"*"s},
             .onRequest =
-                [programDir, schemeName, resourceDir = programDir.parent_path()](CustomSchemeRequest const& request)
+                [programDir, schemeName, resourceDir = resourceRoot(programDir)](CustomSchemeRequest const& request)
             {
                 // make path relative to / to avoid directory traversal
                 const auto url = request.parseUrl();
@@ -214,7 +214,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
     , childSignalTimer_{window_.getExecutor()}
     , events_{hub_}
-    , themeFinder_{programDir_.parent_path(), events_}
+    , themeFinder_{resourceRoot(programDir_), events_}
     , platformSpecifics_{std::make_unique<PlatformSpecifics>(window_, hub_)}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
