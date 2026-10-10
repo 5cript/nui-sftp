@@ -330,7 +330,13 @@ namespace FileTracking
 
         registerOnStrand(
             "FileTracking::addWatch",
-            [this](RpcHelper::RpcOnce&& reply, std::string instanceId, std::string path, bool recursive)
+            [this](
+                RpcHelper::RpcOnce&& reply,
+                std::string instanceId,
+                std::string path,
+                bool recursive,
+                std::string downloadTempSuffix
+            )
             {
                 auto* inst = findInstance(instanceId);
                 if (!inst)
@@ -338,7 +344,7 @@ namespace FileTracking
                     reply.error("Instance not found: " + instanceId);
                     return;
                 }
-                auto watch = inst->addWatch(Utility::pathFromUtf8(path), recursive);
+                auto watch = inst->addWatch(Utility::pathFromUtf8(path), recursive, std::move(downloadTempSuffix));
                 if (!watch)
                 {
                     reply.error("Failed to add watch on path: " + path);

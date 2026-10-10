@@ -47,6 +47,7 @@ struct FileTrackingPanel::Implementation
 
     OperationQueue* operationQueue{nullptr};
     Ids::SessionId sessionId{};
+    std::string downloadTempSuffix{Persistence::defaultTempFileSuffix};
 
     Nui::Observed<std::vector<TrackedEntry>> entries{};
     std::unordered_map<std::string, Nui::RpcClient::AutoUnregister> fileChangeListeners{};
@@ -378,12 +379,22 @@ FileTrackingPanel::FileTrackingPanel(
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(FileTrackingPanel);
 
-void FileTrackingPanel::activate(OperationQueue* operationQueue, Ids::SessionId sessionId)
+void FileTrackingPanel::activate(
+    OperationQueue* operationQueue,
+    Ids::SessionId sessionId,
+    std::string downloadTempSuffix
+)
 {
     impl_->operationQueue = operationQueue;
     impl_->sessionId = std::move(sessionId);
+    impl_->downloadTempSuffix = std::move(downloadTempSuffix);
     Log::debug("FileTracking: activate() — triggering initial orphaned count refresh");
     impl_->refreshOrphanedCount();
+}
+
+std::string const& FileTrackingPanel::downloadTempSuffix() const
+{
+    return impl_->downloadTempSuffix;
 }
 
 void FileTrackingPanel::deactivate()
@@ -420,6 +431,19 @@ void FileTrackingPanel::startWatching(
             const auto filename = payload["filename"].as<std::string>();
 
             Log::debug("FileTracking: file changed in instance {}: {} {}", instanceId.value(), action, filename);
+
+            // Only the tracked file or directory maps to the remote side, anything else in the instance
+            // directory (Finder's .DS_Store for one) would land next to it on the server.
+            const auto isTracked = [&localPath](std::filesystem::path const& changedLocalPath)
+            {
+                const auto relative = changedLocalPath.lexically_relative(localPath);
+                return !relative.empty() && *relative.begin() != "..";
+            };
+            if (!isTracked(std::filesystem::path{directory} / filename))
+            {
+                Log::debug("FileTracking: ignoring change outside the tracked item: {}", filename);
+                return;
+            }
 
             auto& vec = impl_->entries.value();
             auto it = std::find_if(
@@ -474,6 +498,8 @@ void FileTrackingPanel::startWatching(
 
                 std::filesystem::path oldLocalPath = std::filesystem::path{directory} / oldFilename;
                 std::filesystem::path newLocalPath = std::filesystem::path{directory} / filename;
+                if (!isTracked(oldLocalPath))
+                    return;
 
                 std::filesystem::path oldRelPath = oldLocalPath.lexically_relative(instanceDir);
                 std::filesystem::path newRelPath = newLocalPath.lexically_relative(instanceDir);

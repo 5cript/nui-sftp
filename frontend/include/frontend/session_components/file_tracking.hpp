@@ -1,6 +1,7 @@
 #pragma once
 
 #include <persistence/state_holder.hpp>
+#include <persistence/state/sftp_options.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <ids/ids.hpp>
@@ -18,8 +19,15 @@ class FileTrackingPanel
     FileTrackingPanel(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileTrackingPanel);
 
-    /** @brief Connect to a live session's operation queue. */
-    void activate(OperationQueue* operationQueue, Ids::SessionId sessionId);
+    /**
+     * @brief Connect to a live session's operation queue.
+     * @param downloadTempSuffix The suffix the session's downloads write under until complete, see
+     *        Persistence::effectiveTempFileSuffix. The watches ignore those files.
+     */
+    void activate(OperationQueue* operationQueue, Ids::SessionId sessionId, std::string downloadTempSuffix);
+
+    /** @brief The suffix of the session's downloads in progress, given to activate(). */
+    std::string const& downloadTempSuffix() const;
 
     /** @brief Disconnect from the session; clears all watches and entries. */
     void deactivate();

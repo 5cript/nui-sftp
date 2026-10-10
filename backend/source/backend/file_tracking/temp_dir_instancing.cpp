@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <backend/file_tracking/change_filter.hpp>
 
 #include <efsw/efsw.hpp>
 #include <boost/asio/post.hpp>
@@ -63,13 +64,15 @@ namespace FileTracking
         FileChangeListener(
             std::string instanceId,
             boost::asio::strand<boost::asio::any_io_executor> strand,
-            Nui::RpcHub* hub
+            Nui::RpcHub* hub,
+            std::string downloadTempSuffix
         )
             : instanceId_{std::move(instanceId)}
             , strand_{std::move(strand)}
             , hub_{hub}
             , lockFileName_{instanceId_ + ".lock"}
             , eventName_{"FileTracking::" + instanceId_ + "::onFileChanged"}
+            , downloadTempSuffix_{Persistence::effectiveTempFileSuffix(downloadTempSuffix)}
         {}
 
         void handleFileAction(
@@ -83,31 +86,19 @@ namespace FileTracking
             if (filename == lockFileName_ || filename == "metadata.json")
                 return;
 
-            // .goutputstream* ignore
-            if (filename.starts_with(".goutputstream"))
+            std::error_code statusError;
+            const bool isDirectory = std::filesystem::is_directory(std::filesystem::path(dir) / filename, statusError);
+            const auto change = filterFileChange(
+                {toFileAction(action), filename, std::move(oldFilename)}, isDirectory, downloadTempSuffix_
+            );
+            if (!change)
                 return;
-
-            // Ignore in-progress download temp files; they get renamed to the real
-            // name once the download is complete and we don't want to upload partials.
-            if (filename.ends_with(".filepart"))
-                return;
-
-#ifdef _WIN32
-            // On Windows I get updates to directories when things get deleted/created within them etc.
-            // ignore it:
-            if (action == efsw::Actions::Modified)
-            {
-                std::filesystem::path path = std::filesystem::path(dir) / filename;
-                if (std::filesystem::is_directory(path))
-                    return;
-            }
-#endif
 
             nlohmann::json payload = {
-                {"action", Utility::enumToString(toFileAction(action))},
+                {"action", Utility::enumToString(change->action)},
                 {"directory", std::filesystem::path(dir).generic_string()},
-                {"filename", std::filesystem::path(filename).generic_string()},
-                {"oldFilename", std::filesystem::path(oldFilename).generic_string()},
+                {"filename", std::filesystem::path(change->filename).generic_string()},
+                {"oldFilename", std::filesystem::path(change->oldFilename).generic_string()},
             };
 
             boost::asio::post(
@@ -125,6 +116,7 @@ namespace FileTracking
         Nui::RpcHub* hub_;
         std::string lockFileName_;
         std::string eventName_;
+        std::string downloadTempSuffix_;
     };
 
     // -------------------------------------------------------------------------
@@ -204,7 +196,11 @@ namespace FileTracking
         return impl_->instanceDir;
     }
 
-    std::optional<InstanceWatch> TemporaryDirectoryInstance::addWatch(std::filesystem::path const& path, bool recursive)
+    std::optional<InstanceWatch> TemporaryDirectoryInstance::addWatch(
+        std::filesystem::path const& path,
+        bool recursive,
+        std::string downloadTempSuffix
+    )
     {
         namespace fs = std::filesystem;
 
@@ -230,7 +226,9 @@ namespace FileTracking
             return std::nullopt;
         }
 
-        impl_->listener = std::make_unique<FileChangeListener>(impl_->instanceId, impl_->strand, impl_->hub);
+        impl_->listener = std::make_unique<FileChangeListener>(
+            impl_->instanceId, impl_->strand, impl_->hub, std::move(downloadTempSuffix)
+        );
 
         auto watchId = impl_->watcher->addWatch(absPath.string(), impl_->listener.get(), recursive);
         if (watchId < 0)
