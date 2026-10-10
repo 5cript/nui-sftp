@@ -801,6 +801,11 @@ namespace
         auto opened = Store::open(context_.get_executor(), databaseFile(), Store::defaultHistoryCap);
         fs::permissions(sharedMemoryFile, fs::perms::owner_read | fs::perms::owner_write);
 
+#ifdef __APPLE__
+        // Apple's SQLite replaces a stale read-only -shm file, the store just opens.
+        EXPECT_TRUE(opened.has_value()) << opened.error().message;
+        return;
+#endif
         ASSERT_FALSE(opened.has_value());
         EXPECT_NE(opened.error().message.find("-shm' are writable"), std::string::npos) << opened.error().message;
     }

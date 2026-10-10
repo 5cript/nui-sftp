@@ -17,7 +17,9 @@
 #    include <nlohmann/json.hpp>
 
 #    include <algorithm>
+#    include <atomic>
 #    include <cctype>
+#    include <climits>
 #    include <chrono>
 #    include <cstdlib>
 #    include <filesystem>
@@ -26,6 +28,7 @@
 #    include <optional>
 #    include <string>
 #    include <string_view>
+#    include <thread>
 #    include <unordered_map>
 #    include <vector>
 
@@ -100,9 +103,24 @@ namespace Test
             return process_.has_value();
         }
 
+        /**
+         * @brief Writes while the echo is drained: a macOS pty buffers about 1 KiB, so a long write only
+         *        completes when the reader keeps up.
+         */
         void write(std::string_view data)
         {
-            pty_->write(data);
+            std::atomic_bool written{false};
+            std::thread writer{[&]() {
+                pty_->write(data);
+                written = true;
+            }};
+            waitUntil(
+                [&]() {
+                    return written.load();
+                },
+                std::chrono::seconds{30}
+            );
+            writer.join();
         }
 
         /**
@@ -225,10 +243,41 @@ namespace Test
     using Settings = std::vector<std::pair<std::string, std::string>>;
 
     /**
+     * @brief Whether the host tty would drop part of @p line typed while the shell starts.
+     *
+     * A macOS tty drops typeahead past MAX_CANON (1024 bytes) while it is in canonical mode. The app
+     * hands local shells their hook in the environment, but the remote bootstrap is typed and only
+     * fits the 4 KiB of a Linux server. Containers run on Linux and are unaffected.
+     */
+    inline bool exceedsTheMacTypeahead(std::string const& line, std::string const& image)
+    {
+#    ifdef __APPLE__
+        return image.empty() && line.size() + 2 >= MAX_CANON;
+#    else
+        (void)line;
+        (void)image;
+        return false;
+#    endif
+    }
+
+    /**
+     * @brief Length of the longest command the tests type ahead: Linux takes a 4 KiB line, macOS 1 KiB.
+     */
+#    ifdef __APPLE__
+    constexpr std::size_t longTypeahead = MAX_CANON - 64;
+#    else
+    constexpr std::size_t longTypeahead = 4000;
+#    endif
+
+    constexpr std::string_view macTypeaheadSkipReason =
+        "a macOS tty drops typeahead past 1024 bytes, the remote bootstrap is meant for Linux servers";
+
+    /**
      * @brief Starts the shell of a test, on the host or in a docker container.
      *
      * A shell missing on the host is skipped, the docker images cover every shell. Docker itself is
-     * required: without it the docker configurations fail, loudly and each on its own.
+     * required: without it the docker configurations fail, loudly and each on its own. Runners that
+     * cannot have docker (macOS) set NUI_SFTP_SKIP_DOCKER_TESTS to skip them instead.
      */
     class ShellLauncher
     {
@@ -310,7 +359,11 @@ namespace Test
         void launchInContainer(Launch const& launch, Settings shellSettings)
         {
             if (auto const& reason = Docker::unavailableReason())
+            {
+                if (std::getenv("NUI_SFTP_SKIP_DOCKER_TESTS") != nullptr)
+                    GTEST_SKIP() << "Docker is unavailable and NUI_SFTP_SKIP_DOCKER_TESTS is set: " << *reason;
                 FAIL() << "Docker is required for the shell integration tests: " << *reason;
+            }
 
             containerName_ = Docker::uniqueContainerName();
             std::vector<std::string> arguments{"run", "--rm", "-it", "--network", "none", "--name", containerName_};
@@ -460,6 +513,8 @@ namespace Test
       protected:
         void SetUp() override
         {
+            if (exceedsTheMacTypeahead(GetParam().bootstrap, GetParam().image))
+                GTEST_SKIP() << macTypeaheadSkipReason;
             launch({
                 .name = GetParam().name,
                 .shell = GetParam().shell,
@@ -552,7 +607,7 @@ namespace Test
             "echo \xC3\xBCmlaut",
             "echo \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E",
             "echo \xF0\x9F\x98\x80",
-            "echo " + std::string(4000, 'a'),
+            "echo " + std::string(longTypeahead, 'a'),
         };
         for (auto const& command : corpus)
             EXPECT_EQ(commandsFor(command + "\n"), Commands{command}) << command.substr(0, 60);
@@ -800,6 +855,8 @@ namespace Test
       protected:
         void SetUp() override
         {
+            if (exceedsTheMacTypeahead(" " + GetParam().bootstrap, GetParam().image))
+                GTEST_SKIP() << macTypeaheadSkipReason;
             launch({
                 .name = GetParam().name,
                 .shell = GetParam().shell,

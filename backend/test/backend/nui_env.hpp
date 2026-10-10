@@ -5,6 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#ifdef __APPLE__
+#    include <CoreGraphics/CoreGraphics.h>
+#endif
+
 #include <memory>
 
 namespace Test
@@ -28,7 +32,14 @@ namespace Test
         static NuiEnv& instance()
         {
             static NuiEnv env;
+            constructed() = true;
             return env;
+        }
+
+        static bool& constructed()
+        {
+            static bool wasConstructed = false;
+            return wasConstructed;
         }
 
         bool available() const
@@ -43,8 +54,24 @@ namespace Test
         }
 
       private:
+        /**
+         * @brief Without a GUI session (ssh, CI agent) AppKit never finishes launching and the window blocks forever.
+         */
+        static bool canOpenWindows()
+        {
+#ifdef __APPLE__
+            CFDictionaryRef session = CGSessionCopyCurrentDictionary();
+            if (session == nullptr)
+                return false;
+            CFRelease(session);
+#endif
+            return true;
+        }
+
         NuiEnv()
         {
+            if (!canOpenWindows())
+                return;
             try
             {
                 window = std::make_unique<Nui::Window>();
@@ -63,7 +90,8 @@ namespace Test
       public:
         void TearDown() override
         {
-            NuiEnv::instance().shutdown();
+            if (NuiEnv::constructed())
+                NuiEnv::instance().shutdown();
         }
     };
 }

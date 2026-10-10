@@ -19,7 +19,8 @@ target_link_libraries(
         GTest::gtest_main
 )
 
-find_program(TAR_EXECUTABLE tar)
+# macOS ships bsdtar as tar, which adds AppleDouble entries; Homebrew's gnu-tar installs gtar.
+find_program(TAR_EXECUTABLE NAMES gtar tar)
 if (TAR_EXECUTABLE)
     message(STATUS "tar-archive tests: GNU tar interop enabled via ${TAR_EXECUTABLE}")
     target_compile_definitions(nui-sftp-tar-archive-test PRIVATE -DTAR_EXECUTABLE="${TAR_EXECUTABLE}")
