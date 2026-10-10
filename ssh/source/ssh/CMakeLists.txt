@@ -19,7 +19,7 @@ target_include_directories(
 
 target_compile_definitions(secure-shell PRIVATE -DSSH_NO_CPP_EXCEPTIONS)
 
-find_package(LIBSSH REQUIRED)
+include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/libssh.cmake")
 find_package(fmt CONFIG REQUIRED)
 
 target_link_libraries(
