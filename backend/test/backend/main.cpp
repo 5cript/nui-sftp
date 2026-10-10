@@ -13,6 +13,7 @@
 #include "test_shell_integration.hpp"
 #include "test_ui_options.hpp"
 #include "test_environment.hpp"
+#include "test_termios.hpp"
 
 #include <log/log.hpp>
 

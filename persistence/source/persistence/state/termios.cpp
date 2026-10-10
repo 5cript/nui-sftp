@@ -385,27 +385,35 @@ namespace Persistence
 #ifdef _WIN32
         return {};
 #else
-        return std::vector<unsigned char>{
-            VDISCARD_,
-            VDSUSP_,
-            VEOF_,
-            VEOL_,
-            VEOL2_,
-            VERASE_,
-            VINTR_,
-            VKILL_,
-            VLNEXT_,
-            VMIN_,
-            VQUIT_,
-            VREPRINT_,
-            VSTART_,
-            VSTATUS_,
-            VSTOP_,
-            VSUSP_,
-            VSWTCH_,
-            VTIME_,
-            VWERASE_,
-        };
+        std::vector<unsigned char> characters(NCCS, 0);
+        characters[VDISCARD] = VDISCARD_;
+#    ifdef VDSUSP
+        characters[VDSUSP] = VDSUSP_;
+#    endif
+        characters[VEOF] = VEOF_;
+        characters[VEOL] = VEOL_;
+        characters[VEOL2] = VEOL2_;
+        characters[VERASE] = VERASE_;
+        characters[VINTR] = VINTR_;
+        characters[VKILL] = VKILL_;
+        characters[VLNEXT] = VLNEXT_;
+        characters[VMIN] = VMIN_;
+        characters[VQUIT] = VQUIT_;
+        characters[VREPRINT] = VREPRINT_;
+        characters[VSTART] = VSTART_;
+#    ifdef VSTATUS
+        characters[VSTATUS] = VSTATUS_;
+#    endif
+        characters[VSTOP] = VSTOP_;
+        characters[VSUSP] = VSUSP_;
+#    if defined(VSWTCH)
+        characters[VSWTCH] = VSWTCH_;
+#    elif defined(VSWTC)
+        characters[VSWTC] = VSWTCH_;
+#    endif
+        characters[VTIME] = VTIME_;
+        characters[VWERASE] = VWERASE_;
+        return characters;
 #endif
     }
 
