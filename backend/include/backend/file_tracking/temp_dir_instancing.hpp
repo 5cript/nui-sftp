@@ -2,6 +2,7 @@
 
 #include <backend/file_tracking/instance_lock.hpp>
 #include <backend/file_tracking/instance_watch.hpp>
+#include <persistence/state/sftp_options.hpp>
 #include <utility/describe.hpp>
 
 #include <boost/asio/strand.hpp>
@@ -125,10 +126,16 @@ namespace FileTracking
          * @param path      Absolute path or path relative to instanceDir().  Must
          *                  resolve to a location inside instanceDir().
          * @param recursive Whether to recurse into subdirectories.
+         * @param downloadTempSuffix The suffix downloads into the instance write under until complete, those
+         *                  files and their final rename are not mirrored to the remote side.
          * @return A valid InstanceWatch on success, or std::nullopt if the path is
          *         outside instanceDir(), does not exist, or efsw rejected the watch.
          */
-        std::optional<InstanceWatch> addWatch(std::filesystem::path const& path, bool recursive = true);
+        std::optional<InstanceWatch> addWatch(
+            std::filesystem::path const& path,
+            bool recursive = true,
+            std::string downloadTempSuffix = std::string{Persistence::defaultTempFileSuffix}
+        );
 
         /**
          * @brief Immediately delete the instance directory and invalidate this

@@ -21,6 +21,7 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/notifications.hpp>
 #include <persistence/state/session_options.hpp>
+#include <persistence/state/sftp_options.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 
@@ -709,7 +710,13 @@ void Session::openSftp(std::string const& username, bool forceOpen)
             localSideModel().engine(std::move(fileEngine));
             if (remoteSideModel())
                 impl_->operationQueue.activate(remoteSideModel()->engine(), sshTerminalEngine->sshSessionId());
-            impl_->fileTrackingPanel.activate(&impl_->operationQueue, sshTerminalEngine->sshSessionId());
+            impl_->fileTrackingPanel.activate(
+                &impl_->operationQueue,
+                sshTerminalEngine->sshSessionId(),
+                Persistence::effectiveTempFileSuffix(
+                    opts.sftpOptions->downloadOptions ? opts.sftpOptions->downloadOptions->tempFileSuffix : std::nullopt
+                )
+            );
             localSideModel().operationQueue(&impl_->operationQueue);
             if (remoteSideModel())
             {

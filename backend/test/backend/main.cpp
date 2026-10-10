@@ -15,6 +15,7 @@
 #include "test_environment.hpp"
 #include "test_termios.hpp"
 #include "test_fork_pool.hpp"
+#include "test_file_change_filter.hpp"
 
 #include <log/log.hpp>
 

@@ -1431,7 +1431,8 @@ void RemoteSideModel::onFileDownloadComplete(
         },
         instanceId.value(),
         instanceDir.generic_string(),
-        true
+        true,
+        fileTracking_ ? fileTracking_->downloadTempSuffix() : std::string{Persistence::defaultTempFileSuffix}
     );
 }
 
