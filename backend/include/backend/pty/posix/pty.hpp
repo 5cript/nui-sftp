@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nui/utility/move_detector.hpp>
+#include <backend/pty/posix/process_list.hpp>
 #include <persistence/state/termios.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -63,12 +64,7 @@ namespace PTY
 
         void resize(short width, short height);
 
-        struct PtyProcess
-        {
-            int pid;
-            std::string cmdline;
-        };
-        std::vector<PtyProcess> listProcessesUnderPty();
+        std::vector<TerminalProcess> listProcessesUnderPty();
 
         void
         startReading(std::function<void(std::string_view)> onStdout, std::function<void(std::string_view)> onStderr);

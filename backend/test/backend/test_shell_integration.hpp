@@ -6,7 +6,7 @@
 #    include "osc_scanner.hpp"
 
 #    include <backend/process/boost_process.hpp>
-#    include <backend/pty/linux/pty.hpp>
+#    include <backend/pty/posix/pty.hpp>
 #    include <persistence/state/termios.hpp>
 #    include <utility/echo_suppressor.hpp>
 #    include <utility/shell_integration.hpp>

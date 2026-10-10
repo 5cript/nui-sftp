@@ -1,6 +1,7 @@
 #include <backend/process/fork_pool.hpp>
 
 #include <backend/process/json_process_io.hpp>
+#include <backend/pty/posix/process_list.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
 #include <persistence/state/termios.hpp>
 #include <roar/utility/base64.hpp>
@@ -10,12 +11,10 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
-#include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -24,36 +23,65 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/signalfd.h>
 #include <sys/wait.h>
 #include <termios.h>
-#include <pty.h>
 #include <unistd.h>
-#include <utmp.h>
+
+#ifdef __APPLE__
+#    include <util.h>
+#else
+#    include <pty.h>
+#    include <utmp.h>
+#endif
 
 namespace
 {
     // =========================================================================
     // Worker-side — runs entirely in the child process.
-    // Single-threaded, driven by epoll.  No boost, no threads, no mutexes.
+    // Single-threaded, driven by poll.  No boost, no threads, no mutexes.
     // =========================================================================
+
+    // Write end of the SIGCHLD self-pipe, the handler may only touch async-signal-safe state.
+    volatile sig_atomic_t childSignalPipe = -1;
+
+    void onChildSignal(int)
+    {
+        const int savedErrno = errno;
+        const char byte = 0;
+        [[maybe_unused]] const auto written = ::write(childSignalPipe, &byte, 1);
+        errno = savedErrno;
+    }
+
+    bool makePipe(int (&fds)[2], int extraFlags)
+    {
+        if (::pipe(fds) == -1)
+            return false;
+        for (const int fd : fds)
+        {
+            ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+            if (extraFlags != 0)
+                ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | extraFlags);
+        }
+        return true;
+    }
 
     struct WProc
     {
         pid_t pid;
         int ptyMaster; // -1 once closed
         std::string id;
+        // Stdin the pty did not take yet, a macOS pty only buffers about 1 KiB.
+        std::string pendingInput{};
     };
 
     struct WorkerState
     {
-        int epollFd{-1};
         int readFd{-1};
         int writeFd{-1};
-        int sigFd{-1};
+        int signalReadFd{-1};
         FdJsonIo io;
         std::unordered_map<std::string, WProc> procs; // id  -> WProc
         std::unordered_map<int, std::string> fdToId; // pty master fd -> id
@@ -64,21 +92,6 @@ namespace
             , writeFd{writeFd_}
             , io{readFd_, writeFd_}
         {}
-
-        void addToEpoll(int fd, std::uint32_t events) const
-        {
-            epoll_event ev{};
-            ev.events = events;
-            ev.data.fd = fd;
-            if (::epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &ev) == -1)
-                spdlog::error("[worker] epoll_ctl ADD fd={}: {}", fd, std::strerror(errno));
-        }
-
-        void removeFromEpoll(int fd) const
-        {
-            if (::epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr) == -1)
-                spdlog::error("[worker] epoll_ctl DEL fd={}: {}", fd, std::strerror(errno));
-        }
 
         void sendJson(nlohmann::json const& msg)
         {
@@ -92,13 +105,13 @@ namespace
         {
             if (proc.ptyMaster < 0)
                 return;
-            removeFromEpoll(proc.ptyMaster);
             fdToId.erase(proc.ptyMaster);
             ::close(proc.ptyMaster);
             proc.ptyMaster = -1;
+            proc.pendingInput.clear();
         }
 
-        // --- epoll event handlers ---------------------------------------------
+        // --- poll event handlers ----------------------------------------------
 
         void handleParentReadable()
         {
@@ -120,10 +133,9 @@ namespace
 
         void handleSignal()
         {
-            signalfd_siginfo info{};
-            ssize_t nread = ::read(sigFd, &info, sizeof(info));
-            if (nread != static_cast<ssize_t>(sizeof(info)))
-                return;
+            char drain[64];
+            while (::read(signalReadFd, drain, sizeof(drain)) > 0)
+            {}
 
             // Reap all children that have already exited.
             int status = 0;
@@ -172,7 +184,7 @@ namespace
             }
             else if (nread == 0 || (nread == -1 && errno != EAGAIN && errno != EINTR))
             {
-                // EIO or unexpected close — remove from epoll; SIGCHLD will send exit
+                // EIO or unexpected close — stop polling it; SIGCHLD will send exit
                 spdlog::debug("[worker] PTY EIO/close for id='{}' fd={}", procId, fd);
                 auto procIt = procs.find(procId);
                 if (procIt != procs.end())
@@ -234,7 +246,9 @@ namespace
                 .c_oflag = termy.outputFlags.assemble(),
                 .c_cflag = termy.controlFlags.assemble(),
                 .c_lflag = termy.localFlags.assemble(),
+#ifdef __linux__
                 .c_line = 0,
+#endif
                 .c_cc = {},
                 .c_ispeed = 0,
                 .c_ospeed = 0,
@@ -314,11 +328,10 @@ namespace
             // Parent (worker): slave fd no longer needed
             ::close(slave);
 
-            // Make master non-blocking for epoll edge case safety
+            // Non-blocking so a spurious readiness never stalls the loop
             int flags = ::fcntl(master, F_GETFL, 0);
             ::fcntl(master, F_SETFL, flags | O_NONBLOCK);
 
-            addToEpoll(master, EPOLLIN);
             procs.emplace(procId, WProc{pid, master, procId});
             fdToId.emplace(master, procId);
 
@@ -340,26 +353,41 @@ namespace
             }
             const auto decoded = Roar::base64Decode(payload["data"].get<std::string>());
             spdlog::trace("[worker] stdin {} byte(s) for id='{}'", decoded.size(), procId);
-            const char* ptr = decoded.data();
-            std::size_t remaining = decoded.size();
-            while (remaining > 0)
+            it->second.pendingInput += decoded;
+            flushInput(it->second);
+        }
+
+        /**
+         * @brief Writes as much pending stdin as the pty takes, the rest waits for POLLOUT.
+         */
+        void flushInput(WProc& proc)
+        {
+            while (!proc.pendingInput.empty() && proc.ptyMaster >= 0)
             {
-                ssize_t written = ::write(it->second.ptyMaster, ptr, remaining);
+                const ssize_t written = ::write(proc.ptyMaster, proc.pendingInput.data(), proc.pendingInput.size());
                 if (written > 0)
-                {
-                    ptr += written;
-                    remaining -= static_cast<std::size_t>(written);
-                }
+                    proc.pendingInput.erase(0, static_cast<std::size_t>(written));
                 else if (written == -1 && errno == EINTR)
-                {
-                    /* retry */
-                }
+                    continue;
+                else if (written == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                    return;
                 else
                 {
-                    spdlog::warn("[worker] stdin write error for id='{}': {}", procId, std::strerror(errno));
-                    break;
+                    spdlog::warn("[worker] stdin write error for id='{}': {}", proc.id, std::strerror(errno));
+                    proc.pendingInput.clear();
+                    return;
                 }
             }
+        }
+
+        void handlePtyWritable(int fd)
+        {
+            auto fdIt = fdToId.find(fd);
+            if (fdIt == fdToId.end())
+                return;
+            auto procIt = procs.find(fdIt->second);
+            if (procIt != procs.end())
+                flushInput(procIt->second);
         }
 
         void handleResize(std::string const& procId, nlohmann::json const& payload)
@@ -409,55 +437,8 @@ namespace
             }
 
             nlohmann::json procsList = nlohmann::json::array();
-            try
-            {
-                for (const auto& entry : std::filesystem::directory_iterator("/proc"))
-                {
-                    try
-                    {
-                        if (!entry.is_directory())
-                            continue;
-                        const std::string pidStr = entry.path().filename().string();
-                        if (!std::all_of(
-                                pidStr.begin(),
-                                pidStr.end(),
-                                [](unsigned char chr)
-                                {
-                                    return std::isdigit(chr);
-                                }
-                            ))
-                            continue;
-                        const auto fdPath = entry.path() / "fd" / "0";
-                        if (!std::filesystem::is_symlink(fdPath))
-                            continue;
-                        std::error_code ec;
-                        const auto target = std::filesystem::read_symlink(fdPath, ec);
-                        if (ec || target.string() != slaveName)
-                            continue;
-                        std::ifstream cmdlineFile{entry.path() / "cmdline"};
-                        if (!cmdlineFile)
-                            continue;
-                        std::string cmdline;
-                        std::getline(cmdlineFile, cmdline, '\0');
-                        procsList.push_back({{"pid", std::stoi(pidStr)}, {"cmdline", cmdline}});
-                    }
-                    catch (...)
-                    {
-                        continue;
-                    }
-                }
-            }
-            catch (...)
-            {}
-
-            std::sort(
-                procsList.begin(),
-                procsList.end(),
-                [](nlohmann::json const& a, nlohmann::json const& b)
-                {
-                    return a["pid"].get<int>() < b["pid"].get<int>();
-                }
-            );
+            for (auto const& process : PTY::listProcessesOnTerminal(slaveName))
+                procsList.push_back({{"pid", process.pid}, {"cmdline", process.cmdline}});
 
             sendJson({{"id", procId}, {"type", "listProcesses"}, {"responseId", responseId}, {"procs", procsList}});
         }
@@ -478,62 +459,80 @@ namespace
 
         void run()
         {
-            epollFd = ::epoll_create1(EPOLL_CLOEXEC);
-            if (epollFd == -1)
-            {
-                spdlog::error("[worker] epoll_create1: {}", std::strerror(errno));
-                return;
-            }
-
             // Make IPC read fd non-blocking
             int flags = ::fcntl(readFd, F_GETFL, 0);
             ::fcntl(readFd, F_SETFL, flags | O_NONBLOCK);
 
-            addToEpoll(readFd, EPOLLIN);
-
-            // Block SIGCHLD and receive it via signalfd
-            sigset_t mask{};
-            ::sigemptyset(&mask);
-            ::sigaddset(&mask, SIGCHLD);
-            ::sigprocmask(SIG_BLOCK, &mask, nullptr);
-            sigFd = ::signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
-            if (sigFd == -1)
+            int signalPipe[2];
+            if (!makePipe(signalPipe, O_NONBLOCK))
             {
-                spdlog::error("[worker] signalfd: {}", std::strerror(errno));
-                ::close(epollFd);
+                spdlog::error("[worker] pipe: {}", std::strerror(errno));
                 return;
             }
-            addToEpoll(sigFd, EPOLLIN);
+            signalReadFd = signalPipe[0];
+            childSignalPipe = signalPipe[1];
 
-            spdlog::info("[worker] entering epoll loop");
+            struct sigaction action{};
+            action.sa_handler = onChildSignal;
+            sigemptyset(&action.sa_mask);
+            action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+            ::sigaction(SIGCHLD, &action, nullptr);
 
-            epoll_event events[32];
+            // The parent may have blocked SIGCHLD, children inherit the mask through exec.
+            sigset_t mask{};
+            sigemptyset(&mask);
+            sigaddset(&mask, SIGCHLD);
+            ::sigprocmask(SIG_UNBLOCK, &mask, nullptr);
+
+            spdlog::info("[worker] entering poll loop");
+
+            std::vector<pollfd> pollFds;
             while (running)
             {
-                int nfds = ::epoll_wait(epollFd, events, 32, -1);
-                if (nfds == -1)
+                pollFds.clear();
+                pollFds.push_back({.fd = readFd, .events = POLLIN, .revents = 0});
+                pollFds.push_back({.fd = signalReadFd, .events = POLLIN, .revents = 0});
+                for (auto const& [fd, id] : fdToId)
+                {
+                    const auto procIt = procs.find(id);
+                    const bool hasPendingInput = procIt != procs.end() && !procIt->second.pendingInput.empty();
+                    pollFds.push_back(
+                        {.fd = fd, .events = static_cast<short>(POLLIN | (hasPendingInput ? POLLOUT : 0)), .revents = 0}
+                    );
+                }
+
+                const int ready = ::poll(pollFds.data(), static_cast<nfds_t>(pollFds.size()), -1);
+                if (ready == -1)
                 {
                     if (errno == EINTR)
                         continue;
-                    spdlog::error("[worker] epoll_wait: {}", std::strerror(errno));
+                    spdlog::error("[worker] poll: {}", std::strerror(errno));
                     break;
                 }
 
-                for (int idx = 0; idx < nfds && running; ++idx)
+                for (auto const& entry : pollFds)
                 {
-                    int fd = events[idx].data.fd;
-                    if (fd == readFd)
+                    if (!running)
+                        break;
+                    if ((entry.revents & (POLLIN | POLLOUT | POLLHUP | POLLERR)) == 0)
+                        continue;
+                    if (entry.fd == readFd)
                         handleParentReadable();
-                    else if (fd == sigFd)
+                    else if (entry.fd == signalReadFd)
                         handleSignal();
                     else
-                        handlePtyReadable(fd);
+                    {
+                        if ((entry.revents & POLLOUT) != 0)
+                            handlePtyWritable(entry.fd);
+                        if ((entry.revents & (POLLIN | POLLHUP | POLLERR)) != 0)
+                            handlePtyReadable(entry.fd);
+                    }
                 }
             }
 
-            spdlog::info("[worker] epoll loop exited");
-            ::close(sigFd);
-            ::close(epollFd);
+            spdlog::info("[worker] poll loop exited");
+            ::close(signalReadFd);
+            ::close(signalPipe[1]);
         }
     };
 
@@ -648,14 +647,14 @@ void ForkPool::start(boost::asio::any_io_executor executor, std::function<void(n
     int parentToWorker[2];
     int workerToParent[2];
 
-    if (::pipe2(parentToWorker, O_CLOEXEC) == -1)
-        throw std::system_error{errno, std::system_category(), "pipe2(parentToWorker)"};
+    if (!makePipe(parentToWorker, 0))
+        throw std::system_error{errno, std::system_category(), "pipe(parentToWorker)"};
 
-    if (::pipe2(workerToParent, O_CLOEXEC) == -1)
+    if (!makePipe(workerToParent, 0))
     {
         ::close(parentToWorker[0]);
         ::close(parentToWorker[1]);
-        throw std::system_error{errno, std::system_category(), "pipe2(workerToParent)"};
+        throw std::system_error{errno, std::system_category(), "pipe(workerToParent)"};
     }
 
     auto& ctx = boost::asio::query(executor, boost::asio::execution::context);

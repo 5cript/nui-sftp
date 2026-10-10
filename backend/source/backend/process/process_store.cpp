@@ -10,7 +10,7 @@
 #ifdef _WIN32
 #    include <backend/pty/windows/conpty.hpp>
 #else
-#    include <backend/pty/linux/pty.hpp>
+#    include <backend/pty/posix/pty.hpp>
 #    include <backend/process/fork_pool.hpp>
 #endif
 

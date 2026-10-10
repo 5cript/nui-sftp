@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef __linux__
+#ifndef _WIN32
 #    include <signal.h>
 
 extern volatile sig_atomic_t* sigchld;
