@@ -386,7 +386,7 @@ namespace Test
         std::string name;
         std::string shell;
         std::vector<std::string> arguments;
-        /// The bootstrap as the app picks it: the local one for a known shell, the remote one for ssh.
+        /// The line the app types: an eval of the environment for a local shell, the remote bootstrap for ssh.
         std::string bootstrap;
         /// Shell settings that change how the hook sees history.
         Settings settings{};
@@ -408,17 +408,21 @@ namespace Test
     {
         using ShellIntegration::ShellKind;
         const auto local = [](ShellKind kind) {
-            return ShellIntegration::bootstrap(kind);
+            return ShellIntegration::environmentBootstrap(kind);
+        };
+        // A local shell receives its hook in the environment, like the app hands it over.
+        const auto carried = [](ShellKind kind) {
+            return Settings{{std::string{ShellIntegration::bootstrapVariable}, ShellIntegration::bootstrap(kind)}};
         };
         const auto remote = ShellIntegration::remoteBootstrap();
 
         std::vector<ShellConfiguration> configurations{
-            {"HostBashLocal", "bash", bashArguments, local(ShellKind::Bash)},
+            {"HostBashLocal", "bash", bashArguments, local(ShellKind::Bash), carried(ShellKind::Bash)},
             {"HostBashRemote", "bash", bashArguments, remote},
             {"HostBashWithPromptCommand", "bash", bashArguments, remote, {{"PROMPT_COMMAND", "true; :"}}},
             {"HostBashIgnoreBoth", "bash", bashArguments, remote, historySettings},
-            {"HostZshLocal", "zsh", zshArguments, local(ShellKind::Zsh)},
-            {"HostFishLocal", "fish", fishArguments, local(ShellKind::Fish)},
+            {"HostZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh)},
+            {"HostFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish)},
         };
         for (auto const image : Docker::bashImages)
         {
@@ -427,9 +431,9 @@ namespace Test
             configurations.push_back({label + "IgnoreBoth", "bash", bashArguments, remote, historySettings, std::string{image}});
         }
         const std::string shells{Docker::shellsImage};
-        configurations.push_back({"AlpineZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), {}, shells});
+        configurations.push_back({"AlpineZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh), shells});
         configurations.push_back({"AlpineZshRemote", "zsh", zshArguments, remote, {}, shells});
-        configurations.push_back({"AlpineFishLocal", "fish", fishArguments, local(ShellKind::Fish), {}, shells});
+        configurations.push_back({"AlpineFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish), shells});
         return configurations;
     }
 
@@ -688,10 +692,12 @@ namespace Test
                     {"PS1", std::string{prompt}},
                     {"HISTFILE", (home / "history").string()},
                     {"HISTCONTROL", "ignoredups"},
+                    {std::string{ShellIntegration::bootstrapVariable},
+                     ShellIntegration::bootstrap(ShellIntegration::ShellKind::Bash)},
                 },
         }};
         ASSERT_TRUE(shell.started());
-        shell.write(" " + ShellIntegration::remoteBootstrap() + "\n");
+        shell.write(" " + ShellIntegration::environmentBootstrap(ShellIntegration::ShellKind::Bash) + "\n");
         shell.write("echo again\necho again\n: nui-done\n");
         ASSERT_TRUE(shell.waitUntil([&]() {
             return !shell.reportedCommands().empty() && shell.reportedCommands().back() == ": nui-done";

@@ -146,6 +146,23 @@ namespace ShellIntegration
             std::string{bashBootstrap} + R"(; else )" + std::string{zshBootstrap} + R"(; fi')";
     }
 
+    std::string environmentBootstrap(ShellKind kind)
+    {
+        const std::string variable{bootstrapVariable};
+        switch (kind)
+        {
+            case ShellKind::Bash:
+            case ShellKind::Sh:
+            case ShellKind::Zsh:
+                return "eval \"$" + variable + "\"; unset " + variable;
+            case ShellKind::Fish:
+                return "eval $" + variable + "; set -e " + variable;
+            case ShellKind::Unknown:
+                return {};
+        }
+        return {};
+    }
+
     std::size_t echoCount(ShellKind kind)
     {
         return kind == ShellKind::Fish ? 3 : 2;

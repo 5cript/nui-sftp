@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 /**
  * @brief Shell integration for the "smart" history capture mode.
@@ -47,6 +48,21 @@ namespace ShellIntegration
      * (fish included, which is why the guard is written so that fish can parse but never run it).
      */
     std::string remoteBootstrap();
+
+    /**
+     * @brief Environment variable a local shell receives its bootstrap in.
+     *
+     * The name carries the marker the bash bootstrap looks for to drop its own line from history.
+     */
+    constexpr std::string_view bootstrapVariable = "__nui_preexec_bootstrap";
+
+    /**
+     * @brief The short line that runs the bootstrap a local shell received in bootstrapVariable.
+     *
+     * A macOS tty drops typeahead past 1024 bytes while the shell is still starting, the bash
+     * bootstrap is twice that. Empty for ShellKind::Unknown.
+     */
+    std::string environmentBootstrap(ShellKind kind);
 
     /**
      * @brief How often the shell echoes a bootstrap that was typed ahead: once from the tty, once

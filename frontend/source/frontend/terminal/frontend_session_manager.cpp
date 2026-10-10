@@ -2,6 +2,7 @@
 #include <utility/shell_integration.hpp>
 #include <log/log.hpp>
 
+#include <optional>
 #include <unordered_map>
 
 namespace
@@ -12,16 +13,34 @@ namespace
         std::size_t echoes;
     };
 
-    /// The bootstrap that fits the channel: a local process announces its shell in the options, a
-    /// remote one only reveals it at runtime.
+    /// The bootstrap that fits the channel: a local process announces its shell in the options and
+    /// gets the hook in its environment (see withBootstrapEnvironment), a remote one only reveals its
+    /// shell at runtime.
     Bootstrap bootstrapFor(ChannelCreationOptions const& channelOptions)
     {
         if (const auto* executing = dynamic_cast<ExecutingChannelCreationOptions const*>(&channelOptions))
         {
             const auto kind = ShellIntegration::detectShellKind(executing->executingOptions.command);
-            return {ShellIntegration::bootstrap(kind), ShellIntegration::echoCount(kind)};
+            return {ShellIntegration::environmentBootstrap(kind), ShellIntegration::echoCount(kind)};
         }
         return {ShellIntegration::remoteBootstrap(), ShellIntegration::echoCount(ShellIntegration::ShellKind::Unknown)};
+    }
+
+    /// Puts the hook of a local shell into its environment, the line typed later only evaluates it.
+    Persistence::ExecutingSessionOptions withBootstrapEnvironment(
+        Persistence::ExecutingSessionOptions options,
+        Persistence::HistoryCaptureMode captureMode
+    )
+    {
+        if (captureMode != Persistence::HistoryCaptureMode::smart)
+            return options;
+        const auto script = ShellIntegration::bootstrap(ShellIntegration::detectShellKind(options.command));
+        if (script.empty())
+            return options;
+        if (!options.environment)
+            options.environment.emplace();
+        options.environment->insert_or_assign(std::string{ShellIntegration::bootstrapVariable}, script);
+        return options;
     }
 }
 
@@ -248,8 +267,16 @@ void FrontendSessionManager::createChannel(
     auto channelId = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
     auto* primary = impl_->primaryEngine.get();
 
+    std::optional<ExecutingChannelCreationOptions> localShellOptions{};
+    if (const auto* executing = dynamic_cast<ExecutingChannelCreationOptions const*>(&channelOptions))
+    {
+        localShellOptions = *executing;
+        localShellOptions->executingOptions =
+            withBootstrapEnvironment(executing->executingOptions, impl_->captureMode);
+    }
+
     primary->createChannel(
-        channelOptions,
+        localShellOptions ? static_cast<ChannelCreationOptions const&>(*localShellOptions) : channelOptions,
         [this, channelId](std::string const& data)
         {
             if (auto* channel = impl_->findChannel(*channelId))
@@ -361,7 +388,7 @@ void FrontendSessionManager::createLocalShellChannel(
     Log::info("Creating channel on aux local-shell engine");
 
     ExecutingChannelCreationOptions execOptions;
-    execOptions.executingOptions = shellOptions;
+    execOptions.executingOptions = withBootstrapEnvironment(shellOptions, impl_->captureMode);
     execOptions.termios = termios;
 
     auto channelId = std::make_shared<std::optional<Ids::ChannelId>>(std::nullopt);
