@@ -35,17 +35,22 @@ const std::vector<NuiFileExplorer::Item>& SideModel::items() const
     return items_;
 }
 
-void SideModel::onDirectoryListing(std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries)
+void SideModel::onDirectoryListing(
+    std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
+    std::string const& reason
+)
 {
     if (!directoryEntries)
     {
-        Log::error("Failed to list directory");
+        Log::error("Failed to list directory: {}", reason);
+        const auto path = currentPath_->generic_string();
+        auto text = reason.empty()
+            ? fmt::format(fmt::runtime(language->get("sideModel", "failedToListDirectoryText")), path)
+            : fmt::format(fmt::runtime(language->get("sideModel", "failedToListDirectoryReasonText")), path, reason);
         confirmDialog_->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
             .headerText = language->get("sideModel", "failedToListDirectory"),
-            .text = fmt::format(
-                fmt::runtime(language->get("sideModel", "failedToListDirectoryText")), currentPath_->generic_string()
-            ),
+            .text = std::move(text),
             .buttons = ConfirmDialog::Button::Ok,
         });
         // undo the navigation:

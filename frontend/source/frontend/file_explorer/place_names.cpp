@@ -25,13 +25,14 @@ namespace
         std::string (*displayName)();
     };
 
-    const std::array<PlaceKind, 7> placeKinds{{
+    const std::array<PlaceKind, 8> placeKinds{{
         {"home", &Ui5Icons::home, [] { return language->get("places", "home"); }},
         {"desktop", &Ui5Icons::desktop_mobile, [] { return language->get("places", "desktop"); }},
         {"downloads", &Ui5Icons::download, [] { return language->get("places", "downloads"); }},
         {"documents", &Ui5Icons::documents, [] { return language->get("places", "documents"); }},
         {"pictures", &Ui5Icons::picture, [] { return language->get("places", "pictures"); }},
         {"videos", &Ui5Icons::video, [] { return language->get("places", "videos"); }},
+        {"movies", &Ui5Icons::video, [] { return language->get("places", "movies"); }},
         {"music", &Ui5Icons::folder, [] { return language->get("places", "music"); }},
     }};
 
