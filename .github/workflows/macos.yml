@@ -23,17 +23,9 @@ jobs:
             cmake \
             ninja \
             pkgconf \
-            boost \
-            cryptopp \
-            openssl@3 \
-            libssh \
-            fmt \
-            nlohmann-json \
-            zstd \
-            xz \
+            llvm@23 \
             imagemagick \
             librsvg \
-            dylibbundler \
             gnu-tar
 
       - uses: actions/checkout@v6
@@ -45,6 +37,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      # libc++ and the libraries, built with llvm@23 (scripts/macos/build_dependencies.sh).
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/nui-sftp/macos-dependencies
+          key: macos-dependencies-${{ runner.arch }}-${{ hashFiles('scripts/macos/build_dependencies.sh', '_cmake/macos/toolchain.cmake') }}
+
+      - name: Build dependencies
+        run: |
+          bash scripts/macos/build_dependencies.sh
 
       - name: Configure CMake
         run: |
@@ -58,7 +60,7 @@ jobs:
             -DNUI_FETCH_TRAITS=OFF \
             -DNUI_ENABLE_TESTS=off \
             -DNUI_BUILD_EXAMPLES=off \
-            -DBREW_PREFIX="$(brew --prefix)" \
+            -DCMAKE_TOOLCHAIN_FILE=_cmake/macos/toolchain.cmake \
             -DNUI_SFTP_ENABLE_TESTING=ON
 
       - name: Build

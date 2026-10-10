@@ -86,7 +86,10 @@ if (WIN32)
 elseif (APPLE AND NOT EMSCRIPTEN)
     # scripts/deploy.sh assembles nui-sftp.app from these, the build tree keeps the plain bin/ layout.
     # Uint8Array.fromBase64 in static/source/index.js needs the WebKit of macOS 15.2.
-    set(NUI_SFTP_MINIMUM_MACOS "15.2" CACHE STRING "LSMinimumSystemVersion of the app bundle")
+    if (NOT CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "15.2")
+        message(FATAL_ERROR "nui-sftp needs CMAKE_OSX_DEPLOYMENT_TARGET 15.2 or later, use _cmake/macos/toolchain.cmake.")
+    endif()
+    set(NUI_SFTP_MINIMUM_MACOS "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/macos/icon.cmake")
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/_cmake/macos/Info.plist.in"
