@@ -341,7 +341,7 @@ namespace NuiFileExplorer
             return;
         }
 
-        const bool ctrl = event.ctrlKey();
+        const bool ctrl = event.ctrlKey() || event.metaKey();
         const bool shift = event.shiftKey();
 
         if (shift && !ctrl)
@@ -444,7 +444,7 @@ namespace NuiFileExplorer
         const bool isEnd = (key == "End");
         const bool isPageDown = (key == "PageDown");
         const bool isPageUp = (key == "PageUp");
-        const bool isSelectAll = (key == "a" || key == "A") && event.ctrlKey();
+        const bool isSelectAll = (key == "a" || key == "A") && (event.ctrlKey() || event.metaKey());
 
         if (!isArrow && !isHome && !isEnd && !isPageDown && !isPageUp && !isSelectAll)
             return false;

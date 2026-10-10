@@ -100,7 +100,7 @@ namespace NuiFileExplorer
         // Get box rect before display none
         const auto boxRect = Nui::WebApi::DomRect{boxLocked->val().call<Nui::val>("getBoundingClientRect")};
 
-        if (!event.ctrlKey() || event.shiftKey())
+        if (!(event.ctrlKey() || event.metaKey()) || event.shiftKey())
             impl().selectionManager.deselectAll();
         for (auto& item : impl().items.value())
         {

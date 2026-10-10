@@ -161,14 +161,14 @@ namespace NuiFileExplorer
             updateItems(true, false);
             return;
         }
-        if (event.key() == "c" && event.ctrlKey())
+        if (event.key() == "c" && (event.ctrlKey() || event.metaKey()))
         {
             const auto selectedItems = this->selectedItems();
             if (!selectedItems.empty())
                 impl_->copiedFiles = selectedItems;
             return;
         }
-        if (event.key() == "v" && event.ctrlKey())
+        if (event.key() == "v" && (event.ctrlKey() || event.metaKey()))
         {
             if (impl_->otherSide)
             {
