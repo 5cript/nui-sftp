@@ -5,7 +5,9 @@ add_executable(
     main.cpp
 )
 
-find_package(GTest CONFIG REQUIRED)
+if (NOT TARGET GTest::gtest)
+    find_package(GTest CONFIG REQUIRED)
+endif()
 
 target_link_libraries(
     nui-sftp-backend-test

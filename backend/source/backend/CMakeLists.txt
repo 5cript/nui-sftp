@@ -6,6 +6,7 @@ add_library(
         rpc_filesystem.cpp
         rpc_system.cpp
         theme_finder.cpp
+        dropped_entry.cpp
         program_options.cpp
         inspector_environment.cpp
         password/password_prompter.cpp
@@ -43,6 +44,32 @@ if (WIN32)
             windows/windows_drag_drop.cpp
             windows/main_windows.cpp
             windows/opener_windows.cpp
+    )
+elseif(APPLE)
+    enable_language(OBJCXX)
+    target_sources(
+        backend
+        PRIVATE
+            file_tracking/instance_lock_nix.cpp
+            pty/posix/pty.cpp
+            pty/posix/process_list.cpp
+            mac/main_mac.mm
+            mac/opener_mac.mm
+            mac/web_view_hooks.mm
+            process/fork_pool.cpp
+    )
+    set_source_files_properties(
+        mac/main_mac.mm
+        mac/opener_mac.mm
+        mac/web_view_hooks.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    target_link_libraries(
+        backend
+        PRIVATE
+            "-framework AppKit"
+            "-framework WebKit"
+            "-framework UniformTypeIdentifiers"
     )
 else()
     target_sources(

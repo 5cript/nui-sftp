@@ -3,6 +3,20 @@
 #ifdef _WIN32
 #else
 #    include <termios.h>
+
+// Linux-only flags, BSD termios (macOS) has no equivalent.
+#    ifndef IUCLC
+#        define IUCLC 0
+#    endif
+#    ifndef OLCUC
+#        define OLCUC 0
+#    endif
+#    ifndef XCASE
+#        define XCASE 0
+#    endif
+#    ifndef CBAUDEX
+#        define CBAUDEX 0
+#    endif
 #endif
 
 namespace Persistence
