@@ -1,4 +1,5 @@
 #include <backend/sftp/upload_operation.hpp>
+#include <persistence/state/sftp_options.hpp>
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
@@ -14,10 +15,7 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
     , options_{std::move(options)}
     , localFile_{}
 {
-    if (options_.tempFileSuffix.empty())
-        options_.tempFileSuffix = ".filepart";
-    if (options_.tempFileSuffix.find('/') != 0)
-        options_.tempFileSuffix = ".filepart";
+    options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
 }
 
 UploadOperation::~UploadOperation()

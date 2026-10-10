@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <persistence/state/sftp_options.hpp>
 
 #include <tar_archive/error.hpp>
 
@@ -119,8 +120,7 @@ ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sft
     , sftp_{&sftp}
     , options_{std::move(options)}
 {
-    if (options_.tempFileSuffix.empty())
-        options_.tempFileSuffix = ".filepart";
+    options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
 
     tempPath_ = options_.localArchivePath;
     tempPath_ += options_.tempFileSuffix;

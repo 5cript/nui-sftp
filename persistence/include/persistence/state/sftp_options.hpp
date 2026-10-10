@@ -3,6 +3,7 @@
 #include <persistence/state_core.hpp>
 
 #include <string>
+#include <string_view>
 #include <optional>
 #include <filesystem>
 
@@ -18,6 +19,20 @@ namespace Persistence
         SkipSymlink
     };
     BOOST_DESCRIBE_ENUM(SymlinkHandling, AsSymlink, FollowSymlink, SkipSymlink)
+
+    constexpr std::string_view defaultTempFileSuffix = ".filepart";
+
+    /**
+     * @brief The suffix a transfer writes a file under until it is complete.
+     * @param configured The tempFileSuffix option; empty, missing or containing a path separator falls back to
+     *        defaultTempFileSuffix.
+     */
+    inline std::string effectiveTempFileSuffix(std::optional<std::string> const& configured)
+    {
+        if (!configured || configured->empty() || configured->find_first_of("/\\") != std::string::npos)
+            return std::string{defaultTempFileSuffix};
+        return *configured;
+    }
 
     struct CommonTransferOptions : public DefaultMissingMember
     {
