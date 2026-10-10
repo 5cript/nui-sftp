@@ -15,6 +15,7 @@
 #include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <utility/language.hpp>
+#include <utility/user_directories.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
 #include <log/log.hpp>
@@ -24,9 +25,8 @@
 #include <nui/rpc.hpp>
 
 #include <algorithm>
-#include <array>
 #include <iterator>
-#include <string_view>
+#include <utility>
 
 using namespace std::string_literals;
 
@@ -1461,29 +1461,6 @@ void RemoteSideModel::onFileWatchAdded(
 
 // --- IPlacesProvider ---
 
-namespace
-{
-    struct PlaceCandidate
-    {
-        std::string_view kind;
-        /**
-         * @brief The name in user-dirs.dirs, such as DESKTOP for XDG_DESKTOP_DIR. Empty when XDG has no such entry.
-         */
-        std::string_view userDirectoryName;
-        std::string_view directoryName;
-    };
-
-    constexpr std::array<PlaceCandidate, 7> placeCandidates{{
-        {"desktop", "DESKTOP", "Desktop"},
-        {"downloads", "DOWNLOAD", "Downloads"},
-        {"documents", "DOCUMENTS", "Documents"},
-        {"pictures", "PICTURES", "Pictures"},
-        {"videos", "VIDEOS", "Videos"},
-        {"movies", "", "Movies"},
-        {"music", "MUSIC", "Music"},
-    }};
-}
-
 void RemoteSideModel::setRemoteHome(std::filesystem::path home, bool readUserDirectories)
 {
     remoteHome_ = std::move(home);
@@ -1497,72 +1474,88 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
         return callback({});
     if (remotePlaces_)
         return callback(defaultPlaceEntries());
+
+    pendingPlacesRequests_.push_back(std::move(callback));
+    if (pendingPlacesRequests_.size() > 1)
+        return;
     if (!readUserDirectories_)
-        return placesFromHomeListing(std::move(callback));
+        return placesFromHomeListing();
 
     fileEngine_->userDirectories(
         remoteHome_,
-        [this, home = remoteHome_, callback = std::move(callback)](
+        [this, home = remoteHome_](
             std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const& directories,
             std::string const&
         )
         {
             if (home != remoteHome_)
-                return callback({});
+                return retryPlacesRequests();
             if (!directories || directories->empty())
-                return placesFromHomeListing(callback);
+                return placesFromHomeListing();
 
             remotePlaces_.emplace();
-            for (auto const& candidate : placeCandidates)
+            for (auto const& place : Utility::defaultPlaces)
             {
-                if (candidate.userDirectoryName.empty())
+                if (place.userDirectoryName.empty())
                     continue;
                 const auto directory = std::ranges::find(
-                    *directories, candidate.userDirectoryName, &std::pair<std::string, std::filesystem::path>::first
+                    *directories, place.userDirectoryName, &std::pair<std::string, std::filesystem::path>::first
                 );
                 if (directory != directories->end())
-                    remotePlaces_->emplace_back(std::string{candidate.kind}, directory->second);
+                    remotePlaces_->emplace_back(std::string{place.kind}, directory->second);
             }
-            callback(defaultPlaceEntries());
+            finishPlacesRequests();
         }
     );
 }
 
-void RemoteSideModel::placesFromHomeListing(std::function<void(std::vector<PlaceEntry>)> callback)
+void RemoteSideModel::placesFromHomeListing()
 {
     fileEngine_->listDirectory(
         remoteHome_,
-        [this, home = remoteHome_, callback = std::move(callback)](
+        [this, home = remoteHome_](
             std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
         )
         {
             if (home != remoteHome_)
-                return callback({});
-
-            remotePlaces_.emplace();
+                return retryPlacesRequests();
             if (!entries)
             {
                 Log::warn("Failed to list the remote home directory for the default places: {}", info);
-                return callback(defaultPlaceEntries());
+                return finishPlacesRequests();
             }
 
-            for (auto const& candidate : placeCandidates)
+            remotePlaces_.emplace();
+            for (auto const& place : Utility::defaultPlaces)
             {
                 const auto exists = std::ranges::any_of(
                     *entries,
-                    [&candidate](SharedData::DirectoryEntry const& entry)
+                    [&place](SharedData::DirectoryEntry const& entry)
                     {
                         const bool isDirectory = entry.isDirectory() ||
                             (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
-                        return isDirectory && entry.path.filename().generic_string() == candidate.directoryName;
+                        return isDirectory && entry.path.filename().generic_string() == place.directoryName;
                     }
                 );
                 if (exists)
-                    remotePlaces_->emplace_back(std::string{candidate.kind}, remoteHome_ / candidate.directoryName);
+                    remotePlaces_->emplace_back(std::string{place.kind}, remoteHome_ / place.directoryName);
             }
-            callback(defaultPlaceEntries());
+            finishPlacesRequests();
         }
     );
+}
+
+void RemoteSideModel::finishPlacesRequests()
+{
+    const auto entries = defaultPlaceEntries();
+    for (auto const& pending : std::exchange(pendingPlacesRequests_, {}))
+        pending(entries);
+}
+
+void RemoteSideModel::retryPlacesRequests()
+{
+    for (auto& pending : std::exchange(pendingPlacesRequests_, {}))
+        requestDefaultPlaces(std::move(pending));
 }
 
 std::vector<RemoteSideModel::PlaceEntry> RemoteSideModel::defaultPlaceEntries() const

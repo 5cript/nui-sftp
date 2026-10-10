@@ -16,30 +16,6 @@ namespace NuiFileExplorer
 {
     namespace
     {
-        struct PlaceDefinition
-        {
-            char const* kind;
-            char const* name;
-            /**
-             * @brief The name in user-dirs.dirs, such as DESKTOP for XDG_DESKTOP_DIR. nullptr when XDG has none.
-             */
-            char const* userDirectoryName;
-            /**
-             * @brief Relative to home, used when neither the environment nor user-dirs.dirs name the directory.
-             */
-            char const* fallback;
-        };
-
-        constexpr PlaceDefinition placeDefinitions[] = {
-            {"desktop", "Desktop", "DESKTOP", "Desktop"},
-            {"downloads", "Downloads", "DOWNLOAD", "Downloads"},
-            {"documents", "Documents", "DOCUMENTS", "Documents"},
-            {"pictures", "Pictures", "PICTURES", "Pictures"},
-            {"videos", "Videos", "VIDEOS", "Videos"},
-            {"movies", "Movies", nullptr, "Movies"},
-            {"music", "Music", "MUSIC", "Music"},
-        };
-
         std::filesystem::path environmentPath(char const* name)
         {
             const char* value = std::getenv(name);
@@ -66,12 +42,12 @@ namespace NuiFileExplorer
          *        authoritative: places it does not name are left out, like the remote side does.
          */
         std::filesystem::path resolvePlace(
-            PlaceDefinition const& definition,
+            Utility::DefaultPlace const& definition,
             std::filesystem::path const& home,
             std::vector<Utility::UserDirectory> const& userDirectories
         )
         {
-            if (definition.userDirectoryName != nullptr)
+            if (!definition.userDirectoryName.empty())
             {
                 auto fromEnvironment = environmentPath(fmt::format("XDG_{}_DIR", definition.userDirectoryName).c_str());
                 if (!fromEnvironment.empty())
@@ -84,7 +60,7 @@ namespace NuiFileExplorer
             }
             if (!userDirectories.empty())
                 return {};
-            return home / definition.fallback;
+            return home / definition.directoryName;
         }
 
         nlohmann::json listPlaces()
@@ -97,14 +73,16 @@ namespace NuiFileExplorer
             result.push_back({{"kind", "home"}, {"name", "Home"}, {"path", home.generic_string()}});
 
             const auto userDirectories = readUserDirectories(home);
-            for (auto const& definition : placeDefinitions)
+            for (auto const& definition : Utility::defaultPlaces)
             {
                 const auto path = resolvePlace(definition, home, userDirectories);
                 std::error_code error;
                 if (path.empty() || !std::filesystem::is_directory(path, error))
                     continue;
                 result.push_back(
-                    {{"kind", definition.kind}, {"name", definition.name}, {"path", path.generic_string()}}
+                    {{"kind", std::string{definition.kind}},
+                        {"name", std::string{definition.name}},
+                        {"path", path.generic_string()}}
                 );
             }
             return result;
