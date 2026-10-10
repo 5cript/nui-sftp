@@ -166,7 +166,12 @@ class RemoteSideModel
     );
 
   private:
-    void placesFromHomeListing(std::function<void(std::vector<PlaceEntry>)> callback);
+    void placesFromHomeListing();
+    void finishPlacesRequests();
+    /**
+     * @brief Requests the places again for pending requests that were made for a previous home.
+     */
+    void retryPlacesRequests();
     std::vector<PlaceEntry> defaultPlaceEntries() const;
 
   private:
@@ -176,6 +181,10 @@ class RemoteSideModel
      * @brief Kind and path of the default places besides home, determined once per home.
      */
     std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> remotePlaces_;
+    /**
+     * @brief Requests waiting for the places request in flight.
+     */
+    std::vector<std::function<void(std::vector<PlaceEntry>)>> pendingPlacesRequests_;
     SideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;

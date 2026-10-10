@@ -25,6 +25,10 @@ namespace NuiFileExplorer
         Nui::Observed<std::vector<IPlacesProvider::PlaceEntry>> defaultPlaces{};
         Nui::Observed<std::vector<IPlacesProvider::PlaceEntry>> drives{};
         std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites{};
+        /**
+         * @brief Expires with this, so answers to place requests arriving afterwards are dropped.
+         */
+        std::shared_ptr<int> lifetime{std::make_shared<int>(0)};
 
         Implementation(
             ISideModel& mdl,
@@ -35,16 +39,7 @@ namespace NuiFileExplorer
             , texts{&txts}
             , onNavigate{std::move(nav)}
         {
-            if (auto* prov = model->placesProvider(); prov)
-            {
-                prov->requestDefaultPlaces(
-                    [this](std::vector<IPlacesProvider::PlaceEntry> places)
-                    {
-                        defaultPlaces.value() = std::move(places);
-                        defaultPlaces.modifyNow();
-                    }
-                );
-            }
+            requestDefaultPlaces();
             if (auto* prov = model->drivesProvider(); prov)
             {
                 prov->requestDrives(
@@ -58,6 +53,22 @@ namespace NuiFileExplorer
             if (auto* prov = model->favoritesProvider(); prov)
             {
                 favorites = prov->favorites();
+            }
+        }
+
+        void requestDefaultPlaces()
+        {
+            if (auto* prov = model->placesProvider(); prov)
+            {
+                prov->requestDefaultPlaces(
+                    [this, alive = std::weak_ptr{lifetime}](std::vector<IPlacesProvider::PlaceEntry> places)
+                    {
+                        if (alive.expired())
+                            return;
+                        defaultPlaces.value() = std::move(places);
+                        defaultPlaces.modifyNow();
+                    }
+                );
             }
         }
 
@@ -82,16 +93,7 @@ namespace NuiFileExplorer
 
     void Places::reloadDefaultPlaces()
     {
-        if (auto* prov = impl_->model->placesProvider(); prov)
-        {
-            prov->requestDefaultPlaces(
-                [this](std::vector<IPlacesProvider::PlaceEntry> places)
-                {
-                    impl_->defaultPlaces.value() = std::move(places);
-                    impl_->defaultPlaces.modifyNow();
-                }
-            );
-        }
+        impl_->requestDefaultPlaces();
     }
 
     Places::~Places() = default;
