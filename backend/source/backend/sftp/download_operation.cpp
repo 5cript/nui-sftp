@@ -1,4 +1,5 @@
 #include <backend/sftp/download_operation.hpp>
+#include <persistence/state/sftp_options.hpp>
 
 #include <log/log.hpp>
 #include <tuple>
@@ -11,10 +12,7 @@ DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOpe
     , options_{std::move(options)}
     , localFile_{}
 {
-    if (options_.tempFileSuffix.empty())
-        options_.tempFileSuffix = ".filepart";
-    if (options_.tempFileSuffix.find('/') != 0)
-        options_.tempFileSuffix = ".filepart";
+    options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
 }
 
 DownloadOperation::~DownloadOperation()
