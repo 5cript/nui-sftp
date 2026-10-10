@@ -60,6 +60,7 @@ void Session::start()
             self->registerRpcChannelWrite();
             self->registerRpcChannelPtyResize();
             self->registerRpcSftpListDirectory();
+            self->registerRpcSftpHomeDirectory();
             self->registerRpcSftpCreateDirectory();
             self->registerRpcSftpCreateFile();
             self->registerRpcSftpAddDownloadOperation();
@@ -581,6 +582,38 @@ void Session::registerRpcSftpListDirectory()
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
                         reply({{"entries", *result}});
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpHomeDirectory()
+{
+    on(fmt::format("Session::{}::sftp::homeDirectory", id_.value()))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, std::string const& channelIdString)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        auto fut = channel->homeDirectory();
+                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
+                            return reply.error("Failed to get home directory: timeout");
+
+                        const auto result = fut.get();
+                        if (!result.has_value())
+                            return reply.error("Failed to get home directory: " + result.error().toString());
+
+                        const auto home = Utility::pathToUtf8Generic(*result);
+                        Log::info("Remote home directory is '{}'", home);
+                        reply({{"path", home}});
                     },
                     std::move(reply)
                 );

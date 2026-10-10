@@ -116,6 +116,14 @@ class Session
     void registerRpcSftpListDirectory();
 
     /**
+     * Handles calls from the frontend to get the remote home directory over sftp with the following payload:
+     * {
+     *     sftpChannelId: string
+     * }
+     */
+    void registerRpcSftpHomeDirectory();
+
+    /**
      * Handles calls from the frontend to create a directory over sftp with the following payload:
      * {
      *     sftpChannelId: string,

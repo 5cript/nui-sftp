@@ -6,11 +6,14 @@
 #include <nui/rpc.hpp>
 #include <nui/frontend/api/json.hpp>
 
+#include <utility>
+
 struct FileEngine::Implementation
 {
     bool wasDisposed = false;
     SshTerminalEngine* engine;
     std::optional<Ids::ChannelId> sftpChannelId{std::nullopt};
+    std::vector<std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)>> pendingOpens{};
 
     Implementation(SshTerminalEngine* engine)
         : engine{engine}
@@ -52,12 +55,17 @@ void FileEngine::lazyOpen(
         return;
     }
 
+    impl_->pendingOpens.push_back(onOpen);
+    if (impl_->pendingOpens.size() > 1)
+        return;
+
     Log::info("Creating sftp channel");
     impl_->engine->createSftpChannel(
-        [this, onOpen](auto const& id, std::string const& info)
+        [this](auto const& id, std::string const& info)
         {
             impl_->sftpChannelId = id;
-            onOpen(id, info);
+            for (auto const& pendingOpen : std::exchange(impl_->pendingOpens, {}))
+                pendingOpen(id, info);
         }
     );
 }
@@ -105,6 +113,41 @@ void FileEngine::listDirectory(
                 },
                 channelId.value().value(),
                 path.generic_string()
+            );
+        }
+    );
+}
+
+void FileEngine::homeDirectory(
+    std::function<void(std::optional<std::filesystem::path> const&, std::string const& info)> onComplete
+)
+{
+    lazyOpen(
+        [this, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::error("Cannot get home directory, no sftp channel");
+                onComplete(std::nullopt, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::homeDirectory", impl_->engine->sshSessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error") || !val.hasOwnProperty("path"))
+                    {
+                        const auto error =
+                            val.hasOwnProperty("error") ? val["error"].as<std::string>() : std::string{"No path"};
+                        Log::error("(Frontend) Failed to get home directory: {}", error);
+                        onComplete(std::nullopt, error);
+                        return;
+                    }
+
+                    onComplete(std::filesystem::path{val["path"].as<std::string>()}, "Success");
+                },
+                channelId.value().value()
             );
         }
     );

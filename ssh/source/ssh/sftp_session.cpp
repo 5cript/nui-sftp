@@ -535,6 +535,34 @@ namespace SecureShell
         );
     }
 
+    std::expected<std::filesystem::path, SftpSession::Error> SftpSession::homeDirectoryInStrand()
+    {
+        assert(strand_->withinProcessingThread());
+        const std::unique_ptr<char, decltype(&ssh_string_free_char)> canonical{
+            sftp_canonicalize_path(session_, "."), ssh_string_free_char
+        };
+        if (canonical != nullptr && canonical.get()[0] == '/')
+            return pathFromU8(canonical.get());
+
+        char* rawUser = nullptr;
+        const auto optionResult = ssh_options_get(session_->session, SSH_OPTIONS_USER, &rawUser);
+        const std::unique_ptr<char, decltype(&ssh_string_free_char)> user{rawUser, ssh_string_free_char};
+        if (optionResult != SSH_OK || user == nullptr || user.get()[0] == '\0')
+            return std::unexpected(Error{.message = "Server did not report a home directory and the user is unknown"});
+
+        return pathFromU8(fmt::format("/home/{}", user.get()));
+    }
+
+    std::future<std::expected<std::filesystem::path, SftpSession::Error>> SftpSession::homeDirectory()
+    {
+        return performPromise(
+            [this]()
+            {
+                return homeDirectoryInStrand();
+            }
+        );
+    }
+
     SftpError SftpSession::lastError() const
     {
         const auto result = SftpError{
