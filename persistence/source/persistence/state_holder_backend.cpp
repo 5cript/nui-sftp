@@ -210,6 +210,8 @@ namespace Persistence
             stateCache_.terminalOptions["default"] = TerminalOptions{
 #ifdef _WIN32
                 .fontFamily = "consolas, monospace",
+#elif defined(__APPLE__)
+                .fontFamily = "Menlo, SF Mono, Monaco, monospace",
 #else
                 .fontFamily = "Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace",
 #endif
@@ -239,6 +241,8 @@ namespace Persistence
             stateCache_.terminalOptions["nebula"] = TerminalOptions{
 #ifdef _WIN32
                 .fontFamily = "consolas, monospace",
+#elif defined(__APPLE__)
+                .fontFamily = "Menlo, SF Mono, Monaco, monospace",
 #else
                 .fontFamily = "Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace",
 #endif
@@ -287,7 +291,7 @@ namespace Persistence
         {
             Log::warn("Config file misses ssh options, adding defaults.");
             stateCache_.sshOptions["default"] = SshOptions{
-#ifdef __linux__
+#ifndef _WIN32
                 .tryAgentForAuthentication = true,
                 .usePublicKeyAutoAuth = true,
 #endif
@@ -322,10 +326,10 @@ namespace Persistence
                             .mayOverwrite = false,
                             .tryContinue = true,
                             .inheritPermissions = true,
-#ifdef __linux__
-                            .symlinkHandling = SymlinkHandling::AsSymlink,
-#elif defined(_WIN32)
+#ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
+#else
+                            .symlinkHandling = SymlinkHandling::AsSymlink,
 #endif
                             .failFast = false
                         },
@@ -339,10 +343,10 @@ namespace Persistence
                             .mayOverwrite = false,
                             .tryContinue = true,
                             .inheritPermissions = true,
-#ifdef __linux__
-                            .symlinkHandling = SymlinkHandling::AsSymlink,
-#elif defined(_WIN32)
+#ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
+#else
+                            .symlinkHandling = SymlinkHandling::AsSymlink,
 #endif
                             .failFast = false
                         },

@@ -63,16 +63,23 @@ else()
         target_sources(
             nui-file-explorer-support
             PRIVATE
-                support/recent_files_windows.cpp
+                support/recent_files_unsupported.cpp
                 support/default_places_windows.cpp
                 support/windows_drives.cpp
+        )
+    elseif (APPLE)
+        target_sources(
+            nui-file-explorer-support
+            PRIVATE
+                support/recent_files_unsupported.cpp
+                support/default_places_posix.cpp
         )
     else()
         target_sources(
             nui-file-explorer-support
             PRIVATE
                 support/recent_files_linux.cpp
-                support/default_places_linux.cpp
+                support/default_places_posix.cpp
         )
     endif()
 

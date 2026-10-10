@@ -1108,6 +1108,10 @@ backend:
     openFileFailed: "Failed to open file: {}"
     openUriUnavailable: "xdg-desktop-portal OpenURI interface is unavailable."
     documentPortalUnavailable: "xdg-document-portal is unavailable; file-descriptor-based opening is not possible in this flatpak."
+    mac:
+      fileNotFound: "File not found"
+      executable: "The file is a program or application and is not opened from here"
+      openFailed: "No application could open '{}'"
     windows:
       outOfResources: "Out of memory or resources"
       fileNotFound: "File not found"

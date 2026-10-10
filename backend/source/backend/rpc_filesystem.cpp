@@ -60,6 +60,24 @@ namespace
         }
     };
 
+    timespec modificationTime(struct stat const& st)
+    {
+#    ifdef __APPLE__
+        return st.st_mtimespec;
+#    else
+        return st.st_mtim;
+#    endif
+    }
+
+    timespec accessTime(struct stat const& st)
+    {
+#    ifdef __APPLE__
+        return st.st_atimespec;
+#    else
+        return st.st_atim;
+#    endif
+    }
+
     /**
      *  @brief Lean stat fill for directory listing — drops atime (only used by the Properties dialog,
      *         which now fetches its own full entry on demand).
@@ -69,8 +87,9 @@ namespace
         entry.uid = static_cast<std::uint32_t>(st.st_uid);
         entry.gid = static_cast<std::uint32_t>(st.st_gid);
         entry.size = static_cast<std::uint64_t>(st.st_size);
-        entry.mtime = static_cast<std::uint64_t>(st.st_mtim.tv_sec);
-        entry.mtimeNsec = static_cast<std::uint32_t>(st.st_mtim.tv_nsec);
+        const auto modified = modificationTime(st);
+        entry.mtime = static_cast<std::uint64_t>(modified.tv_sec);
+        entry.mtimeNsec = static_cast<std::uint32_t>(modified.tv_nsec);
         entry.owner = cache.user(entry.uid);
         entry.group = cache.group(entry.gid);
     }
@@ -83,10 +102,16 @@ namespace
         entry.uid = static_cast<std::uint32_t>(st.st_uid);
         entry.gid = static_cast<std::uint32_t>(st.st_gid);
         entry.size = static_cast<std::uint64_t>(st.st_size);
-        entry.atime = static_cast<std::uint64_t>(st.st_atim.tv_sec);
-        entry.atimeNsec = static_cast<std::uint32_t>(st.st_atim.tv_nsec);
-        entry.mtime = static_cast<std::uint64_t>(st.st_mtim.tv_sec);
-        entry.mtimeNsec = static_cast<std::uint32_t>(st.st_mtim.tv_nsec);
+        const auto accessed = accessTime(st);
+        entry.atime = static_cast<std::uint64_t>(accessed.tv_sec);
+        entry.atimeNsec = static_cast<std::uint32_t>(accessed.tv_nsec);
+        const auto modified = modificationTime(st);
+        entry.mtime = static_cast<std::uint64_t>(modified.tv_sec);
+        entry.mtimeNsec = static_cast<std::uint32_t>(modified.tv_nsec);
+#    ifdef __APPLE__
+        entry.createTime = static_cast<std::uint64_t>(st.st_birthtimespec.tv_sec);
+        entry.createTimeNsec = static_cast<std::uint32_t>(st.st_birthtimespec.tv_nsec);
+#    endif
 
         char pwdBuf[1024];
         struct passwd pwd{};

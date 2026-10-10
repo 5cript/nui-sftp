@@ -8,7 +8,9 @@ add_executable(
     snippet_presets.test.cpp
 )
 
-find_package(GTest CONFIG REQUIRED)
+if (NOT TARGET GTest::gtest)
+    find_package(GTest CONFIG REQUIRED)
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/sqlite3.cmake")
 
 target_link_libraries(

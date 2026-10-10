@@ -2,6 +2,9 @@
 
 #ifdef _WIN32
 #    include <backend/windows/main_windows.hpp>
+#elif defined(__APPLE__)
+#    include <backend/mac/main_mac.hpp>
+#    include <backend/process/fork_pool.hpp>
 #else
 #    include <backend/linux/main_linux.hpp>
 #    include <backend/process/fork_pool.hpp>

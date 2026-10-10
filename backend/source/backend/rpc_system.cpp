@@ -8,8 +8,18 @@
 #else
 #    include <unistd.h>
 #    include <pwd.h>
+#    include <sys/param.h>
 #    include <climits>
 #endif
+
+namespace
+{
+#ifdef __APPLE__
+    constexpr std::size_t loginNameMaximum = MAXLOGNAME;
+#elif !defined(_WIN32)
+    constexpr std::size_t loginNameMaximum = LOGIN_NAME_MAX;
+#endif
+}
 
 RpcSystem::RpcSystem(boost::asio::any_io_executor executor, Nui::Window& wnd, Nui::RpcHub& hub)
     : RpcHelper::StrandRpc{executor, wnd, hub}
@@ -47,7 +57,7 @@ std::string RpcSystem::username() const
         return "unknown";
     }
 #elif defined(__linux__) || defined(__APPLE__)
-    char username[LOGIN_NAME_MAX];
+    char username[loginNameMaximum];
     if (getlogin_r(username, sizeof(username)) == 0)
     {
         usernameMemo_ = std::string(username);
