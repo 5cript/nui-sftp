@@ -522,7 +522,7 @@ settings:
     logDirectory: "Log Directory"
     disableFileLogging: "Disable File Logging"
     logLevelHelpText: "The log level determines the verbosity of the application's logging output."
-    logDirectoryHelpText: "The directory where log files are stored. if the string starts with %key% it is replaced with a special path. The following keys map to the following directories: ~, %userprofile%: home directory. %appdata%: AppData/Roaming on windows, home on linux. %localappdata%: AppData/Local on windows, home on linux. %temp%: Temp directory. %config_home%, %config_home2%, %config_home3%: Configuration directory (1,2,3 is Home, Documents, AppData on windows). %state_home%, %state_home2%, %state_home3%: State directory. %data_home%, %data_home2%, %data_home3%: Data directory."
+    logDirectoryHelpText: "The directory where log files are stored. if the string starts with %key% it is replaced with a special path. The following keys map to the following directories: ~, %userprofile%: home directory. %appdata%: AppData/Roaming on windows, home on linux. %localappdata%: AppData/Local on windows, home on linux. %temp%: Temp directory. %config_home%, %config_home2%, %config_home3%: Configuration directory (1,2,3 is Home, Documents, AppData on windows). %state_home%, %state_home2%, %state_home3%: State directory. %data_home%, %data_home2%, %data_home3%: Data directory. On macOS the configuration, state and data directories are ~/Library/Application Support."
     disableFileLoggingHelpText: "When enabled, logging to files is disabled. Logs will only be output to the console."
   layoutSetting:
     layoutKeysLabel: "Saved layouts"

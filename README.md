@@ -64,7 +64,9 @@ flatpak install nui-sftp-flatpak-x86_64_0.1.1.flatpak
 
 ## Apple Computers
 
-macOS is currently not supported. Maybe in the future if there is demand.
+macOS support for Apple Silicon is in progress ([#203](https://github.com/5cript/nui-sftp/issues/203)).
+It builds and runs its tests on macOS, release disk images are not published yet.
+The app bundle is only ad-hoc signed, so the first start needs right-click > Open.
 
 ## Other
 

@@ -1,0 +1,98 @@
+name: macOS Build & Test
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: ["main"]
+
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: build/clang_release
+
+jobs:
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install \
+            cmake \
+            ninja \
+            pkgconf \
+            boost \
+            cryptopp \
+            openssl@3 \
+            libssh \
+            fmt \
+            nlohmann-json \
+            zstd \
+            xz \
+            imagemagick \
+            librsvg \
+            dylibbundler \
+            gnu-tar
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Configure CMake
+        run: |
+          cmake \
+            -B "${{ env.BUILD_DIR }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_CXX_EXTENSIONS=on \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DJSON_Diagnostics=ON \
+            -DNUI_FETCH_TRAITS=OFF \
+            -DNUI_ENABLE_TESTS=off \
+            -DNUI_BUILD_EXAMPLES=off \
+            -DBREW_PREFIX="$(brew --prefix)" \
+            -DNUI_SFTP_ENABLE_TESTING=ON
+
+      - name: Build
+        run: |
+          cmake --build \
+            "${{ env.BUILD_DIR }}" \
+            --config "${{ env.BUILD_TYPE }}"
+
+      # The macOS runners have no docker: the containerized shells skip and stay covered by the
+      # Arch Linux job, the host's own bash and zsh still run.
+      - name: Run Tests
+        env:
+          NUI_SFTP_SKIP_DOCKER_TESTS: "1"
+        run: |
+          ctest \
+            --test-dir "${{ env.BUILD_DIR }}" \
+            --build-config "${{ env.BUILD_TYPE }}" \
+            --output-on-failure \
+            --timeout 300
+
+      - name: Run Deploy
+        run: |
+          bash scripts/deploy.sh
+
+      - name: Read version information
+        run: |
+          VERSION_FILE="${{ env.BUILD_DIR }}/text/version.txt"
+          echo "VERSION=$(sed -n '1p' "$VERSION_FILE")" >> "$GITHUB_ENV"
+
+      - name: Pack app bundle
+        run: |
+          cd build/install && ditto -c -k --keepParent nui-sftp.app "nui-sftp-macos-arm64_${{ env.VERSION }}.zip"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: nui-sftp-macos-arm64
+          path: build/install/nui-sftp-macos-arm64_${{ env.VERSION }}.zip
