@@ -792,4 +792,34 @@ namespace Persistence
 
         return modes;
     }
+
+    bool updateMisassignedControlCharacters(Termios& termios)
+    {
+        // The Linux c_cc values in index order, saved under the alphabetically sorted names.
+        const Termios::CC misassignedDefaults{
+            .VDISCARD_ = 3,
+            .VDSUSP_ = 28,
+            .VEOF_ = 127,
+            .VEOL_ = 21,
+            .VEOL2_ = 4,
+            .VERASE_ = 0,
+            .VINTR_ = 1,
+            .VKILL_ = 0,
+            .VLNEXT_ = 17,
+            .VMIN_ = 19,
+            .VQUIT_ = 26,
+            .VREPRINT_ = 0,
+            .VSTART_ = 18,
+            .VSTATUS_ = 15,
+            .VSTOP_ = 23,
+            .VSUSP_ = 22,
+            .VSWTCH_ = 0,
+            .VTIME_ = 0,
+            .VWERASE_ = 0,
+        };
+        if (!termios.cc || nlohmann::json(*termios.cc) != nlohmann::json(misassignedDefaults))
+            return false;
+        termios.cc = Termios::CC{};
+        return true;
+    }
 }
