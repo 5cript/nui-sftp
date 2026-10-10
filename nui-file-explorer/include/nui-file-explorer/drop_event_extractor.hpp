@@ -8,8 +8,8 @@ namespace NuiFileExplorer
 {
     struct DropEventResult
     {
-        /// This drop was handled and will return via rpc elsewhere.
-        bool delegatedToWebView2 = false;
+        /// This drop was handed to the backend, which returns it via rpc elsewhere.
+        bool delegatedToBackend = false;
         std::optional<std::vector<Item>> externDroppedItems = std::nullopt;
         std::optional<bool> isInternalDropFromLeftSide = std::nullopt;
         std::optional<std::string> internalDropSubdir = std::nullopt;
