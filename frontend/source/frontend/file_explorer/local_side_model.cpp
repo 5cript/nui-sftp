@@ -22,6 +22,11 @@
 #include <nui/rpc.hpp>
 
 #include <algorithm>
+#include <functional>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace std::string_literals;
 
@@ -156,32 +161,86 @@ void LocalSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::s
 
 // --- IPlacesProvider ---
 
+namespace
+{
+    struct LocalPlace
+    {
+        std::string kind;
+        std::string name;
+        std::string path;
+    };
+
+    /**
+     * @brief The local default places, asked from the backend once and shared by every session.
+     */
+    std::optional<std::vector<LocalPlace>> localPlacesCache{};
+
+    /**
+     * @brief Requests waiting for the one backend call in flight.
+     */
+    std::vector<std::function<void(std::vector<LocalPlace> const&)>> pendingLocalPlacesRequests{};
+
+    std::vector<LocalSideModel::PlaceEntry> toPlaceEntries(std::vector<LocalPlace> const& places)
+    {
+        std::vector<LocalSideModel::PlaceEntry> entries;
+        entries.reserve(places.size());
+        for (auto const& place : places)
+        {
+            entries.push_back({
+                .icon = iconForPlaceKind(place.kind),
+                .name = placeDisplayName(place.kind, place.name),
+                .path = place.path,
+            });
+        }
+        return entries;
+    }
+
+    void finishLocalPlacesRequests(std::vector<LocalPlace> const& places)
+    {
+        for (auto const& pending : std::exchange(pendingLocalPlacesRequests, {}))
+            pending(places);
+    }
+}
+
 void LocalSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceEntry>)> callback)
 {
+    if (localPlacesCache)
+        return callback(toPlaceEntries(*localPlacesCache));
+
+    pendingLocalPlacesRequests.push_back(
+        [callback = std::move(callback)](std::vector<LocalPlace> const& places)
+        {
+            callback(toPlaceEntries(places));
+        }
+    );
+    if (pendingLocalPlacesRequests.size() > 1)
+        return;
+
     Nui::RpcClient::callWithBackChannel(
         "NuiFileExplorer::DefaultPlaces::list",
-        [callback = std::move(callback)](Nui::val val)
+        [](Nui::val val)
         {
             if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
             {
                 Log::error("DefaultPlaces::list failed");
-                callback({});
+                finishLocalPlacesRequests({});
                 return;
             }
-            std::vector<PlaceEntry> entries;
-            const auto places = val["places"];
-            const auto len = places["length"].as<int>();
-            entries.reserve(len);
-            for (int idx = 0; idx < len; ++idx)
+
+            std::vector<LocalPlace> places;
+            const auto list = val["places"];
+            const auto length = list["length"].as<int>();
+            places.reserve(length);
+            for (int index = 0; index < length; ++index)
             {
-                auto const placeKind = places[idx]["kind"].as<std::string>();
-                entries.push_back({
-                    .icon = iconForPlaceKind(placeKind),
-                    .name = placeDisplayName(placeKind, places[idx]["name"].as<std::string>()),
-                    .path = places[idx]["path"].as<std::string>(),
+                places.push_back({
+                    .kind = list[index]["kind"].as<std::string>(),
+                    .name = list[index]["name"].as<std::string>(),
+                    .path = list[index]["path"].as<std::string>(),
                 });
             }
-            callback(std::move(entries));
+            localPlacesCache = places;
+            finishLocalPlacesRequests(places);
         }
     );
 }

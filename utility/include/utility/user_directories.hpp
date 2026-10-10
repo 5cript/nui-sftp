@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace SecureShell
+namespace Utility
 {
     /**
      * @brief One entry of an XDG user-dirs.dirs file, such as XDG_DESKTOP_DIR.

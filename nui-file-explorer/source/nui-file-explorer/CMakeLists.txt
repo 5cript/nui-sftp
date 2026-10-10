@@ -86,5 +86,7 @@ else()
         nui-file-explorer-support
         PUBLIC
             nui-backend
+        PRIVATE
+            utility
     )
 endif()
