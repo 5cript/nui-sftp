@@ -15,14 +15,13 @@ RESOURCES="${CONTENTS}/Resources"
 echo -e "Assembling \e[32m${BUNDLE}\e[0m"
 
 rm -rf "${BUNDLE}"
-mkdir -p "${CONTENTS}/MacOS" "${RESOURCES}/frontend" "${RESOURCES}/assets/icons" "${RESOURCES}/themes"
+mkdir -p "${CONTENTS}/MacOS" "${RESOURCES}/frontend" "${RESOURCES}/assets" "${RESOURCES}/themes"
 
 cp "${BUILD_DIRECTORY}/bin/nui-sftp" "${CONTENTS}/MacOS/nui-sftp"
 cp "${BUILD_DIRECTORY}/generated/Info.plist" "${CONTENTS}/Info.plist"
 cp "${BUILD_DIRECTORY}/generated/icons/nui-sftp.icns" "${RESOURCES}/nui-sftp.icns"
 
 cp -R "${SOURCE_DIRECTORY}/static/assets/." "${RESOURCES}/assets"
-cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${RESOURCES}/assets/icons/"
 cp -R "${SOURCE_DIRECTORY}/themes/." "${RESOURCES}/themes"
 if [ "$OMIT_FRONTEND" = false ]; then
     cp -R "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${RESOURCES}/frontend"
@@ -30,8 +29,10 @@ fi
 
 # Everything but the OS is linked statically (scripts/macos/build_dependencies.sh), libc++ included.
 LINKED_LIBRARIES=$(otool -L "${CONTENTS}/MacOS/nui-sftp" | tail -n +2 | awk '{print $1}')
-FOREIGN_LIBRARIES=$(grep -E -v '^(/usr/lib/|/System/Library/)' <<< "${LINKED_LIBRARIES}" || true)
-FOREIGN_LIBRARIES+=$(grep -E '^/usr/lib/libc\+\+' <<< "${LINKED_LIBRARIES}" || true)
+FOREIGN_LIBRARIES=$(
+    grep -E -v '^(/usr/lib/|/System/Library/)' <<< "${LINKED_LIBRARIES}" || true
+    grep -E '^/usr/lib/libc\+\+' <<< "${LINKED_LIBRARIES}" || true
+)
 if [ -n "${FOREIGN_LIBRARIES}" ]; then
     echo "nui-sftp links libraries that are not part of the app or the OS:" >&2
     echo "${FOREIGN_LIBRARIES}" >&2
