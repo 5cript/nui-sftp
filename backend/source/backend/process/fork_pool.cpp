@@ -149,6 +149,7 @@ namespace
                         continue;
 
                     found = true;
+                    drainPty(it->second);
                     closePtyMaster(it->second);
 
                     int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -164,15 +165,14 @@ namespace
             }
         }
 
-        void handlePtyReadable(int fd)
+        /**
+         * @brief Reads one chunk from a pty master and forwards it as stdout.
+         * @return The result of read(2).
+         */
+        ssize_t forwardPtyOutput(int fd, std::string const& procId)
         {
-            auto fdIt = fdToId.find(fd);
-            if (fdIt == fdToId.end())
-                return;
-            const std::string& procId = fdIt->second;
-
             char buf[4096];
-            ssize_t nread = ::read(fd, buf, sizeof(buf));
+            const ssize_t nread = ::read(fd, buf, sizeof(buf));
             if (nread > 0)
             {
                 spdlog::trace("[worker] PTY {} byte(s) for id='{}'", nread, procId);
@@ -182,7 +182,35 @@ namespace
                     {"data", Roar::base64Encode(std::string{buf, static_cast<std::size_t>(nread)})},
                 });
             }
-            else if (nread == 0 || (nread == -1 && errno != EAGAIN && errno != EINTR))
+            return nread;
+        }
+
+        /**
+         * @brief Forwards what an exited process left in its pty, the exit is often noticed before that output.
+         */
+        void drainPty(WProc& proc)
+        {
+            // Bounded, a background process still holding the terminal may keep writing.
+            constexpr int maximumReads = 64;
+            for (int readCount = 0; proc.ptyMaster >= 0 && readCount < maximumReads; ++readCount)
+            {
+                const ssize_t nread = forwardPtyOutput(proc.ptyMaster, proc.id);
+                if (nread == -1 && errno == EINTR)
+                    continue;
+                if (nread <= 0)
+                    return;
+            }
+        }
+
+        void handlePtyReadable(int fd)
+        {
+            auto fdIt = fdToId.find(fd);
+            if (fdIt == fdToId.end())
+                return;
+            const std::string& procId = fdIt->second;
+
+            const ssize_t nread = forwardPtyOutput(fd, procId);
+            if (nread == 0 || (nread == -1 && errno != EAGAIN && errno != EINTR))
             {
                 // EIO or unexpected close — stop polling it; SIGCHLD will send exit
                 spdlog::debug("[worker] PTY EIO/close for id='{}' fd={}", procId, fd);
@@ -353,6 +381,17 @@ namespace
             }
             const auto decoded = Roar::base64Decode(payload["data"].get<std::string>());
             spdlog::trace("[worker] stdin {} byte(s) for id='{}'", decoded.size(), procId);
+            // Bounded, a process that never reads its stdin must not grow the worker without limit.
+            constexpr std::size_t maximumPendingInput = 1024u * 1024u;
+            if (it->second.pendingInput.size() + decoded.size() > maximumPendingInput)
+            {
+                spdlog::warn(
+                    "[worker] stdin: dropping {} byte(s) for id='{}', the process is not reading",
+                    decoded.size(),
+                    procId
+                );
+                return;
+            }
             it->second.pendingInput += decoded;
             flushInput(it->second);
         }
