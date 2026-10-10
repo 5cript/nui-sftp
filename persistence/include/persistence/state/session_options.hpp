@@ -26,10 +26,15 @@ namespace Persistence
     };
     BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, ssh);
 
+    /**
+     * @brief The shell a local session runs when nothing else is configured: zsh on macOS, bash elsewhere.
+     */
+    std::filesystem::path defaultShell();
+
     struct ExecutingSessionOptions : public DefaultMissingMember
     {
         bool isPty{true};
-        std::filesystem::path command{"/usr/bin/bash"};
+        std::filesystem::path command{defaultShell()};
         std::optional<std::vector<std::string>> arguments{std::nullopt};
         std::optional<std::map<std::string, std::string>> environment{std::nullopt};
         int exitTimeoutSeconds{5};
@@ -136,4 +141,10 @@ namespace Persistence
 
     ExecutingSessionOptions defaultMsys2SessionOption();
     ExecutingSessionOptions defaultBashSessionOption();
+    ExecutingSessionOptions defaultZshSessionOption();
+
+    /**
+     * @brief The options a new local session starts with, the zsh login shell on macOS, bash elsewhere.
+     */
+    ExecutingSessionOptions defaultShellSessionOption();
 }
