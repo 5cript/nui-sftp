@@ -32,13 +32,19 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
                 return "border: 1px solid #404040; background-color: var(--darker-background)";
             return "";
         }();
+        const auto headerClass = [&params]() -> std::string
+        {
+            if (!params.engagedStatus && params.groupTitle)
+                return "settings-subgroup-header settings-subgroup-header-plain";
+            return "settings-subgroup-header";
+        }();
 
         // clang-format off
         return div{
             class_ = "settings-subgroup",
         }(
             div{
-                class_ = params.engagedStatus ? "settings-subgroup-header" : "settings-subgroup-header settings-subgroup-header-plain",
+                class_ = headerClass,
                 style = headerStyle
             }(
                 // switch to enable/disable entire subgroup:
