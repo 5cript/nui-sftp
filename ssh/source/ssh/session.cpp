@@ -577,20 +577,21 @@ namespace SecureShell
                 {
                     case SSH_AUTH_SUCCESS:
                         return static_cast<int>(SSH_AUTH_SUCCESS);
+                    // The other methods are tried next, so only the final outcome is an error.
                     case SSH_AUTH_DENIED:
-                        Log::error("Authentication denied");
+                        Log::debug("Agent authentication denied");
                         return static_cast<int>(SSH_AUTH_DENIED);
                     case SSH_AUTH_ERROR:
-                        Log::error("Authentication error");
+                        Log::warn("Agent authentication error");
                         return static_cast<int>(SSH_AUTH_ERROR);
                     case SSH_AUTH_PARTIAL:
-                        Log::error("Partial authentication");
+                        Log::debug("Partial agent authentication");
                         return static_cast<int>(SSH_AUTH_PARTIAL);
                     case SSH_AUTH_AGAIN:
-                        Log::error("Authentication again");
+                        Log::debug("Agent authentication again");
                         return static_cast<int>(SSH_AUTH_AGAIN);
                     default:
-                        Log::error("Unknown authentication result");
+                        Log::warn("Unknown agent authentication result {}", result);
                         return result;
                 }
 #endif
