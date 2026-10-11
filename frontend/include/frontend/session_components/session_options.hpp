@@ -21,7 +21,8 @@ class SessionOptions
         FrontendEvents* events,
         std::optional<std::string> persistenceSessionName,
         std::string sessionLayoutId,
-        ConfirmDialog* confirmDialog);
+        ConfirmDialog* confirmDialog
+    );
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SessionOptions);
 
     Nui::ElementRenderer operator()();

@@ -29,8 +29,7 @@ namespace
                 .headerText = language->get("settings", "sessionOptions", "resetUsersConfirmHeader"),
                 .text = language->get("settings", "sessionOptions", "resetUsersConfirmText"),
                 .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                .onClose =
-                    [&users, onChange](std::optional<ConfirmDialog::Button> button)
+                .onClose = [&users, onChange](std::optional<ConfirmDialog::Button> button)
                 {
                     if (button != ConfirmDialog::Button::Ok)
                         return;
@@ -152,6 +151,7 @@ void SshSessionOptions::assumeDefaultsFrom(Persistence::SshSessionOptions const&
     sshOptions.assumeDefaultsFrom(state.sshOptions.value());
     sftpOptions.assumeDefaultsFrom(state.sftpOptions.value());
 }
+
 Nui::ElementRenderer SshSessionOptions::renderServerSettings(std::function<void()> const& onChange)
 {
     using Nui::Elements::fragment;

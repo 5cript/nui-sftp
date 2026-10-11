@@ -39,4 +39,4 @@ class Toolbar
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
-};
+};

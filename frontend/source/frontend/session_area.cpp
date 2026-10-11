@@ -912,4 +912,4 @@ Nui::ElementRenderer SessionArea::operator()()
         Log::error("Exception in SessionArea::operator(): {}", e.what());
         return div{}("Error loading session area: "s + e.what());
     }
-}
+}

@@ -532,4 +532,4 @@ void Toolbar::settings(Settings& settings)
 void Toolbar::notificationCenter(NotificationCenter& center)
 {
     impl_->notificationCenter = &center;
-}
+}

@@ -54,7 +54,10 @@ class FileExplorerPanel
         FilePropertyDialog* filePropertyDialog = nullptr;
         ArchiveTransferDialog* archiveTransferDialog = nullptr;
 
-        /** @brief The name of the session in the settings, which keeps the remote favorites. Nothing for direct connects. */
+        /**
+         * @brief The name of the session in the settings, which keeps the remote favorites. Nothing for
+         * direct connects.
+         */
         std::optional<std::string> persistenceSessionName;
 
         /** @brief UI options captured at construction (favorites, hidden-files, etc.). */
