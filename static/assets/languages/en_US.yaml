@@ -599,6 +599,8 @@ settings:
     usersHelpText: "The users to log in to this server with. Pick one in the toolbar next to the layout before connecting; the first user is the default one."
     usersSearchTags: "login, account, credentials, key"
     userWithoutName: "(no user name)"
+    resetUsersConfirmHeader: "Remove all users?"
+    resetUsersConfirmText: "Resetting removes every user of this server and the key files set for them."
     connectionCategory: "Connection"
     usersCategory: "Users and Keys"
     miscellaneousCategory: "Miscellaneous"

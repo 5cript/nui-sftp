@@ -599,6 +599,8 @@ settings:
     usersHelpText: "Die Benutzer, mit denen man sich an diesem Server anmelden kann. Vor dem Verbinden wird einer in der Werkzeugleiste neben dem Layout ausgewählt; der erste Benutzer ist der Standard."
     usersSearchTags: "Anmeldung, Konto, Zugangsdaten, Schlüssel"
     userWithoutName: "(kein Benutzername)"
+    resetUsersConfirmHeader: "Alle Benutzer entfernen?"
+    resetUsersConfirmText: "Das Zurücksetzen entfernt alle Benutzer dieses Servers samt der für sie eingetragenen Schlüsseldateien."
     connectionCategory: "Verbindung"
     usersCategory: "Benutzer und Schlüssel"
     miscellaneousCategory: "Sonstiges"

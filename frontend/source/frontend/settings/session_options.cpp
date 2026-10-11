@@ -89,7 +89,13 @@ SessionOptions::SessionOptions(
           newItemDialog,
           multiInputDialog
       }
-    , sshSessionOptions{factory.forEngine(Persistence::TerminalEngineType::ssh), onChange, newItemDialog, multiInputDialog}
+    , sshSessionOptions{
+          factory.forEngine(Persistence::TerminalEngineType::ssh),
+          onChange,
+          confirmDialog,
+          newItemDialog,
+          multiInputDialog
+      }
 {}
 
 void SessionOptions::applyToState(Persistence::SessionOptions& state) const
