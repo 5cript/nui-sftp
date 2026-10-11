@@ -175,7 +175,8 @@ void FileExplorerPanel::setup()
         remote && impl_->persistenceSessionName)
     {
         remote->setOnFavoritesChanged(
-            [stateHolder = impl_->stateHolder, sessionName = *impl_->persistenceSessionName](std::vector<std::string> favs)
+            [stateHolder = impl_->stateHolder,
+                sessionName = *impl_->persistenceSessionName](std::vector<std::string> favs)
             {
                 stateHolder->loadModifySave(
                     [favs = std::move(favs), sessionName](Persistence::State& state)

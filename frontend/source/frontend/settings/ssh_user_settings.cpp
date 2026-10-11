@@ -14,13 +14,19 @@ SshUserSettings::SshUserSettings(
     Nui::Observed<bool>* hasEntry
 )
     : name{factory.identity({"sessionOptions", "user"}), onChange, nulloptReset(name, onChange), hasEntry}
-    , sshKeyPrivate{factory.identity({"sessionOptions", "sshKeyPrivate"}), PathSettingType::File, onChange, nulloptReset(sshKeyPrivate, onChange), hasEntry}
+    , sshKeyPrivate{
+          factory.identity({"sessionOptions", "sshKeyPrivate"}),
+          PathSettingType::File,
+          onChange,
+          nulloptReset(sshKeyPrivate, onChange),
+          hasEntry,
+      }
     , sshKeyPublic{
           factory.identity({"sessionOptions", "sshKeyPublic"}),
           PathSettingType::File,
           onChange,
           nulloptReset(sshKeyPublic, onChange),
-          hasEntry
+          hasEntry,
       }
 {}
 

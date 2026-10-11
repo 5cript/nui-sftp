@@ -376,4 +376,4 @@ target_link_libraries(
         rapidfuzz::rapidfuzz
 )
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DBROWSER_ENGINE=${BROWSER_ENGINE})
