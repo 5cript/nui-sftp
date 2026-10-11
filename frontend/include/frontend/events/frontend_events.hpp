@@ -7,6 +7,7 @@
 
 #include <persistence/state/state.hpp>
 
+#include <cstddef>
 #include <string>
 
 /**
@@ -19,13 +20,25 @@ struct AppVersion
     std::string gitBranch{};
 };
 
+/**
+ * @brief A request to open a session of the settings.
+ */
+struct NewSessionRequest
+{
+    std::string name{};
+    /**
+     * @brief The index of the user to log in as, 0 for the default user of the server.
+     */
+    std::size_t userIndex{0u};
+};
+
 struct FrontendEvents : public AppWideEvents
 {
     FrontendEvents()
         : AppWideEvents()
     {}
 
-    Nui::Observed<std::string> onNewSession{};
+    Nui::Observed<NewSessionRequest> onNewSession{};
     /// Fires (via `.modify()`) when the user clicks the "Add New" entry in
     /// the Settings side panel. Carries no payload — the new-session dialog
     /// owns the actual creation flow; this is purely an intent signal for
