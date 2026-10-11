@@ -433,14 +433,17 @@ void SessionArea::addSession(std::string const& name)
     );
 }
 
-void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& sshOptions)
+void SessionArea::addDirectConnectSession(
+    Persistence::SshSessionOptions const& sshOptions,
+    Persistence::InheritableReferences const& inheritables
+)
 {
     using namespace std::string_literals;
 
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
-        [this, sshOptions](bool success, Persistence::State const& state)
+        [this, sshOptions, inheritables](bool success, Persistence::State const& state)
         {
             if (!success)
             {
@@ -457,19 +460,8 @@ void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& 
             engineSsh.openSftpByDefault = sshOptions.openSftpByDefault;
             engineSsh.remoteFavorites = sshOptions.remoteFavorites;
 
-            auto fillDefaults = [](auto& target, auto const& source)
-            {
-                if (!target.hasReference())
-                    return;
-                auto iter = source.find(target.ref());
-                if (iter != source.end())
-                    Persistence::useDefaultsFrom(target, iter->second);
-            };
-            fillDefaults(engine.terminalOptions, state.terminalOptions);
-            fillDefaults(engine.termios, state.termios);
-            fillDefaults(engine.queueOptions, state.queueOptions);
-            fillDefaults(engineSsh.sshOptions, state.sshOptions);
-            fillDefaults(engineSsh.sftpOptions, state.sftpOptions);
+            inheritables.applyTo(engine);
+            state.resolveReferencesOf(engine);
 
             std::string displayName = engineSsh.host;
             if (const auto user = engineSsh.loginUser().name)

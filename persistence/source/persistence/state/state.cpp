@@ -1,15 +1,31 @@
 #include <persistence/state/state.hpp>
 #include <nlohmann/json.hpp>
-#include <utility/visit_overloaded.hpp>
-
-#include <tuple>
 
 namespace Persistence
 {
+    void InheritableReferences::applyTo(SessionOptions& session) const
+    {
+        session.terminalOptions.ref(Reference{terminalOptions});
+        session.termios.ref(Reference{termios});
+        session.queueOptions.ref(Reference{queueOptions});
+        session.historyOptions.ref(Reference{historyOptions});
+        if (auto* ssh = std::get_if<SshSessionOptions>(&session.engine))
+        {
+            ssh->sshOptions.ref(Reference{sshOptions});
+            ssh->sftpOptions.ref(Reference{sftpOptions});
+        }
+    }
+
     State State::fullyResolve() const
     {
         State resolved{*this};
+        for (auto& [key, session] : resolved.sessions)
+            resolved.resolveReferencesOf(session);
+        return resolved;
+    }
 
+    void State::resolveReferencesOf(SessionOptions& session) const
+    {
         auto fillDefaults = [](auto& target, auto const& source)
         {
             if (!target.hasReference())
@@ -19,32 +35,16 @@ namespace Persistence
                 useDefaultsFrom(target, iter->second);
         };
 
-        for (auto& [key, session] : resolved.sessions)
+        fillDefaults(session.terminalOptions, terminalOptions);
+        fillDefaults(session.termios, termios);
+        fillDefaults(session.queueOptions, queueOptions);
+        fillDefaults(session.historyOptions, historyOptions);
+
+        if (auto* ssh = std::get_if<SshSessionOptions>(&session.engine))
         {
-            fillDefaults(session.terminalOptions, resolved.terminalOptions);
-            fillDefaults(session.termios, resolved.termios);
-            fillDefaults(session.queueOptions, resolved.queueOptions);
-            fillDefaults(session.historyOptions, resolved.historyOptions);
-
-            Utility::visitOverloaded(
-                session.engine,
-                [&](std::monostate)
-                {
-                    // Nothing to do here
-                },
-                [&](ExecutingSessionOptions&)
-                {
-                    // Nothing to do here
-                },
-                [&](SshSessionOptions& session)
-                {
-                    fillDefaults(session.sshOptions, resolved.sshOptions);
-                    fillDefaults(session.sftpOptions, resolved.sftpOptions);
-                }
-            );
+            fillDefaults(ssh->sshOptions, sshOptions);
+            fillDefaults(ssh->sftpOptions, sftpOptions);
         }
-
-        return resolved;
     }
 
     void State::writeLegacyUsers()

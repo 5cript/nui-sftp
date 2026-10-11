@@ -34,7 +34,15 @@ class SessionArea
     Nui::ElementRenderer operator()();
 
     void addSession(std::string const& name);
-    void addDirectConnectSession(Persistence::SshSessionOptions const& sshOptions);
+    /**
+     * @brief Connects to a server that is not in the settings.
+     *
+     * @param inheritables The inheritable option groups the session is based on.
+     */
+    void addDirectConnectSession(
+        Persistence::SshSessionOptions const& sshOptions,
+        Persistence::InheritableReferences const& inheritables
+    );
     void registerRpc();
     void removeSession(int tabId);
     void setSelected(int tabId);
@@ -101,4 +109,4 @@ class SessionArea
 
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
-};
+};

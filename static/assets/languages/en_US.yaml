@@ -1030,6 +1030,7 @@ directConnectDialog:
   hostValidationMessage: "Host must not be empty."
   portValidationMessage: "Port must be a number between 1 and 65535."
   pickPrivateKey: "Pick SSH private key"
+  inheritablesHeader: "Based on these inheritable settings"
 onboarding:
   step1Title: "Open Settings"
   step1Body: "Click the gear icon to open Settings, where you can configure your first SFTP server."

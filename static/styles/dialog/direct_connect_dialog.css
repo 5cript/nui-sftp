@@ -35,3 +35,45 @@
         flex: 1 1 auto;
     }
 }
+
+.direct-connect-inheritables {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.direct-connect-separator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.8;
+
+    &::before,
+    &::after {
+        content: "";
+        flex: 1 1 auto;
+        border-top: 1px solid var(--foreground-border-color);
+    }
+}
+
+.direct-connect-inheritables-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr max-content 1fr;
+    column-gap: 12px;
+    row-gap: 8px;
+    align-items: center;
+
+    & > span {
+        font-size: 0.85rem;
+        font-weight: 600;
+        opacity: 0.8;
+    }
+
+    & > .script-nui-select {
+        width: 100%;
+    }
+}
