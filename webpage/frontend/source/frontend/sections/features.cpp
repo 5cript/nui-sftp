@@ -47,34 +47,32 @@ namespace NuiSftpPage::Sections
             {
                 auto const dot = Utf8::cp(0x00B7); // middle dot
 
-                std::string const tagBashEtc = fmt::format("bash {0} zsh {0} fish {0} pwsh", dot);
+                std::string const tagShells = fmt::format("bash {0} zsh {0} fish", dot);
 
                 return std::vector<Feature>{
                     {
                         "sync",
-                        "Synchronization you can see before you commit to it",
-                        "Compare directories side-by-side and reconcile differences with a "
-                        "single click. NuiSftp tracks what's added, modified, and removed "
-                        "(locally and remotely) so your tree stays in lockstep without surprises.",
-                        {"Bidirectional", "Diff preview", "Selective merge"},
+                        "Folder synchronization",
+                        "Compare a local and a remote folder and review the differences before anything is "
+                        "transferred. Pick the files to upload, download or delete, sync in both directions or "
+                        "only one, and leave out hidden files or whatever .gitignore lists.",
+                        {"Preview", "Per-file selection", "One or both directions"},
                         screenshotUrl("synchronize.png"),
                     },
                     {
                         "live_edit",
-                        "Edit locally, deploy instantly",
-                        "Open any remote file in your editor of choice. NuiSftp watches it on "
-                        "disk and pushes changes back automatically the moment you save "
-                        "-> no drag, no drop, no friction.",
-                        {"fs.watch", "Auto-reupload", "Conflict guard"},
+                        "Edit remote files with local apps",
+                        "Open a remote file in its default application or pick another one. NuiSftp watches "
+                        "the local copy and uploads it again every time you save.",
+                        {"Open and watch", "Upload on save"},
                         screenshotUrl("live_edit.png"),
                     },
                     {
                         "ssh_shells",
-                        "SSH shells alongside SFTP, multiplexed",
-                        "Open as many interactive shell channels as your server allows, "
-                        "all over the same connection that's transferring your files. Switch "
-                        "between sessions in tabs, never juggle terminals again.",
-                        {"Multiple channels", "Per-session tabs", "Same connection"},
+                        "Shells and SFTP on one connection",
+                        "Open as many shell channels as the server allows, on the same SSH connection that "
+                        "transfers your files. Each session has its own tab.",
+                        {"Multiple channels", "Session tabs", "One connection"},
                         screenshotUrl("session.png"),
                     },
                     {
@@ -89,35 +87,35 @@ namespace NuiSftpPage::Sections
                     },
                     {
                         "configurable",
-                        "Everything is Configurable",
-                        "Profiles per host, themable panels, layout presets, reuseable inheritable settings. "
-                        "If you want to bend it to your workflow, "
-                        "NuiSftp gets out of the way.",
-                        {"Profiles", "Themes", "Hooks", "Keybinds"},
+                        "Configurable",
+                        "Servers inherit their settings from named defaults and override only what differs. "
+                        "Layouts can be saved per server, a search finds any setting, and there are several "
+                        "themes with a light and a dark mode.",
+                        {"Inherited defaults", "Saved layouts", "Settings search", "Themes"},
                         screenshotUrl("settings.png"),
                     },
                     {
                         "local_terminal",
-                        "Local terminals, right where you need them",
-                        "A full local shell lives next to your remote panes. Run a build, scrub a "
-                        "log, or git-commit without ever leaving the workbench.",
-                        {tagBashEtc, "Split panes", "Persistent history"},
+                        "Local terminals",
+                        "Local shells run next to your remote sessions, with a file view of your own machine. "
+                        "The shell command is configurable, so bash, zsh, fish or anything else works.",
+                        {tagShells, "Dockable panels", "Command history"},
                         screenshotUrl("local.png"),
                     },
                     {
                         "free_and_open",
                         "Free and open source",
                         "No accounts, no ads, no telemetry. The source is on GitHub under the MIT license. "
-                        "nui-sftp is built on libssh and the NuiCpp UI framework, both open source as well.",
+                        "NuiSftp is built on libssh and the NuiCpp UI framework, both open source as well.",
                         {"No accounts", "No telemetry", "MIT license"},
                     },
                     {
                         "cross_platform",
-                        "Native on Windows. Flathub on Linux. Native on Arch. AppImage everywhere else. NixOS coming.",
-                        "First-class Windows builds, an official Flatpak on Flathub, an AppImage for "
-                        "everything else, a disk image for Apple Silicon Macs, and native nixpkgs packages "
-                        "on the way. Same UI, same configuration, same keybinds.",
-                        {"Windows 10/11", "AUR", "Flathub", "AppImage", "macOS"},
+                        "Cross-platform",
+                        "An installer and a portable zip for Windows, packages on the AUR and Flathub, an AppImage "
+                        "for other distributions, and a disk image for Apple Silicon Macs. The app works the same "
+                        "on all of them.",
+                        {"Windows 10/11", "Linux", "macOS 15.2+"},
                     },
                 };
             }();
@@ -281,10 +279,10 @@ namespace NuiSftpPage::Sections
         return section{class_ = "section", id = "features"}(div{
             class_ = "section-inner"
         }(div{class_ = "section-head"}(
-              div{class_ = "section-eyebrow"}("// what's inside"),
-              h2{class_ = "section-title"}("Eight things that make file work feel less like file work."),
-              p{class_ = "section-sub"}("A tour of the features that ship today. Missing something you'd like to see? "
-                                        "Open an issue or pull request, suggestions are always welcome.")
+              div{class_ = "section-eyebrow"}("// features"),
+              h2{class_ = "section-title"}("What's in the app"),
+              p{class_ = "section-sub"}("The main features of the current release. Missing something? "
+                                        "Open an issue or a pull request.")
           ),
             impl_->carousel(),
             renderRecapGrid(impl_->page)));
