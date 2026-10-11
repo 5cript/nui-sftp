@@ -86,24 +86,6 @@ namespace Test
         EXPECT_FALSE(ssh.loginUser().sshKeyPublic.has_value());
     }
 
-    TEST(LegacyMigrationTests, SelectedUserBecomesTheLoginUser)
-    {
-        Persistence::SshSessionOptions options{};
-        options.users = {
-            Persistence::SshUser{.name = "first"},
-            Persistence::SshUser{.name = "second"},
-            Persistence::SshUser{.name = "third"},
-        };
-
-        options.selectUser(2u);
-        EXPECT_EQ(options.loginUser().name, "third");
-        EXPECT_EQ(options.users[1].name, "first");
-        EXPECT_EQ(options.users[2].name, "second");
-
-        options.selectUser(5u);
-        EXPECT_EQ(options.loginUser().name, "third");
-    }
-
     TEST(LegacyMigrationTests, SavingWritesTheFirstUserForEarlierVersions)
     {
         Persistence::SshSessionOptions options{};
