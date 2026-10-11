@@ -9,9 +9,6 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
-#include <cstddef>
-#include <string>
-
 class SessionArea;
 class Settings;
 class NotificationCenter;
@@ -34,12 +31,6 @@ class Toolbar
 
     Nui::ElementRenderer operator()();
     std::string selectedLayout() const;
-
-    /**
-     * @brief The index of the user picked for the server, 0 (its default user) when the server is not the one
-     * selected in the toolbar.
-     */
-    std::size_t selectedUser(std::string const& sessionName) const;
 
   private:
     void connectLayoutsChanged();

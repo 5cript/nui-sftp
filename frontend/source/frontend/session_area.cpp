@@ -152,10 +152,10 @@ SessionArea::SessionArea(
 
     impl_->newSessionListener = Nui::smartListen(
         events->onNewSession,
-        [this](std::string const& name) -> void
+        [this](NewSessionRequest const& request) -> void
         {
-            Log::info("onNewSession Event: Adding session with name '{}'", name);
-            addSession(name);
+            Log::info("onNewSession Event: Adding session with name '{}'", request.name);
+            addSession(request.name, request.userIndex);
         }
     );
 
@@ -390,12 +390,12 @@ Session::Params SessionArea::makeSessionParams(
     return params;
 }
 
-void SessionArea::addSession(std::string const& name)
+void SessionArea::addSession(std::string const& name, std::size_t userIndex)
 {
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
-        [this, name](bool success, Persistence::State const& state)
+        [this, name, userIndex](bool success, Persistence::State const& state)
         {
             if (!success)
             {
@@ -412,7 +412,7 @@ void SessionArea::addSession(std::string const& name)
 
             auto [engineKey, engine] = *iter;
             if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&engine.engine))
-                ssh->selectUser(impl_->toolbar->selectedUser(name));
+                ssh->selectUser(userIndex);
 
             const auto tabId = impl_->tabs.add(name, true);
             Log::info("Adding session: {} with layout {}. Tab ID: {}", name, impl_->toolbar->selectedLayout(), tabId);

@@ -354,7 +354,10 @@ Nui::ElementRenderer Toolbar::operator()()
                 onClick = [this]() {
                     if (impl_->terminalEngines.value().empty())
                         return;
-                    impl_->events->onNewSession = impl_->activeTerminalEngine.value();
+                    impl_->events->onNewSession = NewSessionRequest{
+                        .name = impl_->activeTerminalEngine.value(),
+                        .userIndex = impl_->selectedUser.value(),
+                    };
                     impl_->events->onNewSession.modifyNow();
                 },
             },
@@ -494,13 +497,6 @@ Nui::ElementRenderer Toolbar::operator()()
 std::string Toolbar::selectedLayout() const
 {
     return impl_->selectedLayout.value();
-}
-
-std::size_t Toolbar::selectedUser(std::string const& sessionName) const
-{
-    if (sessionName != impl_->activeTerminalEngine.value())
-        return 0u;
-    return impl_->selectedUser.value();
 }
 
 void Toolbar::sessionArea(SessionArea& sessionArea)

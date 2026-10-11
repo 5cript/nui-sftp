@@ -33,7 +33,12 @@ class SessionArea
 
     Nui::ElementRenderer operator()();
 
-    void addSession(std::string const& name);
+    /**
+     * @brief Opens a session of the settings.
+     *
+     * @param userIndex The index of the user to log in as, 0 for the default user of the server.
+     */
+    void addSession(std::string const& name, std::size_t userIndex = 0u);
     /**
      * @brief Connects to a server that is not in the settings.
      *
