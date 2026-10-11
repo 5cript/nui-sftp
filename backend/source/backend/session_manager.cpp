@@ -126,8 +126,9 @@ void SessionManager::addSession(
                 [weak = weak_from_this(), sessionId]()
                 {
                     auto self = weak.lock();
-                    if (self)
-                        self->removeSession(sessionId);
+                    if (!self)
+                        return;
+                    self->removeSession(sessionId);
 
                     // Notify frontend of session loss:
                     self->wnd_->runInJavascriptThread(
