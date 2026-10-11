@@ -1722,10 +1722,6 @@ Nui::ElementRenderer Settings::currentSession()
         );
 
         return fragment(
-            Snc::messageStrip({
-                .text = language->getObserved("settings", "inheritableSettingsInfoMessage"),
-                .styleVariant = Snc::StyleVariant::Primary,
-            }),
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
                 .content = std::move(overarchingSettings),
