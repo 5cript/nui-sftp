@@ -146,7 +146,7 @@ struct Session::Implementation
             .engineOptions = this->engineOptions,
             .isInLostConnectionState = &this->isInLostConnectionState,
           }}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
+        , operationQueue{this->stateHolder, this->events, this->initialName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , frontendSessionManager{}
         , sessionOptions{params.stateHolder, params.events, this->initialName, this->sessionLayoutId, params.confirmDialog}
         , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
