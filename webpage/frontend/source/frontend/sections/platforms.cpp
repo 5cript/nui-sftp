@@ -58,8 +58,8 @@ namespace NuiSftpPage::Sections
             std::string const versionLine = "Windows 10 " + Utf8::cp(0x00B7) + " 11 " + Utf8::cp(0x00B7) + " x86_64";
 
             std::string const description =
-                "Pick the installer for a Start Menu entry and clean in-place upgrades, "
-                "or grab the portable zip and unpack anywhere.";
+                "The installer adds a Start menu entry and upgrades in place. "
+                "The portable zip runs from any folder.";
 
             return div{class_ = "platform-card glass shine"}(
                 div{
@@ -82,7 +82,7 @@ namespace NuiSftpPage::Sections
                     href = "https://github.com/5cript/nui-sftp/releases",
                     target = "_blank",
                     rel = "noreferrer",
-                }(span{}("Get the Windows build"))
+                }(span{}("Windows downloads"))
             );
         }
 
@@ -93,13 +93,12 @@ namespace NuiSftpPage::Sections
             using Nui::Elements::div;
             using Nui::Elements::span;
 
-            // "AUR · Flathub · AppImage today · NixOS soon" — middle dot U+00B7
             std::string const dot = " " + Utf8::cp(0x00B7) + " ";
-            std::string const versionLine = "AUR" + dot + "Flathub" + dot + "AppImage today" + dot + "NixOS soon";
+            std::string const versionLine = "AUR" + dot + "Flathub" + dot + "AppImage" + dot + "nixpkgs planned";
 
             std::string const description =
-                "Native AUR package, an AppImage from Releases, and an official Flatpak on Flathub today. "
-                "nixpkgs is on the way.";
+                "Install from the AUR or Flathub, or run the AppImage on any distribution with glibc 2.39 "
+                "or newer. Local shells do not work inside the Flatpak sandbox.";
 
             return div{class_ = "platform-card glass shine"}(
                 div{
@@ -122,13 +121,13 @@ namespace NuiSftpPage::Sections
                     "flathub",
                     false,
                     "flatpak install flathub org.nuicpp.nui_sftp"),
-                pkgRow("nixpkgs.nui-sftp", "soon", true),
+                pkgRow("nixpkgs.nui-sftp", "planned", true),
                 a{
                     class_ = "btn primary shine",
                     href = "https://github.com/5cript/nui-sftp/releases",
                     target = "_blank",
                     rel = "noreferrer",
-                }(span{}("Download from Releases"))
+                }(span{}("Linux downloads"))
             );
         }
         Nui::ElementRenderer macosCard()
@@ -167,7 +166,7 @@ namespace NuiSftpPage::Sections
                     href = "https://github.com/5cript/nui-sftp/releases",
                     target = "_blank",
                     rel = "noreferrer",
-                }(span{}("Get the macOS build"))
+                }(span{}("macOS downloads"))
             );
         }
     }
@@ -183,8 +182,8 @@ namespace NuiSftpPage::Sections
             div{
                 class_ = "section-head"
             }(div{class_ = "section-eyebrow"}("// download"),
-                h2{class_ = "section-title"}("Native on Windows. AUR on Arch. Flathub & AppImage everywhere else."),
-                p{class_ = "section-sub"}()),
+                h2{class_ = "section-title"}("Windows, Linux and macOS"),
+                p{class_ = "section-sub"}("Packages are attached to the releases on GitHub.")),
             div{class_ = "platforms"}(windowsCard(), linuxCard(), macosCard())
         ));
     }
