@@ -50,6 +50,8 @@ class Session
         Persistence::UiOptions uiOptions{};
         std::string initialName{};
         std::optional<std::string> layoutName{};
+        /** @brief A direct connect is not in the settings, so its name is only a display name. */
+        bool isDirectConnect = false;
 
         /* Callbacks into the owning SessionArea */
         /** @brief Called to remove this Session from its owner. */
@@ -110,6 +112,12 @@ class Session
 
     /** @brief The user an SSH session logged in as, nothing for local sessions. */
     std::optional<Persistence::SshUser> loginUser() const;
+
+    /** @brief The name of the session in the settings, nothing for a direct connect. */
+    std::optional<std::string> persistenceName() const;
+
+    /** @brief The options the session was opened with. */
+    Persistence::SessionOptions const& engineOptions() const;
 
     /**
      * @brief Asks contentPanelManager to fabricate a `local-shell:<name>`

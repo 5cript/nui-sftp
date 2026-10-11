@@ -7,13 +7,19 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
+#include <optional>
+#include <string>
+
 class SessionOptions
 {
   public:
+    /**
+     * @param persistenceSessionName The name of the session in the settings, nothing for direct connects.
+     */
     SessionOptions(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::string persistenceSessionName,
+        std::optional<std::string> persistenceSessionName,
         std::string sessionLayoutId,
         ConfirmDialog* confirmDialog);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SessionOptions);

@@ -48,7 +48,7 @@ struct OperationQueue::Implementation
 {
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
-    std::string persistenceSessionName;
+    std::optional<std::string> persistenceSessionName;
     Ids::SessionId sessionId;
     ConfirmDialog* confirmDialog;
     std::shared_ptr<FileEngine> fileEngine;
@@ -268,7 +268,7 @@ struct OperationQueue::Implementation
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::string persistenceSessionName,
+        std::optional<std::string> persistenceSessionName,
         ConfirmDialog* confirmDialog,
         LocalSideModel* localModel,
         RemoteSideModel* remoteModel
@@ -290,7 +290,7 @@ struct OperationQueue::Implementation
 OperationQueue::OperationQueue(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
-    std::string persistenceSessionName,
+    std::optional<std::string> persistenceSessionName,
     Persistence::QueueOptions const& queueOptions,
     ConfirmDialog* confirmDialog,
     LocalSideModel* localModel,
@@ -1635,15 +1635,16 @@ void OperationQueue::changeAutoClean(bool doClean)
         );
         impl_->recomputePageCount();
     }
+    if (!impl_->persistenceSessionName)
+        return;
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
-        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const&)
+        [this, name = *impl_->persistenceSessionName](bool success, Persistence::State const&)
         {
             if (!success)
                 return;
 
-            // Direct connects are not in the settings, so there is nothing to keep.
             auto iter = impl_->stateHolder->stateCache().sessions.find(name);
             if (iter == impl_->stateHolder->stateCache().sessions.end())
                 return;

@@ -12,7 +12,7 @@ struct SessionOptions::Implementation
 {
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
-    std::string persistenceSessionName;
+    std::optional<std::string> persistenceSessionName;
     std::string sessionLayoutId;
     ConfirmDialog* confirmDialog;
 
@@ -22,7 +22,7 @@ struct SessionOptions::Implementation
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::string persistenceSessionName,
+        std::optional<std::string> persistenceSessionName,
         std::string sessionLayoutId,
         ConfirmDialog* confirmDialog
     )
@@ -37,6 +37,8 @@ struct SessionOptions::Implementation
 
 void SessionOptions::loadLayoutNames()
 {
+    if (!impl_->persistenceSessionName)
+        return;
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
@@ -47,7 +49,7 @@ void SessionOptions::loadLayoutNames()
 
             impl_->layoutNames.value().clear();
 
-            if (const auto iter = state.sessions.find(impl_->persistenceSessionName);
+            if (const auto iter = state.sessions.find(*impl_->persistenceSessionName);
                 iter != end(state.sessions) && iter->second.layouts)
             {
                 for (const auto& [name, session] : *iter->second.layouts)
@@ -65,7 +67,7 @@ void SessionOptions::loadLayoutNames()
 SessionOptions::SessionOptions(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
-    std::string persistenceSessionName,
+    std::optional<std::string> persistenceSessionName,
     std::string sessionLayoutId,
     ConfirmDialog* confirmDialog
 )

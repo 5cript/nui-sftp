@@ -51,6 +51,8 @@ struct Session::Implementation
 
     // Tab identity
     std::string initialName;
+    /** @brief The name of the session in the settings, nothing for a direct connect. */
+    std::optional<std::string> persistenceName;
     std::shared_ptr<Nui::Observed<std::string>> tabTitle;
     std::string sessionLayoutId;
     std::function<void(Session const*)> closeSelf;
@@ -126,6 +128,7 @@ struct Session::Implementation
         , confirmDialog{params.confirmDialog}
         , commandStoreClient{params.commandStoreClient}
         , initialName{std::move(params.initialName)}
+        , persistenceName{params.isDirectConnect ? std::nullopt : std::optional<std::string>{this->initialName}}
         , tabTitle{std::make_shared<Nui::Observed<std::string>>(this->initialName)}
         , sessionLayoutId{Nui::val::global("generateId")().as<std::string>()}
         , closeSelf{std::move(params.closeSelf)}
@@ -141,14 +144,14 @@ struct Session::Implementation
             .inputDialog = params.newItemAskDialog,
             .filePropertyDialog = params.filePropertyDialog,
             .archiveTransferDialog = params.archiveTransferDialog,
-            .sessionName = this->initialName,
+            .persistenceSessionName = this->persistenceName,
             .uiOptions = this->uiOptions,
             .engineOptions = this->engineOptions,
             .isInLostConnectionState = &this->isInLostConnectionState,
           }}
-        , operationQueue{this->stateHolder, this->events, this->initialName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
+        , operationQueue{this->stateHolder, this->events, this->persistenceName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , frontendSessionManager{}
-        , sessionOptions{params.stateHolder, params.events, this->initialName, this->sessionLayoutId, params.confirmDialog}
+        , sessionOptions{params.stateHolder, params.events, this->persistenceName, this->sessionLayoutId, params.confirmDialog}
         , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
         , commandHistoryPanel{
               params.commandStoreClient,
@@ -283,6 +286,16 @@ std::optional<Persistence::SshUser> Session::loginUser() const
     if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&impl_->engineOptions.engine))
         return ssh->loginUser();
     return std::nullopt;
+}
+
+std::optional<std::string> Session::persistenceName() const
+{
+    return impl_->persistenceName;
+}
+
+Persistence::SessionOptions const& Session::engineOptions() const
+{
+    return impl_->engineOptions;
 }
 
 void Session::openLocalShellChannel(std::string const& shellName)
