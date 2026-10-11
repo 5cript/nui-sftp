@@ -32,6 +32,17 @@ bash scripts/sync/all.sh /tmp/sync         # custom root
 | `gitignore.sh`  | respect-ignore-files toggle incl. negation and anchors           |
 | `symlinks.sh`   | same/different link targets, dangling, link-vs-file type mismatch |
 | `random.sh`     | seeded stress fixture: many files, mixed categories              |
+| `deep.sh`       | differences up to six levels down, type conflict, prefix-sharing names, unicode, empty dirs; optional bulk section for performance work |
+
+## Pushing the remote half to a server
+
+`push-remote.sh` copies `<fixture>/remote` to an SFTP host with tar over ssh, so
+mtimes and symlinks survive:
+
+```sh
+bash scripts/sync/deep.sh ~/sync-audit/deep-bulk 40 50
+bash scripts/sync/push-remote.sh ~/sync-audit/deep-bulk user@host sync-audit/deep-bulk -p 5000 -i ~/.ssh/key
+```
 
 ## How to test a fixture against nui-sftp
 
