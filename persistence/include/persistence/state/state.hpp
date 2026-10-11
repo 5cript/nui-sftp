@@ -19,6 +19,29 @@
 
 namespace Persistence
 {
+    /**
+     * @brief The inheritable option groups a session is based on, by their names.
+     */
+    struct InheritableReferences : public DefaultMissingMember
+    {
+        std::string terminalOptions{"default"};
+        std::string termios{"default"};
+        std::string queueOptions{"default"};
+        std::string historyOptions{"default"};
+        std::string sshOptions{"default"};
+        std::string sftpOptions{"default"};
+
+        /**
+         * @brief Points the inheritable options of the session at these groups.
+         */
+        void applyTo(SessionOptions& session) const;
+    };
+    BOOST_DESCRIBE_STRUCT(
+        InheritableReferences,
+        (),
+        (terminalOptions, termios, queueOptions, historyOptions, sshOptions, sftpOptions)
+    )
+
     struct State : public DefaultMissingMember
     {
         std::map<std::string, TerminalOptions> terminalOptions{};
@@ -34,8 +57,14 @@ namespace Persistence
         LogOptions logOptions{};
         LocalizationOptions localizationOptions{};
         std::optional<SshSessionOptions> lastDirectConnect{};
+        std::optional<InheritableReferences> lastDirectConnectInheritables{};
 
         State fullyResolve() const;
+
+        /**
+         * @brief Fills what the session leaves unset from the inheritable options it references.
+         */
+        void resolveReferencesOf(SessionOptions& session) const;
 
         /**
          * @brief Writes the first user of every SSH server into the fields earlier versions read, so switching back
@@ -59,6 +88,7 @@ namespace Persistence
             historyOptions,
             fileTrackingOptions,
             localFilesystemOptions,
-            lastDirectConnect)
+            lastDirectConnect,
+            lastDirectConnectInheritables)
     )
 }

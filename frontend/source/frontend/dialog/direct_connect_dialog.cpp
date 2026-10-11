@@ -6,6 +6,7 @@
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/dialog.hpp>
+#include <script-nui-components/select.hpp>
 #include <script-nui-components/text_input.hpp>
 
 #include <nui/frontend/attributes.hpp>
@@ -23,6 +24,70 @@
 
 namespace
 {
+    /**
+     * @brief One kind of inheritable options a direct connect can be based on.
+     */
+    struct InheritableKind
+    {
+        /**
+         * @brief The language key of the group name, below "settings".
+         */
+        char const* groupNameKey;
+        std::string Persistence::InheritableReferences::* reference;
+        std::vector<std::string> (*groupNames)(Persistence::State const& state);
+    };
+
+    template <typename MapT>
+    std::vector<std::string> keysOf(MapT const& map)
+    {
+        std::vector<std::string> keys;
+        keys.reserve(map.size());
+        for (auto const& [key, value] : map)
+            keys.push_back(key);
+        return keys;
+    }
+
+    constexpr std::size_t inheritableKindCount = 6u;
+
+    const std::array<InheritableKind, inheritableKindCount> inheritableKinds{{
+        {"sshOptionsGroupName",
+            &Persistence::InheritableReferences::sshOptions,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.sshOptions);
+            }},
+        {"sftpOptionsGroupName",
+            &Persistence::InheritableReferences::sftpOptions,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.sftpOptions);
+            }},
+        {"terminalOptionsGroupName",
+            &Persistence::InheritableReferences::terminalOptions,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.terminalOptions);
+            }},
+        {"termiosGroupName",
+            &Persistence::InheritableReferences::termios,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.termios);
+            }},
+        {"queueOptionsGroupName",
+            &Persistence::InheritableReferences::queueOptions,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.queueOptions);
+            }},
+        {"historyOptionsGroupName",
+            &Persistence::InheritableReferences::historyOptions,
+            [](Persistence::State const& state)
+            {
+                return keysOf(state.historyOptions);
+            }},
+    }};
+
     std::string trim(std::string const& str)
     {
         const auto notSpace = [](unsigned char ch) {
@@ -48,6 +113,12 @@ struct DirectConnectDialog::Implementation
     Nui::Observed<std::string> port{""};
     Nui::Observed<std::string> user{""};
     Nui::Observed<std::string> sshKeyPrivate{""};
+
+    /**
+     * @brief The picked group of each inheritable kind, in the order of inheritableKinds.
+     */
+    std::array<Nui::Observed<std::string>, inheritableKindCount> inheritableChoices{};
+    std::array<Nui::Observed<std::vector<std::string>>, inheritableKindCount> inheritableOptions{};
 
     Nui::Observed<Snc::ValueState> hostValid{Snc::ValueState::Invalid};
     Nui::Observed<Snc::ValueState> portValid{Snc::ValueState::Valid};
@@ -90,6 +161,11 @@ void DirectConnectDialog::loadFromState()
     impl_->loadedFromState = true;
 
     auto const& state = impl_->stateHolder->stateCache();
+
+    const auto inheritables = state.lastDirectConnectInheritables.value_or(Persistence::InheritableReferences{});
+    for (std::size_t index = 0; index < inheritableKindCount; ++index)
+        impl_->inheritableChoices[index] = inheritables.*(inheritableKinds[index].reference);
+
     if (!state.lastDirectConnect)
         return;
 
@@ -99,6 +175,74 @@ void DirectConnectDialog::loadFromState()
     impl_->port = saved.port ? std::to_string(*saved.port) : std::string{};
     impl_->user = user.name.value_or("");
     impl_->sshKeyPrivate = user.sshKeyPrivate ? user.sshKeyPrivate->string() : std::string{};
+}
+
+void DirectConnectDialog::refreshInheritableOptions()
+{
+    auto const& state = impl_->stateHolder->stateCache();
+    for (std::size_t index = 0; index < inheritableKindCount; ++index)
+    {
+        auto groupNames = inheritableKinds[index].groupNames(state);
+        auto& choice = impl_->inheritableChoices[index];
+        if (std::find(groupNames.begin(), groupNames.end(), choice.value()) == groupNames.end())
+        {
+            const auto hasDefault = std::find(groupNames.begin(), groupNames.end(), "default") != groupNames.end();
+            choice = hasDefault || groupNames.empty() ? std::string{"default"} : groupNames.front();
+        }
+        impl_->inheritableOptions[index] = std::move(groupNames);
+    }
+}
+
+Nui::ElementRenderer DirectConnectDialog::inheritablesGrid()
+{
+    using namespace Nui::Elements;
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::span;
+
+    std::vector<Nui::ElementRenderer> cells;
+    cells.reserve(inheritableKindCount * 2u);
+    for (std::size_t index = 0; index < inheritableKindCount; ++index)
+    {
+        auto& choice = impl_->inheritableChoices[index];
+        auto& options = impl_->inheritableOptions[index];
+        cells.push_back(span{}(language->getObserved("settings", inheritableKinds[index].groupNameKey)));
+        cells.push_back(
+            Snc::select(
+                Snc::SelectOptions<decltype(choice), decltype(options)>{
+                    .activeOption = choice,
+                    .options = options,
+                    .attributes =
+                        {
+                            disabled = Nui::observe(options).generate(
+                                [](std::vector<std::string> const& names) -> std::optional<bool>
+                                {
+                                    return names.empty() ? std::optional<bool>{true} : std::nullopt;
+                                }
+                            ),
+                        },
+                    .makeId = []()
+                    {
+                        return Nui::val::global("generateId")().as<std::string>();
+                    },
+                }
+            )
+        );
+    }
+
+    // clang-format off
+    return div{class_ = "direct-connect-inheritables"}(
+        div{class_ = "direct-connect-separator"}(
+            span{}(language->getObserved("directConnectDialog", "inheritablesHeader"))
+        ),
+        div{class_ = "direct-connect-inheritables-grid"}(
+            Nui::range(std::move(cells)),
+            [](long long, auto const& cell) -> Nui::ElementRenderer {
+                return cell;
+            }
+        )
+    );
+    // clang-format on
 }
 
 Nui::ElementRenderer DirectConnectDialog::dialogBody()
@@ -279,7 +423,8 @@ Nui::ElementRenderer DirectConnectDialog::dialogBody()
                     .styleVariant = Snc::StyleVariant::Regular,
                 })
             )
-        )
+        ),
+        inheritablesGrid()
     );
     // clang-format on
 }
@@ -312,6 +457,7 @@ void DirectConnectDialog::checkPortValue(std::string const& value)
 void DirectConnectDialog::open(OpenOptions options)
 {
     loadFromState();
+    refreshInheritableOptions();
 
     impl_->onConfirm = std::move(options.onConfirm);
     impl_->confirmOnClose = false;
@@ -367,18 +513,25 @@ void DirectConnectDialog::open(OpenOptions options)
                 sshOpts.users.push_back(std::move(user));
             }
 
-            sshOpts.sshOptions.ref(Persistence::Reference{"default"});
-            sshOpts.sftpOptions.ref(Persistence::Reference{"default"});
+            Persistence::InheritableReferences inheritables{};
+            for (std::size_t index = 0; index < inheritableKindCount; ++index)
+                inheritables.*(inheritableKinds[index].reference) = impl_->inheritableChoices[index].value();
+
+            sshOpts.sshOptions.ref(Persistence::Reference{inheritables.sshOptions});
+            sshOpts.sftpOptions.ref(Persistence::Reference{inheritables.sftpOptions});
 
             impl_->stateHolder->loadModifySave(
-                [sshOpts](Persistence::State& state)
+                [sshOpts, inheritables](Persistence::State& state)
                 {
                     state.lastDirectConnect = sshOpts;
+                    state.lastDirectConnectInheritables = inheritables;
                 }
             );
 
             if (impl_->onConfirm)
-                impl_->onConfirm(ConfirmResult{.sshOptions = std::move(sshOpts)});
+                impl_->onConfirm(
+                    ConfirmResult{.sshOptions = std::move(sshOpts), .inheritables = std::move(inheritables)}
+                );
         },
         .modal = true,
         .mayCloseWithoutButton = false,

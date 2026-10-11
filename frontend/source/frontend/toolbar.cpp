@@ -410,7 +410,7 @@ Nui::ElementRenderer Toolbar::operator()()
                                 Log::error("Toolbar::DirectConnect: sessionArea is not set.");
                                 return;
                             }
-                            impl_->sessionArea->addDirectConnectSession(result.sshOptions);
+                            impl_->sessionArea->addDirectConnectSession(result.sshOptions, result.inheritables);
                         },
                     });
                 },

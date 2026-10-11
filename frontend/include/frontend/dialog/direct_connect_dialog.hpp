@@ -1,6 +1,7 @@
 #pragma once
 
 #include <persistence/state/session_options.hpp>
+#include <persistence/state/state.hpp>
 #include <persistence/state_holder.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -15,6 +16,10 @@ class DirectConnectDialog
     struct ConfirmResult
     {
         Persistence::SshSessionOptions sshOptions{};
+        /**
+         * @brief The inheritable option groups the session is based on.
+         */
+        Persistence::InheritableReferences inheritables{};
     };
     struct OpenOptions
     {
@@ -33,6 +38,12 @@ class DirectConnectDialog
     void checkHostValue(std::string const& value);
     void checkPortValue(std::string const& value);
     void loadFromState();
+    Nui::ElementRenderer inheritablesGrid();
+
+    /**
+     * @brief Offers the inheritable option groups that exist now, keeping the picked ones where they still exist.
+     */
+    void refreshInheritableOptions();
 
   private:
     struct Implementation;
