@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${1:-$PWD/sync-fixtures}"
 mkdir -p -- "$ROOT"
 
-for fx in basic nested mtime gitignore symlinks random; do
+for fx in basic nested mtime gitignore symlinks random deep; do
     bash "$SCRIPT_DIR/$fx.sh" "$ROOT/$fx"
 done
 
