@@ -55,6 +55,7 @@ struct Toolbar::Implementation
 
     Nui::ListenRemover<decltype(FrontendEvents::onSettingsChanged)> settingsChangedListener;
     Nui::ListenRemover<decltype(FrontendEvents::onLayoutsChanged)> layoutsChangedListener;
+    LanguageChangeListener languageListener;
 
     Implementation(
         Persistence::StateHolder* stateHolder,
@@ -75,7 +76,14 @@ struct Toolbar::Implementation
     }
 
     void updateSessionsList(std::function<void()> onDone);
+    /**
+     * @brief Loads the users of the selected server and picks its default user.
+     */
     void reloadUsers();
+    /**
+     * @brief Names the users of the selected server in the current language, keeping the picked one.
+     */
+    void loadUserLabels();
     Nui::ElementRenderer notificationsButton();
     Nui::ElementRenderer userSelect();
 };
@@ -139,6 +147,13 @@ Toolbar::Toolbar(
         }
     );
 
+    impl_->languageListener = language->listenToLanguageChange(
+        [this](std::string const&)
+        {
+            impl_->loadUserLabels();
+        }
+    );
+
     impl_->settingsChangedListener = Nui::smartListen(
         impl_->events->onSettingsChanged,
         [this](auto const&)
@@ -177,6 +192,12 @@ void Toolbar::connectLayoutsChanged()
 
 void Toolbar::Implementation::reloadUsers()
 {
+    selectedUser = 0u;
+    loadUserLabels();
+}
+
+void Toolbar::Implementation::loadUserLabels()
+{
     userLabels.clear();
     if (const auto iter = stateHolder->stateCache().sessions.find(activeTerminalEngine.value());
         iter != stateHolder->stateCache().sessions.end())
@@ -190,7 +211,6 @@ void Toolbar::Implementation::reloadUsers()
 
     std::vector<std::size_t> indices(userLabels.size());
     std::iota(indices.begin(), indices.end(), 0u);
-    selectedUser = 0u;
     userIndices = std::move(indices);
 }
 
