@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
@@ -51,6 +52,7 @@ struct SshSessionOptions
     SshSessionOptions(
         SettingFactory const& factory,
         std::function<void()> const& onChange,
+        ConfirmDialog& confirmDialog,
         InputDialog& inputDialog,
         MultiInputDialog& multiInputDialog
     );

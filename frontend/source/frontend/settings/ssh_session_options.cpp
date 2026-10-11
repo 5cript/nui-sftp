@@ -3,6 +3,7 @@
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/setting_helper.hpp>
 #include <frontend/settings/subgroup.hpp>
+#include <utility/language.hpp>
 
 #include <nui/frontend/elements/fragment.hpp>
 
@@ -15,11 +16,36 @@ namespace
         return factory.within({"sessionOptions", "basicSettings"})
             .within({"sessionOptions", "sshSessionServerOptions"});
     }
+
+    /**
+     * @brief Resets the users only after a confirmation, because a reset removes all of them.
+     */
+    auto confirmedUsersReset(auto& users, std::function<void()> onChange, ConfirmDialog& confirmDialog)
+    {
+        return [&users, onChange = std::move(onChange), &confirmDialog]()
+        {
+            confirmDialog.open({
+                .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                .headerText = language->get("settings", "sessionOptions", "resetUsersConfirmHeader"),
+                .text = language->get("settings", "sessionOptions", "resetUsersConfirmText"),
+                .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+                .onClose =
+                    [&users, onChange](std::optional<ConfirmDialog::Button> button)
+                {
+                    if (button != ConfirmDialog::Button::Ok)
+                        return;
+                    users.value(Persistence::SshSessionOptions{}.users);
+                    onChange();
+                },
+            });
+        };
+    }
 }
 
 SshSessionOptions::SshSessionOptions(
     SettingFactory const& factory,
     std::function<void()> const& onChange,
+    ConfirmDialog& confirmDialog,
     InputDialog& inputDialog,
     MultiInputDialog& multiInputDialog
 )
@@ -44,7 +70,7 @@ SshSessionOptions::SshSessionOptions(
           usersFactory_.identity({"sessionOptions", "users"}),
           usersFactory_,
           onChange,
-          valueReset(users, onChange, Persistence::SshSessionOptions{}.users),
+          confirmedUsersReset(users, onChange, confirmDialog),
           sshUserLabel
       }
     , openSftpByDefault{
