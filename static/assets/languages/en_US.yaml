@@ -517,6 +517,12 @@ settings:
     addItemHeader: "Add Element"
     addItemPrompt: "Enter the value for the new element."
     valueName: "Value"
+  multiSetting:
+    noEntries: "None yet, add one"
+    addEntry: "Add"
+    makeDefault: "Make default"
+    makeDefaultHelpText: "Moves the selected entry to the front, which makes it the default one."
+    deleteEntry: "Delete"
   logOptions:
     logLevel: "Log Level"
     logDirectory: "Log Directory"

@@ -517,6 +517,12 @@ settings:
     addItemHeader: "Element hinzufügen"
     addItemPrompt: "Geben Sie den Wert für das neue Element ein."
     valueName: "Wert"
+  multiSetting:
+    noEntries: "Noch keine, bitte hinzufügen"
+    addEntry: "Hinzufügen"
+    makeDefault: "Als Standard"
+    makeDefaultHelpText: "Verschiebt den ausgewählten Eintrag an den Anfang, wodurch er zum Standard wird."
+    deleteEntry: "Löschen"
   logOptions:
     logLevel: "Protokollierungsstufe"
     logDirectory: "Protokollverzeichnis"

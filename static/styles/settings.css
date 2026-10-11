@@ -361,3 +361,43 @@
     60%  { background-color: color-mix(in srgb, var(--theme-color) 30%, transparent); }
     100% { background-color: transparent; }
 }
+
+.multi-setting-controls {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+}
+
+.multi-setting-entry {
+    row-gap: 4px;
+    margin: 4px 16px 0 16px;
+    padding: 8px 0 !important;
+    border-left: 2px solid var(--theme-color);
+    border-radius: 4px;
+    background-color: color-mix(in srgb, var(--darker-background) 60%, transparent);
+
+    &>div.addressable-setting {
+        display: contents;
+    }
+
+    &>div.addressable-setting>div {
+        display: grid;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
+        align-items: center;
+        padding: 0 16px 0 14px;
+    }
+
+    &.multi-setting-entry-empty {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+}
+
+.settings-subgroup-header-plain {
+    font-weight: 600;
+    background-color: var(--background-color);
+    padding: 2px 10px;
+    top: -9px;
+}
