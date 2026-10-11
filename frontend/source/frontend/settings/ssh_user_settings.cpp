@@ -8,20 +8,6 @@
 
 #include <fmt/format.h>
 
-namespace
-{
-    /**
-     * @brief Loads an optional value, clearing what the previous entry left in a disengaged setting.
-     */
-    template <typename SettingT, typename ValueT>
-    void loadOptional(SettingT& setting, std::optional<ValueT> const& value)
-    {
-        setting.value(value.value_or(ValueT{}));
-        if (!value)
-            setting.value(std::nullopt);
-    }
-}
-
 SshUserSettings::SshUserSettings(
     SettingFactory const& factory,
     std::function<void()> const& onChange,
@@ -47,9 +33,9 @@ void SshUserSettings::applyToState(StateType& state) const
 
 void SshUserSettings::loadFromState(StateType const& state)
 {
-    loadOptional(name, state.name);
-    loadOptional(sshKeyPrivate, state.sshKeyPrivate);
-    loadOptional(sshKeyPublic, state.sshKeyPublic);
+    name.value(state.name);
+    sshKeyPrivate.value(state.sshKeyPrivate);
+    sshKeyPublic.value(state.sshKeyPublic);
 }
 
 Nui::ElementRenderer SshUserSettings::render()

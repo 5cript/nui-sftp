@@ -132,13 +132,19 @@ class Setting
             return state_.value();
         }
     }
+    /**
+     * @brief Loads a value, or disengages the setting and clears its value for nullopt.
+     */
     virtual void value(std::optional<ValueType> const& value)
     {
         engaged_ = value.has_value();
         if (value)
+        {
             this->value(*value);
-        else
-            updateStateWithInheritance();
+            return;
+        }
+        state_ = ValueType{};
+        updateStateWithInheritance();
     }
     void updateStateWithInheritance()
     {
