@@ -76,7 +76,7 @@ namespace NuiSftpPage::Sections
                     div{class_ = "eyebrow"}(
                         span{class_ = "dot"}(),
                         span{}(
-                            fmt::format("v{0} {1} Windows {1} Linux {1} MIT-style", VERSION_NON_DIRTY, dot)
+                            fmt::format("v{0} {1} Windows {1} Linux {1} macOS {1} MIT-style", VERSION_NON_DIRTY, dot)
                         )
                     ),
                     h1{class_ = "hero-title"}(
@@ -91,7 +91,7 @@ namespace NuiSftpPage::Sections
                     ),
                     div{class_ = "hero-actions"}(
                         a{class_ = "btn primary shine", href = "#platforms"}(
-                            span{}(fmt::format("{} Download for Linux & Windows", arrowDown))
+                            span{}(fmt::format("{} Download for Windows, Linux & macOS", arrowDown))
                         ),
                         a{
                             class_ = "btn ghost",

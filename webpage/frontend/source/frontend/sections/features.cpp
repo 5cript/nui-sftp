@@ -115,9 +115,9 @@ namespace NuiSftpPage::Sections
                         "cross_platform",
                         "Native on Windows. Flathub on Linux. Native on Arch. AppImage everywhere else. NixOS coming.",
                         "First-class Windows builds, an official Flatpak on Flathub, an AppImage for "
-                        "everything else, and native nixpkgs packages on the way. Same UI, same "
-                        "configuration, same keybinds.",
-                        {"Windows 10/11", "AUR", "Flathub", "AppImage"},
+                        "everything else, a disk image for Apple Silicon Macs, and native nixpkgs packages "
+                        "on the way. Same UI, same configuration, same keybinds.",
+                        {"Windows 10/11", "AUR", "Flathub", "AppImage", "macOS"},
                     },
                 };
             }();

@@ -82,7 +82,6 @@ namespace NuiSftpPage::Sections
                     href = "https://github.com/5cript/nui-sftp/releases",
                     target = "_blank",
                     rel = "noreferrer",
-                    style = "margin-top: 8px",
                 }(span{}("Get the Windows build"))
             );
         }
@@ -116,7 +115,7 @@ namespace NuiSftpPage::Sections
                         }(versionLine)
                     )),
                 p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
-                pkgRow("yay -S nui-sftp", "archlinux user repository", false, "yay -S nui-sftp"),
+                pkgRow("yay -S nui-sftp", "aur", false, "yay -S nui-sftp"),
                 pkgRow("./nui-sftp-*.AppImage", "appimage"),
                 pkgRow(
                     "flatpak install flathub org.nuicpp.nui_sftp",
@@ -129,8 +128,46 @@ namespace NuiSftpPage::Sections
                     href = "https://github.com/5cript/nui-sftp/releases",
                     target = "_blank",
                     rel = "noreferrer",
-                    style = "margin-top: 8px",
                 }(span{}("Download from Releases"))
+            );
+        }
+        Nui::ElementRenderer macosCard()
+        {
+            using namespace Nui::Elements;
+            using namespace Nui::Attributes;
+            using Nui::Elements::div;
+            using Nui::Elements::span;
+
+            std::string const versionLine = "macOS 15.2+ " + Utf8::cp(0x00B7) + " Apple Silicon";
+
+            std::string const description =
+                "A disk image for arm64 Macs. The app is not signed with an Apple Developer ID, "
+                "so macOS asks once before the first start.";
+
+            std::string const unquarantine = "xattr -dr com.apple.quarantine /Applications/nui-sftp.app";
+
+            return div{class_ = "platform-card glass shine"}(
+                div{
+                    style = "display:flex; align-items:center; gap:14px"
+                }(div{class_ = "platform-glyph"}(Utf8::cp(0x2318)), // place of interest sign
+                    div{}(
+                        h3{}("macOS"),
+                        div{
+                            style = "font-family: 'JetBrains Mono', monospace;"
+                                    " font-size: 12px;"
+                                    " color: var(--ink-muted);"
+                                    " margin-top: 2px",
+                        }(versionLine)
+                    )),
+                p{style = "margin: 0; color: var(--ink-dim); font-size: 14px"}(description),
+                pkgRow("nui-sftp-macos-arm64.dmg", "disk image"),
+                pkgRow(unquarantine, "first start", false, unquarantine),
+                a{
+                    class_ = "btn primary shine",
+                    href = "https://github.com/5cript/nui-sftp/releases",
+                    target = "_blank",
+                    rel = "noreferrer",
+                }(span{}("Get the macOS build"))
             );
         }
     }
@@ -148,7 +185,7 @@ namespace NuiSftpPage::Sections
             }(div{class_ = "section-eyebrow"}("// download"),
                 h2{class_ = "section-title"}("Native on Windows. AUR on Arch. Flathub & AppImage everywhere else."),
                 p{class_ = "section-sub"}()),
-            div{class_ = "platforms"}(windowsCard(), linuxCard())
+            div{class_ = "platforms"}(windowsCard(), linuxCard(), macosCard())
         ));
     }
 }
