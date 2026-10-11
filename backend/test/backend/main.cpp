@@ -16,6 +16,7 @@
 #include "test_termios.hpp"
 #include "test_fork_pool.hpp"
 #include "test_file_change_filter.hpp"
+#include "test_password_request.hpp"
 
 #include <log/log.hpp>
 
