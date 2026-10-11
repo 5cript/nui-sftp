@@ -28,8 +28,7 @@ namespace NuiSftpPage::Sections
                     class_ = "brand"
                 }(div{class_ = "brand-mark lg"}(brandMarkSvg()),
                     span{style = "font-weight: 700; font-size: 18px"}("NuiSftp")),
-                p{}("A modern SFTP & SSH workbench. Free and open source. "
-                    "Built for people who live at the terminal.")
+                p{}("An SFTP and SSH client for Windows, Linux and macOS. Free and open source.")
             );
         }
 
@@ -115,6 +114,6 @@ namespace NuiSftpPage::Sections
             div{
                 class_ = "foot-bottom"
             }(span{}(fmt::format("// nui-sftp {0} v{1} {0} 2026", dot, VERSION_NON_DIRTY)),
-                span{}(std::string{"built with care "} + dot + " permissive license"))));
+                span{}("MIT license"))));
     }
 }
