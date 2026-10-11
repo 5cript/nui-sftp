@@ -99,7 +99,7 @@ class MultiSetting : public Setting<false, std::vector<typename EntrySettingsT::
     void value(ValueType const& value) override
     {
         state_ = value;
-        selected_ = std::min(selected_.value(), value.empty() ? 0u : value.size() - 1u);
+        selected_ = 0u;
         refreshEntries();
         loadSelectedEntry();
     }
