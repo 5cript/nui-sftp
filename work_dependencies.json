@@ -62,7 +62,7 @@
         },
         {
             "url": "https://github.com/gabime/spdlog.git",
-            "rev": "v1.17.0",
+            "rev": "d5af52d903ed69f96c7350155e94aeff248b31eb",
             "branch": "main",
             "name": "spdlog"
         },
