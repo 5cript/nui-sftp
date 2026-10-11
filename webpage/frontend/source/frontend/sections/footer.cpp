@@ -43,7 +43,11 @@ namespace NuiSftpPage::Sections
                 h6{}("Product"),
                 a{href = "#features"}("Features"),
                 a{href = "#platforms"}("Download"),
-                a{href = "#docs"}("Documentation"),
+                a{
+                    href = "https://github.com/5cript/nui-sftp#readme",
+                    target = "_blank",
+                    rel = "noreferrer",
+                }("Documentation"),
                 a{href = "https://github.com/5cript/nui-sftp/releases"}("Changelog")
             );
         }
@@ -88,7 +92,7 @@ namespace NuiSftpPage::Sections
             return div{}(
                 h6{}("Community"),
                 a{href = "https://github.com/5cript/nui-sftp/discussions"}("Discussions"),
-                a{href = "https://github.com/5cript/nui-sftp/issues"}("Contributing")
+                a{href = "https://github.com/5cript/nui-sftp/blob/main/CONTRIBUTING.md"}("Contributing")
             );
         }
     }
