@@ -30,6 +30,8 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Tim Ebbeke</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>nui-sftp connects to SSH and SFTP servers on your local network.</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
 </dict>
