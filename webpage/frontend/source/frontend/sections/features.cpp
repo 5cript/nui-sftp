@@ -1,5 +1,6 @@
 #include <frontend/sections/features.hpp>
 
+#include <frontend/screenshot_url.hpp>
 #include <frontend/utf8.hpp>
 
 #include <script-nui-components/carousel.hpp>
@@ -30,15 +31,13 @@ namespace NuiSftpPage::Sections
             std::string title;
             std::string desc;
             std::vector<std::string> tags;
-            // Optional path under /assets for the product screenshot. Empty
-            // means the slide drops the visual side entirely and the copy
-            // stretches across the full slide width.
+            // Optional URL of the product screenshot. Empty means the slide
+            // drops the visual side entirely and the copy stretches across the
+            // full slide width.
             std::string visualImage{};
         };
 
-        // Mirrors the FEATURES array from the design mockup. The visual side
-        // of each slide is intentionally a placeholder; product screenshots
-        // will drop in later.
+        // Mirrors the FEATURES array from the design mockup.
         std::vector<Feature> const& featureList()
         {
             // Initialise via IIFE so we can declare runtime-built UTF-8 glyphs
@@ -60,7 +59,7 @@ namespace NuiSftpPage::Sections
                         "single click. NuiSftp tracks what's added, modified, and removed "
                         "(locally and remotely) so your tree stays in lockstep without surprises.",
                         {"Bidirectional", "Diff preview", "Selective merge"},
-                        "assets/synchronize.png",
+                        screenshotUrl("synchronize.png"),
                     },
                     {
                         "live_edit",
@@ -69,7 +68,7 @@ namespace NuiSftpPage::Sections
                         "disk and pushes changes back automatically the moment you save "
                         "-> no drag, no drop, no friction.",
                         {"fs.watch", "Auto-reupload", "Conflict guard"},
-                        "assets/live_edit.png",
+                        screenshotUrl("live_edit.png"),
                     },
                     {
                         "ssh_shells",
@@ -78,7 +77,7 @@ namespace NuiSftpPage::Sections
                         "all over the same connection that's transferring your files. Switch "
                         "between sessions in tabs, never juggle terminals again.",
                         {"Multiple channels", "Per-session tabs", "Same connection"},
-                        "assets/session.png",
+                        screenshotUrl("session.png"),
                     },
                     {
                         "configurable",
@@ -87,7 +86,7 @@ namespace NuiSftpPage::Sections
                         "If you want to bend it to your workflow, "
                         "NuiSftp gets out of the way.",
                         {"Profiles", "Themes", "Hooks", "Keybinds"},
-                        "assets/settings.png",
+                        screenshotUrl("settings.png"),
                     },
                     {
                         "local_terminal",
@@ -95,7 +94,7 @@ namespace NuiSftpPage::Sections
                         "A full local shell lives next to your remote panes. Run a build, scrub a "
                         "log, or git-commit without ever leaving the workbench.",
                         {tagBashEtc, "Split panes", "Persistent history"},
-                        "assets/local.png",
+                        screenshotUrl("local.png"),
                     },
                     {
                         "free",

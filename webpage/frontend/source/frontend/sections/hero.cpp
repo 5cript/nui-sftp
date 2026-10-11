@@ -1,5 +1,6 @@
 #include <frontend/sections/hero.hpp>
 
+#include <frontend/screenshot_url.hpp>
 #include <frontend/utf8.hpp>
 
 #include <version.hpp>
@@ -19,8 +20,7 @@ namespace NuiSftpPage::Sections
          *
          * Structure mirrors the design verbatim so the existing
          * .mock-wrap / .mock-shot* / .chip-float CSS rules apply unchanged.
-         * The screenshot itself is `assets/session.png`, fetched via
-         * FetchContent and staged into bin/assets at build time.
+         * The screenshot is session.png from the S4 bucket, see screenshotUrl().
          */
         Nui::ElementRenderer appMock()
         {
@@ -44,7 +44,7 @@ namespace NuiSftpPage::Sections
                     },
                 }(div{class_ = "mock-shot-frame"}(
                       img{
-                          src = "assets/session.png",
+                          src = screenshotUrl("session.png"),
                           alt = "NuiSftp application screenshot",
                       }(),
                       div{class_ = "mock-shot-sheen"}()
