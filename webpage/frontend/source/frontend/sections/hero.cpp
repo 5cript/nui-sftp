@@ -29,7 +29,6 @@ namespace NuiSftpPage::Sections
             using Nui::Elements::div;
             using Nui::Elements::span;
 
-            auto const dot = Utf8::cp(0x00B7); // middle dot
             auto const arrows = Utf8::cps({0x2191, 0x2193}); // up + down arrow
 
             return div{
@@ -51,10 +50,10 @@ namespace NuiSftpPage::Sections
                   ),
                     div{class_ = "mock-shot-floor"}()),
                 div{class_ =
-                        "chip-float tl"}(span{class_ = "pulse"}(), span{}(fmt::format("watch {} auto-reupload", dot))),
+                        "chip-float tl"}(span{class_ = "pulse"}(), span{}("uploads on save")),
                 div{
                     class_ = "chip-float br"
-                }(span{style = "color: var(--accent-b)"}(arrows), span{}("SFTP + SSH multiplexed")));
+                }(span{style = "color: var(--accent-b)"}(arrows), span{}("shells + SFTP, one connection")));
         }
     }
 
@@ -76,7 +75,7 @@ namespace NuiSftpPage::Sections
                     div{class_ = "eyebrow"}(
                         span{class_ = "dot"}(),
                         span{}(
-                            fmt::format("v{0} {1} Windows {1} Linux {1} macOS {1} MIT-style", VERSION_NON_DIRTY, dot)
+                            fmt::format("v{0} {1} Windows {1} Linux {1} macOS {1} MIT license", VERSION_NON_DIRTY, dot)
                         )
                     ),
                     h1{class_ = "hero-title"}(
@@ -85,13 +84,13 @@ namespace NuiSftpPage::Sections
                         text{" workbench."}()
                     ),
                     p{class_ = "hero-sub"}(
-                        "Multiplex SSH and SFTP over a single connection, "
-                        "synchronize directories, and watch local edits for automatic reupload. "
-                        "Free and open source."
+                        "Terminals and file transfers share one SSH connection. "
+                        "Synchronize folders, edit remote files with your local apps, "
+                        "and keep the commands you use. Free and open source."
                     ),
                     div{class_ = "hero-actions"}(
                         a{class_ = "btn primary shine", href = "#platforms"}(
-                            span{}(fmt::format("{} Download for Windows, Linux & macOS", arrowDown))
+                            span{}(fmt::format("{} Download", arrowDown))
                         ),
                         a{
                             class_ = "btn ghost",
