@@ -25,7 +25,11 @@ namespace NuiSftpPage::Sections
                     a{href = "#features"}("Features"),
                     a{href = "#platforms"}("Download"),
                     a{href = "#oss"}("Open Source"),
-                    a{href = "#docs"}("Docs")
+                    a{
+                        href = "https://github.com/5cript/nui-sftp#readme",
+                        target = "_blank",
+                        rel = "noreferrer"
+                    }("Docs")
                 ),
                 a{
                     class_ = "cta",
