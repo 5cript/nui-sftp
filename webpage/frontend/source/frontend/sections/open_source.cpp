@@ -1,7 +1,5 @@
 #include <frontend/sections/open_source.hpp>
 
-#include <frontend/utf8.hpp>
-
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 
@@ -18,12 +16,6 @@ namespace NuiSftpPage::Sections
             " border-radius: 999px;"
             " background: rgba(255, 255, 255, 0.05);"
             " border: 1px solid var(--line)";
-        // Same shape but slightly dimmer fill — used for the license pill.
-        constexpr char const* kRepoLicenseStyle =
-            "padding: 3px 8px;"
-            " border-radius: 999px;"
-            " background: rgba(255, 255, 255, 0.04);"
-            " border: 1px solid var(--line)";
 
         Nui::ElementRenderer ossCopy()
         {
@@ -35,8 +27,8 @@ namespace NuiSftpPage::Sections
             return div{
                 class_ = "oss-copy"
             }(div{class_ = "section-eyebrow"}("// open source"),
-                h2{}("Built in the open. Yours to inspect, fork, and ship."),
-                p{}("NuiSftp is fully open source on GitHub."),
+                h2{}("Open source"),
+                p{}("The full source is on GitHub under the MIT license. Bug reports, ideas and pull requests are welcome."),
                 div{class_ = "oss-actions"}(
                     a{
                         class_ = "btn primary shine",
@@ -61,10 +53,6 @@ namespace NuiSftpPage::Sections
             using Nui::Elements::span;
             using Nui::Elements::b;
 
-            auto const dot = Utf8::cp(0x00B7);
-            auto const star = Utf8::cp(0x2605);
-            auto const fork = Utf8::cp(0x2442); // OCR fork
-
             return div{
                 class_ = "repo-card"
             }(div{class_ = "repo-title"}(text{"5cript / "}(), span{}("nui-sftp")),
@@ -73,13 +61,10 @@ namespace NuiSftpPage::Sections
                             " font-family: 'Inter', sans-serif;"
                             " font-size: 13px;"
                             " line-height: 1.5",
-                }("A modern, configurable SFTP & SSH workbench with file watching, "
-                  "multiplexed shells and local terminals."),
+                }("A cross platform ssh and sftp client"),
                 div{
                     class_ = "repo-meta"
-                }(span{}(b{}("C++"), text{" " + dot + " 92.4%"}()),
-                    span{}(b{}(star), text{std::string_view{" stars"}}()),
-                    span{}(b{}(fork), text{std::string_view{" forks"}}())),
+                }(span{}(b{}("C++")), span{}(b{}("MIT"), text{std::string_view{" license"}}())),
                 div{
                     style = "display: flex;"
                             " gap: 8px;"
@@ -87,8 +72,7 @@ namespace NuiSftpPage::Sections
                             " font-size: 11px",
                 }(span{style = kRepoTagStyle}("sftp"),
                     span{style = kRepoTagStyle}("ssh"),
-                    span{style = kRepoTagStyle}("cpp"),
-                    span{class_ = "lic", style = kRepoLicenseStyle}("permissive")));
+                    span{style = kRepoTagStyle}("cpp")));
         }
     }
 

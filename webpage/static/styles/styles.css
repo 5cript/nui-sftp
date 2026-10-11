@@ -1012,7 +1012,6 @@ h2.section-title {
 .repo-card .repo-title span { color: var(--ink-muted); font-weight: 400; }
 .repo-card .repo-meta { display: flex; gap: 18px; color: var(--ink-dim); }
 .repo-card .repo-meta b { color: var(--ink); font-weight: 500; }
-.repo-card .lic { color: var(--accent-b); }
 
 /* ---------- footer ---------- */
 footer {
