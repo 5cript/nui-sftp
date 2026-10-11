@@ -75,10 +75,11 @@ namespace Persistence
         /**
          * @brief Adds missing defaults to the state cache and writes it back if anything changed.
          *
-         * @param before The json as it was read from disk.
+         * @param before The json as it was read from disk, after migrating entries of earlier versions.
+         * @param migrated Whether entries of earlier versions were migrated, which must be written back.
          * @return What was changed, empty if nothing was.
          */
-        LoadWarnings dataFixer(nlohmann::json const& before);
+        LoadWarnings dataFixer(nlohmann::json const& before, bool migrated = false);
 #endif
 
       private:

@@ -37,6 +37,8 @@ struct ReconnectState
     /// Cached layoutName so the adopting Session keeps the right saved-layout
     /// id if its snapshot lumino layout is ever cleared.
     std::optional<std::string> layoutName;
+    /// The user the session logged in as, kept across the retries.
+    std::optional<Persistence::SshUser> loginUser;
     /// setTimeout handle for the pending backoff timer; cleared on cancel /
     /// on retry firing.  Holds Nui::val::undefined() when no retry is pending.
     Nui::val retryTimerHandle{Nui::val::undefined()};
@@ -409,6 +411,8 @@ void SessionArea::addSession(std::string const& name)
             }
 
             auto [engineKey, engine] = *iter;
+            if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&engine.engine))
+                ssh->selectUser(impl_->toolbar->selectedUser(name));
 
             const auto tabId = impl_->tabs.add(name, true);
             Log::info("Adding session: {} with layout {}. Tab ID: {}", name, impl_->toolbar->selectedLayout(), tabId);
@@ -449,9 +453,7 @@ void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& 
             auto& engineSsh = std::get<Persistence::SshSessionOptions>(engine.engine);
             engineSsh.host = sshOptions.host;
             engineSsh.port = sshOptions.port;
-            engineSsh.user = sshOptions.user;
-            engineSsh.sshKeyPrivate = sshOptions.sshKeyPrivate;
-            engineSsh.sshKeyPublic = sshOptions.sshKeyPublic;
+            engineSsh.users = sshOptions.users;
             engineSsh.openSftpByDefault = sshOptions.openSftpByDefault;
             engineSsh.remoteFavorites = sshOptions.remoteFavorites;
 
@@ -470,8 +472,8 @@ void SessionArea::addDirectConnectSession(Persistence::SshSessionOptions const& 
             fillDefaults(engineSsh.sftpOptions, state.sftpOptions);
 
             std::string displayName = engineSsh.host;
-            if (engineSsh.user)
-                displayName = *engineSsh.user + "@" + displayName;
+            if (const auto user = engineSsh.loginUser().name)
+                displayName = *user + "@" + displayName;
             if (engineSsh.port)
                 displayName += ":" + std::to_string(*engineSsh.port);
 
@@ -525,6 +527,7 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
     {
         reconnectState.name = name;
         reconnectState.layoutName = impl_->toolbar->selectedLayout();
+        reconnectState.loginUser = oldSession->loginUser();
         reconnectState.snapshot = std::move(snapshot);
         oldSession->startReconnectUi();
     }
@@ -566,6 +569,9 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
                 return;
             }
             reconnectState.engineOptions = sessionIter->second;
+            auto* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine);
+            if (ssh && reconnectState.loginUser)
+                ssh->selectUserLike(*reconnectState.loginUser);
             reconnectState.uiOptions = state.uiOptions;
 
             // Build the ProtoSession, hook it up, start it.  The proto
@@ -896,4 +902,4 @@ Nui::ElementRenderer SessionArea::operator()()
         Log::error("Exception in SessionArea::operator(): {}", e.what());
         return div{}("Error loading session area: "s + e.what());
     }
-}
+}

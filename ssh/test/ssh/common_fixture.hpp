@@ -104,7 +104,7 @@ namespace SecureShell::Test
             return Persistence::SshSessionOptions{
                 .host = host,
                 .port = port,
-                .user = user,
+                .users = {Persistence::SshUser{.name = user}},
                 .sshOptions = Persistence::SshOptions{
                     .connectTimeoutSeconds = connectTimeout.count(),
                 },

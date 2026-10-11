@@ -300,6 +300,7 @@ namespace SecureShell
         auto session = std::make_unique<Session>(std::move(onConnectionLoss));
 
         const auto sshOptions = sessionOptions.sshOptions.value();
+        const auto loginUser = sessionOptions.loginUser();
 
 #ifndef _WIN32
         // TODO: Implement this for Windows (its complicated, because there is no one single agent)
@@ -336,11 +337,11 @@ namespace SecureShell
             },
             [&]
             {
-                if (sessionOptions.user.has_value())
+                if (loginUser.name.has_value())
                 {
                     lastAttemptedAppliedOption = "User";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_USER, sessionOptions.user.value().c_str()
+                        SSH_OPTIONS_USER, loginUser.name.value().c_str()
                     );
                 }
                 return 0;
@@ -621,10 +622,10 @@ namespace SecureShell
         }
 
         std::optional<std::string> keyFailure{};
-        if (result.result != SSH_AUTH_SUCCESS && sessionOptions.sshKeyPrivate)
+        if (result.result != SSH_AUTH_SUCCESS && loginUser.sshKeyPrivate)
         {
-            const auto sshKeyPrivate = sessionOptions.sshKeyPrivate.value();
-            const auto maybeSshKeyPublic = sessionOptions.sshKeyPublic;
+            const auto sshKeyPrivate = loginUser.sshKeyPrivate.value();
+            const auto maybeSshKeyPublic = loginUser.sshKeyPublic;
 
             SshKey publicKey{};
             SshKey privateKey{};
@@ -687,7 +688,7 @@ namespace SecureShell
                         std::optional<std::string> pwFromCache{};
                         for (const auto& cache : *pwCache)
                         {
-                            if (cache.user == sessionOptions.user && cache.host == sessionOptions.host &&
+                            if (cache.user == loginUser.name && cache.host == sessionOptions.host &&
                                 cache.port == sessionOptions.port)
                             {
                                 pwFromCache = cache.password;
@@ -713,9 +714,7 @@ namespace SecureShell
                         if (result == SSH_AUTH_SUCCESS)
                         {
                             if (pwCache)
-                                pwCache->emplace_back(
-                                    sessionOptions.user, sessionOptions.host, sessionOptions.port, buf
-                                );
+                                pwCache->emplace_back(loginUser.name, sessionOptions.host, sessionOptions.port, buf);
                             return (int)SSH_AUTH_SUCCESS;
                         }
                     }

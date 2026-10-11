@@ -6,6 +6,7 @@
 #include <frontend/state_holder_with_dialog.hpp>
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
+#include <frontend/settings/ssh_user_settings.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
@@ -32,6 +33,8 @@
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 
+#include <numeric>
+
 struct Toolbar::Implementation
 {
     Persistence::StateHolder* stateHolder;
@@ -46,6 +49,9 @@ struct Toolbar::Implementation
     Nui::Observed<std::string> selectedLayout{};
     Nui::Observed<std::vector<std::string>> terminalEngines;
     Nui::Observed<std::vector<std::string>> layouts;
+    Nui::Observed<std::size_t> selectedUser{0u};
+    Nui::Observed<std::vector<std::size_t>> userIndices;
+    std::vector<std::string> userLabels;
 
     Nui::ListenRemover<decltype(FrontendEvents::onSettingsChanged)> settingsChangedListener;
     Nui::ListenRemover<decltype(FrontendEvents::onLayoutsChanged)> layoutsChangedListener;
@@ -69,7 +75,9 @@ struct Toolbar::Implementation
     }
 
     void updateSessionsList(std::function<void()> onDone);
+    void reloadUsers();
     Nui::ElementRenderer notificationsButton();
+    Nui::ElementRenderer userSelect();
 };
 
 void Toolbar::Implementation::updateSessionsList(std::function<void()> onDone)
@@ -167,8 +175,64 @@ void Toolbar::connectLayoutsChanged()
     );
 }
 
+void Toolbar::Implementation::reloadUsers()
+{
+    userLabels.clear();
+    if (const auto iter = stateHolder->stateCache().sessions.find(activeTerminalEngine.value());
+        iter != stateHolder->stateCache().sessions.end())
+    {
+        if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&iter->second.engine))
+        {
+            for (auto const& user : ssh->users)
+                userLabels.push_back(sshUserLabel(user));
+        }
+    }
+
+    std::vector<std::size_t> indices(userLabels.size());
+    std::iota(indices.begin(), indices.end(), 0u);
+    selectedUser = 0u;
+    userIndices = std::move(indices);
+}
+
+Nui::ElementRenderer Toolbar::Implementation::userSelect()
+{
+    using namespace Nui::Attributes;
+    using Nui::Elements::span;
+    namespace Snc = ScriptNuiComponents;
+
+    // clang-format off
+    return Snc::select(Snc::SelectOptions<decltype(selectedUser), decltype(userIndices)>{
+        .activeOption = selectedUser,
+        .options = userIndices,
+        .attributes = {
+            title = language->get("toolbar", "userSelect"),
+            style = Nui::observe(userIndices).generate([](std::vector<std::size_t> const& indices) -> std::string {
+                return indices.size() < 2u ? "display: none;" : "";
+            }),
+        },
+        .activeRenderer = [this](auto const&) -> Nui::ElementRenderer {
+            return span{}(Nui::observe(selectedUser, userIndices), [this]() -> std::string {
+                if (selectedUser.value() >= userLabels.size())
+                    return "";
+                return userLabels[selectedUser.value()];
+            });
+        },
+        .elementRenderer = [this](std::size_t index) -> Nui::ElementRenderer {
+            if (index >= userLabels.size())
+                return Nui::nil();
+            return span{}(userLabels[index]);
+        },
+        .makeId = []() {
+            return Nui::val::global("generateId")().as<std::string>();
+        },
+    });
+    // clang-format on
+}
+
 void Toolbar::reloadLayouts()
 {
+    impl_->reloadUsers();
+
     impl_->selectedLayout = "";
     impl_->layouts.value().clear();
     impl_->layouts.value().push_back(std::string{Constants::defaultLayoutName});
@@ -277,6 +341,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 return Nui::val::global("generateId")().as<std::string>();
             }
         }),
+        impl_->userSelect(),
         Snc::button({
             .text = language->get("toolbar", "connect"),
             .icon = Ui5Icons::begin(),
@@ -431,6 +496,13 @@ std::string Toolbar::selectedLayout() const
     return impl_->selectedLayout.value();
 }
 
+std::size_t Toolbar::selectedUser(std::string const& sessionName) const
+{
+    if (sessionName != impl_->activeTerminalEngine.value())
+        return 0u;
+    return impl_->selectedUser.value();
+}
+
 void Toolbar::sessionArea(SessionArea& sessionArea)
 {
     impl_->sessionArea = &sessionArea;
@@ -444,4 +516,4 @@ void Toolbar::settings(Settings& settings)
 void Toolbar::notificationCenter(NotificationCenter& center)
 {
     impl_->notificationCenter = &center;
-}
+}

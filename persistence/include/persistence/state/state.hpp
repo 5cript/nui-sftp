@@ -36,6 +36,12 @@ namespace Persistence
         std::optional<SshSessionOptions> lastDirectConnect{};
 
         State fullyResolve() const;
+
+        /**
+         * @brief Writes the first user of every SSH server into the fields earlier versions read, so switching back
+         * to one keeps the servers usable.
+         */
+        void writeLegacyUsers();
     };
 
     BOOST_DESCRIBE_STRUCT(

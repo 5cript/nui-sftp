@@ -1688,23 +1688,9 @@ Nui::ElementRenderer Settings::currentSession()
                 h1{
                     class_ = "settings-header"
                 }(language->getObserved("settings", "sessionOptions", "sshSessionServerOptions")),
-                subgroup({.onChange =
-                        [this]()
-                    {
-                        onChange();
-                    }},
-                    fragment(
-                        impl_->currentSessionOptions.sshSessionOptions.host(),
-                        impl_->currentSessionOptions.sshSessionOptions.port(),
-                        impl_->currentSessionOptions.sshSessionOptions.user(),
-                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPrivate(),
-                        impl_->currentSessionOptions.sshSessionOptions.sshKeyPublic(),
-                        impl_->currentSessionOptions.sshSessionOptions.openSftpByDefault(),
-                        impl_->currentSessionOptions.sshSessionOptions.remoteFavorites(),
-                        impl_->currentSessionOptions.sshSessionOptions.maxReconnectAttempts(),
-                        impl_->currentSessionOptions.sshSessionOptions.maxReconnectBackoffMs()
-                    )
-                )
+                impl_->currentSessionOptions.sshSessionOptions.renderServerSettings([this]() {
+                    onChange();
+                })
             ),
             div{
                 class_ = "settings-visibility-box",

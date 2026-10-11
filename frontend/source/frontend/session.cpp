@@ -278,6 +278,13 @@ bool Session::supportsLocalShell() const
     return std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
 }
 
+std::optional<Persistence::SshUser> Session::loginUser() const
+{
+    if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&impl_->engineOptions.engine))
+        return ssh->loginUser();
+    return std::nullopt;
+}
+
 void Session::openLocalShellChannel(std::string const& shellName)
 {
     if (!supportsLocalShell())
@@ -548,7 +555,10 @@ namespace
     std::string makeHostLabel(Persistence::SessionOptions const& engineOptions)
     {
         if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&engineOptions.engine))
-            return ssh->user ? fmt::format("{}@{}", *ssh->user, ssh->host) : ssh->host;
+        {
+            const auto user = ssh->loginUser().name;
+            return user ? fmt::format("{}@{}", *user, ssh->host) : ssh->host;
+        }
         if (const auto* executing = std::get_if<Persistence::ExecutingSessionOptions>(&engineOptions.engine))
             return executing->command.string();
         return {};
@@ -830,7 +840,7 @@ void Session::onOpenSession(bool success, std::string const& info)
                         username = response["username"].as<std::string>();
                     Log::info("Retrieved username: {}", username);
 
-                    const auto user = sshSessionOptions.user.value_or(username);
+                    const auto user = sshSessionOptions.loginUser().name.value_or(username);
                     auto host = sshSessionOptions.host;
                     const auto port = sshSessionOptions.port.value_or(22);
 

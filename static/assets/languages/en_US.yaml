@@ -596,6 +596,13 @@ settings:
     maxReconnectBackoffMs: "Max Reconnect Backoff (ms)"
     maxReconnectBackoffMsHelpText: "The longest wait between two reconnect attempts, in milliseconds. The wait doubles with every attempt, starting at one second, until it reaches this cap."
     maxReconnectBackoffMsSearchTags: "retry, reconnect, delay, wait"
+    users: "Users"
+    usersHelpText: "The users to log in to this server with. Pick one in the toolbar next to the layout before connecting; the first user is the default one."
+    usersSearchTags: "login, account, credentials, key"
+    userWithoutName: "(no user name)"
+    connectionCategory: "Connection"
+    usersCategory: "Users and Keys"
+    miscellaneousCategory: "Miscellaneous"
   search:
     placeholder: "Search settings"
     shortcutHint: "Search all settings (Ctrl+F)"
@@ -1011,6 +1018,7 @@ toolbar:
   connect: "Connect"
   endSession: "End Session"
   directConnect: "Direct Connect"
+  userSelect: "User to log in as"
   errorSavingSettingsHeader: "Could not save settings"
   errorSavingSettings: "Error occurred while saving settings."
 directConnectDialog:

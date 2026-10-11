@@ -3,6 +3,9 @@
 #include <utility/visit_overloaded.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <iterator>
+
 namespace Persistence
 {
     std::filesystem::path defaultShell()
@@ -60,6 +63,48 @@ namespace Persistence
 #else
         return defaultBashSessionOption();
 #endif
+    }
+
+    SshUser SshSessionOptions::loginUser() const
+    {
+        if (users.empty())
+            return SshUser{};
+        return users.front();
+    }
+
+    void SshSessionOptions::writeLegacyUser()
+    {
+        const auto first = loginUser();
+        user = first.name;
+        sshKeyPrivate = first.sshKeyPrivate;
+        sshKeyPublic = first.sshKeyPublic;
+    }
+
+    void SshSessionOptions::selectUser(std::size_t index)
+    {
+        if (index >= users.size())
+            return;
+        std::rotate(
+            users.begin(),
+            std::next(users.begin(), static_cast<std::ptrdiff_t>(index)),
+            std::next(users.begin(), static_cast<std::ptrdiff_t>(index) + 1)
+        );
+    }
+
+    void SshSessionOptions::selectUserLike(SshUser const& user)
+    {
+        const auto iter = std::find_if(
+            users.begin(),
+            users.end(),
+            [&user](SshUser const& candidate)
+            {
+                return candidate.name == user.name && candidate.sshKeyPrivate == user.sshKeyPrivate;
+            }
+        );
+        if (iter == users.end())
+            users.insert(users.begin(), user);
+        else
+            selectUser(static_cast<std::size_t>(std::distance(users.begin(), iter)));
     }
 
     SessionOptions SessionOptions::create(std::optional<std::string> icon, TerminalEngineType type)

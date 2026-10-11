@@ -46,13 +46,30 @@ namespace Persistence
         (isPty, command, arguments, environment, exitTimeoutSeconds, cleanEnvironment)
     )
 
+    /**
+     * @brief One login of a server: the user name and the key files used for it.
+     */
+    struct SshUser : public DefaultMissingMember
+    {
+        /**
+         * @brief The user name to log in with. Without one, the SSH configuration or the local user name is used.
+         */
+        std::optional<std::string> name{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
+    };
+    BOOST_DESCRIBE_STRUCT(SshUser, (), (name, sshKeyPrivate, sshKeyPublic))
+
     struct SshSessionOptions : public DefaultMissingMember
     {
         std::string host{};
         std::optional<int> port{std::nullopt};
-        std::optional<std::string> user{std::nullopt};
-        std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
-        std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
+
+        /**
+         * @brief The logins of the server. Connections log in as the first one, so the user picked for a connection
+         * is moved to the front before connecting.
+         */
+        std::vector<SshUser> users{};
         bool openSftpByDefault{true};
         std::vector<std::string> remoteFavorites{};
 
@@ -73,6 +90,34 @@ namespace Persistence
         // Referenceables:
         Referenceable<SshOptions> sshOptions{};
         Referenceable<SftpOptions> sftpOptions{};
+
+        /**
+         * @brief The first user, written for earlier versions that know no user list. Never read by this version.
+         */
+        std::optional<std::string> user{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPrivate{std::nullopt};
+        std::optional<std::filesystem::path> sshKeyPublic{std::nullopt};
+
+        /**
+         * @brief The login connections use, an empty one when the server has no users.
+         */
+        SshUser loginUser() const;
+
+        /**
+         * @brief Writes the first user into the fields earlier versions read.
+         */
+        void writeLegacyUser();
+
+        /**
+         * @brief Makes the user at the index the one connections log in as. Does nothing for an index out of range.
+         */
+        void selectUser(std::size_t index);
+
+        /**
+         * @brief Makes the user with the same name and private key the one connections log in as, or adds the user
+         * in front when no such user exists anymore.
+         */
+        void selectUserLike(SshUser const& user);
     };
     BOOST_DESCRIBE_STRUCT(
         SshSessionOptions,
@@ -81,13 +126,14 @@ namespace Persistence
             sftpOptions,
             host,
             port,
-            user,
-            sshKeyPrivate,
-            sshKeyPublic,
+            users,
             openSftpByDefault,
             remoteFavorites,
             maxReconnectAttempts,
-            maxReconnectBackoffMs)
+            maxReconnectBackoffMs,
+            user,
+            sshKeyPrivate,
+            sshKeyPublic)
     )
 
     struct SessionOptions : public DefaultMissingMember
