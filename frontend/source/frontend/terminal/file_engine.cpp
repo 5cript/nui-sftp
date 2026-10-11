@@ -342,36 +342,39 @@ void FileEngine::openSyncSession(
 void FileEngine::recomputeSyncDiff(
     Ids::SyncSessionId syncSessionId,
     SharedData::Sync::DiffOptions options,
-    std::function<void(SharedData::Sync::DiffSummary)> onSummary
+    SharedData::Sync::LoadedParents loadedParents,
+    std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
 )
 {
     Nui::RpcClient::callWithBackChannel(
         fmt::format("Session::{}::sftp::recomputeSyncDiff", impl_->engine->sshSessionId().value()),
-        [onSummary = std::move(onSummary)](Nui::val val)
+        [onSnapshot = std::move(onSnapshot)](Nui::val val)
         {
+            const auto failed = [&onSnapshot]()
+            {
+                SharedData::Sync::DiffSnapshot empty{};
+                empty.summary.cancelled = true;
+                onSnapshot(std::move(empty));
+            };
             if (val.hasOwnProperty("error"))
             {
                 Log::error("recomputeSyncDiff failed: {}", val["error"].as<std::string>());
-                SharedData::Sync::DiffSummary empty{};
-                empty.cancelled = true;
-                onSummary(std::move(empty));
-                return;
+                return failed();
             }
             try
             {
                 const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
-                onSummary(json.get<SharedData::Sync::DiffSummary>());
+                onSnapshot(json.get<SharedData::Sync::DiffSnapshot>());
             }
             catch (std::exception const& exc)
             {
-                Log::error("Failed to parse DiffSummary: {}", exc.what());
-                SharedData::Sync::DiffSummary empty{};
-                empty.cancelled = true;
-                onSummary(std::move(empty));
+                Log::error("Failed to parse DiffSnapshot: {}", exc.what());
+                failed();
             }
         },
         syncSessionId.value(),
-        options
+        options,
+        loadedParents
     );
 }
 

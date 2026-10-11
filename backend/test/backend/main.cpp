@@ -19,6 +19,7 @@
 #include "test_fork_pool.hpp"
 #include "test_file_change_filter.hpp"
 #include "test_password_request.hpp"
+#include "test_sync_session.hpp"
 
 #include <log/log.hpp>
 

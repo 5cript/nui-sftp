@@ -26,8 +26,8 @@ class SyncProgressDialog
     /**
      * @brief Opens the progress dialog, runs both scans via @p provider, then
      *        immediately triggers a backend diff.  @p onDone fires after both the
-     *        scans and the first diff have landed, passing the @ref DiffSummary
-     *        the frontend should seed its tree from.
+     *        scans and the first diff have landed, passing the @ref DiffSnapshot
+     *        the frontend should seed its trees from.
      *
      *        The dialog keeps showing the Comparing spinner during the diff walk;
      *        light diffs finish within a frame so the phase effectively flashes.
@@ -45,7 +45,7 @@ class SyncProgressDialog
         bool recursive,
         bool ignoreHidden,
         SharedData::Sync::DiffOptions initialOptions,
-        std::function<void(SharedData::Sync::DiffSummary)> onDone
+        std::function<void(SharedData::Sync::DiffSnapshot)> onDone
     );
 
     /**

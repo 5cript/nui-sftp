@@ -4,6 +4,7 @@ add_library(
         directory_entry.cpp
         ignore_rules.cpp
         sync/diff.cpp
+        sync/diff_tree_store.cpp
         sync/enqueue_minimizer.cpp
 )
 

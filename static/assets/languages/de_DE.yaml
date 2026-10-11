@@ -172,6 +172,8 @@ syncDialog:
   deleteSectionCount: "Löschen ({}, {})"
   footerSummary: "{} ausgewählt • {}"
   syncItemNowTitle: "Dieses Element jetzt synchronisieren"
+  recompareNeeded: "Scan-Einstellungen geändert, zum Anwenden neu vergleichen"
+  typeConflictTitle: "Auf einer Seite ein Verzeichnis, auf der anderen eine Datei. Dieses Element jetzt synchronisieren"
   recompare: "Neu vergleichen"
   resumeQueue: "Warteschlange fortsetzen"
   queueRunning: "Warteschlange läuft"

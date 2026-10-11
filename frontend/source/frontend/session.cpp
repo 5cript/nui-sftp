@@ -193,14 +193,7 @@ struct Session::Implementation
             {
                 if (lastSyncLocalPath_.empty() || lastSyncRemotePath_.empty())
                     return;
-                startSyncFlowImpl(
-                    lastSyncLocalPath_,
-                    lastSyncRemotePath_,
-                    req.respectIgnoreFiles,
-                    req.recursive,
-                    req.ignoreHidden,
-                    req.diffOptions
-                );
+                startSyncFlowImpl(lastSyncLocalPath_, lastSyncRemotePath_, req.scan, req.diffOptions);
             }
         );
 
@@ -219,9 +212,7 @@ struct Session::Implementation
     void startSyncFlowImpl(
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
-        bool respectIgnoreFiles,
-        bool recursive,
-        bool ignoreHidden,
+        SyncDialog::ScanSettings scan,
         SharedData::Sync::DiffOptions initialDiffOptions
     )
     {
@@ -236,15 +227,13 @@ struct Session::Implementation
             syncProvider_.get(),
             localPath,
             remotePath,
-            respectIgnoreFiles,
-            recursive,
-            ignoreHidden,
+            scan.respectIgnoreFiles,
+            scan.recursive,
+            scan.ignoreHidden,
             initialDiffOptions,
-            [this, localPath, remotePath](SharedData::Sync::DiffSummary summary)
+            [this, localPath, remotePath, scan](SharedData::Sync::DiffSnapshot snapshot)
             {
-                syncDialog.open(
-                    syncProvider_.get(), std::move(summary), localPath, remotePath
-                );
+                syncDialog.open(syncProvider_.get(), std::move(snapshot), localPath, remotePath, scan);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
@@ -544,20 +533,13 @@ void Session::setupFileGrid()
     impl_->fileExplorerPanel.setup();
 
     // Sync dialog + progress dialog stay on Session; wire them through the
-    // panel's synchronize callback.  Initial flow uses default scan + diff
-    // settings; the sync dialog's own settings drive subsequent recomputes and
-    // recompares.
+    // panel's synchronize callback.  Every flow scans and diffs with the
+    // settings the sync dialog currently shows.
     impl_->fileExplorerPanel.setOnSynchronize(
         [this](std::filesystem::path loc, std::filesystem::path rem)
         {
-            impl_->startSyncFlowImpl(
-                std::move(loc),
-                std::move(rem),
-                /*respectIgnoreFiles=*/true,
-                /*recursive=*/true,
-                /*ignoreHidden=*/false,
-                SharedData::Sync::DiffOptions{}
-            );
+            const auto settings = impl_->syncDialog.currentSettings();
+            impl_->startSyncFlowImpl(std::move(loc), std::move(rem), settings.scan, settings.diffOptions);
         }
     );
 }

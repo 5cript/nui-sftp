@@ -8,6 +8,7 @@
 
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync_phase.hpp>
 
@@ -57,7 +58,7 @@ struct SyncProgressDialog::Implementation
 
     BackendSyncProvider* provider_{nullptr};
     SharedData::Sync::DiffOptions initialOptions_{};
-    std::function<void(SharedData::Sync::DiffSummary)> onDone_{};
+    std::function<void(SharedData::Sync::DiffSnapshot)> onDone_{};
 
     // Cancel token; replaced on each open() to invalidate stale callback captures.
     // The provider also has its own cancel flag that kills the backend walk — this
@@ -82,7 +83,7 @@ void SyncProgressDialog::open(
     bool recursive,
     bool ignoreHidden,
     SharedData::Sync::DiffOptions initialOptions,
-    std::function<void(SharedData::Sync::DiffSummary)> onDone
+    std::function<void(SharedData::Sync::DiffSnapshot)> onDone
 )
 {
     // Invalidate any stale callbacks from a previous open() by flipping the old
@@ -138,7 +139,8 @@ void SyncProgressDialog::open(
             Nui::globalEventContext.executeActiveEventsImmediately();
             impl_->provider_->recompute(
                 impl_->initialOptions_,
-                [this, token](SharedData::Sync::DiffSummary summary)
+                {},
+                [this, token](SharedData::Sync::DiffSnapshot snapshot)
                 {
                     if (*token)
                         return;
@@ -146,7 +148,7 @@ void SyncProgressDialog::open(
                     impl_->open_ = false;
                     Nui::globalEventContext.executeActiveEventsImmediately();
                     if (impl_->onDone_)
-                        impl_->onDone_(std::move(summary));
+                        impl_->onDone_(std::move(snapshot));
                 }
             );
         },

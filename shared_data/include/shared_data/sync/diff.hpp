@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace SharedData::Sync
 {
@@ -78,6 +79,14 @@ namespace SharedData::Sync
      * children are the diff's job, handled by the merge walk.
      */
     bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode);
+
+    /**
+     * @brief Row for an entry that exists on one side only. Directories carry their cached subtree metrics.
+     */
+    DiffTreeNode makeOneSidedRow(ScanNode const& node, std::string const& relKey, Action action, bool isLocalSide);
+
+    /** @brief True for names the "ignore hidden" option drops. */
+    bool isHiddenName(std::string_view name);
 
     /**
      * @brief Parallel merge walk of two sorted scan trees.
