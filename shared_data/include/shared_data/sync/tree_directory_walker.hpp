@@ -27,9 +27,8 @@ namespace SharedData::Sync
      *  - @ref ScanNode::subtreeFileCount / @ref ScanNode::subtreeByteTotal accumulated
      *    when the subtree completes.
      *
-     * No second pass is needed. Pointer stability relies on reserving each node's children
-     * vector before pushing — a node's children vector is only appended to in a single
-     * scanner invocation, so a `reserve(N) + N pushes` sequence never reallocates.
+     * No second pass is needed. Each directory's children are assigned once, sorted, before any of
+     * them is queued, so the queued pointers stay valid.
      */
     template <typename WalkErrorType, typename ScannerT, bool ScannerIncludesDotAndDotDot>
     requires std::is_invocable_r_v<
@@ -39,11 +38,18 @@ namespace SharedData::Sync
     class TreeDirectoryWalker : public Utility::BaseDirectoryWalker
     {
       public:
+        /**
+         * @param rootPath Directory the walk starts at.
+         * @param scanner Lists one directory.
+         * @param recursive When false only the root is listed. Its subdirectories stay in the tree with
+         *        @ref ScanNode::childrenKnown set to false so the diff never deletes what nobody saw.
+         */
         template <typename ForwardingScannerT = ScannerT>
         requires std::is_same_v<std::decay_t<ForwardingScannerT>, ScannerT>
-        TreeDirectoryWalker(std::filesystem::path rootPath, ForwardingScannerT&& scanner)
+        TreeDirectoryWalker(std::filesystem::path rootPath, ForwardingScannerT&& scanner, bool recursive = true)
             : rootPath_{std::move(rootPath)}
             , scanner_{std::forward<ForwardingScannerT>(scanner)}
+            , recursive_{recursive}
         {
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
@@ -107,47 +113,56 @@ namespace SharedData::Sync
                 });
             }
 
-            std::sort(
-                rawChildren.begin(),
-                rawChildren.end(),
-                [](SharedData::DirectoryEntry const& lhs, SharedData::DirectoryEntry const& rhs) {
-                    return lhs.path.filename().generic_string() < rhs.path.filename().generic_string();
-                }
-            );
-
-            // Reserve up front so `&children.back()` stays valid through every push_back
-            // inside this loop — lets us enqueue directory pointers in the same pass.
-            pending.node->children.reserve(rawChildren.size());
+            std::vector<ScanNode> children;
+            children.reserve(rawChildren.size());
             for (auto& raw : rawChildren)
             {
                 if (raw.type == SharedData::FileType::Regular)
                     totalBytes_ += raw.size;
 
-                pending.node->children.push_back(ScanNode{
-                    .name = raw.path.filename().generic_string(),
-                    .type = raw.type,
-                    .size = raw.size,
-                    .mtime = raw.mtime,
-                    .mtimeNsec = raw.mtimeNsec,
-                    .permissions = raw.permissions,
-                    .linkTarget = std::move(raw.linkTarget),
-                    .uid = raw.uid,
-                    .gid = raw.gid,
-                    .children = {},
-                    .subtreeFileCount = 0,
-                    .subtreeByteTotal = 0,
-                    .childrenKnown = true,
-                });
+                children.push_back(
+                    ScanNode{
+                        .name = raw.path.filename().generic_string(),
+                        .type = raw.type,
+                        .size = raw.size,
+                        .mtime = raw.mtime,
+                        .mtimeNsec = raw.mtimeNsec,
+                        .permissions = raw.permissions,
+                        .linkTarget = std::move(raw.linkTarget),
+                        .uid = raw.uid,
+                        .gid = raw.gid,
+                        .children = {},
+                        .subtreeFileCount = 0,
+                        .subtreeByteTotal = 0,
+                        .childrenKnown = recursive_ || raw.type != SharedData::FileType::Directory,
+                    }
+                );
                 ++totalEntries_;
-
-                if (raw.type == SharedData::FileType::Directory)
+            }
+            std::sort(
+                children.begin(),
+                children.end(),
+                [](ScanNode const& lhs, ScanNode const& rhs)
                 {
-                    auto& inserted = pending.node->children.back();
-                    queue_.push_back(QueuedDir{
-                        .node = &inserted,
-                        .fullPath = pending.fullPath / inserted.name,
-                        .depth = pending.depth + 1,
-                    });
+                    return lhs.name < rhs.name;
+                }
+            );
+
+            // The children vector is final from here on, so pointers into it stay valid while queued.
+            pending.node->children = std::move(children);
+            if (recursive_)
+            {
+                for (auto& child : pending.node->children)
+                {
+                    if (child.type != SharedData::FileType::Directory)
+                        continue;
+                    queue_.push_back(
+                        QueuedDir{
+                            .node = &child,
+                            .fullPath = pending.fullPath / child.name,
+                            .depth = pending.depth + 1,
+                        }
+                    );
                 }
             }
 
@@ -200,6 +215,7 @@ namespace SharedData::Sync
 
         std::filesystem::path rootPath_;
         ScannerT scanner_;
+        bool recursive_{true};
         ScanNode root_{};
         std::deque<QueuedDir> queue_{};
         std::size_t totalEntries_{0};

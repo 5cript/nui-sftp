@@ -230,4 +230,90 @@ namespace SharedData::Sync::Test
         EXPECT_FALSE(resultContains(result, 2u));
         EXPECT_TRUE(resultContains(result, 3u));
     }
+
+    TEST(EnqueueMinimizerTests, SiblingSharingANamePrefixIsNotCovered)
+    {
+        std::vector<MinimizerItemView> items{
+            {.relKey = "a", .isBulkDir = true},
+            {.relKey = "a-b", .isBulkDir = false},
+            {.relKey = "a.b", .isBulkDir = true},
+            {.relKey = "a/x", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"a"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        ASSERT_EQ(result.size(), 1u);
+        EXPECT_EQ(result.front(), 0u) << "only 'a' and 'a/x' are selected, 'a-b' and 'a.b' are siblings";
+    }
+
+    TEST(EnqueueMinimizerTests, PrefixNamedSiblingIsNoDescendantForLeafDetection)
+    {
+        // "a.txt" is no child of "a", so "a" stays a plain file leaf.
+        std::vector<MinimizerItemView> items{
+            {.relKey = "a", .isBulkDir = false},
+            {.relKey = "a.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"a", "a.txt"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_TRUE(resultContains(result, 0u));
+        EXPECT_TRUE(resultContains(result, 1u));
+    }
+
+    TEST(EnqueueMinimizerTests, RootSelectionReachesLeavesManyLevelsDown)
+    {
+        std::vector<MinimizerItemView> items{
+            {.relKey = "a", .isBulkDir = false},
+            {.relKey = "a/b", .isBulkDir = false},
+            {.relKey = "a/b/c", .isBulkDir = false},
+            {.relKey = "a/b/c/d", .isBulkDir = false},
+            {.relKey = "a/b/c/d/leaf.txt", .isBulkDir = false},
+            {.relKey = "a/b/c/d/bulk", .isBulkDir = true},
+            {.relKey = "a/b/c/d/bulk/inner.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"a"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        ASSERT_EQ(result.size(), 2u);
+        EXPECT_TRUE(resultContains(result, 4u));
+        EXPECT_TRUE(resultContains(result, 5u));
+    }
+
+    TEST(EnqueueMinimizerTests, ResultListsAncestorsBeforeDescendants)
+    {
+        std::vector<MinimizerItemView> items{
+            {.relKey = "x/y/deep.txt", .isBulkDir = false},
+            {.relKey = "top.txt", .isBulkDir = false},
+            {.relKey = "x", .isBulkDir = false},
+            {.relKey = "x/y", .isBulkDir = false},
+            {.relKey = "x/mid.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"x", "top.txt"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_EQ(result, (std::vector<std::size_t>{1u, 4u, 0u}));
+    }
+
+    TEST(EnqueueMinimizerTests, UnknownSelectionKeysAreIgnored)
+    {
+        std::vector<MinimizerItemView> items{
+            {.relKey = "file.txt", .isBulkDir = false},
+        };
+        std::unordered_set<std::string> selected{"gone", "gone/child.txt"};
+
+        EXPECT_TRUE(minimizeEnqueueIndices(items, selected).empty());
+    }
+
+    TEST(EnqueueMinimizerTests, LargeFlatSelectionEmitsEveryLeaf)
+    {
+        std::vector<MinimizerItemView> items;
+        items.push_back({.relKey = "dir", .isBulkDir = false});
+        for (int index = 0; index < 20000; ++index)
+            items.push_back({.relKey = "dir/f" + std::to_string(index), .isBulkDir = false});
+        std::unordered_set<std::string> selected{"dir"};
+
+        const auto result = minimizeEnqueueIndices(items, selected);
+        EXPECT_EQ(result.size(), 20000u);
+        EXPECT_FALSE(resultContains(result, 0u));
+    }
 }

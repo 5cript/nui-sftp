@@ -365,4 +365,61 @@ namespace Test
         LocalScanOperation operation{{.localPath = scanRoot_.path()}};
         EXPECT_EQ(operation.strand(), nullptr);
     }
+
+    TEST_F(LocalScanOperationTests, BuildTreeNestsAndSortsEntries)
+    {
+        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        std::vector<std::string> names;
+        for (auto const& child : tree.children)
+            names.push_back(child.name);
+        EXPECT_EQ(names, (std::vector<std::string>{".hidden_dir", ".hidden_file", "file1.txt", "notes.md", "subdir"}));
+
+        auto const& subdir = tree.children.back();
+        EXPECT_TRUE(subdir.childrenKnown);
+        EXPECT_EQ(subdir.subtreeFileCount, 2u);
+        EXPECT_EQ(subdir.subtreeByteTotal, std::string_view{"nested content"}.size() + std::string_view{"leaf"}.size());
+    }
+
+    TEST_F(LocalScanOperationTests, NonRecursiveBuildTreeMarksSubdirectoriesUnknown)
+    {
+        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = false, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const subdir = std::find_if(
+            tree.children.begin(),
+            tree.children.end(),
+            [](auto const& child)
+            {
+                return child.name == "subdir";
+            }
+        );
+        ASSERT_NE(subdir, tree.children.end());
+        EXPECT_FALSE(subdir->childrenKnown) << "the diff must not delete what the scan never listed";
+        EXPECT_TRUE(subdir->children.empty());
+    }
+
+    TEST_F(LocalScanOperationTests, BuildTreeHonorsIgnoreFilesAndHidden)
+    {
+        writeFile(scanRoot_.path() / ".gitignore", "*.md\ndeeper/\n");
+        LocalScanOperation operation{
+            {.localPath = scanRoot_.path(),
+                .respectIgnoreFiles = true,
+                .recursive = true,
+                .ignoreHidden = true,
+                .buildTree = true}
+        };
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        std::vector<std::string> names;
+        for (auto const& child : tree.children)
+            names.push_back(child.name);
+        EXPECT_EQ(names, (std::vector<std::string>{"file1.txt", "subdir"}));
+        ASSERT_EQ(tree.children.back().children.size(), 1u);
+        EXPECT_EQ(tree.children.back().children.front().name, "nested.txt");
+    }
 }

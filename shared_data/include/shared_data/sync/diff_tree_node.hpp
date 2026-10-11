@@ -49,25 +49,43 @@ namespace SharedData::Sync
         /// rows for 'a' and 'a/b').  Has no action; its 'action' field is
         /// meaningless. Both hasLocalSide and hasRemoteSide are true.
         bool isStructural{false};
+        /// The entry is a directory on one side and not on the other. The row describes the source side.
+        bool typeConflict{false};
+
+        bool operator==(DiffTreeNode const&) const = default;
     };
     BOOST_DESCRIBE_STRUCT(
         DiffTreeNode,
         (),
         (relKey,
-         name,
-         action,
-         isDirectory,
-         hasLocalSide,
-         hasRemoteSide,
-         localSize,
-         remoteSize,
-         localMtime,
-         remoteMtime,
-         directChildCount,
-         descendantItemCount,
-         descendantByteTotal,
-         isStructural)
+            name,
+            action,
+            isDirectory,
+            hasLocalSide,
+            hasRemoteSide,
+            localSize,
+            remoteSize,
+            localMtime,
+            remoteMtime,
+            directChildCount,
+            descendantItemCount,
+            descendantByteTotal,
+            isStructural,
+            typeConflict)
     )
+
+    /**
+     * @brief Number of items a row stands for in counts: files below a directory (at least one, an empty
+     *        directory still is an item), one for a file, the summed children for structural rows.
+     */
+    inline std::uint64_t itemWeight(DiffTreeNode const& node)
+    {
+        if (node.isStructural)
+            return node.descendantItemCount;
+        if (node.isDirectory)
+            return node.descendantItemCount > 0 ? node.descendantItemCount : 1u;
+        return 1u;
+    }
 
     inline void to_json(nlohmann::json& j, DiffTreeNode const& s)
     {

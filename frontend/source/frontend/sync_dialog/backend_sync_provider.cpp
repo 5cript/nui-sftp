@@ -72,7 +72,8 @@ void BackendSyncProvider::open(
 
 void BackendSyncProvider::recompute(
     SharedData::Sync::DiffOptions options,
-    std::function<void(SharedData::Sync::DiffSummary)> onSummary
+    SharedData::Sync::LoadedParents loadedParents,
+    std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
 )
 {
     if (!queue_ || closed_)
@@ -81,10 +82,16 @@ void BackendSyncProvider::recompute(
     queue_->recomputeSyncDiff(
         sessionId_,
         std::move(options),
-        [this, onSummary = std::move(onSummary)](SharedData::Sync::DiffSummary summary) mutable
+        std::move(loadedParents),
+        [alive = std::weak_ptr{alive_},
+            onSnapshot = std::move(onSnapshot)](SharedData::Sync::DiffSnapshot snapshot) mutable
         {
-            generation_ = summary.generation;
-            onSummary(std::move(summary));
+            const auto self = alive.lock();
+            if (!self)
+                return;
+            if (!snapshot.summary.cancelled)
+                (*self)->generation_ = snapshot.summary.generation;
+            onSnapshot(std::move(snapshot));
         }
     );
 }
@@ -108,10 +115,12 @@ void BackendSyncProvider::loadChildren(
         // Drop stale responses silently: if the generation moved on before the RPC
         // returned the frontend already has a fresher view, and surfacing a stale
         // result would confuse the tree's keyed merge.
-        [this, expectedGeneration, onResolved = std::move(onResolved)](
-            std::vector<SharedData::Sync::DiffTreeNode> nodes) mutable
+        [alive = std::weak_ptr{alive_},
+            expectedGeneration,
+            onResolved = std::move(onResolved)](std::vector<SharedData::Sync::DiffTreeNode> nodes) mutable
         {
-            if (expectedGeneration != generation_)
+            const auto self = alive.lock();
+            if (!self || expectedGeneration != (*self)->generation_)
                 return;
             onResolved(std::move(nodes));
         },
@@ -135,10 +144,12 @@ void BackendSyncProvider::buildEnqueuePlan(
         section,
         std::move(selectedRelKeys),
         expectedGeneration,
-        [this, expectedGeneration, onResolved = std::move(onResolved)](
-            std::vector<SharedData::Sync::EnqueuePlanEntry> plan) mutable
+        [alive = std::weak_ptr{alive_},
+            expectedGeneration,
+            onResolved = std::move(onResolved)](std::vector<SharedData::Sync::EnqueuePlanEntry> plan) mutable
         {
-            if (expectedGeneration != generation_)
+            const auto self = alive.lock();
+            if (!self || expectedGeneration != (*self)->generation_)
                 return;
             onResolved(std::move(plan));
         },

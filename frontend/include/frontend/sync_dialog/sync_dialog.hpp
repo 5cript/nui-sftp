@@ -2,6 +2,7 @@
 
 #include <frontend/sync_dialog/backend_sync_provider.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
@@ -25,34 +26,40 @@ class SyncDialog
     SyncDialog& operator=(SyncDialog&&);
 
     /**
-     * @brief Opens the dialog against a backend-resident sync session whose first
-     *        diff has already completed.
-     *
-     * @param provider Non-owning handle to the session; must outlive the dialog.
-     * @param summary  The @ref DiffSummary returned from the initial recompute.
-     *                 Used to seed footer totals and drive root-tree layout.
-     * @param localPath Local scan root (for path column formatting only — data is
-     *                  served lazily from @p provider).
-     * @param remotePath Remote scan root.
+     * @brief Settings the scans of a sync session ran with. Changing them needs a recompare.
      */
-    void open(
-        BackendSyncProvider* provider,
-        SharedData::Sync::DiffSummary summary,
-        std::filesystem::path localPath,
-        std::filesystem::path remotePath
-    );
-
-    /**
-     * @brief Scan + diff settings snapshot handed to the Recompare callback.
-     *        The scan flags (respectIgnoreFiles/recursive/ignoreHidden) govern
-     *        the backend listing; the diff options are the first recompute's
-     *        inputs.
-     */
-    struct RecompareRequest
+    struct ScanSettings
     {
         bool respectIgnoreFiles{true};
         bool recursive{true};
         bool ignoreHidden{false};
+    };
+
+    /**
+     * @brief Opens the dialog against a backend-resident sync session whose first
+     *        diff has already completed.
+     *
+     * @param provider Non-owning handle to the session; must outlive the dialog.
+     * @param snapshot The result of the initial recompute: summary and section roots.
+     * @param localPath Local scan root (for path column formatting only — data is
+     *                  served lazily from @p provider).
+     * @param remotePath Remote scan root.
+     * @param scanned Settings the scans of @p provider ran with.
+     */
+    void open(
+        BackendSyncProvider* provider,
+        SharedData::Sync::DiffSnapshot snapshot,
+        std::filesystem::path localPath,
+        std::filesystem::path remotePath,
+        ScanSettings scanned
+    );
+
+    /**
+     * @brief Scan + diff settings snapshot handed to the Recompare callback.
+     */
+    struct RecompareRequest
+    {
+        ScanSettings scan{};
         SharedData::Sync::DiffOptions diffOptions{};
     };
 
@@ -63,6 +70,9 @@ class SyncDialog
      *        fresh session.
      */
     void setOnRecompareRequested(std::function<void(RecompareRequest)> callback);
+
+    /** @brief The scan and diff settings the dialog's switches currently show. */
+    RecompareRequest currentSettings() const;
 
     Nui::ElementRenderer operator()();
 

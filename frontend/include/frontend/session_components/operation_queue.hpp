@@ -20,6 +20,7 @@
 #include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 
 #include <frontend/components/progress_bar.hpp>
 #include <frontend/components/svg/play.hpp>
@@ -179,6 +180,14 @@ class OperationQueue
     );
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
+    /** @brief Register a callback that receives the source paths of the entries a bulk operation
+     *         could not transfer.  Runs on completion, before the completion callback, because the
+     *         final BulkProgress can arrive after the completion and is dropped then.
+     */
+    void addFailedEntriesCallback(
+        Ids::OperationId const& opId,
+        std::function<void(std::vector<std::filesystem::path> const& failedPaths)> callback
+    );
     /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
      *         Automatically removed when the operation completes.
      */
@@ -220,6 +229,12 @@ class OperationQueue
     /** @brief Fires a local-side createDirectory RPC (mirror of createRemoteDirectory). */
     void createLocalDirectory(
         std::filesystem::path const& path,
+        std::function<void(bool success, std::string const& info)> onComplete
+    );
+
+    /** @brief Removes local paths, directories with their content. Not queued, like @ref createLocalDirectory. */
+    void removeLocalPaths(
+        std::vector<std::filesystem::path> const& paths,
         std::function<void(bool success, std::string const& info)> onComplete
     );
 
@@ -270,7 +285,8 @@ class OperationQueue
     void recomputeSyncDiff(
         Ids::SyncSessionId syncSessionId,
         SharedData::Sync::DiffOptions options,
-        std::function<void(SharedData::Sync::DiffSummary)> onSummary
+        SharedData::Sync::LoadedParents loadedParents,
+        std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
     );
 
     void loadSyncDiffChildren(

@@ -3,6 +3,7 @@
 #include <ids/ids.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 #include <shared_data/sync/enqueue_plan_entry.hpp>
@@ -22,7 +23,7 @@ class OperationQueue;
  * Owns the @ref Ids::SyncSessionId and wraps the RPC call surface:
  *
  *  - @ref open queues both scans, bridges @c onSyncScanPhaseDone to @p onBothListed.
- *  - @ref recompute triggers a backend diff walk and asks for the resulting summary.
+ *  - @ref recompute triggers a backend diff walk and returns the summary plus the rows to show.
  *    The stored @ref generation_ is advanced; stale @ref loadChildren responses
  *    issued against a previous generation are silently dropped.
  *  - @ref loadChildren feeds the frontend's lazy @ref Tree.
@@ -30,7 +31,8 @@ class OperationQueue;
  *  - @ref close releases backend memory.  Idempotent.
  *
  * The provider owns the lifecycle — callers should construct it once per sync flow
- * and destroy it when the dialog closes.  The destructor calls @ref close.
+ * and destroy it when the dialog closes.  The destructor calls @ref close, replies that
+ * arrive afterwards are dropped.
  */
 class BackendSyncProvider
 {
@@ -68,13 +70,13 @@ class BackendSyncProvider
     );
 
     /**
-     * @brief Runs a backend diff with @p options and hands back a @ref DiffSummary.
-     *        The summary carries the new generation id; cache it for subsequent
-     *        @ref loadChildren calls.
+     * @brief Runs a backend diff with @p options. The snapshot holds the summary with the new generation,
+     *        the section roots and the children of every still existing parent in @p loadedParents.
      */
     void recompute(
         SharedData::Sync::DiffOptions options,
-        std::function<void(SharedData::Sync::DiffSummary)> onSummary
+        SharedData::Sync::LoadedParents loadedParents,
+        std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
     );
 
     /**
@@ -111,4 +113,6 @@ class BackendSyncProvider
     Ids::SyncSessionId sessionId_;
     std::uint64_t generation_{0};
     bool closed_{false};
+    /// Expires with the provider so late RPC replies never touch a destroyed instance.
+    std::shared_ptr<BackendSyncProvider*> alive_{std::make_shared<BackendSyncProvider*>(this)};
 };

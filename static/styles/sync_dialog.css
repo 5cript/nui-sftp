@@ -21,8 +21,11 @@
     margin: 40px;
     border-radius: 12px;
     flex-grow: 1;
-    display: grid;
-    grid-template-rows: auto 1fr auto;
+    /* Flex, not grid: WebKit relayouts nested grids expensively, and every row
+       of the diff trees lives inside this box. */
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     background-color: var(--background-color);
     overflow: hidden;
     /* Decorative scrollbar rail: a consistent surface on the right edge of
@@ -56,8 +59,8 @@
 /* ---- Header ---- */
 
 .sync-dialog-header {
-    display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    display: flex;
+    flex: none;
     padding: 12px 16px;
     /* `margin-right` (not padding) so the element — and its solid dark
        background — actually stops before the rail, letting the rail show
@@ -73,6 +76,8 @@
 }
 
 .sync-dialog-title {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 1rem;
     font-weight: 600;
     overflow: hidden;
@@ -85,8 +90,10 @@
 /* ---- Body ---- */
 
 .sync-dialog-body {
-    display: grid;
-    grid-template-rows: auto auto 1fr;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -94,6 +101,7 @@
 
 .sync-settings-panel {
     display: flex;
+    flex: none;
     flex-wrap: wrap;
     gap: 8px;
     padding: 10px 12px;
@@ -144,6 +152,7 @@
 /* Diff column headers */
 
 .sync-diff-header {
+    flex: none;
     display: grid;
     grid-template-columns: 1fr 44px 1fr 32px;
     padding: 4px 16px;
@@ -172,6 +181,8 @@
 /* Diff body */
 
 .sync-diff-body {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     /* Reserve the rail width on the scrollable element itself.  Content
@@ -229,47 +240,46 @@
 
 /* Diff rows */
 
+/* Rows outside the viewport skip style, layout and paint. Every row has the
+   same height, so the placeholder size is exact and scrolling does not jump. */
+.sync-diff-section .script-nui-tree__row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 28px;
+}
+
 .script-nui-tree__content > .sync-diff-row {
-    /* Symmetric three-column grid: equal flexible cells flank the fixed-width
-       arrow column, so the arrow lands at the row's true horizontal centre. */
+    /* Symmetric three-column grid: equal cells flank the fixed-width arrow
+       column, so the arrow lands at the row's true horizontal centre even
+       though the first cell carries the indent as padding (flex would grow
+       that cell by its padding).  Only rows in view lay out, see above. */
     display: grid;
     grid-template-columns: 1fr 44px 1fr;
     grid-template-rows: 100%;
     align-items: center;
     /* Absolute, edge-to-edge over the ENTIRE tree row.  Uses the SAME
-       negative offsets in both default AND mirrored trees — the mirrored
-       variant used to swap them, which left the 44px arrow column at a
-       different absolute x than in the default tree.  With identical
-       offsets the extended row width (and therefore its centre) is the
-       same in both modes, so arrows line up 1:1 across Upload/Download/
-       Delete.  `left: -fixtures` reaches back through the chevron+indent
-       area (default side); `right: -row-padding-right` reaches through
-       the tiny right pad.  In mirrored mode those areas swap roles but
-       the extended row's overall span stays identical. */
+       negative offsets in both default AND mirrored trees, so the extended
+       row width (and therefore its centre) is the same in both modes and
+       arrows line up 1:1 across Upload/Download/Delete.  `left: -fixtures`
+       reaches back through the chevron+indent area (default side); `right:
+       -row-padding-right` reaches through the tiny right pad. */
     position: absolute;
     left: calc(-1 * var(--row-left-fixtures, 0px));
     right: calc(-1 * var(--row-padding-right, 4px));
     top: 0;
     bottom: 0;
     border-bottom: 1px solid var(--subtle-border-color, rgba(128, 128, 128, 0.12));
-}
-
-/* Progress overlay: driven by the `--sync-row-bg` inline CSS variable the
-   row renderer sets.  Keeping the progress paint on a `::before` keeps the
-   row's main `style` attribute free of reactive CSS so the tree can own
-   `--depth` without collisions. */
-.script-nui-tree__content > .sync-diff-row::before {
-    content: "";
-    position: absolute;
-    inset: 0;
+    /* Progress paint comes from the `--sync-row-bg` inline variable the row
+       renderer sets. */
     background: var(--sync-row-bg, transparent);
-    pointer-events: none;
-    z-index: 0;
 }
 
-.script-nui-tree__content > .sync-diff-row > * {
-    position: relative;
-    z-index: 1;
+.script-nui-tree__content > .sync-diff-row > .sync-diff-arrow {
+    align-self: stretch;
+}
+
+.sync-diff-row--type-conflict .sync-diff-arrow {
+    outline: 1px dashed var(--accent-delete, #e74c3c);
+    outline-offset: -3px;
 }
 
 /* Push the local cell's content past the tree's chevron + indent area. */
@@ -416,6 +426,26 @@
 .sync-queue-status {
     display: flex;
     align-items: center;
+}
+
+.sync-recompare {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sync-recompare-hint {
+    display: none;
+    font-size: 0.8rem;
+    color: var(--warning-color, #f5a623);
+}
+
+.sync-recompare--needed .sync-recompare-hint {
+    display: inline;
+}
+
+.sync-recompare--needed .script-nui-button {
+    border-color: var(--warning-color, #f5a623);
 }
 
 .sync-footer-summary {

@@ -1357,7 +1357,8 @@ void Session::registerRpcSftpRecomputeSyncDiff()
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& syncSessionIdString,
-                SharedData::Sync::DiffOptions const& options
+                SharedData::Sync::DiffOptions const& options,
+                SharedData::Sync::LoadedParents const& loadedParents
             )
             {
                 auto self = weak.lock();
@@ -1372,11 +1373,11 @@ void Session::registerRpcSftpRecomputeSyncDiff()
                 auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
                 boost::asio::post(
                     session->strand(),
-                    [weak, session, options, syncSessionId, replyShared]() mutable
+                    [weak, session, options, loadedParents, syncSessionId, replyShared]() mutable
                     {
-                        auto parent = weak.lock();
-                        const auto summary = session->recomputeDiffInStrand(
+                        const auto snapshot = session->recomputeSnapshotInStrand(
                             options,
+                            loadedParents,
                             [weakParent = weak, syncSessionId](std::uint64_t compared)
                             {
                                 auto parent = weakParent.lock();
@@ -1399,7 +1400,7 @@ void Session::registerRpcSftpRecomputeSyncDiff()
                         );
 
                         nlohmann::json payload;
-                        SharedData::to_json(payload, summary);
+                        SharedData::to_json(payload, snapshot);
                         (*replyShared)(std::move(payload));
                     }
                 );

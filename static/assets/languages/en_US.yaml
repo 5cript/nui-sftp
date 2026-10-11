@@ -114,6 +114,8 @@ syncDialog:
   deleteSectionCount: "Delete ({}, {})"
   footerSummary: "{} selected • {}"
   syncItemNowTitle: "Sync this item now"
+  recompareNeeded: "Scan settings changed, recompare to apply them"
+  typeConflictTitle: "Directory on one side, file on the other. Sync this item now"
   recompare: "Recompare"
   resumeQueue: "Resume Queue"
   queueRunning: "Queue running"

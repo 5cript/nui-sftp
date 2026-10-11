@@ -13,11 +13,6 @@ namespace SharedData::Sync
     {
         constexpr std::uint64_t progressCheckpointInterval = 512;
 
-        bool isHidden(std::string const& name)
-        {
-            return !name.empty() && name.front() == '.';
-        }
-
         std::string joinRel(std::string const& parentRelKey, std::string const& name)
         {
             if (parentRelKey.empty())
@@ -40,9 +35,8 @@ namespace SharedData::Sync
             {
                 if (!options.actionDelete)
                     return std::nullopt;
-                // Non-recursive mode: if we never descended into this directory we cannot
-                // safely delete it — the user hasn't seen its contents.
-                if (node.type == FileType::Directory && !node.childrenKnown)
+                // Never delete a directory whose content the user cannot see in the dialog.
+                if (node.type == FileType::Directory && (!node.childrenKnown || !options.recursive))
                     return std::nullopt;
                 return Action::DeleteLocal;
             }
@@ -60,7 +54,7 @@ namespace SharedData::Sync
             {
                 if (!options.actionDelete)
                     return std::nullopt;
-                if (node.type == FileType::Directory && !node.childrenKnown)
+                if (node.type == FileType::Directory && (!node.childrenKnown || !options.recursive))
                     return std::nullopt;
                 return Action::DeleteRemote;
             }
@@ -69,77 +63,62 @@ namespace SharedData::Sync
             return Action::Download;
         }
 
-        DiffTreeNode makeLocalOnlyRow(ScanNode const& node, std::string const& relKey, Action action)
+        /**
+         * @brief Row for an entry present on both sides. The transferred (source) side decides the
+         *        shape, so a local directory replacing a remote file is a directory row.
+         */
+        DiffTreeNode
+        makeTwoSidedRow(ScanNode const& localNode, ScanNode const& remoteNode, std::string const& relKey, Action action)
         {
-            const bool isDir = node.type == FileType::Directory;
-            return DiffTreeNode{
-                .relKey = relKey,
-                .name = node.name,
-                .action = action,
-                .isDirectory = isDir,
-                .hasLocalSide = true,
-                .hasRemoteSide = false,
-                .localSize = node.size,
-                .remoteSize = 0,
-                .localMtime = node.mtime,
-                .remoteMtime = 0,
-                .directChildCount = isDir ? static_cast<std::uint32_t>(node.children.size()) : 0u,
-                .descendantItemCount = isDir ? node.subtreeFileCount : 1ull,
-                .descendantByteTotal = isDir ? node.subtreeByteTotal : node.size,
-            };
-        }
-
-        DiffTreeNode makeRemoteOnlyRow(ScanNode const& node, std::string const& relKey, Action action)
-        {
-            const bool isDir = node.type == FileType::Directory;
-            return DiffTreeNode{
-                .relKey = relKey,
-                .name = node.name,
-                .action = action,
-                .isDirectory = isDir,
-                .hasLocalSide = false,
-                .hasRemoteSide = true,
-                .localSize = 0,
-                .remoteSize = node.size,
-                .localMtime = 0,
-                .remoteMtime = node.mtime,
-                .directChildCount = isDir ? static_cast<std::uint32_t>(node.children.size()) : 0u,
-                .descendantItemCount = isDir ? node.subtreeFileCount : 1ull,
-                .descendantByteTotal = isDir ? node.subtreeByteTotal : node.size,
-            };
-        }
-
-        DiffTreeNode makeFileDifferRow(
-            ScanNode const& localNode,
-            ScanNode const& remoteNode,
-            std::string const& relKey,
-            Action action
-        )
-        {
+            auto const& source = action == Action::Upload ? localNode : remoteNode;
+            const bool isDirectory = source.type == FileType::Directory;
             return DiffTreeNode{
                 .relKey = relKey,
                 .name = localNode.name,
                 .action = action,
-                .isDirectory = false,
+                .isDirectory = isDirectory,
                 .hasLocalSide = true,
                 .hasRemoteSide = true,
                 .localSize = localNode.size,
                 .remoteSize = remoteNode.size,
                 .localMtime = localNode.mtime,
                 .remoteMtime = remoteNode.mtime,
-                .directChildCount = 0,
-                .descendantItemCount = 1,
-                .descendantByteTotal = action == Action::Upload ? localNode.size : remoteNode.size,
+                .directChildCount = isDirectory ? static_cast<std::uint32_t>(source.children.size()) : 0u,
+                .descendantItemCount = isDirectory ? source.subtreeFileCount : 1ull,
+                .descendantByteTotal = isDirectory ? source.subtreeByteTotal : source.size,
+                .typeConflict = localNode.type != remoteNode.type,
             };
+        }
+
+        /**
+         * @brief Resolves the action for an entry that differs on both sides. Direction Both lets the
+         *        newer side win, ties go to the upload.
+         */
+        std::optional<Action>
+        chooseTwoSidedAction(ScanNode const& localNode, ScanNode const& remoteNode, DiffOptions const& options)
+        {
+            const bool upload = options.direction == Direction::Upload ||
+                (options.direction == Direction::Both && localNode.mtime >= remoteNode.mtime);
+            if (upload)
+                return options.actionUpload ? std::optional{Action::Upload} : std::nullopt;
+            return options.actionDownload ? std::optional{Action::Download} : std::nullopt;
         }
 
         void emitOneSided(
             DiffTreeNode row,
             Action action,
             std::string const& parentRelKey,
+            DiffOptions const& options,
             DiffSink& sink
         )
         {
+            // Without recursion a one-sided directory is created, not filled.
+            if (row.isDirectory && !options.recursive)
+            {
+                row.directChildCount = 0;
+                row.descendantItemCount = 0;
+                row.descendantByteTotal = 0;
+            }
             switch (action)
             {
                 case Action::Upload:
@@ -189,36 +168,14 @@ namespace SharedData::Sync
             if (!entriesDiffer(localChild, remoteChild))
                 return;
 
-            // Direction routing: Upload-only → Upload; Download-only → Download;
-            // Both → mtime-newer wins (local >= remote favors Upload).
-            if (options.direction == Direction::Upload)
-            {
-                if (options.actionUpload)
-                    sink.emitUpload(makeFileDifferRow(localChild, remoteChild, relKey, Action::Upload), parentRelKey);
+            const auto action = chooseTwoSidedAction(localChild, remoteChild, options);
+            if (!action)
                 return;
-            }
-            if (options.direction == Direction::Download)
-            {
-                if (options.actionDownload)
-                    sink.emitDownload(
-                        makeFileDifferRow(localChild, remoteChild, relKey, Action::Download), parentRelKey
-                    );
-                return;
-            }
-            // Both direction.
-            const bool localNewer = localChild.mtime >= remoteChild.mtime;
-            if (localNewer)
-            {
-                if (options.actionUpload)
-                    sink.emitUpload(makeFileDifferRow(localChild, remoteChild, relKey, Action::Upload), parentRelKey);
-            }
+            auto row = makeTwoSidedRow(localChild, remoteChild, relKey, *action);
+            if (*action == Action::Upload)
+                sink.emitUpload(std::move(row), parentRelKey);
             else
-            {
-                if (options.actionDownload)
-                    sink.emitDownload(
-                        makeFileDifferRow(localChild, remoteChild, relKey, Action::Download), parentRelKey
-                    );
-            }
+                sink.emitDownload(std::move(row), parentRelKey);
         }
 
         void mergeChildren(
@@ -256,7 +213,7 @@ namespace SharedData::Sync
                 {
                     auto const& lc = localChildren[li];
                     auto const& rc = remoteChildren[ri];
-                    if (!options.ignoreHidden || !isHidden(lc.name))
+                    if (!options.ignoreHidden || !isHiddenName(lc.name))
                     {
                         const auto relKey = joinRel(parentRelKey, lc.name);
                         handleBothPresent(lc, rc, relKey, parentRelKey, options, sink, comparedCounter);
@@ -268,12 +225,14 @@ namespace SharedData::Sync
                 else if (takeLeft)
                 {
                     auto const& lc = localChildren[li];
-                    if (!options.ignoreHidden || !isHidden(lc.name))
+                    if (!options.ignoreHidden || !isHiddenName(lc.name))
                     {
                         if (auto action = chooseLocalOnlyAction(lc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, lc.name);
-                            emitOneSided(makeLocalOnlyRow(lc, relKey, *action), *action, parentRelKey, sink);
+                            emitOneSided(
+                                makeOneSidedRow(lc, relKey, *action, true), *action, parentRelKey, options, sink
+                            );
                         }
                     }
                     ++li;
@@ -282,12 +241,14 @@ namespace SharedData::Sync
                 else if (takeRight)
                 {
                     auto const& rc = remoteChildren[ri];
-                    if (!options.ignoreHidden || !isHidden(rc.name))
+                    if (!options.ignoreHidden || !isHiddenName(rc.name))
                     {
                         if (auto action = chooseRemoteOnlyAction(rc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, rc.name);
-                            emitOneSided(makeRemoteOnlyRow(rc, relKey, *action), *action, parentRelKey, sink);
+                            emitOneSided(
+                                makeOneSidedRow(rc, relKey, *action, false), *action, parentRelKey, options, sink
+                            );
                         }
                     }
                     ++ri;
@@ -300,6 +261,31 @@ namespace SharedData::Sync
                 }
             }
         }
+    }
+
+    DiffTreeNode makeOneSidedRow(ScanNode const& node, std::string const& relKey, Action action, bool isLocalSide)
+    {
+        const bool isDirectory = node.type == FileType::Directory;
+        return DiffTreeNode{
+            .relKey = relKey,
+            .name = node.name,
+            .action = action,
+            .isDirectory = isDirectory,
+            .hasLocalSide = isLocalSide,
+            .hasRemoteSide = !isLocalSide,
+            .localSize = isLocalSide ? node.size : 0u,
+            .remoteSize = isLocalSide ? 0u : node.size,
+            .localMtime = isLocalSide ? node.mtime : 0u,
+            .remoteMtime = isLocalSide ? 0u : node.mtime,
+            .directChildCount = isDirectory ? static_cast<std::uint32_t>(node.children.size()) : 0u,
+            .descendantItemCount = isDirectory ? node.subtreeFileCount : 1u,
+            .descendantByteTotal = isDirectory ? node.subtreeByteTotal : node.size,
+        };
+    }
+
+    bool isHiddenName(std::string_view name)
+    {
+        return !name.empty() && name.front() == '.';
     }
 
     bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode)

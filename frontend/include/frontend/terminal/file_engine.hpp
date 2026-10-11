@@ -4,6 +4,7 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 #include <shared_data/sync/enqueue_plan_entry.hpp>
@@ -87,7 +88,8 @@ class FileEngine
     void recomputeSyncDiff(
         Ids::SyncSessionId syncSessionId,
         SharedData::Sync::DiffOptions options,
-        std::function<void(SharedData::Sync::DiffSummary)> onSummary
+        SharedData::Sync::LoadedParents loadedParents,
+        std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
     );
 
     /**

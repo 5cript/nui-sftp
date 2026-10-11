@@ -85,6 +85,8 @@ struct OperationQueue::Implementation
 
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
+    std::unordered_map<std::string, std::function<void(std::vector<std::filesystem::path> const&)>>
+        failedEntriesCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
     // Keyed by the aggregate bulk operation id (first pre-generated opId for
     // bulk up/download, or the aggregate id for bulk delete).  Auto-erased on
@@ -1207,6 +1209,21 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         return;
     }
 
+    if (const auto failedIt = impl_->failedEntriesCallbacks.find(completed.operationId.value());
+        failedIt != impl_->failedEntriesCallbacks.end())
+    {
+        auto callback = std::move(failedIt->second);
+        impl_->failedEntriesCallbacks.erase(failedIt);
+        if (!completed.failedEntries.empty())
+        {
+            std::vector<std::filesystem::path> failedPaths;
+            failedPaths.reserve(completed.failedEntries.size());
+            for (auto const& entry : completed.failedEntries)
+                failedPaths.push_back(entry.first);
+            callback(failedPaths);
+        }
+    }
+
     bool partial = false;
     if (!completed.failedEntries.empty())
     {
@@ -1270,6 +1287,14 @@ void OperationQueue::onOperationCompleted(Nui::val val)
 void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback)
 {
     impl_->completionCallbacks[opId.value()] = std::move(callback);
+}
+
+void OperationQueue::addFailedEntriesCallback(
+    Ids::OperationId const& opId,
+    std::function<void(std::vector<std::filesystem::path> const&)> callback
+)
+{
+    impl_->failedEntriesCallbacks[opId.value()] = std::move(callback);
 }
 
 void OperationQueue::addTransferProgressCallback(
@@ -1415,12 +1440,15 @@ void OperationQueue::clearSyncSessionRouting(Ids::SyncSessionId syncSessionId)
 void OperationQueue::recomputeSyncDiff(
     Ids::SyncSessionId syncSessionId,
     SharedData::Sync::DiffOptions options,
-    std::function<void(SharedData::Sync::DiffSummary)> onSummary
+    SharedData::Sync::LoadedParents loadedParents,
+    std::function<void(SharedData::Sync::DiffSnapshot)> onSnapshot
 )
 {
     if (!impl_->fileEngine)
         return;
-    impl_->fileEngine->recomputeSyncDiff(syncSessionId, std::move(options), std::move(onSummary));
+    impl_->fileEngine->recomputeSyncDiff(
+        syncSessionId, std::move(options), std::move(loadedParents), std::move(onSnapshot)
+    );
 }
 
 void OperationQueue::loadSyncDiffChildren(
@@ -1504,6 +1532,30 @@ void OperationQueue::createLocalDirectory(
                 onComplete(false, val["error"].as<std::string>());
                 return;
             }
+            onComplete(true, "Success");
+        },
+        args
+    );
+}
+
+void OperationQueue::removeLocalPaths(
+    std::vector<std::filesystem::path> const& paths,
+    std::function<void(bool, std::string const&)> onComplete
+)
+{
+    Nui::val args = Nui::val::object();
+    args.set("paths", Nui::val::array());
+    args.set("recursive", true);
+    for (auto const& path : paths)
+        args["paths"].call<void>("push", path.generic_string());
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::removeSome",
+        [onComplete = std::move(onComplete)](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+                return onComplete(false, "Invalid response from backend");
+            if (!val["success"].as<bool>())
+                return onComplete(false, language->translate(val["error"].as<std::string>()));
             onComplete(true, "Success");
         },
         args

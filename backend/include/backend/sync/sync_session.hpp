@@ -2,8 +2,10 @@
 
 #include <ids/ids.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
+#include <shared_data/sync/diff_tree_store.hpp>
 #include <shared_data/sync/enqueue_plan_entry.hpp>
 #include <shared_data/sync/scan_node.hpp>
 
@@ -28,8 +30,8 @@
  *  1. Constructed when the frontend calls @c openSyncSession.
  *  2. @ref setLocalTreeInStrand / @ref setRemoteTreeInStrand called once each by the
  *     scan-completion callbacks.
- *  3. @ref recomputeDiffInStrand invoked on every @c recomputeSyncDiff RPC — fills the
- *     three @ref DiffTreeStore adjacency maps in-place, bumps @ref generation().
+ *  3. @ref recomputeDiffInStrand invoked on every @c recomputeSyncDiff RPC refills the
+ *     three @ref SharedData::Sync::DiffTreeStore sections, bumps @ref generation().
  *  4. @ref loadChildrenInStrand serves lazy subtree slices to the frontend tree.
  *  5. Destroyed when @c closeSyncSession fires or the owning channel dies.
  *
@@ -111,11 +113,19 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     );
 
     /**
+     * @brief @ref recomputeDiffInStrand plus the rows the dialog shows: every section root and the children
+     *        of each parent in @p loadedParents that still exists. Precondition: running on @ref strand().
+     */
+    SharedData::Sync::DiffSnapshot recomputeSnapshotInStrand(
+        SharedData::Sync::DiffOptions const& options,
+        SharedData::Sync::LoadedParents const& loadedParents,
+        std::function<void(std::uint64_t compared)> onProgress
+    );
+
+    /**
      * @brief Returns the direct children of @p parentRelKey in @p section (empty
-     *        string = section root).  For a one-sided directory that has not yet
-     *        been explored, lazily walks the corresponding ScanNode subtree and
-     *        caches the resulting DiffTreeNodes into the section store so future
-     *        calls are O(1).  Precondition: running on @ref strand().
+     *        string = section root).  One-sided directories are expanded lazily from
+     *        their scan tree.  Precondition: running on @ref strand().
      */
     std::vector<SharedData::Sync::DiffTreeNode> loadChildrenInStrand(
         SharedData::Sync::DiffSection section,
@@ -123,11 +133,9 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     );
 
     /**
-     * @brief Computes the minimal set of enqueue plan entries from a SPARSE
-     *        selection set: an entry X in @p selectedRelKeys means "X and every
-     *        descendant is selected".  See @ref SharedData::Sync::minimizeEnqueueIndices
-     *        for the emission rules (bulk dirs collapse; structural dirs expand
-     *        to leaves).  Precondition: running on @ref strand().
+     * @brief Computes the enqueue plan from a SPARSE selection set: an entry X in
+     *        @p selectedRelKeys means "X and every descendant is selected".  See
+     *        @ref SharedData::Sync::DiffTreeStore::buildPlan.  Precondition: running on @ref strand().
      */
     std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
         SharedData::Sync::DiffSection section,
@@ -135,23 +143,9 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     ) const;
 
   private:
-    /**
-     * @brief Per-section result store.
-     *        - @ref childrenByParent maps parentRelKey -> sorted DiffTreeNode list
-     *          (the sort order is the one the merge walk used).
-     *        - @ref emissionOrder keeps the full emission list in walk order.  Used
-     *          by @ref buildEnqueuePlanInStrand to preserve deterministic plan order
-     *          and to run the selection-minimization over a stable sequence.
-     */
-    struct DiffTreeStore
-    {
-        std::unordered_map<std::string, SharedData::Sync::DiffTreeNode> nodesByRelKey{};
-        std::unordered_map<std::string, std::vector<SharedData::Sync::DiffTreeNode>> childrenByParent{};
-        std::vector<std::string> emissionOrder{};
-        SharedData::Sync::SectionSummary summary{};
-
-        void clear();
-    };
+    SharedData::Sync::DiffTreeStore& storeFor(SharedData::Sync::DiffSection section);
+    SharedData::Sync::DiffTreeStore const& storeFor(SharedData::Sync::DiffSection section) const;
+    SharedData::Sync::ScanTrees scanTrees() const;
 
     Options options_;
     boost::asio::any_io_executor executor_;
@@ -161,9 +155,9 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     std::optional<SharedData::Sync::ScanNode> localTree_{};
     std::optional<SharedData::Sync::ScanNode> remoteTree_{};
 
-    DiffTreeStore uploads_{};
-    DiffTreeStore downloads_{};
-    DiffTreeStore deletes_{};
+    SharedData::Sync::DiffTreeStore uploads_{};
+    SharedData::Sync::DiffTreeStore downloads_{};
+    SharedData::Sync::DiffTreeStore deletes_{};
 
     std::uint64_t generation_{0};
 };
