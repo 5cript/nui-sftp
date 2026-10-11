@@ -100,7 +100,10 @@ BulkDownloadOperation::makeChild(std::size_t entryIndex, std::function<void(std:
 
 bool BulkDownloadOperation::isSkippableError(Error const& error) const
 {
-    // Missing or unreadable single files do not compromise the rest of the bulk.
+    // Missing or unreadable single files, and local files that cannot be written, do not compromise
+    // the rest of the bulk.
+    if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory)
+        return true;
     return error.sftpError &&
         (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
             error.sftpError->sftpError == SSH_FX_FAILURE);

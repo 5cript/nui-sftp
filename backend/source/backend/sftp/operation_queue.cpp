@@ -1233,6 +1233,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         const auto firstDst = files.front().localDst;
 
         auto downloadOpts = resolveDownloadOptions(transferOptions, resolvedTimeout);
+        // Sync plans list files of directories that do not exist locally yet.
+        downloadOpts.createMissingDirectories = true;
 
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,

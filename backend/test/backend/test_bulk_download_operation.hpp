@@ -539,6 +539,69 @@ namespace Test
         EXPECT_EQ(mtimeSeconds(localRoot / "doc2.txt"), mtimeDoc2);
     }
 
+    TEST_F(BulkDownloadOperationTests, SetPrescannedFileListCreatesMissingLocalParents)
+    {
+        // Sync plans list files of directories that only exist remotely.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localRoot = downloadDir_.path() / "prescanned_parents";
+        std::vector<BulkDownloadOperation::PrescannedFile> files;
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc1.txt",
+            .localDst = localRoot / "new" / "deeper" / "doc1.txt",
+            .sizeBytes = std::string{"Document 1 content"}.size(),
+        });
+
+        BulkDownloadOperation::BulkDownloadOperationOptions options{.localPath = localRoot};
+        options.individualOptions.createMissingDirectories = true;
+        BulkDownloadOperation operation{*sftp, std::move(options)};
+        operation.setPrescannedFileList(std::move(files));
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+        EXPECT_EQ(readLocalFile(localRoot / "new" / "deeper" / "doc1.txt"), "Document 1 content");
+        EXPECT_TRUE(operation.getFailed().empty());
+    }
+
+    TEST_F(BulkDownloadOperationTests, UnwritableLocalTargetIsCollectedAndRestContinue)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localRoot = downloadDir_.path() / "prescanned_unwritable";
+        std::filesystem::create_directories(localRoot);
+        {
+            // A regular file where the first entry needs a directory.
+            std::ofstream blocker{localRoot / "blocker"};
+            blocker << "x";
+        }
+
+        std::vector<BulkDownloadOperation::PrescannedFile> files;
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc1.txt",
+            .localDst = localRoot / "blocker" / "doc1.txt",
+            .sizeBytes = std::string{"Document 1 content"}.size(),
+        });
+        files.push_back({
+            .remoteSrc = "/home/test/Documents/doc2.txt",
+            .localDst = localRoot / "doc2.txt",
+            .sizeBytes = std::string{"Document 2 content"}.size(),
+        });
+
+        for (const bool createMissing : {false, true})
+        {
+            std::filesystem::remove(localRoot / "doc2.txt");
+            BulkDownloadOperation::BulkDownloadOperationOptions options{.localPath = localRoot};
+            options.individualOptions.createMissingDirectories = createMissing;
+            BulkDownloadOperation operation{*sftp, std::move(options)};
+            operation.setPrescannedFileList(files);
+
+            ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+            EXPECT_EQ(readLocalFile(localRoot / "doc2.txt"), "Document 2 content");
+            EXPECT_EQ(operation.getFailed().size(), 1u);
+        }
+    }
+
     TEST_F(BulkDownloadOperationTests, CancelledOperationCannotBeWorkedFurther)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
