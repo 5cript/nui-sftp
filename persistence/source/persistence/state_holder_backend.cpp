@@ -1,5 +1,6 @@
 #include <persistence/state_holder.hpp>
 #include <persistence/state/state.hpp>
+#include <persistence/legacy_migration.hpp>
 #include <utility/resources.hpp>
 #include <utility/localized_message.hpp>
 #include <constants/persistence.hpp>
@@ -74,7 +75,7 @@ namespace Persistence
         {
             std::optional<LoadWarning> unreadable{std::nullopt};
             bool fileExisted = false;
-            const auto before = [&path, &unreadable, &fileExisted]()
+            auto before = [&path, &unreadable, &fileExisted]()
             {
                 try
                 {
@@ -112,9 +113,12 @@ namespace Persistence
             }
             else
             {
+                const bool migrated = migrateLegacyEntries(before);
+                if (migrated)
+                    Log::info("Migrated config entries of an earlier version.");
                 stateCache_ = State{};
                 before.get_to(stateCache_);
-                auto warnings = dataFixer(before);
+                auto warnings = dataFixer(before, migrated);
                 const auto missing = stateCache_.collectMissingMembers(stateCache_);
                 if (!missing.empty())
                 {
@@ -137,11 +141,11 @@ namespace Persistence
         onLoad(error, *this, cachedWarnings_);
     }
 
-    LoadWarnings StateHolder::dataFixer(nlohmann::json const& before)
+    LoadWarnings StateHolder::dataFixer(nlohmann::json const& before, bool migrated)
     {
         const auto after = nlohmann::json(stateCache_);
         const auto diff = nlohmann::json::diff(before, after);
-        bool mustSave = !diff.empty();
+        bool mustSave = migrated || !diff.empty();
         LoadWarnings warnings{};
 
         const auto addWarning = [&warnings](LoadWarningKind kind, std::vector<std::string> arguments = {})
@@ -450,6 +454,7 @@ namespace Persistence
 
         try
         {
+            stateCache_.writeLegacyUsers();
             std::ofstream writer{path, std::ios_base::binary};
             writer << nlohmann::json(stateCache_).dump(4);
             onSaveComplete(std::nullopt);

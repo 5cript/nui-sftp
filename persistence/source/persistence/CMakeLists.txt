@@ -5,6 +5,7 @@ add_library(
         state/session_options.cpp
         state/termios.cpp
         state/ui_options.cpp
+        legacy_migration.cpp
         state_holder.cpp
 )
 

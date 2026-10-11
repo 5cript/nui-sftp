@@ -108,6 +108,9 @@ class Session
     /** @brief True if this session can host local-shell panels (SSH sessions only). */
     bool supportsLocalShell() const;
 
+    /** @brief The user an SSH session logged in as, nothing for local sessions. */
+    std::optional<Persistence::SshUser> loginUser() const;
+
     /**
      * @brief Asks contentPanelManager to fabricate a `local-shell:<name>`
      *        panel.  The actual process spawn happens in localShellFactory.

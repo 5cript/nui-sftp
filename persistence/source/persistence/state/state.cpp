@@ -46,4 +46,15 @@ namespace Persistence
 
         return resolved;
     }
+
+    void State::writeLegacyUsers()
+    {
+        for (auto& [name, session] : sessions)
+        {
+            if (auto* ssh = std::get_if<SshSessionOptions>(&session.engine))
+                ssh->writeLegacyUser();
+        }
+        if (lastDirectConnect)
+            lastDirectConnect->writeLegacyUser();
+    }
 }

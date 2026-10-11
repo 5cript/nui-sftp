@@ -94,10 +94,11 @@ void DirectConnectDialog::loadFromState()
         return;
 
     auto const& saved = *state.lastDirectConnect;
+    const auto user = saved.loginUser();
     impl_->host = saved.host;
     impl_->port = saved.port ? std::to_string(*saved.port) : std::string{};
-    impl_->user = saved.user.value_or("");
-    impl_->sshKeyPrivate = saved.sshKeyPrivate ? saved.sshKeyPrivate->string() : std::string{};
+    impl_->user = user.name.value_or("");
+    impl_->sshKeyPrivate = user.sshKeyPrivate ? user.sshKeyPrivate->string() : std::string{};
 }
 
 Nui::ElementRenderer DirectConnectDialog::dialogBody()
@@ -356,11 +357,15 @@ void DirectConnectDialog::open(OpenOptions options)
                     sshOpts.port = parsed;
             }
 
-            if (!userTrimmed.empty())
-                sshOpts.user = userTrimmed;
-
-            if (!keyTrimmed.empty())
-                sshOpts.sshKeyPrivate = std::filesystem::path{keyTrimmed};
+            if (!userTrimmed.empty() || !keyTrimmed.empty())
+            {
+                Persistence::SshUser user{};
+                if (!userTrimmed.empty())
+                    user.name = userTrimmed;
+                if (!keyTrimmed.empty())
+                    user.sshKeyPrivate = std::filesystem::path{keyTrimmed};
+                sshOpts.users.push_back(std::move(user));
+            }
 
             sshOpts.sshOptions.ref(Persistence::Reference{"default"});
             sshOpts.sftpOptions.ref(Persistence::Reference{"default"});

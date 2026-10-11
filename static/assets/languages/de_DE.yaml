@@ -596,6 +596,13 @@ settings:
     maxReconnectBackoffMs: "Max. Reconnect-Wartezeit (ms)"
     maxReconnectBackoffMsHelpText: "Die längste Wartezeit zwischen zwei Reconnect-Versuchen in Millisekunden. Die Wartezeit verdoppelt sich mit jedem Versuch, beginnend bei einer Sekunde, bis sie diese Grenze erreicht."
     maxReconnectBackoffMsSearchTags: "Wiederholen, Neu verbinden, Verzögerung, warten"
+    users: "Benutzer"
+    usersHelpText: "Die Benutzer, mit denen man sich an diesem Server anmelden kann. Vor dem Verbinden wird einer in der Werkzeugleiste neben dem Layout ausgewählt; der erste Benutzer ist der Standard."
+    usersSearchTags: "Anmeldung, Konto, Zugangsdaten, Schlüssel"
+    userWithoutName: "(kein Benutzername)"
+    connectionCategory: "Verbindung"
+    usersCategory: "Benutzer und Schlüssel"
+    miscellaneousCategory: "Sonstiges"
   sshOptions:
     identitiesHelpText: "Liste von SSH Identitäten (Pfade zu privaten Schlüsseln), die für die automatische Schlüssel Authentifizierung verwendet werden, wenn kein SSH Agent vorhanden ist."
     sshDirectoryHelpText: "Das Verzeichnis, in dem SSH bezogene Dateien wie bekannte Hosts und Identitätsschlüssel gespeichert werden (in der Regel ~/.ssh)."
@@ -1009,6 +1016,7 @@ toolbar:
   connect: "Verbinden"
   endSession: "Sitzung Beenden"
   directConnect: "Direktverbindung"
+  userSelect: "Anmelden als Benutzer"
   errorSavingSettingsHeader: "Einstellungen konnten nicht gespeichert werden"
   errorSavingSettings: "Fehler beim Speichern der Einstellungen aufgetreten."
 directConnectDialog:

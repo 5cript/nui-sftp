@@ -2,8 +2,20 @@
 
 #include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/settings/setting_helper.hpp>
+#include <frontend/settings/subgroup.hpp>
+
+#include <nui/frontend/elements/fragment.hpp>
 
 using namespace std::string_literals;
+
+namespace
+{
+    SettingFactory serverFactory(SettingFactory const& factory)
+    {
+        return factory.within({"sessionOptions", "basicSettings"})
+            .within({"sessionOptions", "sshSessionServerOptions"});
+    }
+}
 
 SshSessionOptions::SshSessionOptions(
     SettingFactory const& factory,
@@ -11,16 +23,16 @@ SshSessionOptions::SshSessionOptions(
     InputDialog& inputDialog,
     MultiInputDialog& multiInputDialog
 )
-    : serverFactory_{
-          factory.within({"sessionOptions", "basicSettings"}).within({"sessionOptions", "sshSessionServerOptions"})
-      }
+    : connectionFactory_{serverFactory(factory).within({"sessionOptions", "connectionCategory"})}
+    , usersFactory_{serverFactory(factory).within({"sessionOptions", "usersCategory"})}
+    , miscellaneousFactory_{serverFactory(factory).within({"sessionOptions", "miscellaneousCategory"})}
     , host{
-          serverFactory_.identity({"sessionOptions", "host"}),
+          connectionFactory_.identity({"sessionOptions", "host"}),
           onChange,
           valueReset(host, onChange, Persistence::SshSessionOptions{}.host)
       }
     , port{
-          serverFactory_.identity({"sessionOptions", "port"}),
+          connectionFactory_.identity({"sessionOptions", "port"}),
           onChange,
           nulloptReset(port, onChange),
           {
@@ -28,36 +40,26 @@ SshSessionOptions::SshSessionOptions(
             .maxValue = 65535,
           }
       }
-    , user{
-          serverFactory_.identity({"sessionOptions", "user"}),
+    , users{
+          usersFactory_.identity({"sessionOptions", "users"}),
+          usersFactory_,
           onChange,
-          nulloptReset(user, onChange)
-      }
-    , sshKeyPublic{
-          serverFactory_.identity({"sessionOptions", "sshKeyPublic"}),
-          PathSettingType::File,
-          onChange,
-          nulloptReset(sshKeyPublic, onChange)
-      }
-    , sshKeyPrivate{
-          serverFactory_.identity({"sessionOptions", "sshKeyPrivate"}),
-          PathSettingType::File,
-          onChange,
-          nulloptReset(sshKeyPrivate, onChange)
+          valueReset(users, onChange, Persistence::SshSessionOptions{}.users),
+          sshUserLabel
       }
     , openSftpByDefault{
-          serverFactory_.identity({"sessionOptions", "openSftpByDefault"}),
+          miscellaneousFactory_.identity({"sessionOptions", "openSftpByDefault"}),
           onChange,
           valueReset(openSftpByDefault, onChange, Persistence::SshSessionOptions{}.openSftpByDefault)
       }
     , remoteFavorites{
-          serverFactory_.identity({"sessionOptions", "remoteFavorites"}),
+          miscellaneousFactory_.identity({"sessionOptions", "remoteFavorites"}),
           inputDialog,
           onChange,
           valueReset(remoteFavorites, onChange, Persistence::SshSessionOptions{}.remoteFavorites)
       }
     , maxReconnectAttempts{
-          serverFactory_.identity({"sessionOptions", "maxReconnectAttempts"}),
+          miscellaneousFactory_.identity({"sessionOptions", "maxReconnectAttempts"}),
           onChange,
           valueReset(
               maxReconnectAttempts, onChange, Persistence::SshSessionOptions{}.maxReconnectAttempts
@@ -68,7 +70,7 @@ SshSessionOptions::SshSessionOptions(
           }
       }
     , maxReconnectBackoffMs{
-          serverFactory_.identity({"sessionOptions", "maxReconnectBackoffMs"}),
+          miscellaneousFactory_.identity({"sessionOptions", "maxReconnectBackoffMs"}),
           onChange,
           valueReset(
               maxReconnectBackoffMs, onChange, Persistence::SshSessionOptions{}.maxReconnectBackoffMs
@@ -86,9 +88,7 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
 {
     assignIfValid(state.host, host);
     assignIfValid(state.port, port);
-    assignIfValid(state.user, user);
-    assignIfValid(state.sshKeyPublic, sshKeyPublic);
-    assignIfValid(state.sshKeyPrivate, sshKeyPrivate);
+    state.users = users.value();
     assignIfValid(state.openSftpByDefault, openSftpByDefault);
     state.remoteFavorites = remoteFavorites.value();
     assignIfValid(state.maxReconnectAttempts, maxReconnectAttempts);
@@ -104,9 +104,7 @@ void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& stat
 {
     host.value(state.host);
     port.value(state.port);
-    user.value(state.user);
-    sshKeyPublic.value(state.sshKeyPublic);
-    sshKeyPrivate.value(state.sshKeyPrivate);
+    users.value(state.users);
     openSftpByDefault.value(state.openSftpByDefault);
     remoteFavorites.value(state.remoteFavorites);
     maxReconnectAttempts.value(state.maxReconnectAttempts);
@@ -127,4 +125,25 @@ void SshSessionOptions::assumeDefaultsFrom(Persistence::SshSessionOptions const&
 {
     sshOptions.assumeDefaultsFrom(state.sshOptions.value());
     sftpOptions.assumeDefaultsFrom(state.sftpOptions.value());
+}
+Nui::ElementRenderer SshSessionOptions::renderServerSettings(std::function<void()> const& onChange)
+{
+    using Nui::Elements::fragment;
+
+    return fragment(
+        subgroup(
+            {.groupTitle = language->getObserved("settings", "sessionOptions", "connectionCategory"),
+                .onChange = onChange},
+            fragment(host(), port())
+        ),
+        subgroup(
+            {.groupTitle = language->getObserved("settings", "sessionOptions", "usersCategory"), .onChange = onChange},
+            users()
+        ),
+        subgroup(
+            {.groupTitle = language->getObserved("settings", "sessionOptions", "miscellaneousCategory"),
+                .onChange = onChange},
+            fragment(openSftpByDefault(), remoteFavorites(), maxReconnectAttempts(), maxReconnectBackoffMs())
+        )
+    );
 }

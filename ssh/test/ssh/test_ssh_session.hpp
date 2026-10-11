@@ -268,7 +268,7 @@ namespace SecureShell::Test
 
         const auto missingKey = programDirectory / "temp" / "missing_key";
         auto options = getSessionOptions(result->port);
-        options.sshKeyPrivate = missingKey;
+        options.users.front().sshKeyPrivate = missingKey;
         options.sshOptions->usePasswordAuth = false;
 
         auto session = makeSession(

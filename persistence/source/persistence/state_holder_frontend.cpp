@@ -52,6 +52,7 @@ namespace Persistence
     }
     void StateHolder::save(std::function<void(std::optional<std::string> const& error)> const& onSaveComplete)
     {
+        stateCache_.writeLegacyUsers();
         Nui::RpcClient::getRemoteCallableWithBackChannel("StateHolder::save", [onSaveComplete](Nui::val const& val) {
             if (val.hasOwnProperty("error"))
             {
