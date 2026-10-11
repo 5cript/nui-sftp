@@ -25,18 +25,28 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
 
     try
     {
+        const bool hasHeader = params.engagedStatus || params.groupTitle;
+        const auto headerStyle = [&params]() -> std::string
+        {
+            if (params.engagedStatus)
+                return "border: 1px solid #404040; background-color: var(--darker-background)";
+            return "";
+        }();
+
         // clang-format off
         return div{
             class_ = "settings-subgroup",
         }(
             div{
-                class_ = "settings-subgroup-header",
-                style = params.engagedStatus ? "border: 1px solid #404040; background-color: var(--darker-background)" : ""
+                class_ = params.engagedStatus ? "settings-subgroup-header" : "settings-subgroup-header settings-subgroup-header-plain",
+                style = headerStyle
             }(
                 // switch to enable/disable entire subgroup:
                 [engagedStatus = params.engagedStatus, title = std::move(params.groupTitle), onChange = std::move(params.onChange)]() mutable -> Nui::ElementRenderer {
-                    if (!engagedStatus || !title)
+                    if (!title)
                         return Nui::nil();
+                    if (!engagedStatus)
+                        return span{}(std::move(title).value());
 
                     return fragment(
                         span{}(std::move(title).value()),
@@ -51,7 +61,7 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
             ),
             div{
                 class_ = "settings-subgroup-content",
-                style = params.engagedStatus ? "margin-top: 20px; padding-top: 32px;" : ""
+                style = params.engagedStatus ? "margin-top: 20px; padding-top: 32px;" : (hasHeader ? "margin-top: 12px; padding-top: 16px;" : "")
             }(
                 std::move(content)
             )
