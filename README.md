@@ -2,7 +2,7 @@
 
 This project contains a cross platform (Linux, Windows & macOS) SSH and SFTP workbench.
 
-![AppImage](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/session.png)
+![Session](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/session.png)
 
 ## Website
 [https://nui-sftp.nuicpp.org](https://nui-sftp.nuicpp.org)
@@ -87,23 +87,23 @@ There will not be support for any other systems (Mobile Devices or BSD).
 
 ## Synchronization
 You can synchronize folders between your local machine and the server. This will automatically upload/download files that are changed in the source folder to the target folder. You can also choose to only synchronize in one direction (upload or download).
-![Synchronize](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/synchronize.png)
+![Synchronize](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/synchronize.png)
 
 ## Local Shell
 Run a PTY on your local machine with a file view.
-![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/local.png)
+![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/local.png)
 
 ## Settings
 When a user might want to change the behavior of the app, I decided: Let's make it configurable.
-![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/settings.png)
+![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/settings.png)
 
 ## Theming & Customizability
 Includes a bright theme and more theme colors. Can be fully customized by overwriting CSS (although that's more of a power user feature).
-![BrightTheme](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/theming.png)
+![BrightTheme](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/theming.png)
 
 ## Download & Upload directly as Archive
 You can download and upload files and folders directly as tar archives, no manual packing required.
-![BrightTheme](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/images/Screenshots/download_as_archive.png)
+![DownloadAsArchive](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/download_as_archive.png)
 
 ## SSH
 - Keyboard interactive password auth.

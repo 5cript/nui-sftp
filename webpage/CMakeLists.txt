@@ -42,20 +42,6 @@ if (EMSCRIPTEN)
 else()
     add_library(nui-sftp-webpage INTERFACE)
 
-    # ------------------------------------------------------------------
-    # Fetch product screenshots used by the carousel slides.
-    # The zip is unpacked once per build dir; the PNGs are then staged
-    # into the parcel dist as a POST_BUILD step (see below) so the
-    # browser can request them at /assets/<name>.png.
-    # ------------------------------------------------------------------
-    include(FetchContent)
-    FetchContent_Declare(
-        webpage_page_assets
-        URL "https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-scp/PageAssets.zip"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(webpage_page_assets)
-
     nui_add_emscripten_target(nui-sftp-webpage
         TARGET
             nui-sftp-webpage
@@ -66,18 +52,16 @@ else()
         CMAKE_OPTIONS
     )
 
-    # Stage fetched PNGs and committed static assets (SVG icons, etc.) into
-    # the parcel dist after the webpage builds. Both end up under bin/assets/
-    # so the C++ runtime can reference them as `assets/<name>` URLs.
+    # Stage committed static assets (SVG icons, etc.) into the parcel dist
+    # after the webpage builds, so the C++ runtime can reference them as
+    # `assets/<name>` URLs. Screenshots are loaded from S4 at runtime.
     set(WEBPAGE_DIST_DIR "${CMAKE_BINARY_DIR}/module_nui-sftp-webpage/bin")
     add_custom_command(
         TARGET nui-sftp-webpage-emscripten POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${WEBPAGE_DIST_DIR}/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${webpage_page_assets_SOURCE_DIR}" "${WEBPAGE_DIST_DIR}/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_LIST_DIR}/static/assets" "${WEBPAGE_DIST_DIR}/assets"
-        COMMENT "Staging fetched and committed page assets into webpage dist"
+        COMMENT "Staging committed page assets into webpage dist"
         VERBATIM
     )
 endif()
