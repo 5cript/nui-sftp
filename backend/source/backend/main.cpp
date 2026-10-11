@@ -225,6 +225,8 @@ Main::~Main()
     // No longer forward logs to the view:
     Log::Detail::logger.detach();
     // sshSessionManager_->stopUpdateDispatching();
+    // Releases a strand job blocked on an unanswered password prompt, the window joins its pool later.
+    sshSessionManager_->shutdown();
     childSignalTimer_.cancel();
 }
 

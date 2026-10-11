@@ -1,6 +1,7 @@
 #include <backend/session_manager.hpp>
 #include <log/log.hpp>
 
+#include <nui/utility/scope_exit.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -17,6 +18,42 @@
 
 using namespace Detail;
 
+namespace
+{
+    using ProviderIterator = std::map<int, PasswordProvider*>::const_iterator;
+
+    void askNextProvider(
+        ProviderIterator iter,
+        ProviderIterator end,
+        std::weak_ptr<PasswordRequest> weakRequest,
+        std::string const& whatFor,
+        std::string const& prompt
+    )
+    {
+        const auto request = weakRequest.lock();
+        if (!request)
+            return;
+
+        if (iter == end)
+            return request->resolve(std::nullopt);
+
+        iter->second->getPassword(
+            whatFor,
+            prompt,
+            [iter, end, weakRequest, whatFor, prompt](std::optional<std::string> password)
+            {
+                if (password.has_value())
+                {
+                    if (const auto pending = weakRequest.lock(); pending)
+                        pending->resolve(std::move(password));
+                    return;
+                }
+                askNextProvider(std::next(iter), end, weakRequest, whatFor, prompt);
+            }
+        );
+    }
+}
+
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, void* userdata)
 {
     std::pair<SessionManager*, std::string> const* data =
@@ -32,47 +69,27 @@ int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, 
         );
     }
 
-    std::promise<std::optional<std::string>> pwPromise{};
-    std::function<void(decltype(manager->passwordProviders_)::const_iterator)> askNextProvider;
-
-    askNextProvider = [end = manager->passwordProviders_.end(), &askNextProvider, prompt, &pwPromise, &whatFor](
-                          decltype(manager->passwordProviders_)::const_iterator iter
-                      )
-    {
-        if (iter == end)
-        {
-            pwPromise.set_value(std::nullopt);
-            return;
-        }
-
-        iter->second->getPassword(
-            whatFor,
-            prompt,
-            [iter, &pwPromise, &askNextProvider](std::optional<std::string> pw) mutable
-            {
-                if (pw.has_value())
-                    pwPromise.set_value(pw);
-                else
-                {
-                    ++iter;
-                    askNextProvider(iter);
-                }
-            }
-        );
-    };
-
     if (manager->passwordProviders_.empty())
-    {
         return -1;
-    }
-    askNextProvider(manager->passwordProviders_.begin());
 
-    const auto pw = pwPromise.get_future().get();
+    const auto request = manager->beginPasswordRequest();
+    if (!request)
+        return -1;
+    const auto endRequest = Nui::ScopeExit(
+        [manager]() noexcept
+        {
+            manager->endPasswordRequest();
+        }
+    );
 
-    if (pw.has_value())
+    askNextProvider(manager->passwordProviders_.begin(), manager->passwordProviders_.end(), request, whatFor, prompt);
+
+    const auto password = request->wait();
+
+    if (password.has_value())
     {
         std::memset(buf, 0, length);
-        std::strncpy(buf, pw.value().c_str(), length - 1);
+        std::strncpy(buf, password.value().c_str(), length - 1);
         return 0;
     }
     return -1;
@@ -92,6 +109,46 @@ SessionManager::~SessionManager()
 {
     for (auto& [id, session] : sessions_)
         session->stop();
+}
+
+void SessionManager::shutdown()
+{
+    {
+        std::scoped_lock lock{passwordRequestMutex_};
+        passwordPromptsCancelled_ = true;
+        if (pendingPasswordRequest_)
+            pendingPasswordRequest_->resolve(std::nullopt);
+    }
+
+    if (strand_->running_in_this_thread())
+    {
+        Log::error("SessionManager::shutdown called from within the strand, not waiting for queued work.");
+        return;
+    }
+
+    std::promise<void> strandDrained;
+    within_strand_do_no_recurse(
+        [&strandDrained]()
+        {
+            strandDrained.set_value();
+        }
+    );
+    strandDrained.get_future().wait();
+}
+
+std::shared_ptr<PasswordRequest> SessionManager::beginPasswordRequest()
+{
+    std::scoped_lock lock{passwordRequestMutex_};
+    if (passwordPromptsCancelled_)
+        return nullptr;
+    pendingPasswordRequest_ = std::make_shared<PasswordRequest>();
+    return pendingPasswordRequest_;
+}
+
+void SessionManager::endPasswordRequest() noexcept
+{
+    std::scoped_lock lock{passwordRequestMutex_};
+    pendingPasswordRequest_.reset();
 }
 
 void SessionManager::addPasswordProvider(int priority, PasswordProvider* provider)

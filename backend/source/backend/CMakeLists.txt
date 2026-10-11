@@ -10,6 +10,7 @@ add_library(
         program_options.cpp
         inspector_environment.cpp
         password/password_prompter.cpp
+        password/password_request.cpp
         process/process.cpp
         process/process_store.cpp
         process/environment.cpp

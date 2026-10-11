@@ -2,6 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/password/password_provider.hpp>
+#include <backend/password/password_request.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
@@ -46,6 +47,13 @@ class SessionManager
             onComplete
     );
 
+    /**
+     * @brief Cancels pending and later password prompts and waits until the strand has run its queued work.
+     *
+     * Call before the window shuts down, never from within the strand.
+     */
+    void shutdown();
+
     friend int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
 
     // void startUpdateDispatching();
@@ -89,12 +97,28 @@ class SessionManager
      */
     void registerRpcDiscardBulkResume();
 
+    /**
+     * @brief Makes a new request the pending one, so that shutdown() can cancel it.
+     *
+     * @return The request, or nullptr once prompts are cancelled.
+     */
+    std::shared_ptr<PasswordRequest> beginPasswordRequest();
+
+    /**
+     * @brief Clears the pending request set by beginPasswordRequest().
+     */
+    void endPasswordRequest() noexcept;
+
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
     std::unordered_map<Ids::SessionId, std::shared_ptr<Session>, Ids::IdHash> sessions_{};
 
     std::map<int, PasswordProvider*> passwordProviders_{};
+    std::mutex passwordRequestMutex_{};
+    /** @brief At most one, askPassDefault only runs within the strand. */
+    std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
+    bool passwordPromptsCancelled_{false};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
     /// Backups of bulk operations interrupted by lost connection; consumed
