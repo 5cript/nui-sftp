@@ -4,7 +4,8 @@
     "version": "1.0.0",
     "scripts": {
         "licenses": "license-checker-rseidelsohn --production --json --out licenses/npm-licenses.json",
-        "test:osc": "node --test static/test/"
+        "test:osc": "node --test static/test/",
+        "webpage:serve": "npm --prefix webpage run serve"
     },
     "devDependencies": {
         "cross-env": "^7.0.3",
