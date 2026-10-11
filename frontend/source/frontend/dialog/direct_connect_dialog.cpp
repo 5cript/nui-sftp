@@ -517,9 +517,6 @@ void DirectConnectDialog::open(OpenOptions options)
             for (std::size_t index = 0; index < inheritableKindCount; ++index)
                 inheritables.*(inheritableKinds[index].reference) = impl_->inheritableChoices[index].value();
 
-            sshOpts.sshOptions.ref(Persistence::Reference{inheritables.sshOptions});
-            sshOpts.sftpOptions.ref(Persistence::Reference{inheritables.sftpOptions});
-
             impl_->stateHolder->loadModifySave(
                 [sshOpts, inheritables](Persistence::State& state)
                 {
