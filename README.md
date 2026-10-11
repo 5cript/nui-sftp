@@ -93,6 +93,11 @@ You can synchronize folders between your local machine and the server. This will
 Run a PTY on your local machine with a file view.
 ![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/local.png)
 
+## Command History & Snippets
+Commands you run in a terminal are recorded per host. The history can be searched, sorted by recency or use count, and entries can be pinned, marked as favorites, run again or inserted into the terminal for editing.
+Commands you need often can be saved as snippets, sorted into folders and tagged. A snippet can contain `{{placeholders}}` that are asked for when it runs. 27 ready-made folders (Docker, Git, systemd, Kubernetes, package managers and more) can be added from the snippets panel, and snippets can be copied and imported as JSON.
+![Snippets](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/snippets.png)
+
 ## Settings
 When a user might want to change the behavior of the app, I decided: Let's make it configurable.
 ![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/settings.png)
