@@ -285,7 +285,12 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
     CHECK_COMPLETE();
 
     if (!item.isDirectoryLike())
+    {
+        const bool canOpen = localModel_ ? localModel_->openerCapabilities().canOpenFile : true;
+        if (fileTracking_ != nullptr && canOpen)
+            onDownloadAndOpen(item, false);
         return;
+    }
 
     if (item.path == ".")
         return;
