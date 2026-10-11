@@ -341,7 +341,11 @@ void LocalSideModel::removeFavorite(std::filesystem::path const& path)
 void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
     if (!item.isDirectoryLike())
+    {
+        if (openerCaps_.canOpenFile)
+            onOpen(item, false);
         return;
+    }
 
     if (item.path == ".")
         return;
