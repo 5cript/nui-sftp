@@ -4,9 +4,12 @@
 #include <boost/asio.hpp>
 #include <spdlog/spdlog.h>
 
+#include <deque>
 #include <string>
 #include <expected>
 #include <functional>
+#include <memory>
+#include <utility>
 
 #include <cstring>
 #include <unistd.h>
@@ -117,19 +120,22 @@ class JsonProcessIo : public JsonFraming
         , readBufferCurrent_(4096, '\0')
     {}
 
+    /**
+     * @brief Queues a frame and writes it after the ones before it.
+     *
+     * Call only from within the output stream's executor, which has to be a strand when other threads run it.
+     *
+     * @param json The message.
+     * @param onSent Called with the outcome. After a failed write every queued frame fails as well.
+     */
     void write(nlohmann::json const& json, std::function<void(bool)> onSent)
     {
-        std::shared_ptr<std::string> frame = std::make_shared<std::string>(buildFrame(json));
+        auto frame = std::make_shared<std::string>(buildFrame(json));
         spdlog::info("Sending message of size {}: {}", frame->size() - frameHeaderSize, frame->substr(frameHeaderSize));
-        boost::asio::async_write(
-            output_,
-            boost::asio::buffer(*frame),
-            [frame, onSent = std::move(onSent)](boost::system::error_code err, std::size_t bytes)
-            {
-                spdlog::debug("Sent {} byte(s), error: {}", bytes, err ? err.message() : "none");
-                onSent(!err);
-            }
-        );
+        pendingWrites_.push_back(PendingWrite{.frame = std::move(frame), .onSent = std::move(onSent)});
+        // A second async_write on the same stream could interleave with a partially written frame.
+        if (pendingWrites_.size() == 1u)
+            writeNext();
     }
 
     void enterReadLoop(std::function<void(ResultType const&)> onResult)
@@ -148,6 +154,38 @@ class JsonProcessIo : public JsonFraming
     }
 
   private:
+    struct PendingWrite
+    {
+        std::shared_ptr<std::string> frame;
+        std::function<void(bool)> onSent;
+    };
+
+    void writeNext()
+    {
+        auto frame = pendingWrites_.front().frame;
+        boost::asio::async_write(
+            output_,
+            boost::asio::buffer(*frame),
+            [this, frame](boost::system::error_code err, std::size_t bytes)
+            {
+                spdlog::debug("Sent {} byte(s), error: {}", bytes, err ? err.message() : "none");
+                if (err)
+                {
+                    // The callbacks may own this object, so nothing here is touched after they ran.
+                    auto failed = std::exchange(pendingWrites_, {});
+                    for (auto& pending : failed)
+                        pending.onSent(false);
+                    return;
+                }
+                const auto sent = std::move(pendingWrites_.front().onSent);
+                pendingWrites_.pop_front();
+                if (!pendingWrites_.empty())
+                    writeNext();
+                sent(true);
+            }
+        );
+    }
+
     void readOnce()
     {
         input_.async_read_some(
@@ -174,6 +212,7 @@ class JsonProcessIo : public JsonFraming
     std::string readBufferCurrent_;
     std::string readBufferAccum_;
     std::function<void(ResultType const&)> onResult_{};
+    std::deque<PendingWrite> pendingWrites_{};
 };
 
 // ---------------------------------------------------------------------------

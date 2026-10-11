@@ -8,6 +8,7 @@
 
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
+#include <spdlog/sinks/null_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
 
@@ -16,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -575,14 +577,28 @@ namespace
         }
     };
 
-    [[noreturn]] void workerMain(int readFd, int writeFd)
+    std::shared_ptr<spdlog::sinks::sink> makeWorkerLogSink()
     {
+        try
         {
             auto logPath = Nui::resolvePath("%state_home2%/nui-sftp/logs/worker.log");
             std::error_code mkdirEc;
             std::filesystem::create_directories(logPath.parent_path(), mkdirEc);
-            auto fileSink =
-                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath.string(), 2 * 1024 * 1024, 3, true);
+            return std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                logPath.string(), 2 * 1024 * 1024, 3, true
+            );
+        }
+        catch (std::exception const&)
+        {
+            // Rotating on open fails when another instance rotates the same files, the worker works without a log.
+            return std::make_shared<spdlog::sinks::null_sink_mt>();
+        }
+    }
+
+    [[noreturn]] void workerMain(int readFd, int writeFd)
+    {
+        {
+            auto fileSink = makeWorkerLogSink();
             fileSink->set_level(spdlog::level::trace);
             auto logger = std::make_shared<spdlog::logger>("worker", std::move(fileSink));
             logger->set_level(spdlog::level::trace);
@@ -614,11 +630,15 @@ struct ForkPool::Implementation : std::enable_shared_from_this<Implementation>
     JsonProcessIo<boost::asio::readable_pipe, boost::asio::writable_pipe> io;
     std::function<void(nlohmann::json const&)> onMessage;
     std::mutex callbackMutex;
+    std::promise<void> readLoopEnded;
+    std::future<void> readLoopEndedFuture;
 
     Implementation(boost::asio::any_io_executor exec, std::function<void(nlohmann::json const&)> callback)
         : strand{std::move(exec)}
         , io(boost::asio::readable_pipe{strand}, boost::asio::writable_pipe{strand})
         , onMessage{std::move(callback)}
+        , readLoopEnded{}
+        , readLoopEndedFuture{readLoopEnded.get_future()}
     {}
 
     void asyncRead()
@@ -638,7 +658,9 @@ struct ForkPool::Implementation : std::enable_shared_from_this<Implementation>
                 }
                 else
                 {
+                    // Every error ends the read loop.
                     spdlog::error("Error reading from worker: {}", result.error());
+                    readLoopEnded.set_value();
                 }
             }
         );
@@ -647,14 +669,54 @@ struct ForkPool::Implementation : std::enable_shared_from_this<Implementation>
     void enqueue(nlohmann::json const& payload)
     {
         spdlog::debug("Enqueueing message to worker: {}", payload.dump());
-        io.write(
-            payload,
-            [](bool success)
+        // The pipes are only used within the strand, the io thread may be in the middle of reading.
+        boost::asio::post(
+            strand,
+            [self = shared_from_this(), payload]()
             {
-                if (!success)
-                    spdlog::error("Error writing to worker");
+                self->io.write(
+                    payload,
+                    [self](bool success)
+                    {
+                        if (!success)
+                            spdlog::error("Error writing to worker");
+                    }
+                );
             }
         );
+    }
+
+    void closePipesNow()
+    {
+        boost::system::error_code ignored;
+        io.input().close(ignored);
+        io.output().close(ignored);
+    }
+
+    /**
+     * @brief Closes the pipes within the strand and waits until the read loop no longer uses this object.
+     */
+    void closePipes()
+    {
+        if (strand.running_in_this_thread())
+        {
+            spdlog::warn("Fork pool stopped from within its own strand, its read loop ends later.");
+            return closePipesNow();
+        }
+
+        boost::asio::post(
+            strand,
+            [self = shared_from_this()]()
+            {
+                self->closePipesNow();
+            }
+        );
+        if (readLoopEndedFuture.wait_for(std::chrono::seconds{2}) == std::future_status::timeout)
+        {
+            // Nothing runs the executor anymore, so nothing else uses the pipes.
+            spdlog::warn("Fork pool executor did not close the worker pipes, closing them directly.");
+            closePipesNow();
+        }
     }
 };
 
@@ -713,20 +775,28 @@ void ForkPool::start(boost::asio::any_io_executor executor, std::function<void(n
 
     if (pid == 0)
     {
-        // Child: reset parent's asio context copy, then hand off to worker
-        ctx.notify_fork(boost::asio::execution_context::fork_child);
-
-        ::close(parentToWorker[1]);
-        ::close(workerToParent[0]);
-
-        int devNull = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
-        if (devNull != -1)
+        // An exception must not unwind into the parent's code that called start().
+        try
         {
-            ::dup2(devNull, STDERR_FILENO);
-            ::close(devNull);
-        }
+            // Child: reset parent's asio context copy, then hand off to worker
+            ctx.notify_fork(boost::asio::execution_context::fork_child);
 
-        workerMain(parentToWorker[0], workerToParent[1]); // [[noreturn]]
+            ::close(parentToWorker[1]);
+            ::close(workerToParent[0]);
+
+            int devNull = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+            if (devNull != -1)
+            {
+                ::dup2(devNull, STDERR_FILENO);
+                ::close(devNull);
+            }
+
+            workerMain(parentToWorker[0], workerToParent[1]); // [[noreturn]]
+        }
+        catch (...)
+        {
+            ::_exit(1);
+        }
     }
 
     // Parent
@@ -767,9 +837,7 @@ void ForkPool::stop()
     if (!impl_ || impl_->workerPid == -1)
         return;
 
-    boost::system::error_code ignored;
-    impl_->io.input().close(ignored);
-    impl_->io.output().close(ignored);
+    impl_->closePipes();
 
     for (int attempt = 0; attempt < 50; ++attempt)
     {
