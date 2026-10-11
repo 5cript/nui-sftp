@@ -371,11 +371,21 @@
 
 .multi-setting-entry {
     row-gap: 4px;
-    margin: 4px 16px 0 16px;
+    margin-top: 4px;
     padding: 8px 0 !important;
-    border-left: 2px solid var(--theme-color);
-    border-radius: 4px;
-    background-color: color-mix(in srgb, var(--darker-background) 60%, transparent);
+    position: relative;
+    isolation: isolate;
+
+    /* Insets of a subgrid widen the edge tracks of the whole subgroup, so the box is drawn out of flow. */
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0 8px;
+        z-index: -1;
+        border-left: 2px solid var(--theme-color);
+        border-radius: 4px;
+        background-color: color-mix(in srgb, var(--darker-background) 60%, transparent);
+    }
 
     &>div.addressable-setting {
         display: contents;
@@ -386,7 +396,7 @@
         grid-template-columns: subgrid;
         grid-column: 1 / -1;
         align-items: center;
-        padding: 0 16px 0 14px;
+        padding: 0 16px;
     }
 
     &.multi-setting-entry-empty {
