@@ -100,6 +100,7 @@ Commands you need often can be saved as snippets, sorted into folders and tagged
 
 ## Settings
 When a user might want to change the behavior of the app, I decided: Let's make it configurable.
+The search box in the settings header (Ctrl+F) finds any setting in the defaults and in every server.
 ![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/screenshots/settings.png)
 
 ## Theming & Customizability
