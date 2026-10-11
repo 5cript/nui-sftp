@@ -82,7 +82,6 @@ operationQueue:
   kickToTopTitle: "Move to top of queue"
   cancelOperationHeader: "Cancel Operation"
   cancelOperationText: "Are you sure you want to cancel the operation?"
-  cannotSetUp: "Cannot set up operation queue."
   deletingItem: "Deleting: '{}'"
   deletingSelectedIn: "Deleting selected items in {}"
   entriesFailed: "{} entries failed:\n"

@@ -140,7 +140,6 @@ operationQueue:
   kickToTopTitle: "Nach oben verschieben"
   cancelOperationHeader: "Operation abbrechen"
   cancelOperationText: "Sind Sie sicher, dass Sie die Operation abbrechen möchten?"
-  cannotSetUp: "Die Operationswarteschlange kann nicht eingerichtet werden."
   deletingItem: "Lösche: '{}'"
   deletingSelectedIn: "Lösche ausgewählte Elemente in {}"
   entriesFailed: "{} Einträge fehlgeschlagen:\n"

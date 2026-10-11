@@ -291,6 +291,7 @@ OperationQueue::OperationQueue(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
     std::string persistenceSessionName,
+    Persistence::QueueOptions const& queueOptions,
     ConfirmDialog* confirmDialog,
     LocalSideModel* localModel,
     RemoteSideModel* remoteModel
@@ -306,30 +307,9 @@ OperationQueue::OperationQueue(
           ),
       }
 {
-    loadState(
-        *impl_->stateHolder,
-        impl_->confirmDialog,
-        [this, name = impl_->persistenceSessionName](bool success, Persistence::State const& state)
-        {
-            if (!success)
-                return;
-
-            auto iter = state.sessions.find(name);
-            if (iter == end(state.sessions))
-            {
-                Log::error("No options found for name: {}", name);
-                return;
-            }
-
-            auto [engineKey, engine] = *iter;
-            impl_->paused = engine.queueOptions->startInPausedState.value_or(true);
-            *impl_->autoClean = engine.queueOptions->autoRemoveCompletedOperations.value_or(false);
-            impl_->liveQueuePageSize = std::clamp(engine.queueOptions->liveQueuePageSize.value_or(200), 1, 1000);
-            impl_->enforceLivePageSize();
-            Nui::globalEventContext.executeActiveEventsImmediately();
-        },
-        language->get("operationQueue", "cannotSetUp")
-    );
+    impl_->paused = queueOptions.startInPausedState.value_or(true);
+    *impl_->autoClean = queueOptions.autoRemoveCompletedOperations.value_or(false);
+    impl_->liveQueuePageSize = std::clamp(queueOptions.liveQueuePageSize.value_or(200), 1, 1000);
 
     Nui::setInterval(
         1000,
@@ -1663,7 +1643,10 @@ void OperationQueue::changeAutoClean(bool doClean)
             if (!success)
                 return;
 
+            // Direct connects are not in the settings, so there is nothing to keep.
             auto iter = impl_->stateHolder->stateCache().sessions.find(name);
+            if (iter == impl_->stateHolder->stateCache().sessions.end())
+                return;
             iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
             iter->second.queueOptions->liveQueuePageSize = impl_->liveQueuePageSize;
             impl_->stateHolder->save(

@@ -43,10 +43,16 @@ class OperationQueue
   public:
     constexpr static std::chrono::seconds autoRemoveTime{5};
 
+    /**
+     * @param persistenceSessionName The name of the session in the settings, which keeps queue options changed in the
+     * queue. Direct connects have none there.
+     * @param queueOptions The resolved queue options of the session.
+     */
     OperationQueue(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
         std::string persistenceSessionName,
+        Persistence::QueueOptions const& queueOptions,
         ConfirmDialog* confirmDialog,
         LocalSideModel* localModel,
         RemoteSideModel* remoteModel
