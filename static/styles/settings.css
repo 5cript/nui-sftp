@@ -227,7 +227,7 @@
 .setting-disengageable {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: 20px 20px;
+    grid-template-rows: minmax(20px, auto) minmax(20px, auto);
     margin-right: 16px;
     align-items: center;
     max-width: 280px;
