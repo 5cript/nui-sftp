@@ -46,8 +46,6 @@ namespace NuiSftpPage::Sections
             static std::vector<Feature> const data = []()
             {
                 auto const dot = Utf8::cp(0x00B7); // middle dot
-                auto const lq = Utf8::cp(0x201C); // left double quote
-                auto const rq = Utf8::cp(0x201D); // right double quote
 
                 std::string const tagBashEtc = fmt::format("bash {0} zsh {0} fish {0} pwsh", dot);
 
@@ -80,6 +78,16 @@ namespace NuiSftpPage::Sections
                         screenshotUrl("session.png"),
                     },
                     {
+                        "history_snippets",
+                        "Command history and snippets",
+                        "Commands you run in a terminal are recorded per host, so you can search them, sort them "
+                        "by use and run them again. Commands you need often go into snippet folders, with "
+                        "{{placeholders}} you fill in when you run them. 27 ready-made folders cover Docker, Git, "
+                        "systemd, Kubernetes, package managers and more.",
+                        {"Per-host history", "Placeholders", "Preset folders"},
+                        screenshotUrl("snippets.png"),
+                    },
+                    {
                         "configurable",
                         "Everything is Configurable",
                         "Profiles per host, themable panels, layout presets, reuseable inheritable settings. "
@@ -97,22 +105,11 @@ namespace NuiSftpPage::Sections
                         screenshotUrl("local.png"),
                     },
                     {
-                        "free",
-                        "Free. No accounts, no telemetry, no nags.",
-                        fmt::format(
-                            "Download it. Use it forever. No ads, no telemetry."
-                            "The whole tool, all the features, available to everyone.",
-                            lq,
-                            rq
-                        ),
-                        {"Zero cost", "Zero tracking"},
-                    },
-                    {
-                        "open_source",
-                        "Open source. Read it, fork it, ship it.",
-                        "Every line of NuiSftp is on GitHub under a permissive license. Based on "
-                        "libssh and the NuiCpp UI framework, both of which are open source as well.",
-                        {"MIT-style", "Pull requests welcome", "Transparent"},
+                        "free_and_open",
+                        "Free and open source",
+                        "No accounts, no ads, no telemetry. The source is on GitHub under the MIT license. "
+                        "nui-sftp is built on libssh and the NuiCpp UI framework, both open source as well.",
+                        {"No accounts", "No telemetry", "MIT license"},
                     },
                     {
                         "cross_platform",
