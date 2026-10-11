@@ -1,6 +1,7 @@
 #include <persistence/state/session_options.hpp>
 
 #include <utility/visit_overloaded.hpp>
+#include <utility/algorithm/move_to_front.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -82,13 +83,7 @@ namespace Persistence
 
     void SshSessionOptions::selectUser(std::size_t index)
     {
-        if (index >= users.size())
-            return;
-        std::rotate(
-            users.begin(),
-            std::next(users.begin(), static_cast<std::ptrdiff_t>(index)),
-            std::next(users.begin(), static_cast<std::ptrdiff_t>(index) + 1)
-        );
+        Utility::Algorithm::moveToFront(users, index);
     }
 
     void SshSessionOptions::selectUserLike(SshUser const& user)

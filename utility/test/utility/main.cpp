@@ -4,6 +4,7 @@
 #include "test_fuzzy_search.hpp"
 #include "test_keyed_diff.hpp"
 #include "test_localized_message.hpp"
+#include "test_move_to_front.hpp"
 #include "test_shell_integration.hpp"
 #include "test_typed_line_buffer.hpp"
 #include "test_user_directories.hpp"

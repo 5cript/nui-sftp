@@ -3,6 +3,7 @@
 #include <frontend/settings/atomic_setting/setting.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
 #include <utility/language.hpp>
+#include <utility/algorithm/move_to_front.hpp>
 
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/select.hpp>
@@ -254,16 +255,10 @@ class MultiSetting : public Setting<false, std::vector<typename EntrySettingsT::
 
     void makeSelectedDefault()
     {
-        auto& entries = state_.value();
         const auto index = selected_.value();
-        if (index == 0u || index >= entries.size())
+        if (index == 0u || index >= state_.value().size())
             return;
-        const auto begin = entries.begin();
-        std::rotate(
-            begin,
-            std::next(begin, static_cast<std::ptrdiff_t>(index)),
-            std::next(begin, static_cast<std::ptrdiff_t>(index) + 1)
-        );
+        Utility::Algorithm::moveToFront(state_.value(), index);
         selected_ = 0u;
         refreshEntries();
         onChange_();
