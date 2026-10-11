@@ -97,7 +97,7 @@ namespace NuiSftpPage::Sections
             std::string const versionLine = "AUR" + dot + "Flathub" + dot + "AppImage" + dot + "nixpkgs planned";
 
             std::string const description =
-                "Install from the AUR or Flathub, or run the AppImage on any distribution with glibc 2.39 "
+                "Install from the AUR or Flathub, or run the AppImage on any distribution with glibc 2.35 "
                 "or newer. Local shells do not work inside the Flatpak sandbox.";
 
             return div{class_ = "platform-card glass shine"}(
