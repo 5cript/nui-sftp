@@ -122,7 +122,7 @@ struct FileExplorerPanel::Implementation
     InputDialog* inputDialog;
     FilePropertyDialog* filePropertyDialog;
     ArchiveTransferDialog* archiveTransferDialog;
-    std::string sessionName;
+    std::optional<std::string> persistenceSessionName;
     Persistence::UiOptions uiOptions;
     Persistence::SessionOptions engineOptions;
     Nui::Observed<bool>* isInLostConnectionState;
@@ -138,7 +138,7 @@ struct FileExplorerPanel::Implementation
         , inputDialog{params.inputDialog}
         , filePropertyDialog{params.filePropertyDialog}
         , archiveTransferDialog{params.archiveTransferDialog}
-        , sessionName{std::move(params.sessionName)}
+        , persistenceSessionName{std::move(params.persistenceSessionName)}
         , uiOptions{params.uiOptions}
         , engineOptions{std::move(params.engineOptions)}
         , isInLostConnectionState{params.isInLostConnectionState}
@@ -171,10 +171,11 @@ void FileExplorerPanel::setup()
                 );
             }
         );
-    if (auto* remote = static_cast<RemoteSideModel*>(impl_->fileGrid.rightModel()); remote)
+    if (auto* remote = static_cast<RemoteSideModel*>(impl_->fileGrid.rightModel());
+        remote && impl_->persistenceSessionName)
     {
         remote->setOnFavoritesChanged(
-            [stateHolder = impl_->stateHolder, sessionName = impl_->sessionName](std::vector<std::string> favs)
+            [stateHolder = impl_->stateHolder, sessionName = *impl_->persistenceSessionName](std::vector<std::string> favs)
             {
                 stateHolder->loadModifySave(
                     [favs = std::move(favs), sessionName](Persistence::State& state)

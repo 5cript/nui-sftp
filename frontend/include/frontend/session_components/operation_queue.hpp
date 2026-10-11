@@ -45,13 +45,13 @@ class OperationQueue
 
     /**
      * @param persistenceSessionName The name of the session in the settings, which keeps queue options changed in the
-     * queue. Direct connects have none there.
+     * queue. Nothing for direct connects, which are not in the settings.
      * @param queueOptions The resolved queue options of the session.
      */
     OperationQueue(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::string persistenceSessionName,
+        std::optional<std::string> persistenceSessionName,
         Persistence::QueueOptions const& queueOptions,
         ConfirmDialog* confirmDialog,
         LocalSideModel* localModel,

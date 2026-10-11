@@ -39,6 +39,11 @@ struct ReconnectState
     std::optional<std::string> layoutName;
     /// The user the session logged in as, kept across the retries.
     std::optional<Persistence::SshUser> loginUser;
+    /**
+     * @brief The options of a direct connect, which is not in the settings and reconnects with the options it was
+     * opened with.
+     */
+    std::optional<Persistence::SessionOptions> directConnectOptions;
     /// setTimeout handle for the pending backoff timer; cleared on cancel /
     /// on retry firing.  Holds Nui::val::undefined() when no retry is pending.
     Nui::val retryTimerHandle{Nui::val::undefined()};
@@ -477,7 +482,7 @@ void SessionArea::addDirectConnectSession(
                 tabId
             );
 
-            impl_->sessions.emplace_back(std::make_unique<Session>(makeSessionParams(
+            auto params = makeSessionParams(
                 std::move(engine),
                 state.uiOptions,
                 displayName,
@@ -485,7 +490,9 @@ void SessionArea::addDirectConnectSession(
                 impl_->sessions.size() == 0,
                 tabId,
                 std::nullopt
-            )));
+            );
+            params.isDirectConnect = true;
+            impl_->sessions.emplace_back(std::make_unique<Session>(std::move(params)));
 
             setSelected(tabId);
         },
@@ -520,6 +527,8 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
         reconnectState.name = name;
         reconnectState.layoutName = impl_->toolbar->selectedLayout();
         reconnectState.loginUser = oldSession->loginUser();
+        if (!oldSession->persistenceName())
+            reconnectState.directConnectOptions = oldSession->engineOptions();
         reconnectState.snapshot = std::move(snapshot);
         oldSession->startReconnectUi();
     }
@@ -550,17 +559,24 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
                 return; // Cancelled between loadState call and callback.
             auto& reconnectState = rcIter->second;
 
-            auto sessionIter = state.sessions.find(reconnectState.name);
-            if (sessionIter == state.sessions.end())
+            if (reconnectState.directConnectOptions)
             {
-                Log::error(
-                    "replaceAtTabId: session '{}' no longer exists in settings — aborting reconnect",
-                    reconnectState.name
-                );
-                abortReconnectCycle(tabId);
-                return;
+                reconnectState.engineOptions = *reconnectState.directConnectOptions;
             }
-            reconnectState.engineOptions = sessionIter->second;
+            else
+            {
+                auto sessionIter = state.sessions.find(reconnectState.name);
+                if (sessionIter == state.sessions.end())
+                {
+                    Log::error(
+                        "replaceAtTabId: session '{}' no longer exists in settings — aborting reconnect",
+                        reconnectState.name
+                    );
+                    abortReconnectCycle(tabId);
+                    return;
+                }
+                reconnectState.engineOptions = sessionIter->second;
+            }
             auto* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine);
             if (ssh && reconnectState.loginUser)
                 ssh->selectUserLike(*reconnectState.loginUser);
@@ -638,6 +654,7 @@ void SessionArea::onProtoReady(int tabId)
 
     const auto name = reconnectState.name;
     const auto layoutName = reconnectState.layoutName;
+    const bool isDirectConnect = reconnectState.directConnectOptions.has_value();
     // Move the enriched snapshot into a Params field so the new Session
     // sees the ejected shells via its adoption path.  The adoption ctor's
     // code path honours Params.resumeFromSnapshot when non-empty.
@@ -655,6 +672,7 @@ void SessionArea::onProtoReady(int tabId)
         tabId,
         std::move(enrichedSnapshot)
     );
+    params.isDirectConnect = isDirectConnect;
     impl_->sessions.emplace_back(std::make_unique<Session>(std::move(params), std::move(proto)));
     if (wasVisible)
         setSelected(tabId);
