@@ -25,6 +25,7 @@
 #    include <filesystem>
 #    include <fstream>
 #    include <functional>
+#    include <mutex>
 #    include <optional>
 #    include <string>
 #    include <string_view>
@@ -110,8 +111,10 @@ namespace Test
         void write(std::string_view data)
         {
             std::atomic_bool written{false};
+            std::atomic_bool accepted{false};
             std::thread writer{[&]() {
-                pty_->write(data);
+                std::lock_guard lock{writeMutex_};
+                accepted = pty_->write(data);
                 written = true;
             }};
             const bool completed = waitUntil(
@@ -128,6 +131,8 @@ namespace Test
                 process_->terminate(terminateError);
             }
             writer.join();
+            if (completed && !accepted)
+                ADD_FAILURE() << "The pty did not take all " << data.size() << " byte(s) of input.";
         }
 
         /**
@@ -143,6 +148,7 @@ namespace Test
                 if (context_.stopped())
                     context_.restart();
                 context_.run_for(std::chrono::milliseconds{10});
+                flushAnswers();
             }
             return true;
         }
@@ -187,6 +193,7 @@ namespace Test
                 if (context_.stopped())
                     context_.restart();
                 context_.run_for(std::chrono::milliseconds{10});
+                flushAnswers();
                 if (output_.size() != lastSize)
                 {
                     lastSize = output_.size();
@@ -227,12 +234,27 @@ namespace Test
                 for (auto position = queryScan_.find(query); position != std::string::npos;
                      position = queryScan_.find(query, position + query.size()))
                 {
-                    pty_->write("\x1b[?62;22c");
+                    pendingAnswers_ += "\x1b[?62;22c";
                 }
             }
             // A query split across reads still completes; a found one cannot fit in the kept tail.
             if (queryScan_.size() > 3)
                 queryScan_.erase(0, queryScan_.size() - 3);
+            flushAnswers();
+        }
+
+        /**
+         * @brief Writes the queued answers unless the writer thread has the pty. The master is
+         *        non-blocking, so a second write racing it fails with EAGAIN and the bytes are lost:
+         *        fish then waits 10 s for its answer, or loses the typed line.
+         */
+        void flushAnswers()
+        {
+            if (pendingAnswers_.empty())
+                return;
+            const std::unique_lock lock{writeMutex_, std::try_to_lock};
+            if (lock.owns_lock() && pty_->write(pendingAnswers_))
+                pendingAnswers_.clear();
         }
 
         boost::asio::io_context context_{};
@@ -242,6 +264,8 @@ namespace Test
         std::vector<std::string> chunks_{};
         OscScanner scanner_{ShellIntegration::oscCode};
         std::string queryScan_{};
+        std::string pendingAnswers_{};
+        std::mutex writeMutex_{};
     };
 
 
