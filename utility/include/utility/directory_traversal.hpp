@@ -1,5 +1,10 @@
 #pragma once
 
+#include <paths/path_segment.hpp>
+#include <paths/relative_path.hpp>
+
+#include <string>
+#include <string_view>
 #include <vector>
 #include <type_traits>
 #include <filesystem>
@@ -68,6 +73,7 @@ namespace Utility
                 .path = rootPath_,
                 .type = EntryT::FileType::Directory,
             }};
+            rejectedEntries_.clear();
             currentIndex_ = 0;
             totalBytes_ = 0;
         }
@@ -144,84 +150,34 @@ namespace Utility
             return currentIndex_ >= entries_.size();
         }
 
+        /**
+         * @brief Entries whose name is not a valid path segment, like ".." or "a/b" from a server. They are never
+         *        walked or returned by @ref entries, their parent index is set so their full path can be shown.
+         */
+        std::vector<EntryT> const& rejectedEntries() const
+        {
+            return rejectedEntries_;
+        }
+
       private:
+        /**
+         * @brief Adopts one listing. Every "." and ".." is dropped and every other name has to be a valid path
+         *        segment: a name like "x/.." would turn into a path outside the walked tree.
+         */
         void moveEntries(std::vector<EntryT>&& newEntries, std::size_t parent)
         {
-            if constexpr (ScannerIncludesDotAndDotDot)
+            for (auto& entry : newEntries)
             {
-                auto iter = std::make_move_iterator(begin(newEntries));
-                auto endMarker = std::make_move_iterator(end(newEntries));
-                bool foundOneWasDot = false;
-                for (; iter != endMarker; ++iter)
+                entry.parent = parent;
+                const auto name = nameOf(entry);
+                if (name == "." || name == "..")
+                    continue;
+                if (!Paths::PathSegment::make(name).has_value())
                 {
-                    auto val{*iter};
-                    if (val.path == ".")
-                    {
-                        foundOneWasDot = true;
-                        ++iter;
-                        break;
-                    }
-                    else if (val.path == "..")
-                    {
-                        ++iter;
-                        break;
-                    }
-                    val.parent = parent;
-                    entries_.push_back(std::move(val));
+                    rejectedEntries_.push_back(std::move(entry));
+                    continue;
                 }
-
-                if (foundOneWasDot)
-                {
-                    for (; iter != endMarker; ++iter)
-                    {
-                        auto val{*iter};
-                        if (val.path == "..")
-                        {
-                            ++iter;
-                            break;
-                        }
-                        val.parent = parent;
-                        entries_.push_back(std::move(val));
-                    }
-                }
-                else
-                {
-                    for (; iter != endMarker; ++iter)
-                    {
-                        auto val{*iter};
-                        if (val.path == ".")
-                        {
-                            ++iter;
-                            break;
-                        }
-                        val.parent = parent;
-                        entries_.push_back(std::move(val));
-                    }
-                }
-
-                std::transform(
-                    iter,
-                    endMarker,
-                    std::back_inserter(entries_),
-                    [parent](EntryT&& entry)
-                    {
-                        entry.parent = parent;
-                        return std::move(entry);
-                    }
-                );
-            }
-            else
-            {
-                std::transform(
-                    std::make_move_iterator(begin(newEntries)),
-                    std::make_move_iterator(end(newEntries)),
-                    std::back_inserter(entries_),
-                    [parent](EntryT&& entry)
-                    {
-                        entry.parent = parent;
-                        return std::move(entry);
-                    }
-                );
+                entries_.push_back(std::move(entry));
             }
         }
 
@@ -229,5 +185,6 @@ namespace Utility
         std::filesystem::path rootPath_;
         ScannerT scanner_;
         std::vector<EntryT> entries_{};
+        std::vector<EntryT> rejectedEntries_{};
     };
 }

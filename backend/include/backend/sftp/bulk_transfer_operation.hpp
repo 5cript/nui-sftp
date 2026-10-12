@@ -112,6 +112,11 @@ class BulkTransferOperation : public Operation
         return scanPhase_ != nullptr;
     }
 
+    /**
+     * @brief Records entries the scan refused because of their name as failed, they are never transferred.
+     */
+    void addRejectedEntries(std::vector<std::string> const& paths);
+
     std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
 
     std::size_t inFlightCount() const noexcept
@@ -182,13 +187,11 @@ class BulkTransferOperation : public Operation
      *
      * @param onProgress Must be wired to the child's progress callback as (current, max).
      */
-    virtual std::unique_ptr<Operation>
-    makeChild(std::size_t entryIndex, std::function<void(std::uint64_t current, std::uint64_t max)> onProgress) = 0;
-
-    /**
-     * @brief Path shown to the user for the entry (the remote side for both directions).
-     */
-    virtual std::filesystem::path displayPath(std::size_t entryIndex) const = 0;
+    virtual std::unique_ptr<Operation> makeChild(
+        std::size_t entryIndex,
+        EntryPaths const& paths,
+        std::function<void(std::uint64_t current, std::uint64_t max)> onProgress
+    ) = 0;
 
     /**
      * @brief Whether a failed child may be recorded and skipped instead of failing the bulk.

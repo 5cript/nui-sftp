@@ -126,6 +126,26 @@ class LocalScanOperation : public Operation
     }
 
     /**
+     * @brief Full paths of listed entries whose name is not a valid path segment, for display. Flat scans only,
+     *        the tree of a sync scan keeps them as invalid name nodes.
+     */
+    std::vector<std::string> rejectedPaths()
+    {
+        return withWalkerDo(
+            [this](auto& walker)
+            {
+                std::vector<std::string> paths;
+                auto root = localPath_.toUtf8();
+                if (!root.ends_with('/'))
+                    root.push_back('/');
+                for (auto const& entry : walker.rejectedEntries())
+                    paths.push_back(root + walker.describeRejected(entry));
+                return paths;
+            }
+        );
+    }
+
+    /**
      * @brief Eject the scanned node tree. Only valid when @ref buildsTree() is true.
      */
     SharedData::Sync::ScanNode ejectScanTree()

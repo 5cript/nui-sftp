@@ -1,4 +1,5 @@
 #include <ssh/file_information.hpp>
+#include <ssh/u8_path.hpp>
 
 namespace SecureShell
 {
@@ -6,7 +7,8 @@ namespace SecureShell
     {
         return FileInformation{
             SharedData::DirectoryEntry{
-                .path = attributes->name ? std::string{attributes->name} : std::string{},
+                // Server names are UTF-8, a narrow std::string would be read in the ANSI code page on Windows.
+                .path = attributes->name ? pathFromU8(attributes->name) : std::filesystem::path{},
                 .longName = attributes->longname ? std::string{attributes->longname} : std::string{},
                 .flags = attributes->flags,
                 .type = static_cast<SharedData::FileType>(attributes->type),

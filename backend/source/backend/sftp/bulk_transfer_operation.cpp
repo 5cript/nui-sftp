@@ -213,6 +213,16 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         }
 
         auto const& entry = entries_[index];
+        const auto paths = entryPaths(index);
+        if (!paths)
+        {
+            Log::warn("{}: Skipping '{}': {}", logName(), displayPath(index), paths.error().toString());
+            failedEntries_.emplace_back(failureSource(index), paths.error());
+            failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+            completedBytes_ += entry.isRegularFile() ? entry.size : 0u;
+            ++completedEntries_;
+            continue;
+        }
         if (entry.isDirectory())
         {
             // Created inline while the cursor passes it, so files listed after it only start once
@@ -452,6 +462,17 @@ void BulkTransferOperation::setPrescannedEntries(
     prescannedDestinations_ = std::move(destinations);
     totalBytes_ = totalBytes;
     entrySource_ = EntrySource::Flat;
+}
+
+void BulkTransferOperation::addRejectedEntries(std::vector<std::string> const& paths)
+{
+    for (auto const& path : paths)
+    {
+        Log::warn("{}: Skipping '{}', its name is not a valid path segment.", logName(), path);
+        failedEntries_.emplace_back(
+            path, Error{.type = ErrorType::InvalidName, .extraInfo = "The name is not a valid path segment"}
+        );
+    }
 }
 
 std::vector<std::pair<std::filesystem::path, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
