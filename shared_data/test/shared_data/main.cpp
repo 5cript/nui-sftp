@@ -1,4 +1,5 @@
 #include "test_bulk_delete_request.hpp"
+#include "test_bulk_transfer_request.hpp"
 #include "test_diff.hpp"
 #include "test_diff_tree_store.hpp"
 #include "test_enqueue_minimizer.hpp"
