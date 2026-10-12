@@ -36,8 +36,8 @@
 
 #include <frontend/svgs/decline.hpp>
 
-#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
@@ -956,55 +956,49 @@ struct SyncDialog::Implementation
         }
     }
 
-    /** @brief Asks the backend to turn sparse selection keys into transfers, then dispatches them. */
-    void enqueueSelection(DiffSection section, std::vector<std::string> relKeys, SharedData::OperationMode mode)
-    {
-        if (!provider_)
-            return;
-        provider_->buildEnqueuePlan(
-            section,
-            std::move(relKeys),
-            [this, section, mode](std::vector<SharedData::Sync::EnqueuePlanEntry> plan)
-            {
-                dispatchPlan(section, std::move(plan), mode);
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            },
-            [](std::string const& msg)
-            {
-                Log::error("buildSyncEnqueuePlan failed: {}", msg);
-            }
-        );
-    }
-
-    /** @brief Files go into one bulk transfer per direction, directories in the plan carry no content
-     *         and are only created, remote deletes become one bulk delete, local deletes one local
-     *         remove call.
+    /**
+     * @brief Progress of one operation of a sync execution. Its rows are only known once the backend answers, and
+     *        the operation can finish before that, so an early completion or early failures wait here.
      */
-    void dispatchPlan(
-        DiffSection section,
-        std::vector<SharedData::Sync::EnqueuePlanEntry> plan,
-        SharedData::OperationMode mode
-    )
+    struct SyncPart
     {
-        if (plan.empty())
-            return;
+        /** @brief One observer per entry index; a directory delete lists its content as entries of their own. */
+        std::vector<ProgressObserver> observers{};
+        std::unordered_map<std::string, std::size_t> indexBySource{};
+        std::set<std::uint64_t> seenInFlight{};
+        bool mapped{false};
+        std::optional<bool> completion{};
+        std::vector<std::string> failedSources{};
 
-        const auto finishWith = [](std::vector<ProgressObserver> observers)
+        void markFailedSources()
         {
-            return [observers = std::move(observers)](bool success, std::string const& info)
+            for (auto const& source : failedSources)
             {
-                if (!success)
-                    Log::error("Sync step failed: {}", info);
-                for (auto const& observer : observers)
-                    *observer = success ? 1.1 : -1.0;
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            };
-        };
-        const auto appendCovering = [this, section](std::vector<ProgressObserver>& target, std::string const& relKey)
+                if (const auto iter = indexBySource.find(source); iter != indexBySource.end())
+                    *observers[iter->second] = -1.0;
+            }
+            failedSources.clear();
+        }
+
+        void complete()
         {
-            auto covering = progressCovering(section, relKey);
-            target.insert(target.end(), covering.begin(), covering.end());
-        };
+            for (auto const& observer : observers)
+            {
+                // Rows already marked failed stay failed on an otherwise successful operation.
+                if (!(*completion && observer->value() < 0.0))
+                    *observer = *completion ? 1.1 : -1.0;
+            }
+        }
+
+        /** @brief The backend answered with the rows of this part. */
+        void map()
+        {
+            mapped = true;
+            markFailedSources();
+            if (completion)
+                complete();
+        }
+    };
 
     void watchCompletion(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
     {
@@ -1020,54 +1014,31 @@ struct SyncDialog::Implementation
         );
     }
 
-        for (auto& entry : plan)
-        {
-            auto progress = progressFor(section, entry.relKey);
-            switch (entry.action)
+    /** @brief Files can finish in any order in a bulk, so rows seen in flight are done once they drop out. */
+    void watchBulkPart(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
+    {
+        operationQueue_->addBulkProgressCallback(
+            operationId,
+            [part](SharedData::BulkProgress const& progress)
             {
-                case SharedData::Sync::Action::Upload:
+                if (!part->mapped)
+                    return;
+                auto& observers = part->observers;
+                for (const auto entryIndex : progress.failedEntryIndices)
                 {
-                    if (entry.isDirectory)
-                    {
-                        operationQueue_->createRemoteDirectory(
-                            entry.remoteAbsPath, finishWith(progressCovering(section, entry.relKey))
-                        );
-                        break;
-                    }
-                    uploadEntries.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.localAbsPath,
-                            .dst = entry.remoteAbsPath,
-                            .sizeBytes = entry.sizeBytes,
-                            .isDirectory = false,
-                            .mtime = entry.mtime,
-                            .mtimeNsec = entry.mtimeNsec,
-                        }
-                    );
-                    uploadObservers.push_back(progress);
-                    break;
+                    if (entryIndex < observers.size() && observers[entryIndex]->value() >= 0.0)
+                        *observers[entryIndex] = -1.0;
                 }
-                case SharedData::Sync::Action::Download:
+                std::set<std::uint64_t> stillInFlight;
+                for (auto const& file : progress.inFlight)
                 {
-                    if (entry.isDirectory)
-                    {
-                        operationQueue_->createLocalDirectory(
-                            entry.localAbsPath, finishWith(progressCovering(section, entry.relKey))
-                        );
-                        break;
-                    }
-                    downloadEntries.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.remoteAbsPath,
-                            .dst = entry.localAbsPath,
-                            .sizeBytes = entry.sizeBytes,
-                            .isDirectory = false,
-                            .mtime = entry.mtime,
-                            .mtimeNsec = entry.mtimeNsec,
-                        }
-                    );
-                    downloadObservers.push_back(progress);
-                    break;
+                    if (file.entryIndex >= observers.size())
+                        continue;
+                    stillInFlight.insert(file.entryIndex);
+                    part->seenInFlight.insert(file.entryIndex);
+                    if (file.totalBytes > 0)
+                        *observers[file.entryIndex] =
+                            static_cast<double>(file.bytes) / static_cast<double>(file.totalBytes);
                 }
                 std::erase_if(
                     part->seenInFlight,
@@ -1083,165 +1054,112 @@ struct SyncDialog::Implementation
                 );
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
-        }
-
-        if (!uploadEntries.empty())
-            hookBulkTransfer(std::move(uploadEntries), std::move(uploadObservers), /*isUpload=*/true, mode);
-        if (!downloadEntries.empty())
-            hookBulkTransfer(std::move(downloadEntries), std::move(downloadObservers), /*isUpload=*/false, mode);
-
-        if (!localDeletes.empty())
-        {
-            operationQueue_->removeLocalPaths(
-                localDeletes,
-                [observers = std::move(localDeleteObservers)](bool success, std::string const& info)
-                {
-                    if (!success)
-                        Log::error("Sync local delete failed: {}", info);
-                    for (auto const& observer : observers)
-                        *observer = success ? 1.1 : -1.0;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
-            );
-        }
-
-        if (!remoteDeletes.empty())
-        {
-            operationQueue_->enqueueBulkDelete(
-                std::move(remoteDeletes),
-                /*insertRefresh=*/false,
-                mode,
-                [observers = std::move(remoteDeleteObservers)](bool success)
-                {
-                    for (auto const& observer : observers)
-                        *observer = success ? 1.1 : -1.0;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
-                [](bool success, std::string const& info)
-                {
-                    if (!success)
-                        Log::error("Sync bulk delete failed: {}", info);
-                }
-            );
-        }
+        );
+        watchFailedEntries(operationId, std::move(part));
     }
 
-    /** @brief Shared wiring between BulkUpload and BulkDownload of files.  Tracks per-file progress via
-     *         the backend's BulkProgress event stream and marks completed rows green.
-     */
-    void hookBulkTransfer(
-        std::vector<SharedData::BulkAddEntry> entries,
-        std::vector<ProgressObserver> observers,
-        bool isUpload,
-        SharedData::OperationMode mode
-    )
+    /** @brief Failed entries arrive by their source path and mark the rows they belong to; then completion. */
+    void watchFailedEntries(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
     {
-        auto observersShared = std::make_shared<std::vector<ProgressObserver>>(std::move(observers));
-        auto indexBySource = std::make_shared<std::unordered_map<std::string, std::size_t>>();
-        for (std::size_t index = 0; index < entries.size(); ++index)
-            indexBySource->emplace(entries[index].src.generic_string(), index);
-
-        // Files can finish in any order now that bulks transfer several at once, so track
-        // which entries we have seen in flight and mark them done once they drop out. Entries
-        // the backend gave up on are marked failed first so they never count as done.
-        auto seenInFlight = std::make_shared<std::set<std::uint64_t>>();
-        auto onBulkProgress = [observersShared, seenInFlight](SharedData::BulkProgress const& prog)
-        {
-            auto& observersRef = *observersShared;
-            for (const auto entryIndex : prog.failedEntryIndices)
+        operationQueue_->addFailedEntriesCallback(
+            operationId,
+            [part](std::vector<std::string> const& failedPaths)
             {
-                if (entryIndex < observersRef.size() && observersRef[entryIndex]->value() >= 0.0)
-                    *observersRef[entryIndex] = -1.0;
+                for (auto const& path : failedPaths)
+                    part->failedSources.push_back(path);
+                if (part->mapped)
+                    part->markFailedSources();
             }
-            std::set<std::uint64_t> stillInFlight;
-            for (auto const& file : prog.inFlight)
+        );
+        watchCompletion(operationId, std::move(part));
+    }
+
+    /**
+     * @brief Has the backend plan and queue the sparse selection @p relKeys. The operation ids are chosen here and
+     *        listened to before the request goes out, the answer maps them to rows.
+     */
+    void enqueueSelection(DiffSection section, std::vector<std::string> relKeys, SharedData::OperationMode mode)
+    {
+        if (!provider_)
+            return;
+
+        const SharedData::Sync::SyncExecutionRequest request{
+            .section = section,
+            .relKeys = std::move(relKeys),
+            .mode = mode,
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        auto uploads = std::make_shared<SyncPart>();
+        auto downloads = std::make_shared<SyncPart>();
+        auto remoteDeletes = std::make_shared<SyncPart>();
+        auto localDeletes = std::make_shared<SyncPart>();
+        watchBulkPart(request.uploadId, uploads);
+        watchBulkPart(request.downloadId, downloads);
+        watchFailedEntries(request.remoteDeleteId, remoteDeletes);
+        watchFailedEntries(request.localDeleteId, localDeletes);
+
+        provider_->executeSelection(
+            request,
+            [this, section, request, uploads, downloads, remoteDeletes, localDeletes](
+                SharedData::Sync::SyncExecutionResult result
+            )
             {
-                if (file.entryIndex >= observersRef.size())
-                    continue;
-                stillInFlight.insert(file.entryIndex);
-                seenInFlight->insert(file.entryIndex);
-                if (file.totalBytes > 0)
-                    *observersRef[file.entryIndex] =
-                        static_cast<double>(file.bytes) / static_cast<double>(file.totalBytes);
+                const auto mapBulk = [this, section](
+                                         SyncPart& part,
+                                         std::vector<std::string> const& rows,
+                                         std::vector<std::string> const& sources
+                                     )
+                {
+                    for (std::size_t index = 0; index < rows.size(); ++index)
+                    {
+                        part.observers.push_back(progressFor(section, rows[index]));
+                        if (index < sources.size())
+                            part.indexBySource.emplace(sources[index], index);
+                    }
+                };
+                const auto setCovering = [this, section](std::vector<std::string> const& rows, double value)
+                {
+                    for (auto const& row : rows)
+                    {
+                        for (auto const& observer : progressCovering(section, row))
+                            *observer = value;
+                    }
+                };
+
+                mapBulk(*uploads, result.uploads, result.uploadSources);
+                mapBulk(*downloads, result.downloads, result.downloadSources);
+                mapBulk(*remoteDeletes, result.remoteDeletes, result.remoteDeleteSources);
+                mapBulk(*localDeletes, result.localDeletes, result.localDeleteSources);
+
+                // A part without rows was never queued and will not complete.
+                const std::array parts{
+                    std::pair{request.uploadId, uploads},
+                    std::pair{request.downloadId, downloads},
+                    std::pair{request.remoteDeleteId, remoteDeletes},
+                    std::pair{request.localDeleteId, localDeletes},
+                };
+                for (auto const& [operationId, part] : parts)
+                {
+                    if (part->observers.empty())
+                        operationQueue_->removeCallbacks(operationId);
+                    else
+                        part->map();
+                }
+                setCovering(result.createdDirectories, 1.1);
+                setCovering(result.failed, -1.0);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            },
+            [this, request](std::string const& message)
+            {
+                Log::error("Sync: the backend did not run the selection: {}", message);
+                for (auto const& operationId :
+                     {request.uploadId, request.downloadId, request.remoteDeleteId, request.localDeleteId})
+                    operationQueue_->removeCallbacks(operationId);
             }
-            std::erase_if(
-                *seenInFlight,
-                [&](std::uint64_t entryIndex)
-                {
-                    if (stillInFlight.contains(entryIndex))
-                        return false;
-                    auto& observer = observersRef[entryIndex];
-                    if (observer->value() >= 0.0 && observer->value() < 1.0)
-                        *observer = 1.1;
-                    return true;
-                }
-            );
-            Nui::globalEventContext.executeActiveEventsImmediately();
-        };
-
-        auto onEnqueued = [this, onBulkProgress = std::move(onBulkProgress), observersShared, indexBySource](
-                              std::vector<Ids::OperationId> const& opIds
-                          )
-        {
-            if (opIds.empty())
-                return;
-            operationQueue_->addBulkProgressCallback(opIds.back(), onBulkProgress);
-            operationQueue_->addFailedEntriesCallback(
-                opIds.back(),
-                [observersShared, indexBySource](std::vector<std::filesystem::path> const& failedPaths)
-                {
-                    for (auto const& path : failedPaths)
-                    {
-                        if (const auto iter = indexBySource->find(path.generic_string()); iter != indexBySource->end())
-                            *(*observersShared)[iter->second] = -1.0;
-                    }
-                }
-            );
-            operationQueue_->addCompletionCallback(
-                opIds.back(),
-                [observersShared](bool success)
-                {
-                    for (auto const& observer : *observersShared)
-                    {
-                        // Rows already marked failed stay failed on an otherwise successful bulk.
-                        if (!(success && observer->value() < 0.0))
-                            *observer = success ? 1.1 : -1.0;
-                    }
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
-            );
-        };
-
-        auto onBulkAck = [isUpload](bool success, std::string const& info)
-        {
-            if (!success)
-                Log::error("Sync bulk {} failed: {}", isUpload ? "upload" : "download", info);
-        };
-
-        if (isUpload)
-        {
-            operationQueue_->enqueueBulkUpload(
-                std::move(entries),
-                /*allowOverwrite*/ true,
-                /*insertRefresh*/ false,
-                mode,
-                /*onEachComplete*/ {},
-                std::move(onBulkAck),
-                std::move(onEnqueued)
-            );
-        }
-        else
-        {
-            operationQueue_->enqueueBulkDownload(
-                std::move(entries),
-                /*allowOverwrite*/ true,
-                /*insertRefresh*/ false,
-                mode,
-                /*onEachComplete*/ {},
-                std::move(onBulkAck),
-                std::move(onEnqueued)
-            );
-        }
+        );
     }
 };
 

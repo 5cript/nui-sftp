@@ -128,30 +128,24 @@ void BackendSyncProvider::loadChildren(
     );
 }
 
-void BackendSyncProvider::buildEnqueuePlan(
-    SharedData::Sync::DiffSection section,
-    std::vector<std::string> selectedRelKeys,
-    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+void BackendSyncProvider::executeSelection(
+    SharedData::Sync::SyncExecutionRequest request,
+    std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
     std::function<void(std::string const&)> onRejected
 )
 {
     if (!queue_ || closed_)
         return;
 
-    const auto expectedGeneration = generation_;
-    queue_->buildSyncEnqueuePlan(
-        sessionId_,
-        section,
-        std::move(selectedRelKeys),
-        expectedGeneration,
-        [alive = std::weak_ptr{alive_},
-            expectedGeneration,
-            onResolved = std::move(onResolved)](std::vector<SharedData::Sync::EnqueuePlanEntry> plan) mutable
+    request.syncSessionId = sessionId_;
+    request.generation = generation_;
+    queue_->executeSyncSelection(
+        std::move(request),
+        [alive = std::weak_ptr{alive_}, onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
         {
-            const auto self = alive.lock();
-            if (!self || expectedGeneration != (*self)->generation_)
-                return;
-            onResolved(std::move(plan));
+            // The operations are queued either way, the reply only maps them to rows of a dialog that may be gone.
+            if (alive.lock())
+                onResolved(std::move(result));
         },
         std::move(onRejected)
     );

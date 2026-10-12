@@ -295,12 +295,9 @@ class OperationQueue
         std::function<void(std::string const&)> onRejected
     );
 
-    void buildSyncEnqueuePlan(
-        Ids::SyncSessionId syncSessionId,
-        SharedData::Sync::DiffSection section,
-        std::vector<std::string> selectedRelKeys,
-        std::uint64_t generation,
-        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    void executeSyncSelection(
+        SharedData::Sync::SyncExecutionRequest request,
+        std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
         std::function<void(std::string const&)> onRejected
     );
 

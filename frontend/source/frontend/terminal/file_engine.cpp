@@ -417,42 +417,46 @@ void FileEngine::loadSyncDiffChildren(
     );
 }
 
-void FileEngine::buildSyncEnqueuePlan(
-    Ids::SyncSessionId syncSessionId,
-    SharedData::Sync::DiffSection section,
-    std::vector<std::string> selectedRelKeys,
-    std::uint64_t generation,
-    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+void FileEngine::executeSyncSelection(
+    SharedData::Sync::SyncExecutionRequest request,
+    std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
     std::function<void(std::string const&)> onRejected
 )
 {
-    Nui::RpcClient::callWithBackChannel(
-        fmt::format("Session::{}::sftp::buildSyncEnqueuePlan", impl_->engine->sshSessionId().value()),
-        [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
+    lazyOpen(
+        [this, request = std::move(request), onResolved = std::move(onResolved), onRejected = std::move(onRejected)](
+            auto const& channelId, std::string const& info
+        ) mutable
         {
-            if (val.hasOwnProperty("error"))
+            if (!channelId)
             {
-                onRejected(val["error"].as<std::string>());
+                onRejected(info);
                 return;
             }
-            try
-            {
-                const auto json = nlohmann::json::parse(Nui::JSON::stringify(val));
-                std::vector<SharedData::Sync::EnqueuePlanEntry> plan;
-                plan.reserve(json.size());
-                for (auto const& elem : json)
-                    plan.push_back(elem.get<SharedData::Sync::EnqueuePlanEntry>());
-                onResolved(std::move(plan));
-            }
-            catch (std::exception const& exc)
-            {
-                onRejected(exc.what());
-            }
-        },
-        syncSessionId.value(),
-        section,
-        selectedRelKeys,
-        std::to_string(generation)
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::executeSyncSelection", impl_->engine->sshSessionId().value()),
+                [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                    {
+                        onRejected(val["error"].as<std::string>());
+                        return;
+                    }
+                    try
+                    {
+                        onResolved(
+                            nlohmann::json::parse(Nui::JSON::stringify(val)).get<SharedData::Sync::SyncExecutionResult>()
+                        );
+                    }
+                    catch (std::exception const& exception)
+                    {
+                        onRejected(exception.what());
+                    }
+                },
+                channelId.value().value(),
+                request
+            );
+        }
     );
 }
 

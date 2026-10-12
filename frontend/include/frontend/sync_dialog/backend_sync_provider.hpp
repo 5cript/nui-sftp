@@ -6,7 +6,7 @@
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
-#include <shared_data/sync/enqueue_plan_entry.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -91,14 +91,12 @@ class BackendSyncProvider
     );
 
     /**
-     * @brief Asks the backend to collapse @p selectedRelKeys into a minimal
-     *        enqueue plan for @p section.  Uses the cached @ref generation_ so
-     *        stale requests (after a recompute) are rejected by the server.
+     * @brief Has the backend plan and queue @p request for this session. Uses the cached @ref generation_ so a
+     *        request against a recomputed diff is refused by the backend.
      */
-    void buildEnqueuePlan(
-        SharedData::Sync::DiffSection section,
-        std::vector<std::string> selectedRelKeys,
-        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    void executeSelection(
+        SharedData::Sync::SyncExecutionRequest request,
+        std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
         std::function<void(std::string const&)> onRejected
     );
 

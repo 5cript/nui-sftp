@@ -8,7 +8,7 @@
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
-#include <shared_data/sync/enqueue_plan_entry.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
@@ -108,17 +108,12 @@ class FileEngine
     );
 
     /**
-     * @brief Asks the backend to collapse the selected relKey SPARSE set in @p section
-     *        into a minimal enqueue plan.  An entry X in @p selectedRelKeys means "X
-     *        and every descendant selected"; the backend-resident minimizer handles
-     *        bulk-dir / structural-dir rules.
+     * @brief Has the backend plan and queue the selected rows of one section, see
+     *        @ref SharedData::Sync::SyncExecutionRequest.
      */
-    void buildSyncEnqueuePlan(
-        Ids::SyncSessionId syncSessionId,
-        SharedData::Sync::DiffSection section,
-        std::vector<std::string> selectedRelKeys,
-        std::uint64_t generation,
-        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    void executeSyncSelection(
+        SharedData::Sync::SyncExecutionRequest request,
+        std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
         std::function<void(std::string const&)> onRejected
     );
 

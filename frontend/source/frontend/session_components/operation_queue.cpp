@@ -1516,20 +1516,15 @@ void OperationQueue::loadSyncDiffChildren(
     );
 }
 
-void OperationQueue::buildSyncEnqueuePlan(
-    Ids::SyncSessionId syncSessionId,
-    SharedData::Sync::DiffSection section,
-    std::vector<std::string> selectedRelKeys,
-    std::uint64_t generation,
-    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+void OperationQueue::executeSyncSelection(
+    SharedData::Sync::SyncExecutionRequest request,
+    std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
     std::function<void(std::string const&)> onRejected
 )
 {
     if (!impl_->fileEngine)
-        return;
-    impl_->fileEngine->buildSyncEnqueuePlan(
-        syncSessionId, section, std::move(selectedRelKeys), generation, std::move(onResolved), std::move(onRejected)
-    );
+        return onRejected("No file engine set");
+    impl_->fileEngine->executeSyncSelection(std::move(request), std::move(onResolved), std::move(onRejected));
 }
 
 void OperationQueue::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
