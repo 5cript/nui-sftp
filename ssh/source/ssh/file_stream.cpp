@@ -280,17 +280,19 @@ namespace SecureShell
 
             void onRead(std::make_signed_t<std::size_t> amount)
             {
+                // The callback runs before the promise is set: the waiting caller may destroy what it captured.
                 if (amount < 0)
                 {
-                    promise.set_value(std::unexpected(stream.lastError()));
+                    const auto error = stream.lastError();
                     callback({});
+                    promise.set_value(std::unexpected(error));
                     return;
                 }
 
                 if (amount == 0)
                 {
-                    promise.set_value(totalRead);
                     callback({});
+                    promise.set_value(totalRead);
                     return;
                 }
 
