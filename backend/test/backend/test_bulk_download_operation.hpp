@@ -570,7 +570,7 @@ namespace Test
 
     TEST_F(BulkDownloadOperationTests, SetPrescannedFileListPreservesMtimeOnDownloadedFiles)
     {
-        // Regression: BulkAddEntry → PrescannedFile → DirectoryEntry must
+        // Regression: BulkDownloadEntry → PrescannedFile → DirectoryEntry must
         // carry mtime through so each downloaded local file ends up with the
         // remote's mtime (otherwise a follow-up sync would see all downloaded
         // files as "modified" and re-enqueue them forever).
