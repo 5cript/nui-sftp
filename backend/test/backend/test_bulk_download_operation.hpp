@@ -942,4 +942,31 @@ namespace Test
         EXPECT_EQ(maxInFlight, 1u);
         EXPECT_EQ(operation.parallelWorkDoable(10), 1) << "nothing pending, still answers at least one";
     }
+
+#ifndef _WIN32
+    TEST_F(BulkDownloadOperationTests, InheritedPermissionsNeverMakeTheRootWorldWritableOrSpecial)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // The scan root carries no permissions, applying "unknown" used to chmod it to 07777.
+        const auto localRoot = downloadDir_.path() / "inherited";
+        BulkDownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = remote("/home/test/Documents"),
+                .localPath = toLocal(localRoot),
+                .individualOptions = {.inheritPermissions = true},
+            }
+        };
+        auto scan = runScan(*sftp, "/home/test/Documents");
+        operation.setScanResult(std::move(scan.entries), scan.totalBytes);
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        const auto mode = std::filesystem::status(localRoot).permissions();
+        EXPECT_EQ(mode & (std::filesystem::perms::set_uid | std::filesystem::perms::set_gid | std::filesystem::perms::sticky_bit), std::filesystem::perms::none);
+        EXPECT_EQ(mode & std::filesystem::perms::others_write, std::filesystem::perms::none);
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "doc1.txt"));
+    }
+#endif
 }
