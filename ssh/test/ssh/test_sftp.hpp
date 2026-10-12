@@ -890,4 +890,133 @@ namespace SecureShell::Test
         ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
         EXPECT_FALSE(fut.get().has_value());
     }
+
+    namespace
+    {
+        std::string readRemote(SftpSession& sftp, std::string_view path)
+        {
+            auto openFuture = sftp.openFile(remote(path), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+            if (openFuture.wait_for(2s) != std::future_status::ready)
+                return "<timeout>";
+            auto opened = openFuture.get();
+            if (!opened.has_value())
+                return "<missing>";
+            std::string data;
+            auto readFuture = opened->lock()->readAll(
+                [&data](std::string_view chunk)
+                {
+                    data.append(chunk);
+                    return true;
+                }
+            );
+            if (readFuture.wait_for(2s) != std::future_status::ready || !readFuture.get().has_value())
+                return "<read failed>";
+            return data;
+        }
+
+        bool remoteExists(SftpSession& sftp, std::string_view path)
+        {
+            auto future = sftp.lstat(remote(path));
+            return future.wait_for(2s) == std::future_status::ready && future.get().has_value();
+        }
+    }
+
+    TEST_F(SftpTests, RenameNoReplaceRefusesAnExistingFile)
+    {
+        for (const bool hardlink : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(Sftp);
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+            if (hardlink)
+                ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "hardlink@openssh.com"}}));
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+            auto future = sftp->performPromise(
+                [&sftp]()
+                {
+                    return sftp->renameNoReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"));
+                }
+            );
+            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            const auto result = future.get();
+            ASSERT_FALSE(result.has_value()) << "hardlink: " << hardlink;
+            EXPECT_EQ(result.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+            EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+            EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
+        }
+    }
+
+    TEST_F(SftpTests, RenameNoReplaceMovesToAFreeName)
+    {
+        for (const bool hardlink : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(Sftp);
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+            if (hardlink)
+                ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "hardlink@openssh.com"}}));
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+            auto future = sftp->performPromise(
+                [&sftp]()
+                {
+                    return sftp->renameNoReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/moved.txt"));
+                }
+            );
+            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            ASSERT_TRUE(future.get().has_value()) << "hardlink: " << hardlink;
+            EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
+            EXPECT_EQ(readRemote(*sftp, "/home/test/moved.txt"), "source");
+        }
+    }
+
+    TEST_F(SftpTests, RenameReplaceReplacesWithAndWithoutPosixRename)
+    {
+        for (const bool posixRename : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(Sftp);
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+            if (posixRename)
+                ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "posix-rename@openssh.com"}}));
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+            auto future = sftp->performPromise(
+                [&sftp]()
+                {
+                    return sftp->renameReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"), ".aside");
+                }
+            );
+            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            ASSERT_TRUE(future.get().has_value()) << "posixRename: " << posixRename;
+            EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "source");
+            EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
+            EXPECT_FALSE(remoteExists(*sftp, "/home/test/target.txt.aside"));
+        }
+    }
+
+    TEST_F(SftpTests, FailedRenameReplaceRestoresTheDestination)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+        // Moving the destination aside succeeds, the rename into place fails.
+        ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 1}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto future = sftp->performPromise(
+            [&sftp]()
+            {
+                return sftp->renameReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"), ".aside");
+            }
+        );
+        ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+        EXPECT_FALSE(future.get().has_value());
+        ASSERT_TRUE(serverStartResult->command("failRenames", {{"enabled", false}}));
+        // The restore is a rename as well and ran while renames failed, so the original sits aside: never lost.
+        const bool restored = readRemote(*sftp, "/home/test/target.txt") == "target";
+        const bool keptAside = readRemote(*sftp, "/home/test/target.txt.aside") == "target";
+        EXPECT_TRUE(restored || keptAside);
+        EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+    }
 }
