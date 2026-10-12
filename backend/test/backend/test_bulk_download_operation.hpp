@@ -97,17 +97,29 @@ namespace Test
         EXPECT_FALSE(operation.isBarrier());
     }
 
-    TEST_F(BulkDownloadOperationTests, EmptyEntriesCompletesImmediately)
+    TEST_F(BulkDownloadOperationTests, EmptyScanResultFails)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         BulkDownloadOperation operation{*sftp, {.localPath = downloadDir_.path() / "empty"}};
+        // A scanned tree always holds its root, an empty one means the scan never delivered.
         operation.setScanResult({}, 0);
 
         auto workResult = operation.work();
-        ASSERT_TRUE(workResult.has_value());
-        EXPECT_EQ(workResult.value(), BulkDownloadOperation::WorkStatus::Complete);
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, SharedData::OperationErrorType::ScanIncomplete);
+    }
+
+    TEST_F(BulkDownloadOperationTests, StartWithoutEntriesFails)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        BulkDownloadOperation operation{*sftp, {}};
+        auto workResult = operation.work();
+        ASSERT_FALSE(workResult.has_value());
+        EXPECT_EQ(workResult.error().type, SharedData::OperationErrorType::ImplementationError);
     }
 
     TEST_F(BulkDownloadOperationTests, FirstEntryMustBeDirectory)

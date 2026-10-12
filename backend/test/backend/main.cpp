@@ -22,6 +22,7 @@
 #include "test_password_request.hpp"
 #include "test_sync_session.hpp"
 #include "test_transfer_failures.hpp"
+#include "test_operation_queue.hpp"
 
 #include <log/log.hpp>
 
