@@ -267,7 +267,7 @@ int main(int argc, char** argv)
         std::unordered_set<std::string> roots;
         for (std::size_t index = 0; index < count; ++index)
             roots.insert(fmt::format("project{:06}", index));
-        const ScanTrees trees{.local = &sparseLocal, .remote = &sparseRemote, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &sparseLocal, .remote = &sparseRemote};
         const auto planTime = measure(
             repetitions,
             [&]
@@ -281,7 +281,7 @@ int main(int argc, char** argv)
     {
         Stores stores;
         stores.run(local, remote);
-        const ScanTrees trees{.local = &local, .remote = &remote, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &local, .remote = &remote};
         std::unordered_set<std::string> roots;
         for (auto const& row : stores.uploads.loadChildren("", trees))
             roots.insert(row.relKey);
@@ -311,7 +311,7 @@ int main(int argc, char** argv)
             }
         );
         report("diff + finalize: one-sided subtree", oneSided.subtreeFileCount, diffTime);
-        const ScanTrees trees{.local = &oneSided, .remote = &empty, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &oneSided, .remote = &empty};
         const auto planTime = measure(
             repetitions,
             [&]
