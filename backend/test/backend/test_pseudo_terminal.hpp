@@ -7,15 +7,20 @@
 #    include <persistence/state/termios.hpp>
 
 #    include <boost/asio/io_context.hpp>
+#    include <boost/asio/thread_pool.hpp>
 #    include <fmt/format.h>
 #    include <gtest/gtest.h>
 
+#    include <atomic>
 #    include <chrono>
+#    include <condition_variable>
 #    include <cstddef>
 #    include <filesystem>
 #    include <fstream>
 #    include <functional>
 #    include <iterator>
+#    include <memory>
+#    include <mutex>
 #    include <optional>
 #    include <string>
 #    include <string_view>
@@ -146,6 +151,62 @@ namespace Test
             record.resize(length, writer);
             return record;
         }
+
+        /**
+         * @brief Collects the output of a pty from the read handler threads.
+         */
+        struct PseudoTerminalOutput
+        {
+            std::mutex mutex;
+            std::condition_variable changed;
+            std::string data;
+
+            /**
+             * @brief Waits until the collected output contains @p text.
+             * @param text The text to wait for.
+             */
+            bool waitFor(std::string_view text)
+            {
+                std::unique_lock lock{mutex};
+                return changed.wait_for(
+                    lock,
+                    std::chrono::seconds{5},
+                    [this, text]()
+                    {
+                        return data.find(text) != std::string::npos;
+                    }
+                );
+            }
+        };
+
+        /**
+         * @brief Opens a pty without a process, its echo reflects writes back to the reader.
+         * @param pool Runs the read handlers on several threads, like the window pool in production.
+         */
+        std::optional<PTY::PseudoTerminal> openEchoingPseudoTerminal(boost::asio::thread_pool& pool)
+        {
+            return PTY::createPseudoTerminal(pool.executor(), Persistence::Termios::saneDefaults());
+        }
+
+        /**
+         * @brief Starts reading @p terminal into @p output.
+         * @param terminal The terminal to read from.
+         * @param output The output to append to.
+         */
+        void startReadingInto(PTY::PseudoTerminal& terminal, std::shared_ptr<PseudoTerminalOutput> const& output)
+        {
+            terminal.startReading(
+                [output](std::string_view data)
+                {
+                    {
+                        std::scoped_lock lock{output->mutex};
+                        output->data.append(data);
+                    }
+                    output->changed.notify_all();
+                },
+                [](std::string_view) {}
+            );
+        }
     }
 
     TEST(PseudoTerminalTests, InputLargerThanThePtyBufferArrivesCompleteWhileTheProcessIsNotReading)
@@ -206,6 +267,83 @@ namespace Test
                 << "Record at " << offset << " is torn or out of order.";
             ++nextIndex[writerPosition];
         }
+    }
+
+    TEST(PseudoTerminalTests, EchoedInputIsDelivered)
+    {
+        boost::asio::thread_pool pool{4};
+        auto terminal = openEchoingPseudoTerminal(pool);
+        ASSERT_TRUE(terminal);
+        const auto output = std::make_shared<PseudoTerminalOutput>();
+        startReadingInto(*terminal, output);
+
+        ASSERT_TRUE(terminal->write("ping\n"));
+        EXPECT_TRUE(output->waitFor("ping"));
+
+        terminal.reset();
+        pool.join();
+    }
+
+    TEST(PseudoTerminalTests, WritesFailAfterStopReading)
+    {
+        boost::asio::thread_pool pool{4};
+        auto terminal = openEchoingPseudoTerminal(pool);
+        ASSERT_TRUE(terminal);
+        const auto output = std::make_shared<PseudoTerminalOutput>();
+        startReadingInto(*terminal, output);
+        ASSERT_TRUE(terminal->write("ping\n"));
+        ASSERT_TRUE(output->waitFor("ping"));
+
+        terminal->stopReading();
+
+        EXPECT_FALSE(terminal->write("pong\n"));
+
+        terminal.reset();
+        pool.join();
+    }
+
+    TEST(PseudoTerminalTests, DestroyingWhileAReadIsPendingIsSafe)
+    {
+        boost::asio::thread_pool pool{4};
+        for (int iteration = 0; iteration < 50; ++iteration)
+        {
+            auto terminal = openEchoingPseudoTerminal(pool);
+            ASSERT_TRUE(terminal);
+            startReadingInto(*terminal, std::make_shared<PseudoTerminalOutput>());
+            terminal.reset();
+        }
+        pool.join();
+    }
+
+    TEST(PseudoTerminalTests, DestroyingWhileOutputFlowsIsSafe)
+    {
+        boost::asio::thread_pool pool{4};
+        for (int iteration = 0; iteration < 50; ++iteration)
+        {
+            auto terminal = openEchoingPseudoTerminal(pool);
+            ASSERT_TRUE(terminal);
+            startReadingInto(*terminal, std::make_shared<PseudoTerminalOutput>());
+            for (int line = 0; line < 20; ++line)
+                terminal->write("some output line\n");
+            terminal.reset();
+        }
+        pool.join();
+    }
+
+    TEST(PseudoTerminalTests, OutputCallbackIsReleasedAfterDestruction)
+    {
+        boost::asio::thread_pool pool{4};
+        auto terminal = openEchoingPseudoTerminal(pool);
+        ASSERT_TRUE(terminal);
+        const auto output = std::make_shared<PseudoTerminalOutput>();
+        startReadingInto(*terminal, output);
+        ASSERT_TRUE(terminal->write("ping\n"));
+        ASSERT_TRUE(output->waitFor("ping"));
+
+        terminal.reset();
+        pool.join();
+
+        EXPECT_EQ(output.use_count(), 1);
     }
 }
 
