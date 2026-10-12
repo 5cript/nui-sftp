@@ -24,7 +24,7 @@ namespace SharedData::Sync::Test
         {
             directories[directory].push_back(
                 DirectoryEntry{
-                    .path = name,
+                    .name = name,
                     .type = FileType::Regular,
                     .size = size,
                     .mtime = mtime,
@@ -34,7 +34,7 @@ namespace SharedData::Sync::Test
 
         void addDirectory(std::string const& directory, std::string const& name)
         {
-            directories[directory].push_back(DirectoryEntry{.path = name, .type = FileType::Directory});
+            directories[directory].push_back(DirectoryEntry{.name = name, .type = FileType::Directory});
             directories[directory + "/" + name];
         }
     };
@@ -44,10 +44,11 @@ namespace SharedData::Sync::Test
         return
             [&filesystem](std::filesystem::path const& path) -> std::expected<std::vector<DirectoryEntry>, std::string>
         {
-            filesystem.listed.push_back(path.generic_string());
-            const auto iter = filesystem.directories.find(path.generic_string());
+            const auto key = relative.empty() ? std::string{"/root"} : "/root/" + relative.value();
+            filesystem.listed.push_back(key);
+            const auto iter = filesystem.directories.find(key);
             if (iter == filesystem.directories.end())
-                return std::unexpected(std::string{"missing "} + path.generic_string());
+                return std::unexpected(std::string{"missing "} + key);
             return iter->second;
         };
     }
