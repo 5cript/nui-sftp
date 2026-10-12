@@ -42,10 +42,18 @@ class DeleteOperation : public Operation
 
     std::expected<WorkStatus, Error> work() override;
 
+    /**
+     * @brief The scanned content of remotePath, see @ref appendScanResult.
+     */
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */);
 
     /**
-     * @brief Deletes exactly @p targets, last first, without a scan. For a bulk delete of files.
+     * @brief Adds the scanned content of @p root, which has to lie below it, otherwise nothing is deleted.
+     */
+    void appendScanResult(Paths::RemotePath const& root, std::vector<SharedData::DirectoryEntry> const& entries);
+
+    /**
+     * @brief Deletes exactly @p targets, last first, without a scan. For the files of a bulk delete.
      */
     void setTargets(std::vector<Paths::RemotePath> targets);
 
@@ -53,6 +61,11 @@ class DeleteOperation : public Operation
      * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first.
      */
     void scanFirst(std::unique_ptr<ScanOperation> scan);
+
+    /**
+     * @brief Like @ref scanFirst for one more directory, so one operation deletes several directories.
+     */
+    void addScanRoot(std::unique_ptr<ScanOperation> scan);
 
     bool scanning() const noexcept
     {
@@ -101,7 +114,7 @@ class DeleteOperation : public Operation
     std::vector<Paths::RemotePath> targets_{};
     /** @brief A scanned entry was not a valid path within remotePath_, nothing may be deleted. */
     std::optional<std::string> invalidScanEntry_{};
-    std::unique_ptr<ScanPhaseDriver> scanPhase_{};
+    std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
     bool scanDelivered_{false};
     bool recursive_{false};
 };

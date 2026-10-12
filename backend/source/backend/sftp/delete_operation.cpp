@@ -145,27 +145,31 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::R
 
 void DeleteOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */)
 {
-    targets_.clear();
-    targets_.reserve(entries.size());
+    appendScanResult(remotePath_, entries);
+}
+
+void DeleteOperation::appendScanResult(Paths::RemotePath const& root, std::vector<SharedData::DirectoryEntry> const& entries)
+{
+    scanDelivered_ = true;
     for (auto const& entry : entries)
     {
         const auto path = SharedData::fullPath(entries, entry);
         auto target = Utility::toRemotePath(path);
-        if (!target || target->isRoot() || !target->isWithin(remotePath_))
+        if (!target || target->isRoot() || !target->isWithin(root))
         {
             invalidScanEntry_ = Utility::pathToUtf8Generic(path);
-            targets_.clear();
             break;
         }
         targets_.push_back(*std::move(target));
     }
+    if (invalidScanEntry_)
+        targets_.clear();
     totalToDelete_ = targets_.size();
-    scanDelivered_ = true;
 }
 
 void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
 {
-    targets_.clear();
+    scanDelivered_ = true;
     for (auto& target : targets)
     {
         if (target.empty() || target.isRoot())
@@ -178,19 +182,25 @@ void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
     if (invalidScanEntry_)
         targets_.clear();
     totalToDelete_ = targets_.size();
-    scanDelivered_ = true;
 }
 
 void DeleteOperation::scanFirst(std::unique_ptr<ScanOperation> scan)
 {
-    auto phase = std::make_unique<ScanPhase<ScanOperation>>(
-        [this](ScanOperation& finished)
-        {
-            setScanResult(finished.ejectEntries(), finished.totalBytes());
-        }
-    );
-    phase->addRoot(std::move(scan));
-    scanPhase_ = std::move(phase);
+    addScanRoot(std::move(scan));
+}
+
+void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
+{
+    if (!scanPhase_)
+    {
+        scanPhase_ = std::make_unique<ScanPhase<ScanOperation>>(
+            [this](ScanOperation& finished)
+            {
+                appendScanResult(Utility::toRemotePathOrUnset(finished.remotePath()), finished.ejectEntries());
+            }
+        );
+    }
+    scanPhase_->addRoot(std::move(scan));
 }
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::cancel(bool adoptCancelState)

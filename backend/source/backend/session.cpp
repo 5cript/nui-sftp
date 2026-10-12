@@ -1817,6 +1817,14 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                         if (!self)
                             return reply({{"error", "Session no longer exists"}});
 
+                        // Nothing is queued when one of the targets is protected.
+                        for (auto const& entry : request.entries)
+                        {
+                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, entry.target);
+                                !allowed)
+                                return reply.error(fmt::format("Refusing to delete '{}'", entry.target.value()));
+                        }
+
                         const auto enqueued = self->operationQueue_->addBulkDeleteOperation(
                             *channel, request, Ids::makeOperationId(bulkOperationIdString)
                         );

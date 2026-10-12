@@ -1582,13 +1582,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     Ids::OperationId bulkOperationId
 )
 {
-    // Assumed in strand.  Strategy: build a single DeleteOperation with
-    // pre-filled entries for all *file* paths in the request — that gives
-    // one bulk-delete card on the frontend driven by the existing
-    // BulkDeleteProgress emit path.  Each *directory* entry still needs the
-    // recursive scan-then-delete flow so descendants are removed; those
-    // become standard single-Delete cards via addDeleteOperation.
-
+    // Assumed in strand. One DeleteOperation, so one card and one completion for the whole request: files are
+    // deleted as given, every real directory is scanned first and deleted with its content.
     auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
@@ -1618,6 +1613,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
         }
     );
 
+    std::vector<Paths::RemotePath> fileTargets;
+    std::size_t scannedDirectories = 0;
     for (auto const& entry : request.entries)
     {
         if (!refuseProtectedDeleteTarget(sftp, entry.target).has_value())
@@ -1648,7 +1645,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
                 continue;
             }
         }
-        ++enqueuedDirs;
+        fileTargets.push_back(entry.target);
     }
 
     const auto queued = fileTargets.size() + scannedDirectories;
@@ -1661,18 +1658,26 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     operation->setTargets(std::move(fileTargets));
     targetQueue.emplace_back(bulkOperationId, std::move(operation));
 
-    Log::info(
-        "Bulk delete: {} file entries (one card) + {} directory entries",
-        request.entries.size() - enqueuedDirs,
-        enqueuedDirs
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = bulkOperationId,
+            .type = SharedData::OperationType::BulkDelete,
+            .mode = request.mode,
+            .insertRefresh = request.insertRefresh,
+            .totalBytes = static_cast<std::uint64_t>(fileCount),
+            .remotePath = commonParent,
+            .scanPhase = scannedDirectories > 0,
+        }
     );
+    Log::info("Bulk delete: {} files and {} scanned directories in one operation", fileCount, scannedDirectories);
 
     if (!request.entries.empty())
     {
         bulkResumeStash_.insert_or_assign(bulkOperationId, BulkResumeEntry{.request = request});
     }
 
-    return request.entries.size();
+    return queued;
 }
 
 std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
