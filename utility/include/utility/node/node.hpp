@@ -27,6 +27,14 @@ namespace SecureShell::Test
         int code = 0;
 
         void command(std::string const& command);
+        /**
+         * @brief Sends a command with arguments and blocks until the process acknowledges it.
+         *
+         * @param command The command name.
+         * @param arguments Extra fields merged into the command object.
+         * @return true if the acknowledgement arrived.
+         */
+        bool command(std::string const& command, nlohmann::json const& arguments);
         void terminate();
         int wait();
     };
