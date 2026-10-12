@@ -10,6 +10,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/session.hpp>
+#include <paths/remote_path.hpp>
 #include <utility/user_directories.hpp>
 
 #include <atomic>
@@ -71,7 +72,7 @@ namespace SecureShell
          * @return std::future<std::expected<std::vector<FileInformation>, Error>>
          */
         std::future<std::expected<std::vector<FileInformation>, Error>>
-        listDirectory(std::filesystem::path const& path);
+        listDirectory(Paths::RemotePath const& path);
 
         /**
          * @brief In-strand variant of listDirectory. Must be called from within the processing thread.
@@ -79,7 +80,7 @@ namespace SecureShell
          * @param path
          * @return std::expected<std::vector<FileInformation>, Error>
          */
-        std::expected<std::vector<FileInformation>, Error> listDirectoryInStrand(std::filesystem::path const& path);
+        std::expected<std::vector<FileInformation>, Error> listDirectoryInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Create a directory.
@@ -89,7 +90,7 @@ namespace SecureShell
          * @return std::future<std::expected<void, Error>>
          */
         std::future<std::expected<void, Error>> createDirectory(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_all
         );
 
@@ -97,7 +98,7 @@ namespace SecureShell
          * @brief In-strand variant of createDirectory. Must be called from within the processing thread.
          */
         std::expected<void, Error> createDirectoryInStrand(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_all
         );
 
@@ -109,7 +110,7 @@ namespace SecureShell
          * @return std::future<std::expected<void, Error>>
          */
         std::future<std::expected<void, Error>> createDirectoryIfItDoesntExist(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_all
         );
 
@@ -117,7 +118,7 @@ namespace SecureShell
          * @brief In-strand variant of createDirectoryIfItDoesntExist. Must be called from within the processing thread.
          */
         std::expected<void, Error> createDirectoryIfItDoesntExistInStrand(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_all
         );
 
@@ -129,7 +130,7 @@ namespace SecureShell
          * @return std::future<std::expected<void, Error>>
          */
         std::future<std::expected<void, Error>> createFile(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_read |
                 std::filesystem::perms::owner_write
         );
@@ -138,7 +139,7 @@ namespace SecureShell
          * @brief In-strand variant of createFile. Must be called from within the processing thread.
          */
         std::expected<void, Error> createFileInStrand(
-            std::filesystem::path const& path,
+            Paths::RemotePath const& path,
             std::filesystem::perms permissions = std::filesystem::perms::owner_read |
                 std::filesystem::perms::owner_write
         );
@@ -149,12 +150,12 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<void, Error>> removeFile(std::filesystem::path const& path);
+        std::future<std::expected<void, Error>> removeFile(Paths::RemotePath const& path);
 
         /**
          * @brief In-strand variant of removeFile. Must be called from within the processing thread.
          */
-        std::expected<void, Error> removeFileInStrand(std::filesystem::path const& path);
+        std::expected<void, Error> removeFileInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Removes a directory.
@@ -162,12 +163,12 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<void, Error>> removeDirectory(std::filesystem::path const& path);
+        std::future<std::expected<void, Error>> removeDirectory(Paths::RemotePath const& path);
 
         /**
          * @brief In-strand variant of removeDirectory. Must be called from within the processing thread.
          */
-        std::expected<void, Error> removeDirectoryInStrand(std::filesystem::path const& path);
+        std::expected<void, Error> removeDirectoryInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Removes everything in the provided paths.
@@ -175,7 +176,7 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<void, Error>> removeAll(std::vector<std::filesystem::path> paths);
+        std::future<std::expected<void, Error>> removeAll(std::vector<Paths::RemotePath> paths);
 
         /**
          * @brief Checks a list of directories for non-emptiness.
@@ -183,8 +184,8 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<std::vector<std::filesystem::path>, Error>>
-        filterOutEmptyDirectories(std::vector<std::filesystem::path> directories);
+        std::future<std::expected<std::vector<Paths::RemotePath>, Error>>
+        filterOutEmptyDirectories(std::vector<Paths::RemotePath> directories);
 
         /**
          * @brief Gets the attributes of a file or directory (resolves links).
@@ -192,12 +193,12 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<FileInformation, Error>>
          */
-        std::future<std::expected<FileInformation, Error>> stat(std::filesystem::path const& path);
+        std::future<std::expected<FileInformation, Error>> stat(Paths::RemotePath const& path);
 
         /**
          * @brief In-strand variant of stat. Must be called from within the processing thread.
          */
-        std::expected<FileInformation, Error> statInStrand(std::filesystem::path const& path);
+        std::expected<FileInformation, Error> statInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Gets the attributes of a file or directory and if it is a link, the attributes of the link itself.
@@ -205,12 +206,12 @@ namespace SecureShell
          * @param path
          * @return std::future<std::expected<FileInformation, Error>>
          */
-        std::future<std::expected<FileInformation, Error>> lstat(std::filesystem::path const& path);
+        std::future<std::expected<FileInformation, Error>> lstat(Paths::RemotePath const& path);
 
         /**
          * @brief In-strand variant of lstat. Must be called from within the processing thread.
          */
-        std::expected<FileInformation, Error> lstatInStrand(std::filesystem::path const& path);
+        std::expected<FileInformation, Error> lstatInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Sets the attributes of a file or directory.
@@ -219,12 +220,12 @@ namespace SecureShell
          * @param attributes
          * @return std::future<std::expected<FileInformation, Error>>
          */
-        std::future<std::expected<void, Error>> stat(std::filesystem::path const& path, sftp_attributes attributes);
+        std::future<std::expected<void, Error>> stat(Paths::RemotePath const& path, sftp_attributes attributes);
 
         /**
          * @brief In-strand variant of setstat. Must be called from within the processing thread.
          */
-        std::expected<void, Error> statInStrand(std::filesystem::path const& path, sftp_attributes attributes);
+        std::expected<void, Error> statInStrand(Paths::RemotePath const& path, sftp_attributes attributes);
 
         /**
          * @brief Sets the owner of a file or directory.
@@ -234,12 +235,12 @@ namespace SecureShell
          * @param group
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<void, Error>> chown(std::filesystem::path const& path, uid_t owner, gid_t group);
+        std::future<std::expected<void, Error>> chown(Paths::RemotePath const& path, uid_t owner, gid_t group);
 
         /**
          * @brief In-strand variant of chown. Must be called from within the processing thread.
          */
-        std::expected<void, Error> chownInStrand(std::filesystem::path const& path, uid_t owner, gid_t group);
+        std::expected<void, Error> chownInStrand(Paths::RemotePath const& path, uid_t owner, gid_t group);
 
         /**
          * @brief Sets the permissions of a file or directory.
@@ -248,18 +249,18 @@ namespace SecureShell
          * @param mode
          * @return std::future<std::expected<void, Error>>
          */
-        std::future<std::expected<void, Error>> chmod(std::filesystem::path const& path, std::filesystem::perms perms);
+        std::future<std::expected<void, Error>> chmod(Paths::RemotePath const& path, std::filesystem::perms perms);
 
         /**
          * @brief In-strand variant of chmod. Must be called from within the processing thread.
          */
-        std::expected<void, Error> chmodInStrand(std::filesystem::path const& path, std::filesystem::perms perms);
+        std::expected<void, Error> chmodInStrand(Paths::RemotePath const& path, std::filesystem::perms perms);
 
         /**
          * @brief Move a file or directory.
          */
         std::future<std::expected<void, Error>>
-        rename(std::filesystem::path const& source, std::filesystem::path const& destination);
+        rename(Paths::RemotePath const& source, Paths::RemotePath const& destination);
 
         /**
          * @brief In-strand variant of rename. Must be called from within the processing thread.
@@ -267,7 +268,7 @@ namespace SecureShell
          *        @ref renameNoReplaceInStrand or @ref renameReplaceInStrand to choose.
          */
         std::expected<void, Error>
-        renameInStrand(std::filesystem::path const& source, std::filesystem::path const& destination);
+        renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
 
         /**
          * @brief Renames without ever replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it
@@ -303,27 +304,27 @@ namespace SecureShell
         };
 
         std::future<std::expected<std::weak_ptr<FileStream>, Error>>
-        openFile(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions);
+        openFile(Paths::RemotePath const& path, OpenType openType, std::filesystem::perms permissions);
 
         /**
          * @brief In-strand variant of openFile. Must be called from within the processing thread.
          */
         std::expected<std::weak_ptr<FileStream>, Error>
-        openFileInStrand(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions);
+        openFileInStrand(Paths::RemotePath const& path, OpenType openType, std::filesystem::perms permissions);
 
         /**
          * @brief Determines the directory the server starts the user in, which is the home directory on conforming
          * servers. Falls back to /home/<user> when the server does not answer with an absolute path, or to / when that
          * does not exist either.
          *
-         * @return std::future<std::expected<std::filesystem::path, Error>>
+         * @return std::future<std::expected<Paths::RemotePath, Error>>
          */
-        std::future<std::expected<std::filesystem::path, Error>> homeDirectory();
+        std::future<std::expected<Paths::RemotePath, Error>> homeDirectory();
 
         /**
          * @brief In-strand variant of homeDirectory. Must be called from within the processing thread.
          */
-        std::expected<std::filesystem::path, Error> homeDirectoryInStrand();
+        std::expected<Paths::RemotePath, Error> homeDirectoryInStrand();
 
         /**
          * @brief Reads the XDG user directories from <home>/.config/user-dirs.dirs. A missing file yields no
@@ -333,13 +334,13 @@ namespace SecureShell
          * @return std::future<std::expected<std::vector<Utility::UserDirectory>, Error>>
          */
         std::future<std::expected<std::vector<Utility::UserDirectory>, Error>>
-        userDirectories(std::filesystem::path const& home);
+        userDirectories(Paths::RemotePath const& home);
 
         /**
          * @brief In-strand variant of userDirectories. Must be called from within the processing thread.
          */
         std::expected<std::vector<Utility::UserDirectory>, Error>
-        userDirectoriesInStrand(std::filesystem::path const& home);
+        userDirectoriesInStrand(Paths::RemotePath const& home);
 
         std::future<std::expected<sftp_limits_struct, Error>> limits();
 
@@ -376,33 +377,43 @@ namespace SecureShell
 
         struct DeepLinkResult
         {
-            std::filesystem::path linkTarget;
-            // target may not exist:
+            /** @brief The content of the link at the given path, as stored on the server. */
+            std::string linkContent;
+            /** @brief The end of the link chain. */
+            Paths::RemotePath linkTarget;
+            /** @brief The attributes of @ref linkTarget, empty when it does not exist. */
             std::optional<FileInformation> targetInfo;
         };
         std::future<std::expected<DeepLinkResult, Error>>
-        readLinkDeep(std::filesystem::path const& path, int maxDepth = 10);
+        readLinkDeep(Paths::RemotePath const& path, int maxDepth = 10);
 
         /**
          * @brief In-strand variant of readLinkDeep. Must be called from within the processing thread.
          */
-        std::expected<DeepLinkResult, Error> readLinkDeepInStrand(std::filesystem::path const& path, int maxDepth = 10);
+        std::expected<DeepLinkResult, Error> readLinkDeepInStrand(Paths::RemotePath const& path, int maxDepth = 10);
 
+        /**
+         * @brief Creates a symlink at @p linkPath with the content @p target, which may be relative.
+         */
         std::future<std::expected<void, Error>>
-        createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath);
+        createSymLink(std::string const& target, Paths::RemotePath const& linkPath);
 
         /**
          * @brief In-strand variant of createSymLink. Must be called from within the processing thread.
          */
-        std::expected<void, Error>
-        createSymLinkInStrand(std::filesystem::path const& target, std::filesystem::path const& linkPath);
+        std::expected<void, Error> createSymLinkInStrand(std::string const& target, Paths::RemotePath const& linkPath);
 
       private:
+        /**
+         * @brief Refuses an unset path before it reaches the server.
+         */
+        static std::expected<void, Error> requireSet(Paths::RemotePath const& path);
+
         /**
          * @brief Reads a file into a string, stopping after maximumSize bytes.
          */
         std::expected<std::string, Error>
-        readSmallFileInStrand(std::filesystem::path const& path, std::size_t maximumSize);
+        readSmallFileInStrand(Paths::RemotePath const& path, std::size_t maximumSize);
 
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();

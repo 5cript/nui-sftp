@@ -25,7 +25,8 @@ namespace
     std::optional<std::string>
     readRemoteFile(SecureShell::SftpSession& sftp, std::filesystem::path const& path, std::chrono::seconds timeout)
     {
-        auto openFut = sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        auto openFut =
+            sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
         if (openFut.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
         auto openResult = openFut.get();
@@ -60,6 +61,7 @@ ScanOperation::scanner(std::filesystem::path const& path)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
+    const auto path = remotePath_ / relative;
     auto fut = sftp_->listDirectory(path);
     fut.wait_for(futureTimeout_);
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)

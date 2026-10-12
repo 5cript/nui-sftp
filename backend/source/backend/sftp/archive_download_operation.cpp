@@ -459,7 +459,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
     }
 
     const auto streamOpenResult = sftp_->openFileInStrand(
-        resolved.remoteFullPath,
+        resolved.source,
         SecureShell::SftpSession::OpenType::Read,
         std::filesystem::perms::unknown
     );

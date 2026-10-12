@@ -1,6 +1,7 @@
 #include <backend/session.hpp>
 
 #include <utility/path_utf.hpp>
+#include <paths/paths.hpp>
 
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
@@ -14,6 +15,66 @@
 #include <unordered_set>
 
 using namespace std::chrono_literals;
+
+namespace
+{
+    /**
+     * @brief A remote path from the frontend, or the message to reply with when it is not a valid absolute path.
+     */
+    std::expected<Paths::RemotePath, std::string> parseRemotePath(std::string const& path)
+    {
+        return Paths::RemotePath::make(path).transform_error(
+            [](Paths::PathError const& error)
+            {
+                return fmt::format("Invalid remote path: {}", error.toString());
+            }
+        );
+    }
+
+    /**
+     * @brief A local path from the frontend, or the message to reply with when it is not a valid absolute path.
+     */
+    std::expected<Paths::LocalPath, std::string> parseLocalPath(std::string const& path)
+    {
+        return Paths::LocalPath::fromUtf8(path).transform_error(
+            [](Paths::PathError const& error)
+            {
+                return fmt::format("Invalid local path: {}", error.toString());
+            }
+        );
+    }
+
+    /**
+     * @brief A JSON request from the frontend, or the message to reply with when it does not parse. Paths are
+     *        validated while parsing.
+     */
+    template <typename RequestT>
+    std::expected<RequestT, std::string> parseRequest(nlohmann::json const& json, std::string_view what)
+    {
+        try
+        {
+            return json.get<RequestT>();
+        }
+        catch (std::exception const& exception)
+        {
+            return std::unexpected(fmt::format("Invalid {}: {}", what, exception.what()));
+        }
+    }
+
+    std::expected<std::vector<Paths::RemotePath>, std::string> parseRemotePaths(std::vector<std::string> const& paths)
+    {
+        std::vector<Paths::RemotePath> result;
+        result.reserve(paths.size());
+        for (auto const& path : paths)
+        {
+            auto parsed = parseRemotePath(path);
+            if (!parsed)
+                return std::unexpected(std::move(parsed).error());
+            result.push_back(*std::move(parsed));
+        }
+        return result;
+    }
+}
 
 Session::Session(
     Ids::SessionId id,
@@ -573,7 +634,10 @@ void Session::registerRpcSftpListDirectory()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->listDirectory(path);
+                        const auto remotePath = parseRemotePath(path);
+                        if (!remotePath)
+                            return reply.error(remotePath.error());
+                        auto fut = channel->listDirectory(*remotePath);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Timed out");
 
@@ -619,7 +683,7 @@ void Session::registerRpcSftpHomeDirectory()
                         if (!result.has_value())
                             return reply.error("Failed to get home directory: " + result.error().toString());
 
-                        const auto home = Utility::pathToUtf8Generic(*result);
+                        const auto& home = result->value();
                         Log::info("Remote home directory is '{}'", home);
                         reply({{"path", home}});
                     },
@@ -645,7 +709,10 @@ void Session::registerRpcSftpUserDirectories()
                     Ids::makeChannelId(channelIdString),
                     [home](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->userDirectories(Utility::pathFromUtf8(home));
+                        const auto homePath = parseRemotePath(home);
+                        if (!homePath)
+                            return reply.error(homePath.error());
+                        auto fut = channel->userDirectories(*homePath);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to read user directories: timeout");
 
@@ -735,7 +802,10 @@ void Session::registerRpcSftpCreateDirectory()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->createDirectory(path);
+                        const auto remotePath = parseRemotePath(path);
+                        if (!remotePath)
+                            return reply.error(remotePath.error());
+                        auto fut = channel->createDirectory(*remotePath);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error(fmt::format("Failed to create directory '{}': timeout", path));
 
@@ -770,7 +840,10 @@ void Session::registerRpcSftpCreateFile()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->createFile(path);
+                        const auto remotePath = parseRemotePath(path);
+                        if (!remotePath)
+                            return reply.error(remotePath.error());
+                        auto fut = channel->createFile(*remotePath);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to create file: timeout");
 
@@ -1546,7 +1619,7 @@ void Session::registerRpcSftpPreDeleteChecks()
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
-                std::vector<std::filesystem::path> const& directories
+                std::vector<std::string> const& directories
             )
             {
                 auto self = weak.lock();
@@ -1561,7 +1634,10 @@ void Session::registerRpcSftpPreDeleteChecks()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        auto fut = channel->filterOutEmptyDirectories(directories);
+                        auto remotePaths = parseRemotePaths(directories);
+                        if (!remotePaths)
+                            return reply.error(remotePaths.error());
+                        auto fut = channel->filterOutEmptyDirectories(*std::move(remotePaths));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to perform pre-delete checks: timeout");
 
@@ -1595,19 +1671,16 @@ void Session::registerRpcSftpDeleteFiles()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        std::vector<std::filesystem::path> transformedPaths;
-                        transformedPaths.resize(paths.size());
-                        std::transform(
-                            paths.begin(),
-                            paths.end(),
-                            transformedPaths.begin(),
-                            [](std::string const& p)
-                            {
-                                return Utility::pathFromUtf8(p);
-                            }
-                        );
-
-                        auto fut = channel->removeAll(transformedPaths);
+                        auto remotePaths = parseRemotePaths(paths);
+                        if (!remotePaths)
+                            return reply.error(remotePaths.error());
+                        for (auto const& path : *remotePaths)
+                        {
+                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
+                                !allowed)
+                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
+                        }
+                        auto fut = channel->removeAll(*std::move(remotePaths));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to delete files: timeout");
 
@@ -1748,74 +1821,8 @@ void Session::registerRpcSftpExistsBatch()
                         constexpr std::size_t listingThreshold = 10;
                         if (paths.size() < listingThreshold)
                         {
-                            std::vector<bool> results;
-                            results.reserve(paths.size());
-                            for (auto const& path : paths)
-                            {
-                                auto fut = channel->stat(Utility::pathFromUtf8(path));
-                                if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                                {
-                                    Log::warn(
-                                        "sftp::existsBatch: stat timeout for '{}' (treating as not-exists)", path
-                                    );
-                                    results.push_back(false);
-                                    continue;
-                                }
-                                const auto result = fut.get();
-                                results.push_back(result.has_value());
-                            }
-                            Log::info("sftp::existsBatch: probed {} paths via stat", paths.size());
-                            reply({{"success", true}, {"exists", results}});
-                            return;
-                        }
-
-                        // Larger drops: group destinations by parent directory and list each
-                        // parent once (readdir) rather than issuing one stat round-trip per
-                        // path. A bulk drop targets a single directory, so this collapses N
-                        // sequential SFTP round-trips into a single listing — a shallow
-                        // existence diff, like sync does. A listing failure (e.g. the parent
-                        // doesn't exist yet) degrades to "nothing exists", matching the
-                        // per-stat fallback.
-                        std::unordered_map<std::string, std::optional<std::unordered_set<std::string>>> listingByParent;
-
-                        auto listParent = [&channel](
-                                              std::filesystem::path const& parent
-                                          ) -> std::optional<std::unordered_set<std::string>>
-                        {
-                            auto fut = channel->listDirectory(parent);
-                            if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            {
-                                Log::warn(
-                                    "sftp::existsBatch: listing timed out for '{}' (treating contents as not-exists)",
-                                    parent.generic_string()
-                                );
-                                return std::nullopt;
-                            }
-                            const auto result = fut.get();
-                            if (!result.has_value())
-                                return std::nullopt;
-                            std::unordered_set<std::string> names;
-                            names.reserve(result->size());
-                            for (auto const& entry : *result)
-                                names.insert(entry.path.filename().generic_string());
-                            return names;
-                        };
-
-                        std::vector<bool> results;
-                        results.reserve(paths.size());
-                        for (auto const& path : paths)
-                        {
-                            const auto fsPath = Utility::pathFromUtf8(path);
-                            const auto parentKey = fsPath.parent_path().generic_string();
-                            auto it = listingByParent.find(parentKey);
-                            if (it == listingByParent.end())
-                                it = listingByParent.emplace(parentKey, listParent(fsPath.parent_path())).first;
-
-                            auto const& listing = it->second;
-                            results.push_back(
-                                listing.has_value() &&
-                                listing->find(fsPath.filename().generic_string()) != listing->end()
-                            );
+                            Log::error("sftp::existsBatch: {}", results.error());
+                            return reply.error(results.error());
                         }
                         Log::info(
                             "sftp::existsBatch: probed {} paths across {} dir listing(s)",
@@ -1850,7 +1857,10 @@ void Session::registerRpcSftpStat()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        auto fut = channel->stat(Utility::pathFromUtf8(path));
+                        const auto remotePath = parseRemotePath(path);
+                        if (!remotePath)
+                            return reply.error(remotePath.error());
+                        auto fut = channel->stat(*remotePath);
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to stat file: timeout");
 

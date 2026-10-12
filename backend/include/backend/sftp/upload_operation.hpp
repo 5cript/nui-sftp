@@ -5,6 +5,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
@@ -122,7 +123,7 @@ class UploadOperation : public Operation
      *  the parent, so deeply-nested missing paths are created in one pass.
      *  Must be called from within the processing thread.
      */
-    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(std::filesystem::path const& dir);
+    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
@@ -132,6 +133,12 @@ class UploadOperation : public Operation
     SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     UploadOperationOptions options_;
+    /** @brief options_.remotePath, unset when none was given. */
+    Paths::RemotePath remotePath_{};
+    /** @brief options_.localPath for the filesystem calls, empty when none was given. */
+    std::filesystem::path localNativePath_{};
+    /** @brief Where the upload is written before it replaces remotePath_. */
+    Paths::RemotePath tempPath_{};
     std::ifstream localFile_;
     bool isSymlink_{false};
     std::size_t leftToUpload_{0};

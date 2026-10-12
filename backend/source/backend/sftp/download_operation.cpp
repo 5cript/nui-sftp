@@ -18,6 +18,9 @@ DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOpe
     , localFile_{}
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
+    remotePath_ = options_.remotePath;
+    if (!options_.localPath.empty())
+        localNativePath_ = options_.localPath.native();
 }
 
 DownloadOperation::~DownloadOperation()
@@ -247,7 +250,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
         return {};
     }
 
-    const auto readResult = readSymlinkInStrand(options_.remotePath);
+    const auto readResult = readSymlinkInStrand(remotePath_);
     if (!readResult.has_value())
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
@@ -266,10 +269,12 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
+    // The copy keeps the link's own content, so a relative link still points into the downloaded tree.
+    const auto linkContent = Paths::nativeFromUtf8(readResult.value().linkContent);
     if (linkEntry && linkEntry->isDirectory())
-        std::filesystem::create_directory_symlink(readResult.value().linkTarget, options_.localPath, ec);
+        std::filesystem::create_directory_symlink(linkContent, localNativePath_, ec);
     else
-        std::filesystem::create_symlink(readResult.value().linkTarget, options_.localPath, ec);
+        std::filesystem::create_symlink(linkContent, localNativePath_, ec);
     if (ec)
     {
         Log::error(
@@ -464,7 +469,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 }
 
 std::expected<SecureShell::SftpSession::DeepLinkResult, DownloadOperation::Error>
-DownloadOperation::readSymlinkInStrand(std::filesystem::path const& remoteFullPath)
+DownloadOperation::readSymlinkInStrand(Paths::RemotePath const& remoteFullPath)
 {
     auto deepLinkResult = sftp_->readLinkDeepInStrand(remoteFullPath);
     if (!deepLinkResult.has_value())
@@ -472,13 +477,13 @@ DownloadOperation::readSymlinkInStrand(std::filesystem::path const& remoteFullPa
         Log::error(
             "DownloadOperation: Failed to read symlink target: {} for entry: {}.",
             deepLinkResult.error().toString(),
-            remoteFullPath.generic_string()
+            remoteFullPath.value()
         );
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
                 .sftpError = deepLinkResult.error(),
-                .extraInfo = fmt::format("Reading symlink target for entry: {}", remoteFullPath.generic_string())
+                .extraInfo = fmt::format("Reading symlink target for entry: {}", remoteFullPath.value())
             }
         );
     }
@@ -525,9 +530,15 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand()
 {
+    if (remotePath_.empty() || remotePath_.isRoot())
+    {
+        Log::error("DownloadOperation: Invalid remote path '{}'.", options_.remotePath.value());
+        return std::unexpected(Error{.type = ErrorType::InvalidPath, .extraInfo = options_.remotePath.value()});
+    }
+
     if (!options_.entry)
     {
-        const auto fileInfo = sftp_->lstatInStrand(options_.remotePath);
+        const auto fileInfo = sftp_->lstatInStrand(remotePath_);
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
@@ -541,7 +552,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return {};
 
     const auto streamOpenResult = sftp_->openFileInStrand(
-        options_.remotePath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
+        remotePath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
     );
     if (!streamOpenResult.has_value())
     {

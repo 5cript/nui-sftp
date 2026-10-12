@@ -2,6 +2,7 @@
 #include <ssh/session.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/u8_path.hpp>
+#include <paths/relative_path.hpp>
 
 #include <algorithm>
 #include <array>
@@ -70,16 +71,19 @@ namespace SecureShell
     }
 
     std::expected<std::vector<FileInformation>, SftpSession::Error>
-    SftpSession::listDirectoryInStrand(std::filesystem::path const& path)
+    SftpSession::listDirectoryInStrand(Paths::RemotePath const& path)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
 
         int closeResult = 0;
         std::vector<FileInformation> entries{};
+        std::vector<std::string> names{};
 
         {
             std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
-                sftp_opendir(session_, u8Path(path).c_str()),
+                sftp_opendir(session_, path.c_str()),
                 [&](sftp_dir_struct* dir)
                 {
                     if (dir != nullptr)
@@ -101,6 +105,7 @@ namespace SecureShell
                 for (; entry != nullptr; entry.reset(sftp_readdir(session_, dir.get())))
                 {
                     entries.push_back(fromSftpAttributes(entry.get()));
+                    names.emplace_back(entry->name != nullptr ? entry->name : "");
                 }
             }
 
@@ -114,11 +119,16 @@ namespace SecureShell
             return std::unexpected(lastError());
         }
 
-        for (auto& entry : entries)
+        for (std::size_t index = 0; index < entries.size(); ++index)
         {
+            auto& entry = entries[index];
             if (entry.type == SharedData::FileType::Symlink)
             {
-                const auto fullPath = u8Path(path / entry.path);
+                // A name that is no valid segment, like "x/..", must not become a path to look up.
+                const auto name = Paths::PathSegment::make(names[index]);
+                if (!name)
+                    continue;
+                const auto fullPath = path / *name;
 
                 std::unique_ptr<char, decltype(&ssh_string_free_char)> linkLiteral{
                     sftp_readlink(session_, fullPath.c_str()), ssh_string_free_char
@@ -142,7 +152,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<std::vector<FileInformation>, SftpSession::Error>>
-    SftpSession::listDirectory(std::filesystem::path const& path)
+    SftpSession::listDirectory(Paths::RemotePath const& path)
     {
         return performPromise(
             [this, path]()
@@ -153,11 +163,13 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::createDirectoryInStrand(std::filesystem::path const& path, std::filesystem::perms permissions)
+    SftpSession::createDirectoryInStrand(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         auto result = sftp_mkdir(
-            session_, u8Path(path).c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+            session_, path.c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
         );
         if (result != SSH_OK)
             return std::unexpected(lastError());
@@ -165,7 +177,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::createDirectory(std::filesystem::path const& path, std::filesystem::perms permissions)
+    SftpSession::createDirectory(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
         return performPromise(
             [this, path, permissions]()
@@ -176,18 +188,20 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error> SftpSession::createDirectoryIfItDoesntExistInStrand(
-        std::filesystem::path const& path,
+        Paths::RemotePath const& path,
         std::filesystem::perms permissions
     )
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_lstat(session_, u8Path(path).c_str()), sftp_attributes_free
+            sftp_lstat(session_, path.c_str()), sftp_attributes_free
         };
         if (!attributes)
         {
             auto result = sftp_mkdir(
-                session_, u8Path(path).c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+                session_, path.c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             );
             if (result != SSH_OK)
                 return std::unexpected(lastError());
@@ -209,7 +223,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::createDirectoryIfItDoesntExist(std::filesystem::path const& path, std::filesystem::perms permissions)
+    SftpSession::createDirectoryIfItDoesntExist(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
         return performPromise(
             [this, path, permissions]()
@@ -220,13 +234,15 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::createFileInStrand(std::filesystem::path const& path, std::filesystem::perms permissions)
+    SftpSession::createFileInStrand(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
             sftp_open(
                 session_,
-                u8Path(path).c_str(),
+                path.c_str(),
                 O_CREAT,
                 static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             ),
@@ -246,7 +262,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::createFile(std::filesystem::path const& path, std::filesystem::perms permissions)
+    SftpSession::createFile(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
         return performPromise(
             [this, path, permissions]()
@@ -256,16 +272,18 @@ namespace SecureShell
         );
     }
 
-    std::expected<void, SftpSession::Error> SftpSession::removeFileInStrand(std::filesystem::path const& path)
+    std::expected<void, SftpSession::Error> SftpSession::removeFileInStrand(Paths::RemotePath const& path)
     {
         assert(strand_->withinProcessingThread());
-        auto result = sftp_unlink(session_, u8Path(path).c_str());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_unlink(session_, path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
 
-    std::future<std::expected<void, SftpSession::Error>> SftpSession::removeFile(std::filesystem::path const& path)
+    std::future<std::expected<void, SftpSession::Error>> SftpSession::removeFile(Paths::RemotePath const& path)
     {
         return performPromise(
             [this, path]()
@@ -275,16 +293,18 @@ namespace SecureShell
         );
     }
 
-    std::expected<void, SftpSession::Error> SftpSession::removeDirectoryInStrand(std::filesystem::path const& path)
+    std::expected<void, SftpSession::Error> SftpSession::removeDirectoryInStrand(Paths::RemotePath const& path)
     {
         assert(strand_->withinProcessingThread());
-        auto result = sftp_rmdir(session_, u8Path(path).c_str());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_rmdir(session_, path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
 
-    std::future<std::expected<void, SftpSession::Error>> SftpSession::removeDirectory(std::filesystem::path const& path)
+    std::future<std::expected<void, SftpSession::Error>> SftpSession::removeDirectory(Paths::RemotePath const& path)
     {
         return performPromise(
             [this, path]()
@@ -294,18 +314,20 @@ namespace SecureShell
         );
     }
 
-    std::future<std::expected<std::vector<std::filesystem::path>, SftpSession::Error>>
-    SftpSession::filterOutEmptyDirectories(std::vector<std::filesystem::path> directories)
+    std::future<std::expected<std::vector<Paths::RemotePath>, SftpSession::Error>>
+    SftpSession::filterOutEmptyDirectories(std::vector<Paths::RemotePath> directories)
     {
         return performPromise(
-            [this, directories = std::move(directories)]() -> std::expected<std::vector<std::filesystem::path>, Error>
+            [this, directories = std::move(directories)]() -> std::expected<std::vector<Paths::RemotePath>, Error>
             {
                 int closeResult = 0;
-                std::vector<std::filesystem::path> nonEmpties;
+                std::vector<Paths::RemotePath> nonEmpties;
                 for (const auto& path : directories)
                 {
+                    if (auto valid = requireSet(path); !valid)
+                        return std::unexpected(valid.error());
                     std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                        sftp_lstat(session_, u8Path(path).c_str()), sftp_attributes_free
+                        sftp_lstat(session_, path.c_str()), sftp_attributes_free
                     };
 
                     if (attributes == nullptr)
@@ -314,7 +336,7 @@ namespace SecureShell
                     if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
                     {
                         std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
-                            sftp_opendir(session_, u8Path(path).c_str()),
+                            sftp_opendir(session_, path.c_str()),
                             [&](sftp_dir_struct* dir)
                             {
                                 if (dir != nullptr)
@@ -366,15 +388,17 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::removeAll(std::vector<std::filesystem::path> paths)
+    SftpSession::removeAll(std::vector<Paths::RemotePath> paths)
     {
         return performPromise(
             [this, paths = std::move(paths)]() -> std::expected<void, Error>
             {
                 for (const auto& path : paths)
                 {
+                    if (auto valid = requireSet(path); !valid)
+                        return std::unexpected(valid.error());
                     std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                        sftp_lstat(session_, u8Path(path).c_str()), sftp_attributes_free
+                        sftp_lstat(session_, path.c_str()), sftp_attributes_free
                     };
 
                     if (attributes == nullptr)
@@ -382,13 +406,13 @@ namespace SecureShell
 
                     if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
                     {
-                        auto result = sftp_rmdir(session_, u8Path(path).c_str());
+                        auto result = sftp_rmdir(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }
                     else
                     {
-                        auto result = sftp_unlink(session_, u8Path(path).c_str());
+                        auto result = sftp_unlink(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }
@@ -398,12 +422,14 @@ namespace SecureShell
         );
     }
 
-    std::expected<FileInformation, SftpSession::Error> SftpSession::statInStrand(std::filesystem::path const& path)
+    std::expected<FileInformation, SftpSession::Error> SftpSession::statInStrand(Paths::RemotePath const& path)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_stat(session_, u8Path(path).c_str()), sftp_attributes_free
+            sftp_stat(session_, path.c_str()), sftp_attributes_free
         };
         chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
@@ -412,7 +438,7 @@ namespace SecureShell
         return fromSftpAttributes(attributes.get());
     }
 
-    std::future<std::expected<FileInformation, SftpSession::Error>> SftpSession::stat(std::filesystem::path const& path)
+    std::future<std::expected<FileInformation, SftpSession::Error>> SftpSession::stat(Paths::RemotePath const& path)
     {
         return performPromise(
             [this, path]()
@@ -422,12 +448,14 @@ namespace SecureShell
         );
     }
 
-    std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(std::filesystem::path const& path)
+    std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(Paths::RemotePath const& path)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_lstat(session_, u8Path(path).c_str()), sftp_attributes_free
+            sftp_lstat(session_, path.c_str()), sftp_attributes_free
         };
         chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
@@ -437,7 +465,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<FileInformation, SftpSession::Error>>
-    SftpSession::lstat(std::filesystem::path const& path)
+    SftpSession::lstat(Paths::RemotePath const& path)
     {
         return performPromise(
             [this, path]()
@@ -448,17 +476,19 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::statInStrand(std::filesystem::path const& path, sftp_attributes attributes)
+    SftpSession::statInStrand(Paths::RemotePath const& path, sftp_attributes attributes)
     {
         assert(strand_->withinProcessingThread());
-        auto result = sftp_setstat(session_, u8Path(path).c_str(), attributes);
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_setstat(session_, path.c_str(), attributes);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::stat(std::filesystem::path const& path, sftp_attributes attributes)
+    SftpSession::stat(Paths::RemotePath const& path, sftp_attributes attributes)
     {
         return performPromise(
             [this, path, attributes]()
@@ -469,7 +499,7 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::renameInStrand(std::filesystem::path const& source, std::filesystem::path const& destination)
+    SftpSession::renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination)
     {
         assert(strand_->withinProcessingThread());
         if (auto valid = requireSet(source); !valid)
@@ -581,7 +611,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::rename(std::filesystem::path const& source, std::filesystem::path const& destination)
+    SftpSession::rename(Paths::RemotePath const& source, Paths::RemotePath const& destination)
     {
         return performPromise(
             [this, source, destination]()
@@ -592,17 +622,19 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::chownInStrand(std::filesystem::path const& path, uid_t owner, gid_t group)
+    SftpSession::chownInStrand(Paths::RemotePath const& path, uid_t owner, gid_t group)
     {
         assert(strand_->withinProcessingThread());
-        auto result = sftp_chown(session_, u8Path(path).c_str(), owner, group);
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_chown(session_, path.c_str(), owner, group);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::chown(std::filesystem::path const& path, uid_t owner, gid_t group)
+    SftpSession::chown(Paths::RemotePath const& path, uid_t owner, gid_t group)
     {
         return performPromise(
             [this, path, owner, group]()
@@ -613,17 +645,19 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::chmodInStrand(std::filesystem::path const& path, std::filesystem::perms perms)
+    SftpSession::chmodInStrand(Paths::RemotePath const& path, std::filesystem::perms perms)
     {
         assert(strand_->withinProcessingThread());
-        auto result = sftp_chmod(session_, u8Path(path).c_str(), static_cast<mode_t>(perms));
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_chmod(session_, path.c_str(), static_cast<mode_t>(perms));
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::chmod(std::filesystem::path const& path, std::filesystem::perms perms)
+    SftpSession::chmod(Paths::RemotePath const& path, std::filesystem::perms perms)
     {
         return performPromise(
             [this, path, perms]()
@@ -633,14 +667,17 @@ namespace SecureShell
         );
     }
 
-    std::expected<std::filesystem::path, SftpSession::Error> SftpSession::homeDirectoryInStrand()
+    std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::homeDirectoryInStrand()
     {
         assert(strand_->withinProcessingThread());
         const std::unique_ptr<char, decltype(&ssh_string_free_char)> canonical{
             sftp_canonicalize_path(session_, "."), ssh_string_free_char
         };
         if (canonical != nullptr && canonical.get()[0] == '/')
-            return pathFromU8(canonical.get());
+        {
+            if (auto home = Paths::RemotePath::make(canonical.get()); home)
+                return *std::move(home);
+        }
 
         char* rawUser = nullptr;
         const auto optionResult = ssh_options_get(session_->session, SSH_OPTIONS_USER, &rawUser);
@@ -648,14 +685,16 @@ namespace SecureShell
         if (optionResult != SSH_OK || user == nullptr || user.get()[0] == '\0')
             return std::unexpected(Error{.message = "Server did not report a home directory and the user is unknown"});
 
-        const auto guess = pathFromU8(fmt::format("/home/{}", user.get()));
-        const auto information = statInStrand(guess);
+        const auto guess = Paths::RemotePath::make(fmt::format("/home/{}", user.get()));
+        if (!guess)
+            return Paths::RemotePath::root();
+        const auto information = statInStrand(*guess);
         if (information && information->isDirectory())
-            return guess;
-        return std::filesystem::path{"/"};
+            return *guess;
+        return Paths::RemotePath::root();
     }
 
-    std::future<std::expected<std::filesystem::path, SftpSession::Error>> SftpSession::homeDirectory()
+    std::future<std::expected<Paths::RemotePath, SftpSession::Error>> SftpSession::homeDirectory()
     {
         return performPromise(
             [this]()
@@ -666,11 +705,13 @@ namespace SecureShell
     }
 
     std::expected<std::string, SftpSession::Error>
-    SftpSession::readSmallFileInStrand(std::filesystem::path const& path, std::size_t maximumSize)
+    SftpSession::readSmallFileInStrand(Paths::RemotePath const& path, std::size_t maximumSize)
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         const std::unique_ptr<sftp_file_struct, decltype(&sftp_close)> file{
-            sftp_open(session_, u8Path(path).c_str(), O_RDONLY, 0), sftp_close
+            sftp_open(session_, path.c_str(), O_RDONLY, 0), sftp_close
         };
         if (file == nullptr)
             return std::unexpected(lastError());
@@ -691,14 +732,16 @@ namespace SecureShell
     }
 
     std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>
-    SftpSession::userDirectoriesInStrand(std::filesystem::path const& home)
+    SftpSession::userDirectoriesInStrand(Paths::RemotePath const& home)
     {
         constexpr std::size_t maximumFileSize = 64u * 1024u;
-        return readSmallFileInStrand(home / ".config" / "user-dirs.dirs", maximumFileSize)
+        if (auto valid = requireSet(home); !valid)
+            return std::unexpected(valid.error());
+        return readSmallFileInStrand(home / *Paths::RelativePath::make(".config/user-dirs.dirs"), maximumFileSize)
             .transform(
                 [&home](std::string const& content)
                 {
-                    return Utility::parseUserDirectories(content, home);
+                    return Utility::parseUserDirectories(content, home.value());
                 }
             )
             .or_else(
@@ -712,12 +755,25 @@ namespace SecureShell
     }
 
     std::future<std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>>
-    SftpSession::userDirectories(std::filesystem::path const& home)
+    SftpSession::userDirectories(Paths::RemotePath const& home)
     {
         return performPromise(
             [this, home]()
             {
                 return userDirectoriesInStrand(home);
+            }
+        );
+    }
+
+    std::expected<void, SftpSession::Error> SftpSession::requireSet(Paths::RemotePath const& path)
+    {
+        if (!path.empty())
+            return {};
+        return std::unexpected(
+            Error{
+                .message = "The remote path is not set",
+                .sftpError = SSH_FX_FAILURE,
+                .wrapperError = WrapperErrors::InvalidPath,
             }
         );
     }
@@ -752,17 +808,19 @@ namespace SecureShell
     }
 
     std::expected<std::weak_ptr<FileStream>, SftpSession::Error> SftpSession::openFileInStrand(
-        std::filesystem::path const& path,
+        Paths::RemotePath const& path,
         OpenType openType,
         std::filesystem::perms permissions
     )
     {
         assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
             sftp_open(
                 session_,
-                u8Path(path).c_str(),
+                path.c_str(),
                 static_cast<int>(openType),
                 static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             ),
@@ -790,7 +848,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<std::weak_ptr<FileStream>, SftpSession::Error>>
-    SftpSession::openFile(std::filesystem::path const& path, OpenType openType, std::filesystem::perms permissions)
+    SftpSession::openFile(Paths::RemotePath const& path, OpenType openType, std::filesystem::perms permissions)
     {
         return performPromise(
             [this, path, openType, permissions]()
@@ -801,10 +859,13 @@ namespace SecureShell
     }
 
     std::expected<SftpSession::DeepLinkResult, SftpSession::Error>
-    SftpSession::readLinkDeepInStrand(std::filesystem::path const& path, int maxDepth)
+    SftpSession::readLinkDeepInStrand(Paths::RemotePath const& path, int maxDepth)
     {
         assert(strand_->withinProcessingThread());
-        std::filesystem::path currentPath = path;
+        if (auto valid = requireSet(path); !valid)
+            return std::unexpected(valid.error());
+        auto currentPath = path;
+        std::optional<std::string> linkContent{};
         for (int depth = 0; depth < maxDepth; ++depth)
         {
             std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
@@ -813,9 +874,10 @@ namespace SecureShell
             if (attributes == nullptr)
             {
                 auto last = lastError();
-                if (last.sftpError == 2)
+                if (last.sftpError == SSH_FX_NO_SUCH_FILE)
                 {
                     return DeepLinkResult{
+                        .linkContent = linkContent.value_or(""),
                         .linkTarget = currentPath,
                         .targetInfo = std::nullopt,
                     };
@@ -826,6 +888,7 @@ namespace SecureShell
             if (attributes->type != SSH_FILEXFER_TYPE_SYMLINK)
             {
                 return DeepLinkResult{
+                    .linkContent = linkContent.value_or(""),
                     .linkTarget = currentPath,
                     .targetInfo = fromSftpAttributes(attributes.get()),
                 };
@@ -836,8 +899,24 @@ namespace SecureShell
             );
             if (readLinkResult == nullptr)
                 return std::unexpected(lastError());
+            if (!linkContent)
+                linkContent = readLinkResult.get();
 
-            currentPath = readLinkResult.get();
+            // Relative content is relative to the link's directory, not to the server's working directory.
+            auto next = currentPath.resolveLink(readLinkResult.get());
+            if (!next)
+            {
+                return std::unexpected(
+                    Error{
+                        .message = fmt::format(
+                            "Symlink '{}' has an unusable target: {}", currentPath.value(), next.error().toString()
+                        ),
+                        .sftpError = SSH_FX_FAILURE,
+                        .wrapperError = WrapperErrors::InvalidPath,
+                    }
+                );
+            }
+            currentPath = *std::move(next);
         }
 
         return std::unexpected(
@@ -850,7 +929,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<SftpSession::DeepLinkResult, SftpSession::Error>>
-    SftpSession::readLinkDeep(std::filesystem::path const& path, int maxDepth)
+    SftpSession::readLinkDeep(Paths::RemotePath const& path, int maxDepth)
     {
         return performPromise(
             [this, path, maxDepth]()
@@ -861,7 +940,7 @@ namespace SecureShell
     }
 
     std::expected<void, SftpSession::Error>
-    SftpSession::createSymLinkInStrand(std::filesystem::path const& target, std::filesystem::path const& linkPath)
+    SftpSession::createSymLinkInStrand(std::string const& target, Paths::RemotePath const& linkPath)
     {
         assert(strand_->withinProcessingThread());
         if (auto valid = requireSet(linkPath); !valid)
@@ -873,7 +952,7 @@ namespace SecureShell
     }
 
     std::future<std::expected<void, SftpSession::Error>>
-    SftpSession::createSymLink(std::filesystem::path const& target, std::filesystem::path const& linkPath)
+    SftpSession::createSymLink(std::string const& target, Paths::RemotePath const& linkPath)
     {
         return performPromise(
             [this, target, linkPath]()

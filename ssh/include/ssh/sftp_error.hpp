@@ -21,6 +21,8 @@ namespace SecureShell
         UnexpectedEndOfFile,
         // The local side of a transfer could not be read or written.
         LocalIoFailure,
+        // The remote path is unset or invalid, nothing was sent to the server.
+        InvalidPath,
     };
 
     struct SftpError

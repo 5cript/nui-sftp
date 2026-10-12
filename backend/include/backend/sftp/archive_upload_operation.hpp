@@ -7,6 +7,7 @@
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
+#include <paths/remote_path.hpp>
 #include <tar_archive/archive.hpp>
 #include <tar_archive/writer.hpp>
 #include <tar_archive/entry_writer.hpp>
@@ -202,6 +203,8 @@ class ArchiveUploadOperation : public Operation
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
     std::unique_ptr<ScanPhase<LocalScanOperation>> scanPhase_{};
+    /** @brief options_.remoteArchivePath, unset when none was given. */
+    Paths::RemotePath remoteArchivePath_{};
     /** @brief Where the archive is written before it replaces the destination. */
     Paths::RemotePath tempPath_{};
     /** @brief The temp file exists on the server and must go if the upload does not complete. */

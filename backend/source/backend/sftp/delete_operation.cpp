@@ -1,4 +1,5 @@
 #include <backend/sftp/delete_operation.hpp>
+#include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
 

@@ -5,6 +5,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
@@ -123,7 +124,7 @@ class DownloadOperation : public Operation
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlinkInStrand(std::filesystem::path const& remoteFullPath);
+    readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
 
     void cleanup();
 
@@ -131,6 +132,8 @@ class DownloadOperation : public Operation
     SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     DownloadOperationOptions options_;
+    /** @brief options_.remotePath, unset when none was given. */
+    Paths::RemotePath remotePath_{};
     std::ofstream localFile_;
     SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;

@@ -3,6 +3,7 @@
 #include <tar_archive/error.hpp>
 
 #include <log/log.hpp>
+#include <paths/native.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -375,6 +376,16 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
 {
+    if (remoteArchivePath_.empty() || remoteArchivePath_.isRoot() || tempPath_.empty())
+    {
+        return std::unexpected(
+            Error{
+                .type = ErrorType::InvalidPath,
+                .extraInfo = options_.remoteArchivePath.value(),
+            }
+        );
+    }
+
     const auto flattenResult = flattenRoots();
     if (!flattenResult.has_value())
         return std::unexpected(flattenResult.error());
