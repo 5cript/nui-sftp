@@ -98,7 +98,7 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
-                        .remotePath = op.remotePath(),
+                        .remotePath = unlessEmpty(op.remotePath()),
                         .error = error,
                     };
                 },
@@ -454,18 +454,23 @@ void OperationQueue::adoptBulkResume(
         return Ids::generateOperationId();
     };
 
-    switch (entry.kind)
-    {
-        case BulkResumeEntry::Kind::BulkDownload:
-            addBulkDownloadOperation(sftp, entry.request, operationIdFor, operationId);
-            break;
-        case BulkResumeEntry::Kind::BulkUpload:
-            addBulkUploadOperation(sftp, entry.request, operationIdFor, operationId);
-            break;
-        case BulkResumeEntry::Kind::BulkDelete:
-            addBulkDeleteOperation(sftp, entry.request, operationId);
-            break;
-    }
+    std::visit(
+        Utility::overloaded{
+            [&](SharedData::BulkDownloadRequest const& request)
+            {
+                addBulkDownloadOperation(sftp, request, operationIdFor, operationId);
+            },
+            [&](SharedData::BulkUploadRequest const& request)
+            {
+                addBulkUploadOperation(sftp, request, operationIdFor, operationId);
+            },
+            [&](SharedData::BulkDeleteRequest const& request)
+            {
+                addBulkDeleteOperation(sftp, request, operationId);
+            },
+        },
+        entry.request
+    );
 }
 
 void OperationQueue::deepPause(bool pause)
@@ -1459,10 +1464,38 @@ std::size_t OperationQueue::addBulkUploadOperation(
     return request.entries.size();
 }
 
+std::expected<void, Operation::Error>
+OperationQueue::refuseProtectedDeleteTarget(SecureShell::SftpSession& sftp, Paths::RemotePath const& target)
+{
+    const auto refuse = [&target](std::string_view why)
+    {
+        Log::error("Refusing to delete '{}': {}", target.value(), why);
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = target.value()});
+    };
+    if (target.empty())
+        return refuse("no path");
+    if (target.isRoot())
+        return refuse("it is the root directory");
+
+    if (!remoteHome_)
+    {
+        auto homeFuture = sftp.homeDirectory();
+        if (homeFuture.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
+            return refuse("the home directory could not be determined in time");
+        auto home = homeFuture.get();
+        if (!home)
+            return refuse("the home directory could not be determined");
+        remoteHome_ = *std::move(home);
+    }
+    if (remoteHome_->isWithin(target))
+        return refuse(fmt::format("it contains the home directory '{}'", remoteHome_->value()));
+    return {};
+}
+
 std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::filesystem::path const& remotePath,
+    Paths::RemotePath const& remotePath,
     bool recursive,
     bool insertRefresh,
     SharedData::OperationMode mode
@@ -1470,6 +1503,9 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 {
     // Assumed in strand
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+
+    if (auto allowed = refuseProtectedDeleteTarget(sftp, remotePath); !allowed)
+        return allowed;
 
     // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
     auto statFut = sftp.lstat(remotePath);
@@ -1542,7 +1578,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 
 std::size_t OperationQueue::addBulkDeleteOperation(
     SecureShell::SftpSession& sftp,
-    SharedData::BulkAddRequest const& request,
+    SharedData::BulkDeleteRequest const& request,
     Ids::OperationId bulkOperationId
 )
 {
@@ -1556,98 +1592,74 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
-    std::vector<SharedData::DirectoryEntry> fileEntries;
-    fileEntries.reserve(request.entries.size());
-    std::size_t enqueuedDirs = 0;
+    auto operation = std::make_unique<DeleteOperation>(
+        sftp,
+        DeleteOperation::DeleteOperationOptions{
+            .filesRemovedProgress =
+                [weak = weak_from_this(), bulkOperationId, name = rpcName("onDeleteProgress")](
+                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles
+                )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::BulkDeleteProgress{
+                        .operationId = bulkOperationId,
+                        .currentFile = path,
+                        .filesDeleted = filesDeleted,
+                        .totalFiles = totalFiles,
+                    }
+                );
+            },
+            .futureTimeout = resolvedTimeout,
+            .recursive = true,
+        }
+    );
 
     for (auto const& entry : request.entries)
     {
-        if (!entry.isDirectory)
-        {
-            SharedData::DirectoryEntry de{};
-            de.path = entry.src;
-            de.fullPath = entry.src;
-            de.type = SharedData::FileType::Regular;
-            de.size = entry.sizeBytes;
-            fileEntries.push_back(std::move(de));
+        if (!refuseProtectedDeleteTarget(sftp, entry.target).has_value())
             continue;
-        }
-        // Directory entry → existing single-add path which sets up the
-        // Scan + Delete pair.  These render as standard Scan / Delete
-        // cards (separate from the bulk-files card below).
-        const auto dirOpId = Ids::generateOperationId();
-        const auto result = addDeleteOperation(
-            sftp,
-            dirOpId,
-            entry.src,
-            /*recursive*/ true,
-            /*insertRefresh*/ false,
-            request.mode
-        );
-        if (!result.has_value())
+        if (entry.isDirectory && !request.listedContentOnly)
         {
-            Log::error(
-                "Bulk delete: directory entry '{}' failed to queue: {}",
-                entry.src.generic_string(),
-                result.error().toString()
-            );
-            continue;
+            // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
+            auto statFuture = sftp.lstat(entry.target);
+            if (statFuture.wait_for(resolvedTimeout) != std::future_status::ready)
+            {
+                Log::error("Bulk delete: lstat timed out for '{}'", entry.target.value());
+                continue;
+            }
+            const auto information = statFuture.get();
+            if (information && information->isDirectory())
+            {
+                operation->addScanRoot(
+                    std::make_unique<ScanOperation>(
+                        sftp,
+                        ScanOperation::ScanOperationOptions{
+                            .progressCallback = makeScanProgressCallback("onScanProgress", bulkOperationId),
+                            .remotePath = entry.target,
+                            .futureTimeout = resolvedTimeout,
+                        }
+                    )
+                );
+                ++scannedDirectories;
+                continue;
+            }
         }
         ++enqueuedDirs;
     }
 
-    if (!fileEntries.empty())
-    {
-        const auto fileCount = fileEntries.size();
-        // Parent of the batch, surfaced on the card so it can read "Deleting
-        // items in <dir>" before any per-file progress arrives. Captured before
-        // fileEntries is moved into the operation below.
-        const auto commonParent = fileEntries.front().path.parent_path();
-        // recursive=true so DeleteOperation walks the prefilled entries_
-        // (its non-recursive branch ignores entries_ and only deletes the
-        // top-level remotePath).  remotePath is left empty; not used in
-        // recursive mode.
-        auto operation = std::make_unique<DeleteOperation>(
-            sftp,
-            DeleteOperation::DeleteOperationOptions{
-                .filesRemovedProgress =
-                    [weak = weak_from_this(), bulkOperationId, name = rpcName("onDeleteProgress")](
-                        auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles
-                    )
-                {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-                    self->hub_->callRemote(
-                        name,
-                        SharedData::BulkDeleteProgress{
-                            .operationId = bulkOperationId,
-                            .currentFile = path,
-                            .filesDeleted = filesDeleted,
-                            .totalFiles = totalFiles,
-                        }
-                    );
-                },
-                .remotePath = {},
-                .futureTimeout = resolvedTimeout,
-                .recursive = true,
-            }
-        );
-        operation->setScanResult(std::move(fileEntries), 0);
-        targetQueue.emplace_back(bulkOperationId, std::move(operation));
+    const auto queued = fileTargets.size() + scannedDirectories;
+    if (queued == 0)
+        return 0;
 
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = bulkOperationId,
-                .type = SharedData::OperationType::BulkDelete,
-                .mode = request.mode,
-                .insertRefresh = request.insertRefresh,
-                .totalBytes = static_cast<std::uint64_t>(fileCount),
-                .remotePath = commonParent,
-            }
-        );
-    }
+    // Parent of the first item, so the card can read "Deleting items in <dir>" before any progress arrives.
+    const auto commonParent = request.entries.front().target.parent().value_or(Paths::RemotePath::root());
+    const auto fileCount = fileTargets.size();
+    operation->setTargets(std::move(fileTargets));
+    targetQueue.emplace_back(bulkOperationId, std::move(operation));
 
     Log::info(
         "Bulk delete: {} file entries (one card) + {} directory entries",
@@ -1657,9 +1669,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
 
     if (!request.entries.empty())
     {
-        bulkResumeStash_.insert_or_assign(
-            bulkOperationId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDelete, .request = request}
-        );
+        bulkResumeStash_.insert_or_assign(bulkOperationId, BulkResumeEntry{.request = request});
     }
 
     return request.entries.size();

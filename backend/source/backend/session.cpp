@@ -7,6 +7,7 @@
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -743,7 +744,7 @@ void Session::registerRpcQueuedRemoves()
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
-                std::vector<std::filesystem::path> paths,
+                std::vector<std::string> const& pathStrings,
                 bool recursive,
                 bool insertRefresh,
                 int mode
@@ -753,15 +754,27 @@ void Session::registerRpcQueuedRemoves()
                 if (!self)
                     return reply.error("Session no longer exists");
 
+                auto parsed = parseRemotePaths(pathStrings);
+                if (!parsed)
+                    return reply.error(parsed.error());
+
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), paths = std::move(paths), recursive, insertRefresh, mode](
+                    [weak = self->weak_from_this(), paths = *std::move(parsed), recursive, insertRefresh, mode](
                         RpcHelper::RpcOnce&& reply, auto&& channel
                     ) mutable
                     {
                         auto self = weak.lock();
                         if (!self)
                             return reply.error("Session no longer exists");
+
+                        // Nothing is queued when one of the targets is protected.
+                        for (auto const& path : paths)
+                        {
+                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
+                                !allowed)
+                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
+                        }
 
                         std::vector<std::string> operationIds;
                         for (auto const& path : paths)
@@ -775,6 +788,11 @@ void Session::registerRpcQueuedRemoves()
                                 insertRefresh,
                                 static_cast<SharedData::OperationMode>(mode)
                             );
+                            if (!result)
+                            {
+                                Log::error("Could not queue the delete of '{}': {}", path.value(), result.error().toString());
+                                continue;
+                            }
                             operationIds.push_back(newOperationId.value());
                         }
 
@@ -1763,12 +1781,23 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::string const& bulkOperationIdString,
-                SharedData::BulkAddRequest const& request
+                nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
+
+                // Parsed here, so an invalid target is answered with an error instead of no reply at all.
+                SharedData::BulkDeleteRequest request{};
+                try
+                {
+                    request = requestJson.get<SharedData::BulkDeleteRequest>();
+                }
+                catch (std::exception const& exception)
+                {
+                    return reply.error(fmt::format("Invalid bulk delete: {}", exception.what()));
+                }
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),

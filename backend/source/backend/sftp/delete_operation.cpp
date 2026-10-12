@@ -42,6 +42,12 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
         {
             if (!recursive_)
             {
+                if (remotePath_.empty() || remotePath_.isRoot())
+                {
+                    Log::error("DeleteOperation: Refusing to delete '{}'.", remotePath_.value());
+                    return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath, .extraInfo = remotePath_.value()});
+                }
+                targets_ = {remotePath_};
                 totalToDelete_ = 1;
                 filesRemovedProgress_ = {};
             }
@@ -50,6 +56,15 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                 // Without the scanned tree a recursive delete would silently delete nothing.
                 Log::error("DeleteOperation: Recursive delete of '{}' has no scan result.", remotePath_.value());
                 return enterErrorState<WorkStatus>({.type = ErrorType::ScanIncomplete});
+            }
+            else if (invalidScanEntry_)
+            {
+                Log::error(
+                    "DeleteOperation: Scan of '{}' returned '{}', which is not a path below it.",
+                    remotePath_.value(),
+                    *invalidScanEntry_
+                );
+                return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath, .extraInfo = *invalidScanEntry_});
             }
 
             state_ = Prepared;
@@ -67,22 +82,11 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                 state_ = Completed;
                 return WorkStatus::Complete;
             }
-            const auto currentPath = [this]()
-            {
-                if (!recursive_)
-                    return remotePath_;
-                // go from back:
-                return fullPath(entries_, entries_[totalToDelete_ - deletedThusFar_ - 1]);
-            }();
-            auto removeResult = removeOnce(currentPath);
-            if (!removeResult.has_value())
-                return std::unexpected(removeResult.error());
-            if (deletedThusFar_ == totalToDelete_)
-            {
-                state_ = Completed;
-                return WorkStatus::Complete;
-            }
-            return WorkStatus::MoreWork;
+            // Nothing deleted at all is a failure, some items left behind a partial success.
+            if (totalToDelete_ > 0 && failedEntries_.size() == totalToDelete_)
+                return enterErrorState<WorkStatus>(failedEntries_.back().second);
+            state_ = Completed;
+            return WorkStatus::Complete;
         }
         case (Finalizing):
         {
@@ -118,28 +122,62 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(std::filesystem::path const& path)
+std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::RemotePath const& path)
 {
     auto fut = sftp_->removeAll({path});
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<void>({.type = ErrorType::FutureTimeout});
 
-    const auto result = fut.get();
-    if (!result.has_value())
-        return enterErrorState<void>(
-            {.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.generic_string()}
+    // One item that cannot be deleted does not keep the others, its directories then stay as well. An item that is
+    // already gone, after a resume for one, counts as deleted.
+    if (const auto result = fut.get(); !result.has_value() && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+    {
+        Log::error("DeleteOperation: Failed to delete '{}': {}", path.value(), result.error().toString());
+        failedEntries_.emplace_back(
+            path.value(), Error{.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.value()}
         );
 
     ++deletedThusFar_;
     if (filesRemovedProgress_)
-        filesRemovedProgress_(path.generic_string(), deletedThusFar_, totalToDelete_);
+        filesRemovedProgress_(path.value(), deletedThusFar_, totalToDelete_);
     return {};
 }
 
 void DeleteOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */)
 {
-    entries_ = std::move(entries);
-    totalToDelete_ = entries_.size();
+    targets_.clear();
+    targets_.reserve(entries.size());
+    for (auto const& entry : entries)
+    {
+        const auto path = SharedData::fullPath(entries, entry);
+        auto target = Utility::toRemotePath(path);
+        if (!target || target->isRoot() || !target->isWithin(remotePath_))
+        {
+            invalidScanEntry_ = Utility::pathToUtf8Generic(path);
+            targets_.clear();
+            break;
+        }
+        targets_.push_back(*std::move(target));
+    }
+    totalToDelete_ = targets_.size();
+    scanDelivered_ = true;
+}
+
+void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
+{
+    targets_.clear();
+    for (auto& target : targets)
+    {
+        if (target.empty() || target.isRoot())
+        {
+            invalidScanEntry_ = target.value();
+            break;
+        }
+        targets_.push_back(std::move(target));
+    }
+    if (invalidScanEntry_)
+        targets_.clear();
+    totalToDelete_ = targets_.size();
     scanDelivered_ = true;
 }
 
@@ -162,7 +200,7 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::cancel(bool adoptCa
 
     if (adoptCancelState)
     {
-        Log::info("DeleteOperation: Delete of '{}' canceled.", remotePath_.generic_string());
+        Log::info("DeleteOperation: Delete of '{}' canceled.", remotePath_.value());
         state_ = OperationState::Canceled;
     }
     return {};

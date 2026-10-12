@@ -2,6 +2,7 @@
 
 #include <ids/ids.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 
 #include <chrono>
@@ -21,15 +22,7 @@
  */
 struct BulkResumeEntry
 {
-    enum class Kind
-    {
-        BulkDownload,
-        BulkUpload,
-        BulkDelete,
-    };
-
-    Kind kind;
-    SharedData::BulkAddRequest request;
+    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest> request;
     std::chrono::steady_clock::time_point storedAt{std::chrono::steady_clock::now()};
 };
 

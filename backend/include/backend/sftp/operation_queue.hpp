@@ -11,6 +11,8 @@
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_summary.hpp>
@@ -146,10 +148,14 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /**
+     * @brief Queues the delete of @p remotePath, refused for the root and for the home directory or any directory
+     *        that contains it.
+     */
     std::expected<void, Operation::Error> addDeleteOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
-        std::filesystem::path const& remotePath,
+        Paths::RemotePath const& remotePath,
         bool recursive,
         bool insertRefresh,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
@@ -200,17 +206,44 @@ class OperationQueue
      *        recursively removed.
      *
      * @param sftp           SFTP session to use.
-     * @param request        Bulk request — `dst` is unused for delete, only
-     *                       `src` (target path) and `isDirectory` matter.
+     * @param request        The remote items; directories are scanned and deleted with their content.
      * @param bulkOperationId  Single OperationId for the aggregate file-bulk
      *                         card.  Per-directory ids are generated locally.
      * @return Number of entries successfully enqueued.
      */
     std::size_t addBulkDeleteOperation(
         SecureShell::SftpSession& sftp,
-        SharedData::BulkAddRequest const& request,
+        SharedData::BulkDeleteRequest const& request,
         Ids::OperationId bulkOperationId
     );
+
+    /**
+     * @brief Queues a resolved sync plan under the operation ids of @p request: files of each direction as one
+     *        bulk transfer, remote and local deletes as one operation each. Directories without content are created
+     *        right away. Every path comes from @p plan, which resolved them below the sync roots.
+     */
+    SharedData::Sync::SyncExecutionResult executeSyncPlan(
+        SecureShell::SftpSession& sftp,
+        SyncSession const& session,
+        SyncSession::ResolvedPlan plan,
+        SharedData::Sync::SyncExecutionRequest const& request
+    );
+
+    /**
+     * @brief Queues the delete of local items as one operation with one card. Refused as a whole when one of them
+     *        is a root directory or contains the home directory.
+     */
+    std::expected<void, Operation::Error> addLocalDeleteOperation(
+        Ids::OperationId operationId,
+        std::vector<Paths::LocalPath> targets,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
+    /**
+     * @brief Refuses an unset delete target, the root, and the home directory or any directory that contains it.
+     */
+    std::expected<void, Operation::Error>
+    refuseProtectedDeleteTarget(SecureShell::SftpSession& sftp, Paths::RemotePath const& target);
 
     std::expected<void, Operation::Error> addRenameOperation(
         SecureShell::SftpSession& sftp,
@@ -343,4 +376,7 @@ class OperationQueue
     // op and erased once the op completes (success or failure).  Keyed by
     // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
     std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
+
+    /** @brief The server's home directory, asked once for the delete guard. */
+    std::optional<Paths::RemotePath> remoteHome_{};
 };
