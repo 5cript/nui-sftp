@@ -817,7 +817,7 @@ void FileEngine::addBulkUpload(
 }
 
 void FileEngine::addBulkDelete(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDeleteEntry> entries,
     Ids::OperationId bulkOperationId,
     bool insertRefresh,
     SharedData::OperationMode mode,
@@ -841,9 +841,8 @@ void FileEngine::addBulkDelete(
                 return;
             }
 
-            SharedData::BulkAddRequest request{
+            SharedData::BulkDeleteRequest request{
                 .entries = entries,
-                .allowOverwrite = false,
                 .insertRefresh = insertRefresh,
                 .mode = mode,
             };
@@ -935,13 +934,10 @@ void FileEngine::addUpload(
 }
 
 void FileEngine::remove(
-    std::vector<NuiFileExplorer::Item> const& files,
-    std::vector<NuiFileExplorer::Item> const& directories,
+    std::vector<Paths::RemotePath> files,
+    std::vector<Paths::RemotePath> directories,
     std::function<void(bool, std::string const& info)> onComplete,
-    std::function<void(
-        std::vector<std::filesystem::path>, /* regular files & empty */
-        std::vector<std::filesystem::path> /* non empties */
-    )> onNonEmptyDirectoriesFound
+    std::function<void(std::vector<Paths::RemotePath>, std::vector<Paths::RemotePath>)> onNonEmptyDirectoriesFound
 )
 {
     Log::info("Requesting to remove {} items", files.size() + directories.size());
@@ -949,8 +945,8 @@ void FileEngine::remove(
     lazyOpen(
         [this,
             onComplete = std::move(onComplete),
-            files,
-            directories,
+            files = std::move(files),
+            directories = std::move(directories),
             onNonEmptyDirectoriesFound =
                 std::move(onNonEmptyDirectoriesFound)](auto const& channelId, std::string const& info) mutable
         {
@@ -962,16 +958,9 @@ void FileEngine::remove(
             }
 
             std::vector<std::string> transformedDirectories;
-            transformedDirectories.resize(directories.size());
-            std::transform(
-                directories.begin(),
-                directories.end(),
-                transformedDirectories.begin(),
-                [](auto const& item)
-                {
-                    return item.path.generic_string();
-                }
-            );
+            transformedDirectories.reserve(directories.size());
+            for (auto const& directory : directories)
+                transformedDirectories.push_back(directory.value());
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::preDeleteChecks", impl_->engine->sshSessionId().value()),
@@ -994,17 +983,18 @@ void FileEngine::remove(
                         onComplete(false, "no nonEmptyDirectories");
                         return;
                     }
-                    std::vector<std::filesystem::path> nonEmpties;
-                    Nui::convertFromVal(val["nonEmptyDirectories"], nonEmpties);
+                    std::vector<std::string> nonEmptyNames;
+                    Nui::convertFromVal(val["nonEmptyDirectories"], nonEmptyNames);
 
-                    std::vector<std::filesystem::path> filesAndEmptyDirs;
-                    filesAndEmptyDirs.reserve(files.size() + (directories.size() - nonEmpties.size()));
-                    for (const auto& file : files)
-                        filesAndEmptyDirs.push_back(file.path);
-                    for (const auto& dir : directories)
+                    // Only directories that were asked about count, the answer never adds a delete target.
+                    std::vector<Paths::RemotePath> nonEmpties;
+                    std::vector<Paths::RemotePath> filesAndEmptyDirs = std::move(files);
+                    for (auto& directory : directories)
                     {
-                        if (std::find(nonEmpties.begin(), nonEmpties.end(), dir.path) == nonEmpties.end())
-                            filesAndEmptyDirs.push_back(dir.path);
+                        if (std::ranges::find(nonEmptyNames, directory.value()) != nonEmptyNames.end())
+                            nonEmpties.push_back(std::move(directory));
+                        else
+                            filesAndEmptyDirs.push_back(std::move(directory));
                     }
 
                     // Always route through the queue (bulk delete), never a synchronous
@@ -1178,7 +1168,7 @@ void FileEngine::addRename(
 }
 
 void FileEngine::removeOnQueueUnchecked(
-    std::vector<std::filesystem::path> const& paths,
+    std::vector<Paths::RemotePath> const& paths,
     bool recursive,
     std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
     SharedData::OperationMode mode
@@ -1195,6 +1185,11 @@ void FileEngine::removeOnQueueUnchecked(
                 onComplete(std::nullopt, info);
                 return;
             }
+
+            std::vector<std::string> pathStrings;
+            pathStrings.reserve(paths.size());
+            for (auto const& path : paths)
+                pathStrings.push_back(path.value());
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::queuedRemove", impl_->engine->sshSessionId().value()),
@@ -1215,7 +1210,7 @@ void FileEngine::removeOnQueueUnchecked(
                     onComplete(operationIds, "Success");
                 },
                 channelId.value().value(),
-                paths,
+                pathStrings,
                 recursive,
                 true,
                 static_cast<int>(mode)

@@ -405,9 +405,9 @@ void RemoteSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
 }
 
 void RemoteSideModel::askNonEmptyDirectoryDeletions(
-    std::vector<std::filesystem::path> confirmedToDelete,
-    std::vector<std::filesystem::path> nonEmpties,
-    std::vector<std::filesystem::path> filesAndEmptyDirs,
+    std::vector<Paths::RemotePath> confirmedToDelete,
+    std::vector<Paths::RemotePath> nonEmpties,
+    std::vector<Paths::RemotePath> filesAndEmptyDirs,
     std::size_t currentNonEmpty
 )
 {
@@ -422,7 +422,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
             .headerText = language->get("remoteSideModel", "nonEmptyDirectoriesFound"),
-            .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.string()),
+            .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.value()),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::None |
                 ConfirmDialog::Button::All | ConfirmDialog::Button::Cancel,
             .focusButton = ConfirmDialog::Button::No,
@@ -479,38 +479,20 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
 }
 
 void RemoteSideModel::enqueueDeletes(
-    std::vector<std::filesystem::path> nonEmpties,
-    std::vector<std::filesystem::path> filesAndEmptyDirs
+    std::vector<Paths::RemotePath> nonEmpties,
+    std::vector<Paths::RemotePath> filesAndEmptyDirs
 )
 {
     // Combine into a single bulk-delete request.  File / empty-dir entries
     // become one bulk-delete card; non-empty directories become individual
     // Scan+Delete pairs (their isDirectory=true triggers the recursive flow
     // backend-side).  One RPC for the whole user action.
-    std::vector<SharedData::BulkAddEntry> entries;
+    std::vector<SharedData::BulkDeleteEntry> entries;
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
-    for (auto const& path : filesAndEmptyDirs)
-    {
-        entries.push_back(
-            SharedData::BulkAddEntry{
-                .src = path,
-                .dst = {},
-                .sizeBytes = 0,
-                .isDirectory = false,
-            }
-        );
-    }
-    for (auto const& path : nonEmpties)
-    {
-        entries.push_back(
-            SharedData::BulkAddEntry{
-                .src = path,
-                .dst = {},
-                .sizeBytes = 0,
-                .isDirectory = true,
-            }
-        );
-    }
+    for (auto& path : filesAndEmptyDirs)
+        entries.push_back({.target = std::move(path), .isDirectory = false});
+    for (auto& path : nonEmpties)
+        entries.push_back({.target = std::move(path), .isDirectory = true});
 
     if (entries.empty())
         return;
@@ -582,21 +564,36 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                     return;
                 }
 
-                std::vector<NuiFileExplorer::Item> directories;
-                std::vector<NuiFileExplorer::Item> files;
-                for (auto item : items)
+                std::vector<Paths::RemotePath> directories;
+                std::vector<Paths::RemotePath> files;
+                for (auto const& item : items)
                 {
-                    item.path = currentPath_.value() / item.path;
+                    // A name like "x/.." or ".." must not turn into another delete target.
+                    auto path = remotePathOf(item);
+                    if (!path)
+                    {
+                        Log::error("Refusing to delete '{}': not an item of the current directory.", item.name);
+                        confirmDialog_->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = language->get("remoteSideModel", "deleteFailed"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")),
+                                item.name
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                        return;
+                    }
                     if (item.type == NuiFileExplorer::Item::Type::Directory)
-                        directories.push_back(item);
+                        directories.push_back(*std::move(path));
                     else
-                        files.push_back(item);
+                        files.push_back(*std::move(path));
                 }
 
                 Log::info("Deleting items");
                 fileEngine_->remove(
-                    files,
-                    directories,
+                    std::move(files),
+                    std::move(directories),
                     [this](bool success, std::string const& info)
                     {
                         if (!success)
@@ -615,10 +612,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                         // Refresh list from server:
                         onRefresh();
                     },
-                    [this](
-                        std::vector<std::filesystem::path> filesAndEmptyDirs,
-                        std::vector<std::filesystem::path> nonEmpties
-                    )
+                    [this](std::vector<Paths::RemotePath> filesAndEmptyDirs, std::vector<Paths::RemotePath> nonEmpties)
                     {
                         askNonEmptyDirectoryDeletions({}, std::move(nonEmpties), std::move(filesAndEmptyDirs), 0);
                     }

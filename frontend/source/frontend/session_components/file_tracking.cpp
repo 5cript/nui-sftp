@@ -461,14 +461,23 @@ void FileTrackingPanel::startWatching(
             {
                 if (it->deleteRemote && impl_->operationQueue)
                 {
-                    std::filesystem::path changedLocalPath = std::filesystem::path{directory} / filename;
-                    std::filesystem::path relPath = changedLocalPath.lexically_relative(instanceDir);
-                    std::filesystem::path changedRemotePath = remotePath.parent_path() / relPath;
+                    // The deleted item must map to a path below the tracked remote directory, never next to it.
+                    const auto remoteOfChange = remotePathOfChange(*changedLocalPath, instanceDirectory, remotePath);
+                    if (!remoteOfChange)
+                    {
+                        Log::error(
+                            "FileTracking: not mirroring the deletion of '{}': {}",
+                            changedLocalPath->toUtf8(),
+                            remoteOfChange.error().toString()
+                        );
+                        return;
+                    }
+                    const auto changedRemotePath = *remoteOfChange;
 
                     Log::info(
                         "FileTracking: enqueueing remote delete for instance {} due to local deletion: {}",
                         instanceId.value(),
-                        changedRemotePath.generic_string()
+                        changedRemotePath.value()
                     );
 
                     impl_->operationQueue->enqueueDelete(

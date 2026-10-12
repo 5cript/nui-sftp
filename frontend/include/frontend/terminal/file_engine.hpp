@@ -3,6 +3,7 @@
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
@@ -219,26 +220,25 @@ class FileEngine
      * @brief Bulk-delete: collapse N file deletions into a single bulk-delete
      *        card on the frontend.  One RPC, one OperationId for the
      *        aggregate file card; directory entries get their own
-     *        Scan+Delete cards on the backend.  `dst` and `sizeBytes` of
-     *        each entry are ignored — only `src` (target path) and
-     *        `isDirectory` matter.
+     *        Scan+Delete cards on the backend.
      */
     void addBulkDelete(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDeleteEntry> entries,
         Ids::OperationId bulkOperationId,
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(bool success, std::string const& info)> onBulkCreated
     );
 
+    /**
+     * @brief Asks the server which of @p directories are not empty and hands the split to
+     *        @p onNonEmptyDirectoriesFound: files and empty directories first, non-empty directories second.
+     */
     void remove(
-        std::vector<NuiFileExplorer::Item> const& files,
-        std::vector<NuiFileExplorer::Item> const& directories,
+        std::vector<Paths::RemotePath> files,
+        std::vector<Paths::RemotePath> directories,
         std::function<void(bool, std::string const& info)> onComplete,
-        std::function<void(
-            std::vector<std::filesystem::path>, /* regular files & empty */
-            std::vector<std::filesystem::path> /* non empties */
-        )> onNonEmptyDirectoriesFound
+        std::function<void(std::vector<Paths::RemotePath>, std::vector<Paths::RemotePath>)> onNonEmptyDirectoriesFound
     );
 
     /**
@@ -249,7 +249,7 @@ class FileEngine
      * @param onComplete
      */
     void removeOnQueueUnchecked(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued

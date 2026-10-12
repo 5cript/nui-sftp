@@ -140,14 +140,14 @@ class RemoteSideModel
     );
 
     void askNonEmptyDirectoryDeletions(
-        std::vector<std::filesystem::path> confirmedToDelete,
-        std::vector<std::filesystem::path> nonEmpties,
-        std::vector<std::filesystem::path> filesAndEmptyDirs,
+        std::vector<Paths::RemotePath> confirmedToDelete,
+        std::vector<Paths::RemotePath> nonEmpties,
+        std::vector<Paths::RemotePath> filesAndEmptyDirs,
         std::size_t currentNonEmpty
     );
 
     void
-    enqueueDeletes(std::vector<std::filesystem::path> nonEmpties, std::vector<std::filesystem::path> filesAndEmptyDirs);
+    enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
     void continueDeletion();
     void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);

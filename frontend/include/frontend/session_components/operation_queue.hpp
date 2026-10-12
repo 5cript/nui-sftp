@@ -89,7 +89,7 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueDelete(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
@@ -171,7 +171,7 @@ class OperationQueue
      *  @param onEnqueued  Invoked synchronously with the aggregate file-bulk
      *                     OperationId before the RPC dispatches. */
     void enqueueBulkDelete(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDeleteEntry> entries,
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(bool success)> onBulkComplete,

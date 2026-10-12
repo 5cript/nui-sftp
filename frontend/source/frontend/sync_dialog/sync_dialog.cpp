@@ -1010,7 +1010,7 @@ struct SyncDialog::Implementation
         std::vector<ProgressObserver> uploadObservers;
         std::vector<SharedData::BulkAddEntry> downloadEntries;
         std::vector<ProgressObserver> downloadObservers;
-        std::vector<SharedData::BulkAddEntry> remoteDeletes;
+        std::vector<SharedData::BulkDeleteEntry> remoteDeletes;
         std::vector<ProgressObserver> remoteDeleteObservers;
         std::vector<std::filesystem::path> localDeletes;
         std::vector<ProgressObserver> localDeleteObservers;
@@ -1072,14 +1072,14 @@ struct SyncDialog::Implementation
                 }
                 case SharedData::Sync::Action::DeleteRemote:
                 {
-                    remoteDeletes.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.remoteAbsPath,
-                            .dst = {},
-                            .sizeBytes = 0,
-                            .isDirectory = entry.isDirectory,
-                        }
-                    );
+                    auto target = Paths::RemotePath::make(entry.remoteAbsPath);
+                    if (!target)
+                    {
+                        Log::error("Sync: not deleting '{}' remotely: {}", entry.remoteAbsPath, target.error().toString());
+                        finishWith(progressCovering(section, entry.relKey))(false, target.error().toString());
+                        break;
+                    }
+                    remoteDeletes.push_back({.target = *std::move(target), .isDirectory = entry.isDirectory});
                     appendCovering(remoteDeleteObservers, entry.relKey);
                     break;
                 }

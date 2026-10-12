@@ -2326,7 +2326,7 @@ void OperationQueue::enqueueRename(
     impl_->fileEngine->addRename(oldPath, newPath, std::move(onComplete), mode);
 }
 void OperationQueue::enqueueDelete(
-    std::vector<std::filesystem::path> const& paths,
+    std::vector<Paths::RemotePath> const& paths,
     bool recursive,
     std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
     SharedData::OperationMode mode
@@ -2504,59 +2504,71 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
         return NuiFileExplorer::Item{entry};
     };
 
-    switch (op.kind)
-    {
-        case ResumableOp::Kind::Download:
-            enqueueDownload(
-                makeItem(op.src),
-                makeItem(op.dst),
-                reportSingle,
-                op.allowOverwrite,
-                /*insertRefresh=*/true,
-                op.createMissingDirectories,
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::Upload:
-            enqueueUpload(
-                makeItem(op.dst),
-                makeItem(op.src),
-                reportSingle,
-                op.allowOverwrite,
-                /*insertRefresh=*/true,
-                op.createMissingDirectories,
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::Rename:
-            enqueueRename(op.src, op.dst, reportSingle, SharedData::OperationMode::Queued);
-            break;
-        case ResumableOp::Kind::Delete:
-            enqueueDelete(
-                {op.src},
-                op.recursive,
-                [src = op.src](std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info)
-                {
-                    if (ids)
-                        Log::info("Resumed delete of {} ({} op(s) created)", src.generic_string(), ids->size());
-                    else
-                        Log::error("Failed to re-enqueue delete of {}: {}", src.generic_string(), info);
-                },
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::BulkDownload:
-        case ResumableOp::Kind::BulkUpload:
-        case ResumableOp::Kind::BulkDelete:
-            // Bulk kinds are adopted via SessionManager::adoptBulkResume —
-            // see Session::applySnapshot.  This helper handles only the
-            // single-file kinds.
-            break;
-    }
+    std::visit(
+        Utility::overloaded{
+            [&](Resumable::Download const& download)
+            {
+                enqueueDownload(
+                    download.source,
+                    download.destination,
+                    resumeSize,
+                    report(fmt::format("download {} -> {}", download.source.value(), download.destination.toUtf8())),
+                    download.allowOverwrite,
+                    /*insertRefresh=*/true,
+                    /*createMissingDirectories=*/false,
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Upload const& upload)
+            {
+                enqueueUpload(
+                    upload.source,
+                    upload.destination,
+                    resumeSize,
+                    report(fmt::format("upload {} -> {}", upload.source.toUtf8(), upload.destination.value())),
+                    upload.allowOverwrite,
+                    /*insertRefresh=*/true,
+                    /*createMissingDirectories=*/false,
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Rename const& rename)
+            {
+                enqueueRename(
+                    rename.source,
+                    rename.destination,
+                    report(fmt::format("rename {} -> {}", rename.source.value(), rename.destination.value())),
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Delete const& remove)
+            {
+                enqueueDelete(
+                    {remove.target},
+                    remove.recursive,
+                    [target = remove.target](
+                        std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info
+                    )
+                    {
+                        if (ids)
+                            Log::info("Resumed delete of {} ({} op(s) created)", target.value(), ids->size());
+                        else
+                            Log::error("Failed to re-enqueue delete of {}: {}", target.value(), info);
+                    },
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [](Resumable::Bulk const&)
+            {
+                // Bulks are adopted through SessionManager::adoptBulkResume, see SessionSnapshotManager::apply.
+            },
+        },
+        op
+    );
 }
 
 void OperationQueue::enqueueBulkDelete(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDeleteEntry> entries,
     bool insertRefresh,
     SharedData::OperationMode mode,
     std::function<void(bool success)> onBulkComplete,
