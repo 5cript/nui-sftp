@@ -1541,47 +1541,6 @@ void OperationQueue::closeSyncSession(Ids::SyncSessionId syncSessionId)
     impl_->fileEngine->closeSyncSession(syncSessionId);
 }
 
-void OperationQueue::createRemoteDirectory(
-    std::filesystem::path const& path,
-    std::function<void(bool, std::string const&)> onComplete
-)
-{
-    if (!impl_->fileEngine)
-    {
-        Log::error("No file engine set for operation queue, cannot create remote directory");
-        onComplete(false, "No file engine set");
-        return;
-    }
-    impl_->fileEngine->createDirectory(path, std::move(onComplete));
-}
-
-void OperationQueue::createLocalDirectory(
-    std::filesystem::path const& path,
-    std::function<void(bool, std::string const&)> onComplete
-)
-{
-    Nui::val args = Nui::val::object();
-    args.set("path", path.generic_string());
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::createDirectory",
-        [onComplete = std::move(onComplete)](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-            {
-                onComplete(false, "Invalid response from backend");
-                return;
-            }
-            if (!val["success"].as<bool>())
-            {
-                onComplete(false, val["error"].as<std::string>());
-                return;
-            }
-            onComplete(true, "Success");
-        },
-        args
-    );
-}
-
 void OperationQueue::removeCallbacks(Ids::OperationId const& opId)
 {
     impl_->completionCallbacks.erase(opId.value());

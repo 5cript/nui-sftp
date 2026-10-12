@@ -206,32 +206,6 @@ class OperationQueue
     /** @brief Observable pause state — observe() it to react to pause/unpause changes. */
     Nui::Observed<bool>& pausedState();
 
-    /** @brief Enqueues a priority remote scan and a priority local scan for sync comparison.
-     *         All callbacks are registered before the backend RPC is called to avoid missing progress.
-     *
-     * @param localPath        Local directory root to scan.
-     * @param remotePath       Remote directory root to scan.
-     * @param onRemoteProgress Called on each remote scan progress update.
-     * @param onLocalProgress  Called on each local scan progress update.
-     * @param onRemoteComplete Called with the remote scan result when it finishes.
-     * @param onLocalComplete  Called with the local scan result when it finishes.
-     */
-    /** @brief Fires a remote-side createDirectory RPC.  Used by the sync dialog in
-     *         non-recursive mode where transferring a missing directory must not
-     *         turn into a recursive bulk upload that could clobber existing files.
-     *         Fire-and-forget (no operation ID, no queue entry).
-     */
-    void createRemoteDirectory(
-        std::filesystem::path const& path,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
-
-    /** @brief Fires a local-side createDirectory RPC (mirror of createRemoteDirectory). */
-    void createLocalDirectory(
-        std::filesystem::path const& path,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
-
     /** @brief Drops every callback registered for @p opId, for an operation that was never queued. */
     void removeCallbacks(Ids::OperationId const& opId);
 
