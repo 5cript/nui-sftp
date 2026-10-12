@@ -340,15 +340,14 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
         return false;
     }
 
-    std::uint64_t tellp = 0;
     std::uint64_t fileSize = 0;
     bool good = true;
     {
         localFile_.write(buffer_.data(), static_cast<std::streamsize>(readAmount));
-        tellp = static_cast<uint64_t>(localFile_.tellp());
+        bytesInFile_ += static_cast<std::uint64_t>(readAmount);
         fileSize = options_.entry->size;
         good = localFile_.good();
-        options_.progressCallback(0ull, fileSize, tellp, 0);
+        options_.progressCallback(0ull, fileSize, bytesInFile_, 0);
     }
     if (!good)
     {
@@ -358,7 +357,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
         });
         return false;
     }
-    return good && tellp < fileSize;
+    return good && bytesInFile_ < fileSize;
 }
 
 bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -398,30 +397,40 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 
     if (options_.tryContinue && std::filesystem::exists(tempPath))
     {
-        localFile_.open(tempPath, std::ios::binary | std::ios::app);
-        if (!localFile_.is_open())
+        // The size on disk, tellp right after opening in append mode reports 0 on Windows.
+        std::error_code sizeError{};
+        const auto existingSize = std::filesystem::file_size(tempPath, sizeError);
+        if (sizeError)
         {
-            Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
-            return std::unexpected(Error{.type = ErrorType::OpenFailure});
+            Log::error("DownloadOperation: Cannot read the size of '{}': {}", tempPath.generic_string(), sizeError.message());
+            return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
 
-        if (static_cast<std::uint64_t>(localFile_.tellp()) == options_.entry->size)
+        // A leftover of another program or of an older version of the source must not be continued.
+        bool belongsToSource = existingSize > 0 && existingSize <= options_.entry->size;
+        if (belongsToSource)
+        {
+            const auto matches = ResumeCheck::tailsMatchInStrand(stream, tempPath, existingSize);
+            if (!matches)
+                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = matches.error()});
+            belongsToSource = *matches;
+        }
+
+        if (belongsToSource && existingSize == options_.entry->size)
         {
             Log::info(
                 "DownloadOperation: File '{}' already complete, will be renamed in finalize() step.",
                 tempPath.generic_string()
             );
-            localFile_.close();
             transferComplete_ = true;
             return {};
         }
-        else if (static_cast<std::uint64_t>(localFile_.tellp()) > options_.entry->size)
+        else if (!belongsToSource)
         {
             Log::info(
                 "DownloadOperation: File '{}' is larger than expected, discarding and starting over.",
                 tempPath.generic_string()
             );
-            localFile_.close();
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else
