@@ -2,6 +2,11 @@
 #include <persistence/state/sftp_options.hpp>
 
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
+#include <utility/download_mark.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <utility/rename.hpp>
+
 #include <tuple>
 
 using namespace std::chrono_literals;
@@ -731,8 +736,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
             return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
         }
 
+        // Special bits never travel and the umask applies, like for a file created locally.
         std::error_code permissionsError{};
-        std::filesystem::permissions(options_.localPath, fileInfo->permissions, permissionsError);
+        if (const auto inherited = Utility::inheritablePermissions(fileInfo->permissions); inherited)
+            std::filesystem::permissions(localNativePath_, *inherited, permissionsError);
         if (permissionsError)
         {
             Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
@@ -742,7 +749,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     else if (options_.filePermissions)
     {
         std::error_code permissionsError{};
-        std::filesystem::permissions(options_.localPath, *options_.filePermissions, permissionsError);
+        if (const auto configured = Utility::sanitizePermissions(*options_.filePermissions); configured)
+            std::filesystem::permissions(localNativePath_, *configured, permissionsError);
         if (permissionsError)
         {
             Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());

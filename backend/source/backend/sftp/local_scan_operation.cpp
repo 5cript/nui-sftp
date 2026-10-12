@@ -165,6 +165,7 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                     .path = filename,
                     .type = type,
                     .size = entry.is_regular_file() ? entry.file_size() : 0,
+                    .permissions = Utility::localPermissions(status),
                     .mtime = mtimeSecs,
                     .linkTarget = std::move(linkTarget),
                 }

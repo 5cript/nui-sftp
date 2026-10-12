@@ -3,6 +3,7 @@
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -438,9 +439,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     tempPath += options_.tempFileSuffix;
     const auto tempResult = sftp_->lstatInStrand(tempPath);
 
-    // local file perms
-    const auto status = std::filesystem::symlink_status(options_.localPath);
-    const auto perms = determinePerms(status.permissions());
+    // Permissions of what is uploaded: the target of a followed symlink, not the link.
+    std::error_code statusError{};
+    const auto status = std::filesystem::status(localNativePath_, statusError);
+    const auto perms = determinePerms(statusError ? std::filesystem::perms::unknown : Utility::localPermissions(status));
 
     // Adoption mechanic for temp file parts:
     if (tempResult.has_value())
@@ -830,7 +832,10 @@ std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms lo
     {
         if (options_.inheritPermissions)
         {
-            return localPerms;
+            return Utility::sanitizePermissions(localPerms).value_or(
+                std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                std::filesystem::perms::others_read
+            );
         }
         else
         {

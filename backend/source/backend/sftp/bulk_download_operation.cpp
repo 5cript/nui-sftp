@@ -1,6 +1,7 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
 
 namespace
 {
@@ -114,11 +115,12 @@ std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPe
     SharedData::DirectoryEntry const& entryToInheritFrom
 )
 {
+    // Unknown permissions (the scan root carries none) leave the directory as created.
     std::optional<std::filesystem::perms> toApplyPerms{std::nullopt};
     if (individualOptions_.inheritPermissions)
-        toApplyPerms = entryToInheritFrom.permissions;
+        toApplyPerms = Utility::inheritablePermissions(entryToInheritFrom.permissions);
     else if (individualOptions_.directoryPermissions)
-        toApplyPerms = individualOptions_.directoryPermissions;
+        toApplyPerms = Utility::sanitizePermissions(*individualOptions_.directoryPermissions);
 
     if (!toApplyPerms)
         return {};

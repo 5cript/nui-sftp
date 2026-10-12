@@ -21,6 +21,7 @@ else()
         utility
         PRIVATE
         node/node.cpp
+        permissions.cpp
         resources.cpp
     )
 

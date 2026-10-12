@@ -1,6 +1,7 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
 
 namespace
 {
@@ -110,12 +111,15 @@ bool BulkUploadOperation::isSkippableError(Error const& error) const
 
 std::filesystem::perms BulkUploadOperation::determinePerms(SharedData::DirectoryEntry const& entry) const
 {
+    // Unknown permissions (the scan root carries none) fall back to the defaults below.
     if (individualOptions_.inheritPermissions)
     {
-        auto inherited = entry.permissions;
-        if (entry.isRegularFile())
-            inherited |= std::filesystem::perms::owner_write;
-        return inherited;
+        if (auto inherited = Utility::sanitizePermissions(entry.permissions); inherited)
+        {
+            if (entry.isRegularFile())
+                *inherited |= std::filesystem::perms::owner_write;
+            return *inherited;
+        }
     }
 
     if (entry.isDirectory())
@@ -129,8 +133,9 @@ std::filesystem::perms BulkUploadOperation::determinePerms(SharedData::Directory
     if (individualOptions_.filePermissions)
         return individualOptions_.filePermissions.value() | std::filesystem::perms::owner_write;
     // Inherit execute permissions anyway:
-    const auto ownerExecute = entry.permissions & std::filesystem::perms::owner_exec;
-    const auto groupExecute = entry.permissions & std::filesystem::perms::group_exec;
+    const auto known = Utility::sanitizePermissions(entry.permissions).value_or(std::filesystem::perms::none);
+    const auto ownerExecute = known & std::filesystem::perms::owner_exec;
+    const auto groupExecute = known & std::filesystem::perms::group_exec;
     return std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | ownerExecute |
         std::filesystem::perms::group_read | std::filesystem::perms::group_write | groupExecute;
 }
