@@ -3,6 +3,8 @@
 #include <backend/sftp/scan_operation.hpp>
 #include "real_server_tests.hpp"
 
+#include <shared_data/sync/diff_tree_store.hpp>
+
 #include <nui/utility/scope_exit.hpp>
 
 #include <algorithm>
@@ -360,5 +362,40 @@ namespace Test
         auto entries = operation.ejectEntries();
         EXPECT_TRUE(hasEntryNamed(entries, "doc1.txt"));
         EXPECT_TRUE(hasEntryNamed(entries, "doc2.txt"));
+    }
+
+    TEST_F(ScanOperationTests, BuildTreeKeepsDeniedSubdirectoryAsUnreadable)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ScanOperation operation{*sftp, {.remotePath = remote("/home/test"), .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* documents = SharedData::Sync::findScanNode(tree, "Documents");
+        ASSERT_NE(documents, nullptr);
+        EXPECT_EQ(documents->availability, SharedData::Sync::Availability::Unreadable);
+        EXPECT_FALSE(documents->childrenKnown);
+        auto const* pictures = SharedData::Sync::findScanNode(tree, "Pictures");
+        ASSERT_NE(pictures, nullptr);
+        EXPECT_EQ(pictures->children.size(), 2u);
+    }
+
+    TEST_F(ScanOperationTests, DeniedSubdirectoryFailsAFlatScan)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // Transfers and deletes use flat scans, an incomplete listing must fail them.
+        ScanOperation operation{*sftp, {.remotePath = remote("/home/test")}};
+        std::expected<ScanOperation::WorkStatus, ScanOperation::Error> result{};
+        for (int iteration = 0; iteration < 100 && result.has_value() &&
+             result.value() != ScanOperation::WorkStatus::Complete;
+             ++iteration)
+            result = operation.work();
+        EXPECT_FALSE(result.has_value());
     }
 }

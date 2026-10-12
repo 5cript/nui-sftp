@@ -3,7 +3,10 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include "real_server_tests.hpp"
 
+#include <shared_data/sync/diff_tree_store.hpp>
 #include <utility/temporary_directory.hpp>
+
+#include <nui/utility/scope_exit.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -11,6 +14,11 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifndef _WIN32
+#    include <sys/stat.h>
+#    include <unistd.h>
+#endif
 
 namespace Test
 {
@@ -422,4 +430,80 @@ namespace Test
         ASSERT_EQ(tree.children.back().children.size(), 1u);
         EXPECT_EQ(tree.children.back().children.front().name, "nested.txt");
     }
+
+#ifndef _WIN32
+    TEST_F(LocalScanOperationTests, BuildTreeKeepsUnreadableDirectoryAsUnreadable)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir" / "deeper";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* deeper = SharedData::Sync::findScanNode(tree, "subdir/deeper");
+        ASSERT_NE(deeper, nullptr);
+        EXPECT_EQ(deeper->availability, SharedData::Sync::Availability::Unreadable);
+        EXPECT_FALSE(deeper->childrenKnown) << "unknown content must never look empty";
+    }
+
+    TEST_F(LocalScanOperationTests, FlatScanReportsAnUnreadableDirectory)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir" / "deeper";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        EXPECT_EQ(operation.unreadableDirectories(), (std::vector<std::string>{Paths::nativeToUtf8(locked)}));
+    }
+
+    TEST_F(LocalScanOperationTests, UnreadableRootFailsTheScan)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(locked), .recursive = true, .buildTree = true}};
+        std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> result{};
+        for (int iteration = 0; iteration < 10 && result.has_value() &&
+             result.value() != LocalScanOperation::WorkStatus::Complete;
+             ++iteration)
+            result = operation.work();
+        EXPECT_FALSE(result.has_value());
+    }
+
+    TEST_F(LocalScanOperationTests, BuildTreeKeepsFifoAsExcludedPlaceholder)
+    {
+        const auto fifo = scanRoot_.path() / "pipe";
+        ASSERT_EQ(::mkfifo(fifo.c_str(), 0600), 0);
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        const auto tree = operation.ejectScanTree();
+        auto const* pipe = SharedData::Sync::findScanNode(tree, "pipe");
+        ASSERT_NE(pipe, nullptr);
+        EXPECT_EQ(pipe->availability, SharedData::Sync::Availability::Excluded);
+
+        LocalScanOperation flat{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(flat), LocalScanOperation::WorkStatus::Complete);
+        EXPECT_FALSE(hasEntryNamed(flat.ejectEntries(), "pipe")) << "transfers never see untransferable entries";
+    }
+#endif
 }

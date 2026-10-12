@@ -388,4 +388,33 @@ namespace SharedData::Sync::Test
         EXPECT_TRUE(plan[0].isDirectory);
         EXPECT_EQ(stores.uploads.summary().itemCount, 1u);
     }
+
+    TEST(DiffTreeStoreTests, PlansAndRowsSkipUnknownAndExcludedEntriesInsideTransferredDirectories)
+    {
+        DiffStores stores{
+            makeDir("", {makeDir("new", {makeFile("a", 1, 100), makeExcluded("pipe"), makeUnreadableDir("secret")})}),
+            makeDir("", {}),
+        };
+
+        EXPECT_EQ(relKeys(stores.uploads.loadChildren("new", stores.trees())), (std::vector<std::string>{"new/a"}));
+        EXPECT_EQ(relKeys(stores.uploads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/a"}));
+    }
+
+    TEST(DiffTreeStoreTests, BlockedEntriesAreCountedWithSamples)
+    {
+        DiffTreeStore uploads;
+        DiffTreeStore downloads;
+        DiffTreeStore deletes;
+        StoreDiffSink sink{uploads, downloads, deletes};
+        diffScanTrees(
+            makeDir("", {makeUnreadableDir("a"), makeExcluded("b")}),
+            makeDir("", {makeDir("a", {makeFile("x", 1, 100)})}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
+        );
+        EXPECT_EQ(sink.blockedCount(), 2u);
+        ASSERT_EQ(sink.blockedSamples().size(), 2u);
+        EXPECT_EQ(sink.blockedSamples()[0].relKey, "a");
+        EXPECT_EQ(sink.blockedSamples()[1].relKey, "b");
+    }
 }

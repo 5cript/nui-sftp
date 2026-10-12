@@ -28,6 +28,7 @@ namespace SharedData::Sync::Test
         std::vector<Record> uploads;
         std::vector<Record> downloads;
         std::vector<Record> deletes;
+        std::vector<BlockedEntry> blocked;
         std::uint64_t lastProgress{0};
 
         void emitUpload(DiffTreeNode node, std::string const& parentRelKey) override
@@ -42,11 +43,40 @@ namespace SharedData::Sync::Test
         {
             deletes.push_back(Record{.node = std::move(node), .parentRelKey = parentRelKey});
         }
+        void onBlocked(std::string const& relKey, BlockReason reason) override
+        {
+            blocked.push_back(BlockedEntry{.relKey = relKey, .reason = reason});
+        }
         void onProgress(std::uint64_t entriesCompared) override
         {
             lastProgress = entriesCompared;
         }
     };
+
+    /**
+     * @brief Builds a directory whose listing failed: its content is unknown.
+     */
+    inline ScanNode makeUnreadableDir(std::string const& name)
+    {
+        return ScanNode{
+            .name = name,
+            .type = FileType::Directory,
+            .childrenKnown = false,
+            .availability = Availability::Unreadable,
+        };
+    }
+
+    /**
+     * @brief Builds an entry the scan keeps but never transfers, like a FIFO.
+     */
+    inline ScanNode makeExcluded(std::string const& name, FileType type = FileType::Fifo)
+    {
+        return ScanNode{
+            .name = name,
+            .type = type,
+            .availability = Availability::Excluded,
+        };
+    }
 
     inline bool hasRelKey(std::vector<CollectingSink::Record> const& records, std::string const& relKey)
     {
@@ -758,5 +788,203 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(row.directChildCount, 0u);
         EXPECT_EQ(row.descendantItemCount, 0u);
         EXPECT_EQ(row.descendantByteTotal, 0u);
+    }
+
+    TEST(SyncDiffTests, WithoutALastSyncTheNewestSideWins)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("a.txt", 1, 300)}),
+            makeDir("", {makeFile("a.txt", 2, 200)}),
+            {.direction = Direction::Both},
+            sink
+        );
+        EXPECT_EQ(sink.uploads.size(), 1u);
+        EXPECT_TRUE(sink.blocked.empty());
+    }
+
+    TEST(SyncDiffTests, BothSidesChangedSinceTheLastSyncIsBlocked)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("both.txt", 1, 300), makeFile("local.txt", 1, 300)}),
+            makeDir("", {makeFile("both.txt", 2, 250), makeFile("local.txt", 2, 50)}),
+            {.direction = Direction::Both, .lastSyncTime = 100},
+            sink
+        );
+        ASSERT_EQ(sink.blocked.size(), 1u);
+        EXPECT_EQ(sink.blocked.front().relKey, "both.txt");
+        EXPECT_EQ(sink.blocked.front().reason, BlockReason::ChangedOnBothSides);
+        ASSERT_EQ(sink.uploads.size(), 1u) << "only the local side changed, it wins";
+        EXPECT_EQ(sink.uploads.front().node.relKey, "local.txt");
+    }
+
+    TEST(SyncDiffTests, UploadNeverReplacesWhatChangedOnTheServerSinceTheLastSync)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("a.txt", 1, 50), makeFile("b.txt", 1, 300)}),
+            makeDir("", {makeFile("a.txt", 2, 200), makeFile("b.txt", 2, 50)}),
+            {.direction = Direction::Upload, .lastSyncTime = 100},
+            sink
+        );
+        ASSERT_EQ(sink.blocked.size(), 1u);
+        EXPECT_EQ(sink.blocked.front().relKey, "a.txt");
+        EXPECT_EQ(sink.blocked.front().reason, BlockReason::ChangedOnDestination);
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "b.txt");
+    }
+
+    TEST(SyncDiffTests, DeleteNeverRemovesWhatAppearedSinceTheLastSync)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {}),
+            makeDir(
+                "",
+                {makeFile("old.txt", 1, 50),
+                 makeFile("new.txt", 1, 200),
+                 makeDir("dir", {makeFile("old", 1, 50), makeFile("fresh", 1, 200)})}
+            ),
+            {.direction = Direction::Upload, .actionDelete = true, .lastSyncTime = 100},
+            sink
+        );
+        ASSERT_EQ(sink.deletes.size(), 1u);
+        EXPECT_EQ(sink.deletes.front().node.relKey, "old.txt");
+        EXPECT_EQ(sink.blocked.size(), 2u) << "new.txt and the directory holding a new file";
+    }
+
+    TEST(SyncDiffTests, NamesDifferingOnlyInCaseAcrossSidesAreBlocked)
+    {
+        // On a case insensitive server "Foo" replaces "foo", the delete of "foo" would then remove the upload.
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("Foo", 3, 200), makeFile("other", 1, 100)}),
+            makeDir("", {makeFile("foo", 3, 100)}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
+        );
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "other");
+        EXPECT_TRUE(sink.deletes.empty());
+        ASSERT_EQ(sink.blocked.size(), 2u);
+        for (auto const& blocked : sink.blocked)
+            EXPECT_EQ(blocked.reason, BlockReason::CaseConflict) << blocked.relKey;
+    }
+
+    TEST(SyncDiffTests, RemoteCaseVariantsAreBlockedOnlyForACaseFoldingLocalFilesystem)
+    {
+        const auto local = makeDir("", {});
+        const auto remote = makeDir("", {makeFile("Readme", 1, 100), makeFile("readme", 1, 100)});
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download}, sink);
+            EXPECT_EQ(sink.downloads.size(), 2u) << "a case sensitive filesystem stores both";
+            EXPECT_TRUE(sink.blocked.empty());
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download, .localCaseInsensitive = true}, sink);
+            EXPECT_TRUE(sink.downloads.empty());
+            EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, UnreadableLocalDirectoryNeverDeletesItsRemoteContent)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeUnreadableDir("data")}),
+            makeDir("", {makeDir("data", {makeFile("a.txt", 1, 100), makeDir("deep", {makeFile("b", 1, 100)})})}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
+        );
+        EXPECT_TRUE(sink.deletes.empty());
+        EXPECT_TRUE(sink.uploads.empty());
+        ASSERT_EQ(sink.blocked.size(), 1u);
+        EXPECT_EQ(sink.blocked.front().relKey, "data");
+        EXPECT_EQ(sink.blocked.front().reason, BlockReason::Unreadable);
+    }
+
+    TEST(SyncDiffTests, UnreadableRemoteDirectoryNeverDeletesItsLocalContent)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeDir("data", {makeFile("a.txt", 1, 100)})}),
+            makeDir("", {makeUnreadableDir("data")}),
+            {.direction = Direction::Download, .actionDelete = true},
+            sink
+        );
+        EXPECT_TRUE(sink.deletes.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        ASSERT_EQ(sink.blocked.size(), 1u);
+        EXPECT_EQ(sink.blocked.front().reason, BlockReason::Unreadable);
+    }
+
+    TEST(SyncDiffTests, OneSidedUnreadableDirectoryIsNeitherTransferredNorDeleted)
+    {
+        for (const auto direction : {Direction::Upload, Direction::Download, Direction::Both})
+        {
+            CollectingSink sink;
+            diffScanTrees(
+                makeDir("", {makeUnreadableDir("local-only")}),
+                makeDir("", {makeUnreadableDir("remote-only")}),
+                {.direction = direction, .actionDelete = true},
+                sink
+            );
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_TRUE(sink.downloads.empty());
+            EXPECT_TRUE(sink.deletes.empty());
+            EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, ExcludedLocalEntryKeepsTheRemoteDirectoryOfTheSameName)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeExcluded("assets", FileType::Unknown)}),
+            makeDir("", {makeDir("assets", {makeFile("logo.png", 10, 100)})}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
+        );
+        EXPECT_TRUE(sink.deletes.empty());
+        EXPECT_TRUE(sink.uploads.empty());
+        ASSERT_EQ(sink.blocked.size(), 1u);
+        EXPECT_EQ(sink.blocked.front().reason, BlockReason::Excluded);
+    }
+
+    TEST(SyncDiffTests, OneSidedExcludedEntryIsNotTransferred)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeExcluded("pipe")}),
+            makeDir("", {makeExcluded("socket", FileType::Socket)}),
+            {.direction = Direction::Both},
+            sink
+        );
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_TRUE(sink.downloads.empty());
+        EXPECT_EQ(sink.blocked.size(), 2u);
+    }
+
+    TEST(SyncDiffTests, DirectoryAgainstSymlinkIsBlockedInBothDirections)
+    {
+        for (const auto direction : {Direction::Upload, Direction::Download, Direction::Both})
+        {
+            CollectingSink sink;
+            diffScanTrees(
+                makeDir("", {makeSymlink("x", "/etc", 200), makeDir("y", {makeFile("a", 1, 100)})}),
+                makeDir("", {makeDir("x", {makeFile("passwd", 1, 100)}), makeSymlink("y", "/root", 200)}),
+                {.direction = direction, .actionDelete = true},
+                sink
+            );
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_TRUE(sink.downloads.empty());
+            EXPECT_TRUE(sink.deletes.empty());
+            ASSERT_EQ(sink.blocked.size(), 2u);
+            EXPECT_EQ(sink.blocked[0].reason, BlockReason::TypeConflict);
+            EXPECT_EQ(sink.blocked[1].reason, BlockReason::TypeConflict);
+        }
     }
 }
