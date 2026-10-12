@@ -1404,14 +1404,22 @@ void Session::registerRpcSftpOpenSyncSession()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
+                // The roots every synchronized path is resolved against, refused here when they are not absolute.
+                auto remoteRoot = parseRemotePath(remotePath);
+                if (!remoteRoot)
+                    return reply.error(remoteRoot.error());
+                auto localRoot = Paths::LocalPath::fromUtf8(localPath);
+                if (!localRoot)
+                    return reply.error(fmt::format("Invalid local path: {}", localRoot.error().toString()));
+
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         syncSessionIdString,
                         remoteScanIdString,
                         localScanIdString,
-                        remotePath,
-                        localPath,
+                        remotePath = *std::move(remoteRoot),
+                        localPath = *std::move(localRoot),
                         respectIgnoreFiles,
                         recursive,
                         ignoreHidden](RpcHelper::RpcOnce&& reply, auto&& channel)

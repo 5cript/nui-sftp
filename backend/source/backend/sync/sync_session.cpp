@@ -1,4 +1,5 @@
 #include <backend/sync/sync_session.hpp>
+#include <log/log.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -64,9 +65,18 @@ ScanTrees SyncSession::scanTrees() const
     return ScanTrees{
         .local = localTree_ ? &*localTree_ : nullptr,
         .remote = remoteTree_ ? &*remoteTree_ : nullptr,
-        .localRoot = options_.localRoot,
-        .remoteRoot = options_.remoteRoot,
     };
+}
+
+std::expected<SyncSession::ResolvedPaths, Paths::PathError>
+SyncSession::resolve(Paths::RelativePath const& relative) const
+{
+    return options_.localRoot.join(relative).transform(
+        [this, &relative](Paths::LocalPath local)
+        {
+            return ResolvedPaths{.local = std::move(local), .remote = options_.remoteRoot / relative};
+        }
+    );
 }
 
 DiffSummary SyncSession::recomputeDiffInStrand(

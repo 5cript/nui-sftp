@@ -272,8 +272,8 @@ class OperationQueue
         Ids::SyncSessionId syncSessionId,
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        Paths::RemotePath const& remotePath,
+        Paths::LocalPath const& localPath,
         bool respectIgnoreFiles,
         bool recursive,
         bool ignoreHidden
