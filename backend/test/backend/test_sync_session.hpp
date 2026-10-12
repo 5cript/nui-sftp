@@ -134,15 +134,16 @@ namespace Test
         EXPECT_EQ(snapshot.deletes[0].children[0].action, SharedData::Sync::Action::DeleteRemote);
     }
 
-    TEST_F(SyncSessionTests, PlanUsesSessionRoots)
+    TEST_F(SyncSessionTests, PlanResolvesBelowSessionRoots)
     {
         session_->recomputeSnapshotInStrand({}, {}, {});
-        const auto plan = session_->buildEnqueuePlanInStrand(SharedData::Sync::DiffSection::Upload, {"src"});
-        ASSERT_EQ(plan.size(), 2u);
-        EXPECT_EQ(plan[0].relKey, "src/main.cpp");
-        EXPECT_EQ(plan[0].localAbsPath, "/local/src/main.cpp");
-        EXPECT_EQ(plan[0].remoteAbsPath, "/remote/src/main.cpp");
-        EXPECT_EQ(plan[1].relKey, "src/util/strings.cpp");
+        const auto plan = session_->resolvePlanInStrand(SharedData::Sync::DiffSection::Upload, {"src"});
+        ASSERT_EQ(plan.entries.size(), 2u);
+        EXPECT_TRUE(plan.refused.empty());
+        EXPECT_EQ(plan.entries[0].entry.relKey, "src/main.cpp");
+        EXPECT_EQ(plan.entries[0].paths.local.toUtf8(), "/local/src/main.cpp");
+        EXPECT_EQ(plan.entries[0].paths.remote.value(), "/remote/src/main.cpp");
+        EXPECT_EQ(plan.entries[1].entry.relKey, "src/util/strings.cpp");
     }
 
     TEST_F(SyncSessionTests, CancelOnlyStopsTheRunningWalk)

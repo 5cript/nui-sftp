@@ -41,7 +41,7 @@ namespace SharedData::Sync::Test
 
         ScanTrees trees() const
         {
-            return ScanTrees{.local = &local, .remote = &remote, .localRoot = "/l", .remoteRoot = "/r"};
+            return ScanTrees{.local = &local, .remote = &remote};
         }
     };
 
@@ -203,8 +203,7 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(plan[0].sizeBytes, 16u);
         EXPECT_EQ(plan[0].mtime, 2000u);
         EXPECT_EQ(plan[0].mtimeNsec, 42u);
-        EXPECT_EQ(plan[0].localAbsPath, "/l/socket.cpp");
-        EXPECT_EQ(plan[0].remoteAbsPath, "/r/socket.cpp");
+        EXPECT_EQ(plan[0].relKey, "socket.cpp");
     }
 
     TEST(DiffTreeStoreTests, PlanForANewerLocalFileCarriesLocalSizeAndMtime)
