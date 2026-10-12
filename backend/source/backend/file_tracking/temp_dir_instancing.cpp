@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 
@@ -127,7 +128,7 @@ namespace FileTracking
         Config config;
         std::string instanceId;
         std::filesystem::path instanceDir;
-        InstanceLock lock;
+        std::optional<InstanceLock> lock;
         boost::asio::strand<boost::asio::any_io_executor> strand;
         Nui::RpcHub* hub;
         std::shared_ptr<efsw::FileWatcher> watcher;
@@ -149,7 +150,7 @@ namespace FileTracking
             : config{std::move(cfg)}
             , instanceId{std::move(instId)}
             , instanceDir{prepareInstanceDir(config.tempRootDir / instanceId)}
-            , lock{instanceDir / (instanceId + ".lock")}
+            , lock{std::in_place, instanceDir / (instanceId + ".lock")}
             , strand{std::move(strd)}
             , hub{hubPtr}
             , watcher{std::make_shared<efsw::FileWatcher>()}
@@ -248,6 +249,7 @@ namespace FileTracking
 
         impl_->watcher.reset();
         impl_->listener.reset();
+        impl_->lock.reset();
 
         std::error_code err;
         std::filesystem::remove_all(impl_->instanceDir, err);
