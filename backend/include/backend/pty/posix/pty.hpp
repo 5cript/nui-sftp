@@ -70,6 +70,11 @@ namespace PTY
         startReading(std::function<void(std::string_view)> onStdout, std::function<void(std::string_view)> onStderr);
         void stopReading();
 
+        /**
+         * @brief Queues @p data for the pty and writes it in order without blocking, from any thread.
+         * @param data The input for the process on the pty.
+         * @return false if the pty is closed and the data was dropped.
+         */
         bool write(std::string_view data);
 
       private:

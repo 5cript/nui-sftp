@@ -11,14 +11,155 @@
 #    include <pty.h>
 #    include <utmp.h>
 #endif
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <atomic>
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
+#include <mutex>
+#include <string>
 
 namespace PTY
 {
+    namespace
+    {
+        /**
+         * @brief Input for the pty master, written in order without blocking the caller.
+         *
+         * The master is non-blocking, so a write can take a part of the data or nothing while the pty
+         * input buffer is full. The rest waits here until the master is writable again.
+         */
+        class InputQueue : public std::enable_shared_from_this<InputQueue>
+        {
+          public:
+            /**
+             * @brief Writes through a duplicate of the master, the reading stream owns the master itself.
+             * @param executor Runs the waits for the master to become writable.
+             * @param descriptor The duplicated master, owned by the queue from here on.
+             */
+            InputQueue(boost::asio::any_io_executor executor, int descriptor)
+                : mutex_{}
+                , descriptor_{std::move(executor), descriptor}
+                , pending_{}
+                , writtenOffset_{0u}
+                , isWaitingForWritable_{false}
+            {}
+
+            /**
+             * @brief Appends @p data behind the pending input and writes as much as the pty takes now.
+             * @param data The input for the pty.
+             * @return false if the pty is closed and the data was dropped.
+             */
+            bool enqueue(std::string_view data)
+            {
+                std::scoped_lock lock{mutex_};
+                if (!descriptor_.is_open())
+                    return false;
+                pending_.append(data);
+                if (!isWaitingForWritable_)
+                    flush();
+                return true;
+            }
+
+            /**
+             * @brief Drops the pending input and closes the duplicated master.
+             */
+            void close()
+            {
+                std::scoped_lock lock{mutex_};
+                closeDescriptor();
+            }
+
+          private:
+            /**
+             * @brief Writes pending input until it is gone or the pty takes no more. Requires mutex_.
+             */
+            void flush()
+            {
+                while (writtenOffset_ < pending_.size())
+                {
+                    const auto written = ::write(
+                        descriptor_.native_handle(), pending_.data() + writtenOffset_, pending_.size() - writtenOffset_
+                    );
+                    if (written > 0)
+                        writtenOffset_ += static_cast<std::size_t>(written);
+                    else if (written == -1 && errno == EINTR)
+                        continue;
+                    else if (written == 0 || errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // Erasing the front of a large paste on every wakeup would be quadratic.
+                        if (writtenOffset_ * 2u >= pending_.size())
+                        {
+                            pending_.erase(0, writtenOffset_);
+                            writtenOffset_ = 0u;
+                        }
+                        waitUntilWritable();
+                        return;
+                    }
+                    else
+                    {
+                        Log::warn(
+                            "Dropping {} byte(s) of pty input: {}",
+                            pending_.size() - writtenOffset_,
+                            std::strerror(errno)
+                        );
+                        closeDescriptor();
+                        return;
+                    }
+                }
+                pending_.clear();
+                writtenOffset_ = 0u;
+            }
+
+            /**
+             * @brief Continues the flush once the master is writable. Requires mutex_.
+             */
+            void waitUntilWritable()
+            {
+                isWaitingForWritable_ = true;
+                descriptor_.async_wait(
+                    boost::asio::posix::stream_descriptor::wait_write,
+                    [weak = weak_from_this()](boost::system::error_code const& error)
+                    {
+                        const auto self = weak.lock();
+                        if (!self)
+                            return;
+                        std::scoped_lock lock{self->mutex_};
+                        self->isWaitingForWritable_ = false;
+                        if (error || !self->descriptor_.is_open())
+                            return;
+                        self->flush();
+                    }
+                );
+            }
+
+            /**
+             * @brief Drops the pending input and closes the duplicate. Requires mutex_.
+             */
+            void closeDescriptor()
+            {
+                pending_.clear();
+                writtenOffset_ = 0u;
+                boost::system::error_code ignored;
+                descriptor_.close(ignored);
+            }
+
+          private:
+            std::mutex mutex_;
+            boost::asio::posix::stream_descriptor descriptor_;
+            std::string pending_;
+            /**
+             * @brief The front of pending_ that is already written.
+             */
+            std::size_t writtenOffset_;
+            bool isWaitingForWritable_;
+        };
+    }
+
     struct PseudoTerminal::Implementation
     {
       public:
@@ -32,11 +173,20 @@ namespace PTY
         std::function<void(std::string_view)> onStderr;
         std::unique_ptr<boost::asio::posix::stream_descriptor> stream;
         std::vector<char> buffer;
+        std::shared_ptr<InputQueue> input;
+
+        void closeInput()
+        {
+            if (input)
+                input->close();
+        }
 
         void stopReading()
         {
             if (isReading)
             {
+                // Keeping the duplicate open would keep the pty alive after the master is closed.
+                closeInput();
                 stream.reset();
                 isReading = false;
                 onStdout = {};
@@ -95,6 +245,7 @@ namespace PTY
             , onStderr{}
             , stream{}
             , buffer(4096)
+            , input{}
         {}
     };
 
@@ -133,6 +284,7 @@ namespace PTY
     {
         Log::error("Failed to launch the process on the pty: {}", error.message());
 
+        terminal_->impl_->closeInput();
         close(terminal_->impl_->master);
         close(terminal_->impl_->slave);
     }
@@ -212,6 +364,21 @@ namespace PTY
             Log::info("Opened pty: {}", name);
         }
 
+        // Writes must never block the caller, whether or not reading has started yet.
+        const auto flags = fcntl(term.impl_->master, F_GETFL);
+        const auto inputDescriptor = fcntl(term.impl_->master, F_DUPFD_CLOEXEC, 0);
+        if (flags == -1 || fcntl(term.impl_->master, F_SETFL, flags | O_NONBLOCK) == -1 || inputDescriptor == -1)
+        {
+            Log::error("Failed to prepare the pty for input: {}", strerror(errno));
+            if (inputDescriptor != -1)
+                close(inputDescriptor);
+            close(term.impl_->master);
+            close(term.impl_->slave);
+            term.impl_->master = 0;
+            return std::nullopt;
+        }
+        term.impl_->input = std::make_shared<InputQueue>(term.impl_->executor, inputDescriptor);
+
         return std::optional<PseudoTerminal>(std::move(term));
     }
 
@@ -226,6 +393,8 @@ namespace PTY
         {
             if (impl_->isReading)
                 stopReading();
+
+            impl_->closeInput();
 
             if (impl_->master != 0)
                 close(impl_->master);
@@ -256,7 +425,9 @@ namespace PTY
 
     bool PseudoTerminal::write(std::string_view data)
     {
-        return ::write(impl_->master, data.data(), data.size()) == static_cast<ssize_t>(data.size());
+        if (!impl_->input)
+            return false;
+        return impl_->input->enqueue(data);
     }
 
     void PseudoTerminal::resize(short width, short height)
