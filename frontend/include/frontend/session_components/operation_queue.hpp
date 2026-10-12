@@ -232,11 +232,8 @@ class OperationQueue
         std::function<void(bool success, std::string const& info)> onComplete
     );
 
-    /** @brief Removes local paths, directories with their content. Not queued, like @ref createLocalDirectory. */
-    void removeLocalPaths(
-        std::vector<std::filesystem::path> const& paths,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
+    /** @brief Drops every callback registered for @p opId, for an operation that was never queued. */
+    void removeCallbacks(Ids::OperationId const& opId);
 
     /** @brief Shows a restore button in the queue header for a minimized SyncDialog.
      *         The button pulses once on call (and on subsequent calls) to catch the user's eye.

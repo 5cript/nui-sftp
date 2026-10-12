@@ -13,6 +13,7 @@
 #endif
 
 #include <backend/inspector_environment.hpp>
+#include <paths/local_path_segment.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <constants/persistence.hpp>
@@ -389,6 +390,8 @@ void Main::registerVersionGetter()
                     {"version", VERSION},
                     {"gitTag", GIT_TAG},
                     {"gitBranch", GIT_BRANCH},
+                    {"localPlatform",
+                     Paths::compiledLocalPlatform() == Paths::LocalPlatform::Windows ? "windows" : "posix"},
                 }
             );
         }
@@ -493,4 +496,4 @@ int main(int const argc, char const* const* argv)
     }
 
     ssh_finalize();
-}
+}

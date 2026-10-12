@@ -1570,28 +1570,11 @@ void OperationQueue::createLocalDirectory(
     );
 }
 
-void OperationQueue::removeLocalPaths(
-    std::vector<std::filesystem::path> const& paths,
-    std::function<void(bool, std::string const&)> onComplete
-)
+void OperationQueue::removeCallbacks(Ids::OperationId const& opId)
 {
-    Nui::val args = Nui::val::object();
-    args.set("paths", Nui::val::array());
-    args.set("recursive", true);
-    for (auto const& path : paths)
-        args["paths"].call<void>("push", path.generic_string());
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::removeSome",
-        [onComplete = std::move(onComplete)](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-                return onComplete(false, "Invalid response from backend");
-            if (!val["success"].as<bool>())
-                return onComplete(false, language->translate(val["error"].as<std::string>()));
-            onComplete(true, "Success");
-        },
-        args
-    );
+    impl_->completionCallbacks.erase(opId.value());
+    impl_->failedEntriesCallbacks.erase(opId.value());
+    impl_->bulkProgressCallbacks.erase(opId.value());
 }
 
 void OperationQueue::showMinimizedSync(std::function<void()> onRestore)

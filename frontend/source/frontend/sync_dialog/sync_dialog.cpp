@@ -1006,14 +1006,19 @@ struct SyncDialog::Implementation
             target.insert(target.end(), covering.begin(), covering.end());
         };
 
-        std::vector<SharedData::BulkAddEntry> uploadEntries;
-        std::vector<ProgressObserver> uploadObservers;
-        std::vector<SharedData::BulkAddEntry> downloadEntries;
-        std::vector<ProgressObserver> downloadObservers;
-        std::vector<SharedData::BulkDeleteEntry> remoteDeletes;
-        std::vector<ProgressObserver> remoteDeleteObservers;
-        std::vector<std::filesystem::path> localDeletes;
-        std::vector<ProgressObserver> localDeleteObservers;
+    void watchCompletion(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
+    {
+        operationQueue_->addCompletionCallback(
+            operationId,
+            [part](bool success)
+            {
+                part->completion = success;
+                if (part->mapped)
+                    part->complete();
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        );
+    }
 
         for (auto& entry : plan)
         {
@@ -1064,25 +1069,19 @@ struct SyncDialog::Implementation
                     downloadObservers.push_back(progress);
                     break;
                 }
-                case SharedData::Sync::Action::DeleteLocal:
-                {
-                    localDeletes.push_back(entry.localAbsPath);
-                    appendCovering(localDeleteObservers, entry.relKey);
-                    break;
-                }
-                case SharedData::Sync::Action::DeleteRemote:
-                {
-                    auto target = Paths::RemotePath::make(entry.remoteAbsPath);
-                    if (!target)
+                std::erase_if(
+                    part->seenInFlight,
+                    [&](std::uint64_t entryIndex)
                     {
-                        Log::error("Sync: not deleting '{}' remotely: {}", entry.remoteAbsPath, target.error().toString());
-                        finishWith(progressCovering(section, entry.relKey))(false, target.error().toString());
-                        break;
+                        if (stillInFlight.contains(entryIndex))
+                            return false;
+                        auto& observer = observers[entryIndex];
+                        if (observer->value() >= 0.0 && observer->value() < 1.0)
+                            *observer = 1.1;
+                        return true;
                     }
-                    remoteDeletes.push_back({.target = *std::move(target), .isDirectory = entry.isDirectory});
-                    appendCovering(remoteDeleteObservers, entry.relKey);
-                    break;
-                }
+                );
+                Nui::globalEventContext.executeActiveEventsImmediately();
             }
         }
 

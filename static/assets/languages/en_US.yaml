@@ -1139,6 +1139,7 @@ backend:
     createFilePrevented: "File creation is prevented by configuration."
     createDirectoryPrevented: "Directory creation is prevented by configuration."
     removeFailed: "Failed to remove path '{}': {}"
+    removeRefused: "Refusing to delete '{}': it is not an absolute path, it is a root directory, or it contains your home directory."
   opener:
     sessionBusUnavailable: "D-Bus session bus is unavailable."
     sessionBusUnavailableOpenFile: "Session bus is unavailable; cannot open files via xdg-desktop-portal. This typically happens when running as root or without a user D-Bus session."
