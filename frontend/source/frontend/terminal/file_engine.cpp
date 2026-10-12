@@ -683,7 +683,7 @@ void FileEngine::addArchiveUpload(
 }
 
 void FileEngine::addBulkDownload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDownloadEntry> entries,
     std::vector<Ids::OperationId> operationIds,
     bool allowOverwrite,
     bool insertRefresh,
@@ -723,7 +723,7 @@ void FileEngine::addBulkDownload(
             for (auto const& id : operationIds)
                 operationIdStrings.push_back(id.value());
 
-            SharedData::BulkAddRequest request{
+            SharedData::BulkDownloadRequest request{
                 .entries = entries,
                 .allowOverwrite = allowOverwrite,
                 .insertRefresh = insertRefresh,
@@ -752,7 +752,7 @@ void FileEngine::addBulkDownload(
 }
 
 void FileEngine::addBulkUpload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkUploadEntry> entries,
     std::vector<Ids::OperationId> operationIds,
     bool allowOverwrite,
     bool insertRefresh,
@@ -792,7 +792,7 @@ void FileEngine::addBulkUpload(
             for (auto const& id : operationIds)
                 operationIdStrings.push_back(id.value());
 
-            SharedData::BulkAddRequest request{
+            SharedData::BulkUploadRequest request{
                 .entries = entries,
                 .allowOverwrite = allowOverwrite,
                 .insertRefresh = insertRefresh,

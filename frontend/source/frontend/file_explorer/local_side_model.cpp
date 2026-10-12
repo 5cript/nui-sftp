@@ -1054,7 +1054,7 @@ void LocalSideModel::uploadItemsConfirmed(
     std::size_t index,
     bool overwriteNever,
     bool overwriteAlways,
-    std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted
+    std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted
 )
 {
     // Mirrors RemoteSideModel::downloadItemsConfirmed — see that for the
@@ -1062,23 +1062,7 @@ void LocalSideModel::uploadItemsConfirmed(
     // keep WASM stack depth bounded by conflicts not by file count).
 
     if (!accepted)
-        accepted = std::make_shared<std::vector<SharedData::BulkAddEntry>>();
-
-    auto pushEntry = [](std::vector<SharedData::BulkAddEntry>& bucket,
-                         NuiFileExplorer::Item const& remoteItem,
-                         NuiFileExplorer::Item const& localItem)
-    {
-        bucket.push_back(
-            SharedData::BulkAddEntry{
-                // For uploads, src is local and dst is remote — opposite of
-                // download (the bulk RPC is symmetric on field naming).
-                .src = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
-                .dst = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
-                .sizeBytes = localItem.size,
-                .isDirectory = localItem.isDirectory(),
-            }
-        );
-    };
+        accepted = std::make_shared<std::vector<SharedData::BulkUploadEntry>>();
 
     // Every entry in `accepted` is either a non-existing destination or an
     // item the user explicitly approved for overwrite (Yes / All); the "No"
@@ -1094,18 +1078,6 @@ void LocalSideModel::uploadItemsConfirmed(
         // the bulk path because they need the Scan+Bulk pair.
         if (accepted->size() == 1 && !accepted->front().isDirectory)
         {
-            auto const& entry = accepted->front();
-            // For upload, BulkAddEntry.src is the LOCAL path (source) and
-            // .dst is the REMOTE path (destination) — see the pushEntry
-            // lambda above.  enqueueSingleUpload's parameter order is
-            // (remoteItem, localItem) so build accordingly.
-            SharedData::DirectoryEntry localEntry{};
-            localEntry.path = entry.src;
-            localEntry.size = entry.sizeBytes;
-            localEntry.type = SharedData::FileType::Regular;
-            SharedData::DirectoryEntry remoteEntry{};
-            remoteEntry.path = entry.dst;
-            remoteEntry.type = SharedData::FileType::Regular;
             enqueueSingleUpload(
                 NuiFileExplorer::Item{remoteEntry},
                 NuiFileExplorer::Item{localEntry},

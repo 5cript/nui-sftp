@@ -129,7 +129,7 @@ class RemoteSideModel
         std::size_t index = 0,
         bool overwriteNever = false,
         bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted = nullptr
+        std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted = nullptr
     );
 
     void enqueueSingleDownload(

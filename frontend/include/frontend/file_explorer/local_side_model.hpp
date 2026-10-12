@@ -1,7 +1,7 @@
 #pragma once
 
 #include <frontend/file_explorer/side_model.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/opener_capabilities.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
@@ -133,7 +133,7 @@ class LocalSideModel
         std::size_t index = 0,
         bool overwriteNever = false,
         bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted = nullptr
+        std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted = nullptr
     );
 
     void enqueueSingleUpload(

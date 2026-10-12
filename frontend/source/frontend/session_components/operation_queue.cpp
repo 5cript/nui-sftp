@@ -2296,7 +2296,7 @@ void OperationQueue::enqueueDelete(
 }
 
 void OperationQueue::enqueueBulkDownload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDownloadEntry> entries,
     bool allowOverwrite,
     bool insertRefresh,
     SharedData::OperationMode mode,
@@ -2352,7 +2352,7 @@ void OperationQueue::enqueueBulkDownload(
 }
 
 void OperationQueue::enqueueBulkUpload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkUploadEntry> entries,
     bool allowOverwrite,
     bool insertRefresh,
     SharedData::OperationMode mode,

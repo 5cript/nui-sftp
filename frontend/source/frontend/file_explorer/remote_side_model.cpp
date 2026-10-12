@@ -659,7 +659,7 @@ void RemoteSideModel::downloadItemsConfirmed(
     std::size_t index,
     bool overwriteNever,
     bool overwriteAlways,
-    std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted
+    std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted
 )
 {
     // Lazily allocate the accumulator on the first (top-level) call.  All
@@ -667,23 +667,7 @@ void RemoteSideModel::downloadItemsConfirmed(
     // confirmations land in one batch that's flushed as a single bulk RPC at
     // the terminal recursion.
     if (!accepted)
-        accepted = std::make_shared<std::vector<SharedData::BulkAddEntry>>();
-
-    auto pushEntry = [](std::vector<SharedData::BulkAddEntry>& bucket,
-                         NuiFileExplorer::Item const& remoteItem,
-                         NuiFileExplorer::Item const& localItem)
-    {
-        bucket.push_back(
-            SharedData::BulkAddEntry{
-                .src = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
-                .dst = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
-                .sizeBytes = remoteItem.size,
-                .isDirectory = remoteItem.isDirectory(),
-                .mtime = remoteItem.mtime,
-                .mtimeNsec = remoteItem.mtimeNsec,
-            }
-        );
-    };
+        accepted = std::make_shared<std::vector<SharedData::BulkDownloadEntry>>();
 
     // Every entry in `accepted` is either a non-existing destination or an
     // item the user explicitly approved for overwrite (Yes / All); the "No"
@@ -699,16 +683,6 @@ void RemoteSideModel::downloadItemsConfirmed(
         // the bulk path because they need the Scan+Bulk pair.
         if (accepted->size() == 1 && !accepted->front().isDirectory)
         {
-            auto const& entry = accepted->front();
-            SharedData::DirectoryEntry remoteEntry{};
-            remoteEntry.path = entry.src;
-            remoteEntry.size = entry.sizeBytes;
-            remoteEntry.type = SharedData::FileType::Regular;
-            remoteEntry.mtime = entry.mtime;
-            remoteEntry.mtimeNsec = entry.mtimeNsec;
-            SharedData::DirectoryEntry localEntry{};
-            localEntry.path = entry.dst;
-            localEntry.type = SharedData::FileType::Regular;
             enqueueSingleDownload(
                 NuiFileExplorer::Item{remoteEntry},
                 NuiFileExplorer::Item{localEntry},

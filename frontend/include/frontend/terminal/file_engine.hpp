@@ -2,7 +2,7 @@
 
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
@@ -160,7 +160,7 @@ class FileEngine
      *                             before the RPC returns).
      */
     void addBulkDownload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDownloadEntry> entries,
         std::vector<Ids::OperationId> operationIds,
         bool allowOverwrite,
         bool insertRefresh,
@@ -203,7 +203,7 @@ class FileEngine
 
     /** @brief Upload analogue of addBulkDownload — see its docs. */
     void addBulkUpload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkUploadEntry> entries,
         std::vector<Ids::OperationId> operationIds,
         bool allowOverwrite,
         bool insertRefresh,

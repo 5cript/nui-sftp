@@ -17,7 +17,7 @@
 #include <shared_data/file_operations/operation_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operations_reordered.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
@@ -117,7 +117,7 @@ class OperationQueue
      *                        transfer-progress callbacks per entry.
      */
     void enqueueBulkDownload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDownloadEntry> entries,
         bool allowOverwrite,
         bool insertRefresh,
         SharedData::OperationMode mode,
@@ -157,7 +157,7 @@ class OperationQueue
 
     /** @brief Upload analogue of enqueueBulkDownload — see its docs. */
     void enqueueBulkUpload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkUploadEntry> entries,
         bool allowOverwrite,
         bool insertRefresh,
         SharedData::OperationMode mode,
