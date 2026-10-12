@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ssh/sftp_session.hpp>
+#include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <utility/node/node.hpp>
 
@@ -21,6 +22,14 @@ extern std::filesystem::path programDirectory;
 inline Paths::RemotePath remote(std::string_view path)
 {
     return Paths::RemotePath::make(path).value();
+}
+
+/**
+ * @brief A local path below the test directory, which is known to be valid.
+ */
+inline Paths::LocalPath toLocal(std::filesystem::path const& path)
+{
+    return Paths::LocalPath::make(path).value();
 }
 
 #pragma clang diagnostic push
