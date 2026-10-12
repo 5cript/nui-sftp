@@ -11,6 +11,20 @@
 namespace SharedData::Sync
 {
     /**
+     * @brief Whether the scan knows what is behind a node. Sync never acts on a node that is not Listed.
+     */
+    enum class Availability
+    {
+        Listed,
+        /// A directory whose listing failed, its content is unknown.
+        Unreadable,
+        /// Present but not transferable: sockets, devices, FIFOs and symlinks on Windows.
+        Excluded,
+        /// A name that cannot be a path segment, like ".." or a name containing '/'.
+        InvalidName,
+    };
+
+    /**
      * @brief One node of a scan tree.
      *
      * Built on the backend by @ref Utility::TreeDirectoryWalker; never serialized to the
@@ -39,5 +53,6 @@ namespace SharedData::Sync
         /// False when the scan did not descend into this directory (non-recursive mode).
         /// Diff suppresses one-sided delete emissions when this is false.
         bool childrenKnown{true};
+        Availability availability{Availability::Listed};
     };
 }

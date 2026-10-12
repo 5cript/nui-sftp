@@ -98,7 +98,16 @@ class LocalScanOperation : public Operation
         };
         using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan), recursive_);
+            walker_ = std::make_unique<WalkerType>(
+                std::move(scan),
+                recursive_,
+                [](Error const& error)
+                {
+                    return error.type == ErrorType::DirectoryUnreadable;
+                },
+                /*requireLocalNames=*/false,
+                excludedSuffixes_
+            );
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -137,6 +146,17 @@ class LocalScanOperation : public Operation
     std::uint64_t totalBytes() const;
 
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
+
+  private:
+    /**
+     * @brief A directory below the root that vanished or denies listing is unreadable, a sync tree keeps
+     *        it as such. Any other listing error fails the scan.
+     */
+    std::expected<std::vector<SharedData::DirectoryEntry>, Error> listingFailed(
+        std::filesystem::path const& path,
+        Paths::RelativePath const& relative,
+        std::error_code const& errorCode
+    );
 
   private:
     std::filesystem::path localPath_;

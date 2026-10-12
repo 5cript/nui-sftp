@@ -285,6 +285,13 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
             .extraInfo = "no archivable entries under the selected roots",
         });
 
+    // Opening for writing follows a symlink planted at the temp path, out of the target directory.
+    if (std::error_code linkError{}; std::filesystem::is_symlink(std::filesystem::symlink_status(tempPath_, linkError)))
+    {
+        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", tempPath_.generic_string());
+        return std::unexpected(Error{.type = ErrorType::OpenFailure, .extraInfo = "The temporary file path is a symlink"});
+    }
+
     auto sinkOrError = openArchiveSink(
         tempPath_, options_.localArchivePath, options_.compression, options_.compressionOptions
     );

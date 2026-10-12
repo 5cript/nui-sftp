@@ -192,6 +192,8 @@ namespace SharedData::Sync
         {
             if (options_.ignoreHidden && isHiddenName(child.name))
                 continue;
+            if (child.availability != Availability::Listed)
+                continue;
             auto childKey = joinRelKey(parentRelKey, child.name);
             nodes_.insert_or_assign(childKey, makeOneSidedRow(child, childKey, parent.action, sourceIsLocal));
             order_.push_back(childKey);
@@ -226,6 +228,9 @@ namespace SharedData::Sync
         for (auto const& child : directory.children)
         {
             if (options_.ignoreHidden && isHiddenName(child.name))
+                continue;
+            // Unknown or untransferable entries are never planned, not even inside a transferred directory.
+            if (child.availability != Availability::Listed)
                 continue;
             anyChild = true;
             auto childKey = joinRelKey(relKey, child.name);
@@ -314,6 +319,13 @@ namespace SharedData::Sync
     void StoreDiffSink::emitDelete(DiffTreeNode node, std::string const& parentRelKey)
     {
         deletes_->add(std::move(node), parentRelKey);
+    }
+
+    void StoreDiffSink::onBlocked(std::string const& relKey, BlockReason reason)
+    {
+        ++blockedCount_;
+        if (blockedSamples_.size() < maxBlockedSamples)
+            blockedSamples_.push_back(BlockedEntry{.relKey = relKey, .reason = reason});
     }
 
     void StoreDiffSink::onProgress(std::uint64_t entriesCompared)

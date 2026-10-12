@@ -46,19 +46,12 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
+    // No skip_permission_denied: an unreadable directory would list as empty and sync would delete the
+    // remote copy of its content.
     std::error_code iterErrc{};
-    auto iter = std::filesystem::directory_iterator(
-        path, std::filesystem::directory_options::skip_permission_denied, iterErrc
-    );
+    auto iter = std::filesystem::directory_iterator(path, iterErrc);
     if (iterErrc)
-    {
-        Log::error(
-            "LocalScanOperation: Failed to open directory '{}': {}", path.generic_string(), iterErrc.message()
-        );
-        return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-            {.type = ErrorType::FilesystemError, .extraInfo = iterErrc.message()}
-        );
-    }
+        return listingFailed(path, relative, iterErrc);
     const auto end = std::filesystem::directory_iterator();
 
     const auto relDir = [&]() -> std::filesystem::path {
@@ -84,8 +77,10 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
 
     std::vector<SharedData::DirectoryEntry> entries;
 
-    for (; iter != end; ++iter)
+    for (; iter != end; iter.increment(iterErrc))
     {
+        if (iterErrc)
+            return listingFailed(path, relative, iterErrc);
         try
         {
             auto const& entry = *iter;
@@ -95,9 +90,11 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             if (isSymlink)
             {
 #ifdef _WIN32
-                // Windows symlinks require elevated privileges to create and are rarely used by
-                // ordinary users. Skipping them here keeps sync predictable on Windows.
-                continue;
+                // Windows symlinks and junctions are not transferred. A sync tree keeps them as excluded
+                // placeholders, so the name still counts as present and the remote side is left alone.
+                if (!buildTree_)
+                    continue;
+                type = SharedData::DirectoryEntry::FileType::Unknown;
 #else
                 type = SharedData::DirectoryEntry::FileType::Symlink;
 #endif
@@ -108,8 +105,13 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                 type = SharedData::DirectoryEntry::FileType::Regular;
             else
             {
-                // Dont add anything thats not uploadable:
-                continue;
+                // Sockets, devices and FIFOs are not uploadable, a sync tree keeps them as excluded placeholders.
+                if (!buildTree_)
+                    continue;
+                type = SharedData::fileTypeFromStdFilesystemType(status.type());
+                if (type == SharedData::DirectoryEntry::FileType::Regular ||
+                    type == SharedData::DirectoryEntry::FileType::Directory)
+                    type = SharedData::DirectoryEntry::FileType::Unknown;
             }
 
             std::uint64_t mtimeSecs = 0;
@@ -177,6 +179,38 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         }
     }
     return {std::move(entries)};
+}
+
+std::expected<std::vector<SharedData::DirectoryEntry>, LocalScanOperation::Error>
+LocalScanOperation::listingFailed(
+    std::filesystem::path const& path,
+    Paths::RelativePath const& relative,
+    std::error_code const& errorCode
+)
+{
+    const bool belowRoot = !relative.empty();
+    const bool deniedOrVanished =
+        errorCode == std::errc::permission_denied || errorCode == std::errc::no_such_file_or_directory;
+    if (belowRoot && deniedOrVanished)
+    {
+        Log::warn("LocalScanOperation: Cannot list '{}': {}", path.generic_string(), errorCode.message());
+        if (!buildTree_)
+        {
+            // Left out of the entries, the consumer reports it instead of transferring an empty directory.
+            unreadableDirectories_.push_back(Paths::nativeToUtf8(path));
+            return std::vector<SharedData::DirectoryEntry>{};
+        }
+        return std::unexpected(
+            Error{
+                .type = ErrorType::DirectoryUnreadable,
+                .extraInfo = fmt::format("{}: {}", path.generic_string(), errorCode.message()),
+            }
+        );
+    }
+    Log::error("LocalScanOperation: Failed to list '{}': {}", path.generic_string(), errorCode.message());
+    return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
+        {.type = ErrorType::FilesystemError, .extraInfo = errorCode.message()}
+    );
 }
 
 std::uint64_t LocalScanOperation::totalBytes() const

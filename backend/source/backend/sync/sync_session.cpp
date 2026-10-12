@@ -105,6 +105,8 @@ DiffSummary SyncSession::recomputeDiffInStrand(
     summary.deletes = deletes_.summary();
     summary.entriesCompared = sink.lastCompared();
     summary.cancelled = sink.cancelled();
+    summary.blockedCount = sink.blockedCount();
+    summary.blockedSamples = sink.blockedSamples();
     return summary;
 }
 

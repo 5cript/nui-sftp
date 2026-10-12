@@ -31,6 +31,7 @@
 #include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 #include <ui5-sap-icons/icons/slim-arrow-right.hpp>
 #include <ui5-sap-icons/icons/refresh.hpp>
+#include <ui5-sap-icons/icons/alert.hpp>
 #include <ui5-sap-icons/icons/play.hpp>
 
 #include <frontend/svgs/decline.hpp>
@@ -831,6 +832,23 @@ struct SyncDialog::Implementation
         );
     }
 
+    /** @brief Selected items and bytes of one section, from the rows the selection names. */
+    std::pair<std::uint64_t, std::uint64_t> selectedTotalsOf(DiffSection section) const
+    {
+        std::uint64_t items = 0;
+        std::uint64_t bytes = 0;
+        auto const& rows = stateFor(section).rows;
+        for (auto const& key : selectionFor(section)->value())
+        {
+            const auto iter = rows.find(key);
+            if (iter == rows.end())
+                continue;
+            items += SharedData::Sync::itemWeight(iter->second);
+            bytes += iter->second.descendantByteTotal;
+        }
+        return {items, bytes};
+    }
+
     /** @brief Selected items and bytes over all sections, from the rows the selection names. */
     std::pair<std::uint64_t, std::uint64_t> selectedTotals() const
     {
@@ -838,17 +856,86 @@ struct SyncDialog::Implementation
         std::uint64_t bytes = 0;
         for (const auto section : {DiffSection::Upload, DiffSection::Download, DiffSection::Delete})
         {
-            auto const& rows = stateFor(section).rows;
-            for (auto const& key : selectionFor(section)->value())
-            {
-                const auto iter = rows.find(key);
-                if (iter == rows.end())
-                    continue;
-                items += SharedData::Sync::itemWeight(iter->second);
-                bytes += iter->second.descendantByteTotal;
-            }
+            const auto [sectionItems, sectionBytes] = selectedTotalsOf(section);
+            items += sectionItems;
+            bytes += sectionBytes;
         }
         return {items, bytes};
+    }
+
+    /** @brief "on the server" or "locally", for the side the delete section removes from. */
+    std::string deleteSideText() const
+    {
+        return language->get("syncDialog", direction_ == SyncDirection::Upload ? "deleteSideRemote" : "deleteSideLocal");
+    }
+
+    /** @brief Text of the confirmation before synchronizing: names the deletes and their side. */
+    std::string synchronizeConfirmText() const
+    {
+        auto text = fmt::format(
+            fmt::runtime(language->get("syncDialog", "confirmText")),
+            localPath_.filename().string(),
+            remotePath_.filename().string()
+        );
+        const auto [deleteItems, deleteBytes] = selectedTotalsOf(DiffSection::Delete);
+        if (deleteItems == 0)
+            return text;
+        return fmt::format(
+            "{} {}",
+            text,
+            fmt::format(
+                fmt::runtime(language->get("syncDialog", "confirmDeletes")),
+                deleteItems,
+                Utility::formatBytes(static_cast<long long>(deleteBytes)),
+                deleteSideText()
+            )
+        );
+    }
+
+    /** @brief Runs the row arrow, a delete only after the user confirmed it. */
+    void enqueueSingleNodeConfirmed(DiffSection section, std::string const& relKey)
+    {
+        if (section != DiffSection::Delete)
+            return enqueueSingleNode(section, relKey);
+        confirmDialog_->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("syncDialog", "confirmDeleteRowHeader"),
+            .text = fmt::format(fmt::runtime(language->get("syncDialog", "confirmDeleteRow")), relKey, deleteSideText()),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::No,
+            .onClose =
+                [this, relKey](std::optional<ConfirmDialog::Button> button)
+            {
+                if (button == ConfirmDialog::Button::Yes)
+                    enqueueSingleNode(DiffSection::Delete, relKey);
+            },
+        });
+    }
+
+    /** @brief Names the entries sync leaves alone, one per line. */
+    std::string blockedSamplesText() const
+    {
+        auto const& summary = summary_.value();
+        std::string text;
+        for (auto const& entry : summary.blockedSamples)
+        {
+            if (!text.empty())
+                text.push_back('\n');
+            text += fmt::format(
+                "{} ({})",
+                entry.relKey,
+                language->get("syncDialog", "blockReason", Utility::enumToString(entry.reason).c_str())
+            );
+        }
+        if (summary.blockedCount > summary.blockedSamples.size())
+        {
+            text += '\n';
+            text += fmt::format(
+                fmt::runtime(language->get("confirmDialog", "andMore")),
+                summary.blockedCount - summary.blockedSamples.size()
+            );
+        }
+        return text;
     }
 
     /** @brief The arrow of a row: plans just that row (a directory with its content) and runs it. */
@@ -1218,7 +1305,7 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
             onClick = [this, section, relKey](Nui::val event)
             {
                 event.call<void>("stopPropagation");
-                enqueueSingleNode(section, relKey);
+                enqueueSingleNodeConfirmed(section, relKey);
             },
         }(std::move(arrowIcon));
 
@@ -1681,6 +1768,24 @@ Nui::ElementRenderer SyncDialog::operator()()
                 )
             ),
 
+            // Entries sync leaves alone, listed in a dialog on click.
+            div{}(
+                observe(impl_->summary_),
+                [this]() -> Nui::ElementRenderer {
+                    using Nui::Elements::div;
+                    const auto blocked = impl_->summary_.value().blockedCount;
+                    if (blocked == 0)
+                        return Nui::nil();
+                    return div{
+                        class_ = "sync-blocked-notice",
+                        onClick = [this]() { impl_->showBlockedEntries(); }
+                    }(
+                        Ui5Icons::alert(),
+                        span{}(fmt::format(fmt::runtime(language->get("syncDialog", "blockedNotice")), blocked))
+                    );
+                }
+            ),
+
             // Footer
             div{class_ = "sync-dialog-footer"}(
                 div{class_ = "sync-footer-actions"}(
@@ -1746,15 +1851,13 @@ Nui::ElementRenderer SyncDialog::operator()()
                         .icon = Ui5Icons::synchronize(),
                         .attributes = {
                             onClick = [this](Nui::val) {
+                                const bool deletes = impl_->selectedTotalsOf(DiffSection::Delete).first > 0;
                                 impl_->confirmDialog_->open({
-                                    .styleVariant = Snc::StyleVariant::Warning,
+                                    .styleVariant = deletes ? Snc::StyleVariant::Danger : Snc::StyleVariant::Warning,
                                     .headerText = language->get("syncDialog", "confirmHeader"),
-                                    .text = fmt::format(
-                                        fmt::runtime(language->get("syncDialog", "confirmText")),
-                                        impl_->localPath_.filename().string(),
-                                        impl_->remotePath_.filename().string()
-                                    ),
+                                    .text = impl_->synchronizeConfirmText(),
                                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+                                    .focusButton = deletes ? std::optional{ConfirmDialog::Button::No} : std::nullopt,
                                     .onClose = [this](std::optional<ConfirmDialog::Button> btn) {
                                         if (btn == ConfirmDialog::Button::Yes)
                                             impl_->enqueueOperations();

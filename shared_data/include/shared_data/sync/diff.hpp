@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/shared_data.hpp>
+#include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/scan_node.hpp>
 
 #include <utility/describe.hpp>
@@ -53,6 +54,12 @@ namespace SharedData::Sync
         virtual void emitUpload(DiffTreeNode node, std::string const& parentRelKey) = 0;
         virtual void emitDownload(DiffTreeNode node, std::string const& parentRelKey) = 0;
         virtual void emitDelete(DiffTreeNode node, std::string const& parentRelKey) = 0;
+
+        /**
+         * @brief An entry the diff leaves alone, so nothing is transferred or deleted for it or below it.
+         */
+        virtual void onBlocked(std::string const& /* relKey */, BlockReason /* reason */)
+        {}
 
         /**
          * @brief Called periodically with the running compare count. Implementations

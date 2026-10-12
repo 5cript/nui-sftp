@@ -122,6 +122,7 @@ namespace SharedData::Sync
         void emitUpload(DiffTreeNode node, std::string const& parentRelKey) override;
         void emitDownload(DiffTreeNode node, std::string const& parentRelKey) override;
         void emitDelete(DiffTreeNode node, std::string const& parentRelKey) override;
+        void onBlocked(std::string const& relKey, BlockReason reason) override;
         void onProgress(std::uint64_t entriesCompared) override;
         bool cancelled() const override;
 
@@ -130,6 +131,19 @@ namespace SharedData::Sync
             return lastCompared_;
         }
 
+        std::uint64_t blockedCount() const
+        {
+            return blockedCount_;
+        }
+
+        std::vector<BlockedEntry> const& blockedSamples() const
+        {
+            return blockedSamples_;
+        }
+
+        /** @brief How many blocked entries are kept by name. */
+        static constexpr std::size_t maxBlockedSamples = 10000u;
+
       private:
         DiffTreeStore* uploads_;
         DiffTreeStore* downloads_;
@@ -137,5 +151,7 @@ namespace SharedData::Sync
         std::shared_ptr<std::atomic<bool>> cancelled_;
         std::function<void(std::uint64_t)> onProgress_;
         std::uint64_t lastCompared_{0};
+        std::uint64_t blockedCount_{0};
+        std::vector<BlockedEntry> blockedSamples_{};
     };
 }

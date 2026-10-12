@@ -67,9 +67,22 @@ ScanOperation::scanner(std::filesystem::path const& path)
 
     auto result = fut.get();
     if (!result.has_value())
+    {
+        // A directory below the root that vanished or denies listing has unknown content, a sync tree
+        // keeps it as unreadable instead of failing or treating it as empty.
+        const auto sftpError = result.error().sftpError;
+        const bool deniedOrVanished = sftpError == SSH_FX_PERMISSION_DENIED || sftpError == SSH_FX_NO_SUCH_FILE;
+        if (buildTree_ && !relative.empty() && deniedOrVanished)
+        {
+            Log::warn("ScanOperation: Cannot list '{}': {}", path.value(), result.error().toString());
+            return std::unexpected(
+                Error{.type = ErrorType::DirectoryUnreadable, .sftpError = result.error(), .extraInfo = path.value()}
+            );
+        }
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
             {.type = ErrorType::SftpError, .sftpError = result.error()}
         );
+    }
 
     auto entries = std::move(result).value();
 
@@ -86,14 +99,6 @@ ScanOperation::scanner(std::filesystem::path const& path)
 
     if (!respectIgnoreFiles_)
         return {std::move(entries)};
-
-    const auto relDir = [&]() -> std::filesystem::path {
-        std::error_code errc{};
-        auto rel = std::filesystem::relative(path, remotePath_, errc);
-        if (errc || rel.empty() || rel == std::filesystem::path{"."})
-            return {};
-        return rel;
-    }();
 
     for (auto const& entry : entries)
     {

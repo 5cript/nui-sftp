@@ -98,7 +98,16 @@ class ScanOperation : public Operation
         };
         using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(remotePath_, std::move(scan), recursive_);
+            walker_ = std::make_unique<WalkerType>(
+                std::move(scan),
+                recursive_,
+                [](Error const& error)
+                {
+                    return error.type == ErrorType::DirectoryUnreadable;
+                },
+                /*requireLocalNames=*/true,
+                excludedSuffixes_
+            );
         return fn(static_cast<WalkerType&>(*walker_));
     }
 

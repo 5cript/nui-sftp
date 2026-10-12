@@ -146,6 +146,22 @@ namespace SharedData::Sync
             std::uint64_t& comparedCounter
         );
 
+        std::optional<BlockReason> blockReasonOf(ScanNode const& node)
+        {
+            switch (node.availability)
+            {
+                case Availability::Listed:
+                    return std::nullopt;
+                case Availability::Unreadable:
+                    return BlockReason::Unreadable;
+                case Availability::Excluded:
+                    return BlockReason::Excluded;
+                case Availability::InvalidName:
+                    return BlockReason::InvalidName;
+            }
+            return BlockReason::Excluded;
+        }
+
         void handleBothPresent(
             ScanNode const& localChild,
             ScanNode const& remoteChild,
@@ -156,6 +172,25 @@ namespace SharedData::Sync
             std::uint64_t& comparedCounter
         )
         {
+            // Unknown or untransferable on one side: neither side may be changed for this name.
+            if (auto reason = blockReasonOf(localChild).or_else([&]() { return blockReasonOf(remoteChild); }); reason)
+            {
+                sink.onBlocked(relKey, *reason);
+                return;
+            }
+
+            // Transferring a directory onto a symlink writes through the link, out of the sync root.
+            const auto isPair = [&](FileType first, FileType second)
+            {
+                return (localChild.type == first && remoteChild.type == second) ||
+                    (localChild.type == second && remoteChild.type == first);
+            };
+            if (isPair(FileType::Directory, FileType::Symlink))
+            {
+                sink.onBlocked(relKey, BlockReason::TypeConflict);
+                return;
+            }
+
             const bool sameDir =
                 localChild.type == FileType::Directory && remoteChild.type == FileType::Directory;
             if (sameDir)
@@ -227,7 +262,9 @@ namespace SharedData::Sync
                     auto const& lc = localChildren[li];
                     if (!options.ignoreHidden || !isHiddenName(lc.name))
                     {
-                        if (auto action = chooseLocalOnlyAction(lc, options); action)
+                        if (auto reason = blockReasonOf(lc); reason)
+                            sink.onBlocked(joinRel(parentRelKey, lc.name), *reason);
+                        else if (auto action = chooseLocalOnlyAction(lc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, lc.name);
                             emitOneSided(
@@ -243,7 +280,9 @@ namespace SharedData::Sync
                     auto const& rc = remoteChildren[ri];
                     if (!options.ignoreHidden || !isHiddenName(rc.name))
                     {
-                        if (auto action = chooseRemoteOnlyAction(rc, options); action)
+                        if (auto reason = blockReasonOf(rc); reason)
+                            sink.onBlocked(joinRel(parentRelKey, rc.name), *reason);
+                        else if (auto action = chooseRemoteOnlyAction(rc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, rc.name);
                             emitOneSided(

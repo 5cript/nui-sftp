@@ -43,13 +43,23 @@ namespace SharedData::Sync
          * @param scanner Lists one directory.
          * @param recursive When false only the root is listed. Its subdirectories stay in the tree with
          *        @ref ScanNode::childrenKnown set to false so the diff never deletes what nobody saw.
+         * @param isUnreadable Classifies a scanner error of a directory below the root. A directory it
+         *        accepts stays in the tree as @ref Availability::Unreadable and the walk goes on, every
+         *        other error ends the walk.
          */
         template <typename ForwardingScannerT = ScannerT>
         requires std::is_same_v<std::decay_t<ForwardingScannerT>, ScannerT>
-        TreeDirectoryWalker(std::filesystem::path rootPath, ForwardingScannerT&& scanner, bool recursive = true)
+        explicit TreeDirectoryWalker(
+            ForwardingScannerT&& scanner,
+            bool recursive = true,
+            std::function<bool(WalkErrorType const&)> isUnreadable = {},
+            bool requireLocalNames = false,
+            std::vector<std::string> excludedSuffixes = {}
+        )
             : rootPath_{std::move(rootPath)}
             , scanner_{std::forward<ForwardingScannerT>(scanner)}
             , recursive_{recursive}
+            , isUnreadable_{std::move(isUnreadable)}
         {
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
@@ -102,7 +112,16 @@ namespace SharedData::Sync
 
             auto result = scanner_(pending.fullPath);
             if (!result)
-                return std::unexpected(std::move(result).error());
+            {
+                const bool belowRoot = pending.depth > 0;
+                if (!belowRoot || !isUnreadable_ || !isUnreadable_(result.error()))
+                    return std::unexpected(std::move(result).error());
+                // Unknown content must never look like empty content, the diff would delete the other side.
+                pending.node->availability = Availability::Unreadable;
+                pending.node->childrenKnown = false;
+                ++currentIndex_;
+                return queue_.empty();
+            }
 
             auto rawChildren = std::move(result).value();
 
@@ -135,6 +154,7 @@ namespace SharedData::Sync
                         .subtreeFileCount = 0,
                         .subtreeByteTotal = 0,
                         .childrenKnown = recursive_ || raw.type != SharedData::FileType::Directory,
+                        .availability = availability,
                     }
                 );
                 ++totalEntries_;
@@ -154,7 +174,7 @@ namespace SharedData::Sync
             {
                 for (auto& child : pending.node->children)
                 {
-                    if (child.type != SharedData::FileType::Directory)
+                    if (child.type != SharedData::FileType::Directory || child.availability != Availability::Listed)
                         continue;
                     queue_.push_back(
                         QueuedDir{
@@ -192,6 +212,8 @@ namespace SharedData::Sync
             node.subtreeByteTotal = 0;
             for (auto& child : node.children)
             {
+                if (child.availability != Availability::Listed)
+                    continue;
                 if (child.type == SharedData::FileType::Directory)
                 {
                     finalizeCounts(child);
@@ -206,6 +228,12 @@ namespace SharedData::Sync
             }
         }
 
+        static bool isTransferable(SharedData::FileType type)
+        {
+            return type == SharedData::FileType::Regular || type == SharedData::FileType::Directory ||
+                type == SharedData::FileType::Symlink;
+        }
+
         struct QueuedDir
         {
             ScanNode* node;
@@ -216,6 +244,7 @@ namespace SharedData::Sync
         std::filesystem::path rootPath_;
         ScannerT scanner_;
         bool recursive_{true};
+        std::function<bool(WalkErrorType const&)> isUnreadable_{};
         ScanNode root_{};
         std::deque<QueuedDir> queue_{};
         std::size_t totalEntries_{0};

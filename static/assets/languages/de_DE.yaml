@@ -181,6 +181,18 @@ syncDialog:
   synchronize: "Synchronisieren"
   confirmHeader: "Verzeichnisse synchronisieren"
   confirmText: "{} mit {} synchronisieren?"
+  confirmDeletes: "Dabei werden {} Einträge ({}) {} gelöscht."
+  deleteSideRemote: "auf dem Server"
+  deleteSideLocal: "lokal"
+  confirmDeleteRowHeader: "Jetzt löschen"
+  confirmDeleteRow: "'{}' {} jetzt löschen?"
+  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden oder sie sich seit der letzten Synchronisation so geändert haben, dass Daten verloren gingen. Zum Anzeigen klicken."
+  blockedTitle: "Unveränderte Einträge"
+  blockReason:
+    Unreadable: "nicht lesbar"
+    Excluded: "nicht übertragbar"
+    InvalidName: "ungültiger Name"
+    TypeConflict: "Verzeichnis gegen symbolischen Link"
   tree:
     loading: "Lädt…"
     loadFailed: "Fehlgeschlagen: {}"
