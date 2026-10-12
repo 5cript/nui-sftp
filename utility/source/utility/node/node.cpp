@@ -160,6 +160,20 @@ namespace SecureShell::Test
         child.wait();
     }
 
+    void drainStandardError(std::shared_ptr<NodeProcessResult> const& result)
+    {
+        result->stderrPipe.async_read_some(
+            boost::asio::buffer(result->stderrBuffer),
+            [weak = std::weak_ptr{result}](boost::system::error_code const& ec, std::size_t)
+            {
+                if (ec)
+                    return;
+                if (auto result = weak.lock())
+                    drainStandardError(result);
+            }
+        );
+    }
+
     std::shared_ptr<NodeProcessResult> nodeProcess(
         boost::asio::any_io_executor executor,
         Utility::TemporaryDirectory const& isolateDirectory,
@@ -239,6 +253,9 @@ namespace SecureShell::Test
             return result;
         }
 
+        // Windows writes to pipes synchronously: once nobody reads stderr and its small buffer is full, the
+        // process blocks for good and only the kill timer ends it.
+        drainStandardError(result);
         return result;
     }
 }

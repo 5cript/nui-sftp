@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -25,6 +26,8 @@ namespace SecureShell::Test
         std::atomic_bool killed = false;
         unsigned short port = 0;
         int code = 0;
+        /** @brief Receives what the process writes to stderr, which is read and dropped. */
+        std::array<char, 4096> stderrBuffer{};
 
         void command(std::string const& command);
         /**
