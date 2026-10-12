@@ -955,4 +955,6 @@ cli.on('createSymlink', (command) => {
 cli.on('exit', () => {
     logMessage('').end();
     server.close();
+    // Exits even when a handle stays open, like stdin on Windows, which held every test until the kill timer.
+    setTimeout(() => process.exit(0), 200).unref();
 });
