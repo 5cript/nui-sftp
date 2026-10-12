@@ -48,6 +48,9 @@ namespace SecureShell::Test
             std::cerr << "Failed to write command: " << ec.message() << std::endl;
             return;
         }
+        // Node on Windows cannot finish exiting while a read on its stdin pipe is pending.
+        if (command == "exit")
+            stdinPipe.close(ec);
     }
 
     bool NodeProcessResult::command(std::string const& command, nlohmann::json const& arguments)
