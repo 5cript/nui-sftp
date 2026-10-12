@@ -7,12 +7,27 @@
 
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <system_error>
 
 namespace FileTracking
 {
     namespace
     {
+        /**
+         * @brief Parse a metadata file, the stream is closed again on return.
+         *
+         * @param metaPath Path to the metadata.json file.
+         * @return The parsed json.
+         */
+        nlohmann::json readMetadata(std::filesystem::path const& metaPath)
+        {
+            std::ifstream metaIn{metaPath};
+            nlohmann::json meta;
+            metaIn >> meta;
+            return meta;
+        }
+
         /**
          * @brief Scan @p tempRootDir for dead instance directories and handle them.
          *
@@ -222,45 +237,15 @@ namespace FileTracking
                     continue;
                 }
 
+                // The metadata stream must be closed before remove_all, Windows refuses to delete open files.
+                std::optional<std::chrono::system_clock::time_point> deadAt;
                 try
                 {
-                    std::ifstream metaIn{metaPath};
-                    nlohmann::json meta;
-                    metaIn >> meta;
-
+                    auto const meta = readMetadata(metaPath);
                     if (meta.contains("deadAt") && !meta["deadAt"].is_null())
-                    {
-                        auto deadAtTs = meta["deadAt"].get<std::int64_t>();
-                        auto deadAt = std::chrono::system_clock::from_time_t(
-                            static_cast<std::time_t>(deadAtTs)
+                        deadAt = std::chrono::system_clock::from_time_t(
+                            static_cast<std::time_t>(meta["deadAt"].get<std::int64_t>())
                         );
-                        auto elapsed =
-                            std::chrono::duration_cast<std::chrono::hours>(now - deadAt);
-
-                        if (elapsed >= retentionHours)
-                        {
-                            Log::info(
-                                "Removing dead instance '{}' (dead for {} hours)",
-                                dirName,
-                                elapsed.count()
-                            );
-                            std::error_code rmErr;
-                            fs::remove_all(dirPath, rmErr);
-                            if (rmErr)
-                            {
-                                Log::warn(
-                                    "Failed to remove dead instance '{}': {}",
-                                    dirName,
-                                    rmErr.message()
-                                );
-                            }
-                        }
-                        // else: dead but within retention window, leave it
-                    }
-                    else
-                    {
-                        writeDeadAt();
-                    }
                 }
                 catch (std::exception const& exc)
                 {
@@ -269,8 +254,23 @@ namespace FileTracking
                         dirName,
                         exc.what()
                     );
-                    writeDeadAt();
                 }
+
+                if (!deadAt)
+                {
+                    writeDeadAt();
+                    continue;
+                }
+
+                auto const elapsed = std::chrono::duration_cast<std::chrono::hours>(now - *deadAt);
+                if (elapsed < retentionHours)
+                    continue;
+
+                Log::info("Removing dead instance '{}' (dead for {} hours)", dirName, elapsed.count());
+                std::error_code rmErr;
+                Utility::removeAllNoFollow(dirPath, rmErr);
+                if (rmErr)
+                    Log::warn("Failed to remove dead instance '{}': {}", dirName, rmErr.message());
             }
         }
     } // namespace
