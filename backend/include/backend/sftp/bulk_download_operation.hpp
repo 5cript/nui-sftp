@@ -13,8 +13,10 @@ class BulkDownloadOperation : public BulkTransferOperation
     struct BulkDownloadOperationOptions
     {
         BulkProgressCallback overallProgressCallback = [](SharedData::BulkProgress const&) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        /** @brief The scanned remote directory, only a label for a flat list. */
+        Paths::RemotePath remotePath{};
+        /** @brief Where the scanned directory is created, only a label for a flat list. */
+        Paths::LocalPath localPath{};
         DownloadOperation::DownloadOperationOptions individualOptions = {};
         bool asArchive{false};
         std::string archiveFormat{"tar"};
@@ -43,8 +45,8 @@ class BulkDownloadOperation : public BulkTransferOperation
      */
     struct PrescannedFile
     {
-        std::filesystem::path remoteSrc;
-        std::filesystem::path localDst;
+        Paths::RemotePath source;
+        Paths::LocalPath destination;
         std::uint64_t sizeBytes;
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
@@ -53,10 +55,12 @@ class BulkDownloadOperation : public BulkTransferOperation
 
   protected:
     std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex) override;
-    std::unique_ptr<Operation>
-    makeChild(std::size_t entryIndex, std::function<void(std::uint64_t, std::uint64_t)> onProgress) override;
-    std::filesystem::path displayPath(std::size_t entryIndex) const override;
+    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) override;
+    std::unique_ptr<Operation> makeChild(
+        std::size_t entryIndex,
+        EntryPaths const& paths,
+        std::function<void(std::uint64_t, std::uint64_t)> onProgress
+    ) override;
     bool isSkippableError(Error const& error) const override;
 
     std::string_view logName() const noexcept override
@@ -65,7 +69,8 @@ class BulkDownloadOperation : public BulkTransferOperation
     }
 
   private:
-    std::filesystem::path localPathOf(std::size_t entryIndex) const;
+    std::expected<void, Error>
+    createLocalDirectory(Paths::LocalPath const& path, SharedData::DirectoryEntry const& entry);
     std::expected<void, Error>
     applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
 

@@ -1148,8 +1148,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         }
         files.push_back(
             BulkDownloadOperation::PrescannedFile{
-                .remoteSrc = entry.src,
-                .localDst = entry.dst,
+                .source = entry.source,
+                .destination = entry.destination,
                 .sizeBytes = entry.sizeBytes,
                 .mtime = entry.mtime,
                 .mtimeNsec = entry.mtimeNsec,
@@ -1165,8 +1165,9 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         // file entry drives the UI's "localPath"/"remotePath" labels for the
         // card — arbitrary pick; per-file paths show up in progress events.
         const auto bulkOpId = bulkCardId;
-        const auto firstSrc = files.front().remoteSrc;
-        const auto firstDst = files.front().localDst;
+        // The card's labels, a file directly below the root labels with the root itself.
+        const auto remoteLabel = files.front().source.parent().value_or(Paths::RemotePath::root());
+        const auto localLabel = files.front().destination.parent().value_or(files.front().destination);
 
         auto downloadOpts = resolveDownloadOptions(transferOptions, resolvedTimeout);
         // Sync plans list files of directories that do not exist locally yet.
@@ -1176,8 +1177,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkOpId),
-                .remotePath = firstSrc.parent_path(),
-                .localPath = firstDst.parent_path(),
+                .remotePath = remoteLabel,
+                .localPath = localLabel,
                 .individualOptions = std::move(downloadOpts),
                 .failFast = transferOptions.failFast.value_or(false),
                 .concurrency = bulkConcurrency_,
@@ -1419,8 +1420,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
         }
         files.push_back(
             BulkUploadOperation::PrescannedFile{
-                .localSrc = entry.src,
-                .remoteDst = entry.dst,
+                .source = entry.source,
+                .destination = entry.destination,
                 .sizeBytes = entry.sizeBytes,
             }
         );
@@ -1430,8 +1431,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
     {
         // Separate reserved id — see addBulkDownloadOperation for rationale.
         const auto bulkOpId = bulkCardId;
-        const auto firstSrc = files.front().localSrc;
-        const auto firstDst = files.front().remoteDst;
+        const auto localLabel = files.front().source.parent().value_or(files.front().source);
+        const auto remoteLabel = files.front().destination.parent().value_or(Paths::RemotePath::root());
 
         auto uploadOpts = resolveUploadOptions(transferOptions, resolvedTimeout);
         uploadOpts.createMissingDirectories = true;
@@ -1440,8 +1441,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
             sftp,
             BulkUploadOperation::BulkUploadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkOpId),
-                .remotePath = firstDst.parent_path(),
-                .localPath = firstSrc.parent_path(),
+                .remotePath = remoteLabel,
+                .localPath = localLabel,
                 .individualOptions = std::move(uploadOpts),
                 .failFast = transferOptions.failFast.value_or(false),
                 .concurrency = bulkConcurrency_,

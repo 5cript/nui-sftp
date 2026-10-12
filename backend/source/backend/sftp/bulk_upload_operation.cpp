@@ -32,26 +32,6 @@ SharedData::OperationType BulkUploadOperation::type() const
     return SharedData::OperationType::BulkUpload;
 }
 
-std::filesystem::path BulkUploadOperation::localPathOf(std::size_t entryIndex) const
-{
-    // Prescanned entries carry the absolute local source in entry.path.
-    if (prescanned())
-        return entries()[entryIndex].path;
-    return (common().localPath / SharedData::fullPathRelative(entries(), entries()[entryIndex])).lexically_normal();
-}
-
-std::filesystem::path BulkUploadOperation::remotePathOf(std::size_t entryIndex) const
-{
-    if (prescanned())
-        return prescannedDestination(entryIndex);
-    return (common().remotePath / SharedData::fullPathRelative(entries(), entries()[entryIndex])).lexically_normal();
-}
-
-std::filesystem::path BulkUploadOperation::displayPath(std::size_t entryIndex) const
-{
-    return remotePathOf(entryIndex);
-}
-
 std::expected<void, BulkUploadOperation::Error>
 BulkUploadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
 {
@@ -59,13 +39,14 @@ BulkUploadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
     return createRemoteDirectoryInStrand(common().remotePath, root);
 }
 
-std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex)
+std::expected<void, BulkUploadOperation::Error>
+BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
 {
-    return createRemoteDirectoryInStrand(remotePathOf(entryIndex), entries()[entryIndex]);
+    return createRemoteDirectoryInStrand(paths.remote, entries()[entryIndex]);
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemoteDirectoryInStrand(
-    std::filesystem::path const& path,
+    Paths::RemotePath const& path,
     SharedData::DirectoryEntry const& entry
 )
 {
@@ -77,21 +58,24 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemot
             Error{
                 .type = ErrorType::SftpError,
                 .sftpError = result.error(),
-                .extraInfo = fmt::format("Creating remote directory: {}", path.string())
+                .extraInfo = fmt::format("Creating remote directory: {}", path.value())
             }
         );
     }
     return {};
 }
 
-std::unique_ptr<Operation>
-BulkUploadOperation::makeChild(std::size_t entryIndex, std::function<void(std::uint64_t, std::uint64_t)> onProgress)
+std::unique_ptr<Operation> BulkUploadOperation::makeChild(
+    std::size_t entryIndex,
+    EntryPaths const& paths,
+    std::function<void(std::uint64_t, std::uint64_t)> onProgress
+)
 {
     auto const& entry = entries()[entryIndex];
 
     auto uploadOptions = individualOptions_;
-    uploadOptions.remotePath = remotePathOf(entryIndex);
-    uploadOptions.localPath = localPathOf(entryIndex);
+    uploadOptions.remotePath = paths.remote;
+    uploadOptions.localPath = paths.local;
     uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
@@ -144,20 +128,25 @@ std::filesystem::perms BulkUploadOperation::determinePerms(SharedData::Directory
 void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> files)
 {
     std::vector<SharedData::DirectoryEntry> entries;
-    std::vector<std::filesystem::path> destinations;
+    std::vector<EntryPaths> paths;
     entries.reserve(files.size());
-    destinations.reserve(files.size());
+    paths.reserve(files.size());
     std::uint64_t totalBytes = 0;
     for (auto& file : files)
     {
         SharedData::DirectoryEntry entry{};
-        entry.path = file.localSrc;
-        entry.fullPath = file.localSrc;
+        // Flat entries carry their name only, the paths come from the prescanned paths.
+        if (const auto name = file.source.filename(); name)
+            entry.name = name->value();
         entry.type = SharedData::FileType::Regular;
         entry.size = file.sizeBytes;
         totalBytes += file.sizeBytes;
         entries.push_back(std::move(entry));
-        destinations.push_back(std::move(file.remoteDst));
+        paths.push_back(
+            EntryPaths{
+                .remote = std::move(file.destination), .local = std::move(file.source), .mayOverwrite = file.mayOverwrite
+            }
+        );
     }
-    setPrescannedEntries(std::move(entries), std::move(destinations), totalBytes);
+    setPrescannedEntries(std::move(entries), std::move(paths), totalBytes);
 }

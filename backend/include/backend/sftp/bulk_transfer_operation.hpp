@@ -5,6 +5,7 @@
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
+#include <paths/paths.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -36,14 +37,27 @@ class BulkTransferOperation : public Operation
     struct CommonOptions
     {
         BulkProgressCallback overallProgressCallback = [](SharedData::BulkProgress const&) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        /** @brief Root of a scanned tree on the server, only a label for a flat list. */
+        Paths::RemotePath remotePath{};
+        /** @brief Root of a scanned tree on this machine, only a label for a flat list. */
+        Paths::LocalPath localPath{};
         bool failFast{false};
         // Upper bound of files transferred at once. The queue may grant fewer slots per step.
         int concurrency{1};
         std::chrono::seconds futureTimeout{5};
         // Minimum gap between two progress emissions; start and completion always emit.
         std::chrono::milliseconds progressEmitInterval{100};
+    };
+
+    /**
+     * @brief Both ends of one entry.
+     */
+    struct EntryPaths
+    {
+        Paths::RemotePath remote{};
+        Paths::LocalPath local{};
+        /** @brief This entry's destination may be replaced even when the bulk's options do not allow it. */
+        bool mayOverwrite{false};
     };
 
     ~BulkTransferOperation() override;
@@ -138,24 +152,29 @@ class BulkTransferOperation : public Operation
     BulkTransferOperation(SecureShell::SftpSession& sftp, CommonOptions common);
 
     /**
-     * @brief Flat-list mode: every entry is a file with an absolute source in entry.path and the
-     *        matching absolute destination in @p destinations (index aligned).
+     * @brief Flat-list mode: every entry is a file, @p paths holds both of its ends (index aligned).
      */
     void setPrescannedEntries(
         std::vector<SharedData::DirectoryEntry> entries,
-        std::vector<std::filesystem::path> destinations,
+        std::vector<EntryPaths> paths,
         std::uint64_t totalBytes
     );
 
     bool prescanned() const noexcept
     {
-        return !prescannedDestinations_.empty();
+        return entrySource_ == EntrySource::Flat;
     }
 
-    std::filesystem::path const& prescannedDestination(std::size_t entryIndex) const
-    {
-        return prescannedDestinations_[entryIndex];
-    }
+    /**
+     * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots,
+     *        so an entry whose name the local side cannot hold fails with InvalidName.
+     */
+    std::expected<EntryPaths, Error> entryPaths(std::size_t entryIndex) const;
+
+    /**
+     * @brief Path shown to the user for the entry, the remote side for both directions.
+     */
+    std::string displayPath(std::size_t entryIndex) const;
 
     std::vector<SharedData::DirectoryEntry> const& entries() const noexcept
     {
@@ -180,7 +199,7 @@ class BulkTransferOperation : public Operation
     /**
      * @brief Creates the directory described by the entry at @p entryIndex.
      */
-    virtual std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex) = 0;
+    virtual std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) = 0;
 
     /**
      * @brief Builds the child transfer for the file at @p entryIndex.
@@ -251,7 +270,7 @@ class BulkTransferOperation : public Operation
     EntrySource entrySource_{EntrySource::None};
     std::vector<SharedData::DirectoryEntry> entries_{};
     // Index aligned with entries_ in prescanned mode, empty in tree mode.
-    std::vector<std::filesystem::path> prescannedDestinations_{};
+    std::vector<EntryPaths> prescannedPaths_{};
     std::vector<Slot> slots_{};
     // Entries whose child could not get a transfer buffer; retried once a slot frees up.
     std::deque<std::size_t> deferred_{};
