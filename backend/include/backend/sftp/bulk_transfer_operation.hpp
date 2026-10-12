@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
@@ -61,14 +62,15 @@ class BulkTransferOperation : public Operation
     void pause(bool doPause) override;
     SecureShell::ProcessingStrand* strand() const override;
 
+    // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
     bool usesStrand() const noexcept override
     {
-        return true;
+        return scanPhase_ == nullptr;
     }
 
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
     }
 
     /**
@@ -82,6 +84,33 @@ class BulkTransferOperation : public Operation
      * @brief Feeds the entries of a completed tree scan. entries[0] must be the root directory.
      */
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t totalBytes);
+
+    /**
+     * @brief Runs @p scan before transferring; the scanned tree becomes this bulk's entries.
+     *
+     * @tparam ScanT ScanOperation for downloads, LocalScanOperation for uploads.
+     */
+    template <typename ScanT>
+    void scanFirst(std::unique_ptr<ScanT> scan)
+    {
+        auto phase = std::make_unique<ScanPhase<ScanT>>(
+            [this](ScanT& finished)
+            {
+                const auto scannedBytes = finished.totalBytes();
+                addRejectedEntries(finished.rejectedPaths());
+                if constexpr (requires { finished.unreadableDirectories(); })
+                    addUnreadableDirectories(finished.unreadableDirectories());
+                setScanResult(finished.ejectEntries(), scannedBytes);
+            }
+        );
+        phase->addRoot(std::move(scan));
+        scanPhase_ = std::move(phase);
+    }
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
+    }
 
     std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
 
@@ -202,8 +231,21 @@ class BulkTransferOperation : public Operation
     std::int64_t updateBulkBytesPerSecond(std::uint64_t bytesNow);
 
   private:
+    /**
+     * @brief Where the entries came from. A scanned tree always holds its root, so an empty one
+     *        means the scan never delivered.
+     */
+    enum class EntrySource
+    {
+        None,
+        Tree,
+        Flat,
+    };
+
     SecureShell::SftpSession* sftp_;
     CommonOptions common_;
+    std::unique_ptr<ScanPhaseDriver> scanPhase_{};
+    EntrySource entrySource_{EntrySource::None};
     std::vector<SharedData::DirectoryEntry> entries_{};
     // Index aligned with entries_ in prescanned mode, empty in tree mode.
     std::vector<std::filesystem::path> prescannedDestinations_{};

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
@@ -98,9 +100,25 @@ class ArchiveDownloadOperation : public Operation
     std::expected<WorkStatus, Error> work() override;
     std::expected<WorkStatus, Error> workInStrand() override;
 
+    // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
+    bool usesStrand() const noexcept override
+    {
+        return scanPhase_ == nullptr;
+    }
+
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
+    }
+
+    /**
+     * @brief Scans the directory root of @p scan before packing; roots are scanned in the order added.
+     */
+    void addScanRoot(std::unique_ptr<ScanOperation> scan);
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
     }
 
     int parallelWorkDoable(int) const noexcept override
@@ -208,4 +226,5 @@ class ArchiveDownloadOperation : public Operation
      */
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
+    std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
 };

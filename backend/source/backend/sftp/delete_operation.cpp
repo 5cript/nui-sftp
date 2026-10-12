@@ -22,6 +22,14 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
 {
     using enum OperationState;
 
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     switch (state_)
     {
         case (NotStarted):
@@ -35,6 +43,12 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
             {
                 totalToDelete_ = 1;
                 filesRemovedProgress_ = {};
+            }
+            else if (!scanDelivered_)
+            {
+                // Without the scanned tree a recursive delete would silently delete nothing.
+                Log::error("DeleteOperation: Recursive delete of '{}' has no scan result.", remotePath_.value());
+                return enterErrorState<WorkStatus>({.type = ErrorType::ScanIncomplete});
             }
 
             state_ = Prepared;
@@ -125,10 +139,26 @@ void DeleteOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&& en
 {
     entries_ = std::move(entries);
     totalToDelete_ = entries_.size();
+    scanDelivered_ = true;
+}
+
+void DeleteOperation::scanFirst(std::unique_ptr<ScanOperation> scan)
+{
+    auto phase = std::make_unique<ScanPhase<ScanOperation>>(
+        [this](ScanOperation& finished)
+        {
+            setScanResult(finished.ejectEntries(), finished.totalBytes());
+        }
+    );
+    phase->addRoot(std::move(scan));
+    scanPhase_ = std::move(phase);
 }
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
+
     if (adoptCancelState)
     {
         Log::info("DeleteOperation: Delete of '{}' canceled.", remotePath_.generic_string());

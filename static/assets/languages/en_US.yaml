@@ -90,6 +90,7 @@ operationQueue:
   noError: "No Error"
   renameCard: "Rename: '{}' -> '{}'"
   scanCard: "Scan '{}'"
+  scanningItems: "Scanning... {} items ({})"
   unknownError: "Unknown Error"
 syncDialog:
   titleFormat: "Synchronize: {} / {}"

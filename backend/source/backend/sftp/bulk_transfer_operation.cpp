@@ -19,6 +19,14 @@ BulkTransferOperation::~BulkTransferOperation()
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto fut = sftp_->performPromise(
         [this]()
         {
@@ -36,6 +44,14 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::workInStrand()
 {
     using enum OperationState;
+
+    if (scanPhase_)
+    {
+        Log::error("{}: The scan phase cannot run on the processing thread.", logName());
+        return enterErrorState<WorkStatus>(
+            Error{.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
 
     switch (state())
     {
@@ -81,8 +97,20 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::start()
 {
+    if (entrySource_ == EntrySource::None)
+    {
+        Log::error("{}: Started without entries.", logName());
+        return enterErrorState<WorkStatus>(
+            Error{.type = ErrorType::ImplementationError, .extraInfo = "Neither a scan result nor a file list was set."}
+        );
+    }
     if (entries_.empty())
     {
+        if (entrySource_ == EntrySource::Tree)
+        {
+            Log::error("{}: The scan delivered no entries.", logName());
+            return enterErrorState<WorkStatus>(Error{.type = ErrorType::ScanIncomplete});
+        }
         Log::info("{}: No entries to transfer.", logName());
         enterState(OperationState::Completed);
         return WorkStatus::Complete;
@@ -411,6 +439,7 @@ void BulkTransferOperation::setScanResult(std::vector<SharedData::DirectoryEntry
     entries_ = std::move(entries);
     totalBytes_ = totalBytes;
     prescannedDestinations_.clear();
+    entrySource_ = EntrySource::Tree;
 }
 
 void BulkTransferOperation::setPrescannedEntries(
@@ -422,6 +451,7 @@ void BulkTransferOperation::setPrescannedEntries(
     entries_ = std::move(entries);
     prescannedDestinations_ = std::move(destinations);
     totalBytes_ = totalBytes;
+    entrySource_ = EntrySource::Flat;
 }
 
 std::vector<std::pair<std::filesystem::path, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
@@ -442,6 +472,9 @@ void BulkTransferOperation::cancelChildrenInStrand(bool adoptCancelState)
 
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
+
     // Each child's cancel and destructor would block on the processing thread separately;
     // hop once and do all of them there.
     auto* processingStrand = sftp_->strand();

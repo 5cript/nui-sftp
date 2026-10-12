@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <utility/language.hpp>
@@ -15,7 +16,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         std::filesystem::path removePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
-        std::function<void()> onCompleteAction
+        std::function<void()> onCompleteAction,
+        bool scanning = false
     )
         : OperationCard{
               type,
@@ -26,6 +28,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
               std::move(onCompleteAction)
           }
         , removePath_{std::move(removePath)}
+        , scanPhase_{scanning}
         , progressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -47,8 +50,15 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
             progressBar_.setZeroAsComplete();
     }
 
+    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
+    {
+        scanPhase_.setProgress(scannedBytes, scannedEntries);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
     void setProgress(SharedData::BulkDeleteProgress const& progress)
     {
+        scanPhase_.end();
         if (currentFile.value() != progress.currentFile)
             currentFile = progress.currentFile;
 
@@ -117,8 +127,10 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                 span{
                     class_ = "opq-status-text"
                 }(
-                    observe(filesDeleted_, totalFiles_),
+                    observe(filesDeleted_, totalFiles_, scanPhase_.scanning, scanPhase_.totalScanned),
                     [this](){
+                        if (scanPhase_.scanning.value())
+                            return scanPhase_.text();
                         return fmt::format("{}/{}", filesDeleted_.value(), totalFiles_.value());
                     }
                 )
@@ -133,5 +145,6 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     Nui::Observed<std::uint64_t> filesDeleted_{0ull};
     Nui::Observed<std::uint64_t> totalFiles_{0ull};
     std::filesystem::path removePath_;
+    ScanPhaseStatus scanPhase_;
     Components::ProgressBar progressBar_;
 };

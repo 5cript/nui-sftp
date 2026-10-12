@@ -1,6 +1,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
 
 #include <shared_data/file_operations/bulk_progress.hpp>
@@ -23,7 +24,8 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
-        std::function<void()> onCompleteAction
+        std::function<void()> onCompleteAction,
+        bool scanning = false
     )
         : OperationCard{
               type,
@@ -35,6 +37,7 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
           }
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
+        , scanPhase_{scanning}
         , totalProgressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -49,8 +52,15 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         return true;
     }
 
+    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
+    {
+        scanPhase_.setProgress(scannedBytes, scannedEntries);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
     void setProgress(SharedData::BulkProgress const& progress)
     {
+        scanPhase_.end();
         // A row keeps its file until that file leaves the in-flight set; new files take the
         // first free row, so nothing shifts when an earlier file finishes.
         const auto inFlight = [&progress](std::uint64_t entryIndex)
@@ -145,8 +155,10 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                 span{
                     class_ = "opq-status-text opq-status-count"
                 }(
-                    observe(fileCurrentIndex, fileCount, state_),
+                    observe(fileCurrentIndex, fileCount, state_, scanPhase_.scanning, scanPhase_.totalScanned),
                     [this](){
+                        if (scanPhase_.scanning.value() && !isCompletedState())
+                            return scanPhase_.text();
                         // On successful completion, pin the numerator to the
                         // total so a dropped or late terminal progress tick
                         // can't leave the card stuck at (N-1)/N.
@@ -343,6 +355,7 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
   private:
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;
+    ScanPhaseStatus scanPhase_;
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};

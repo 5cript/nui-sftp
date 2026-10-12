@@ -265,6 +265,11 @@ class OperationQueue
     bool paused() const;
     void paused(bool pause);
 
+    /**
+     * @brief Observes every completion right before it is sent to the frontend. Used by tests.
+     */
+    void setCompletionObserver(std::function<void(OperationCompleted const&)> observer);
+
     bool hasPriorityWork() const;
 
     /**
@@ -303,12 +308,23 @@ class OperationQueue
   private:
     bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
 
+    /**
+     * @brief Tells the sync session waiting for the scan @p id, if any, that it failed or was cancelled.
+     */
+    void failSyncScan(Ids::OperationId const& id, std::string const& reason);
+
+    /**
+     * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
+     */
+    void deliverSyncScan(Ids::OperationId const& id, Operation& operation);
+
   private:
     Persistence::SftpOptions sftpOpts_{};
     Ids::SessionId sessionId_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
+    std::function<void(OperationCompleted const&)> completionObserver_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
     // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.

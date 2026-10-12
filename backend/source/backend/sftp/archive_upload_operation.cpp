@@ -140,6 +140,14 @@ ArchiveUploadOperation::~ArchiveUploadOperation()
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto future = sftp_->performPromise([this]() { return workInStrand(); });
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
@@ -152,6 +160,19 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::workInStrand()
 {
     using enum OperationState;
+
+    if (scanPhase_)
+    {
+        Log::error("ArchiveUploadOperation: The scan phase cannot run on the processing thread.");
+        return enterErrorState<WorkStatus>(
+            {.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
+    if (incompleteScan_ && state_ == OperationState::NotStarted)
+    {
+        Log::error("ArchiveUploadOperation: The scan is incomplete: {}", incompleteScan_->toString());
+        return enterErrorState<WorkStatus>(*incompleteScan_);
+    }
 
     switch (state_)
     {
@@ -611,6 +632,8 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
     if (adoptCancelState)
     {
         Log::info(
@@ -643,4 +666,34 @@ void ArchiveUploadOperation::cleanup()
     if (auto stream = remoteStream_.lock(); stream)
         stream->close(false);
     remoteStream_.reset();
+}
+
+void ArchiveUploadOperation::addScanRoot(std::unique_ptr<LocalScanOperation> scan)
+{
+    if (!scanPhase_)
+    {
+        scanPhase_ = std::make_unique<ScanPhase<LocalScanOperation>>(
+            [this](LocalScanOperation& finished)
+            {
+                const auto scannedBytes = finished.totalBytes();
+                // An archive cannot be partly successful, missing content fails it.
+                if (const auto& unreadable = finished.unreadableDirectories(); !unreadable.empty() && !incompleteScan_)
+                {
+                    incompleteScan_ = Error{
+                        .type = ErrorType::DirectoryUnreadable,
+                        .extraInfo = fmt::format("Cannot list '{}'", unreadable.front()),
+                    };
+                }
+                if (const auto rejected = finished.rejectedPaths(); !rejected.empty() && !incompleteScan_)
+                {
+                    incompleteScan_ = Error{
+                        .type = ErrorType::InvalidName,
+                        .extraInfo = fmt::format("'{}' is not a valid name", rejected.front()),
+                    };
+                }
+                setScanResultForRoot(finished.localPath(), finished.ejectEntries(), scannedBytes);
+            }
+        );
+    }
+    scanPhase_->addRoot(std::move(scan));
 }

@@ -19,6 +19,22 @@ namespace SharedData
         std::optional<std::uint64_t> totalBytes{std::nullopt};
         std::optional<std::filesystem::path> localPath{};
         std::optional<std::filesystem::path> remotePath{};
+        /** @brief The operation scans before it starts its own work. */
+        std::optional<bool> scanPhase{};
     };
-    BOOST_DESCRIBE_STRUCT(OperationAdded, (), (operationId, type, mode, totalBytes, localPath, remotePath, insertRefresh))
+    BOOST_DESCRIBE_STRUCT(
+        OperationAdded,
+        (),
+        (operationId,
+         type,
+         mode,
+         totalBytes,
+         localPath,
+         remotePath,
+         source,
+         destination,
+         insertRefresh,
+         scanPhase,
+         allowOverwrite)
+    )
 }

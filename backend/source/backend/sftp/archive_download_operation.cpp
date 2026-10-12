@@ -138,6 +138,14 @@ ArchiveDownloadOperation::~ArchiveDownloadOperation()
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto future = sftp_->performPromise([this]() { return workInStrand(); });
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
@@ -151,6 +159,14 @@ std::expected<Operation::WorkStatus, Operation::Error>
 ArchiveDownloadOperation::workInStrand()
 {
     using enum OperationState;
+
+    if (scanPhase_)
+    {
+        Log::error("ArchiveDownloadOperation: The scan phase cannot run on the processing thread.");
+        return enterErrorState<WorkStatus>(
+            {.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
 
     switch (state_)
     {
@@ -645,6 +661,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
 
 std::expected<void, Operation::Error> ArchiveDownloadOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
     if (adoptCancelState)
     {
         Log::info(
@@ -682,4 +700,19 @@ void ArchiveDownloadOperation::cleanup()
         std::error_code removeErr{};
         std::filesystem::remove(tempPath_, removeErr);
     }
+}
+
+void ArchiveDownloadOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
+{
+    if (!scanPhase_)
+    {
+        scanPhase_ = std::make_unique<ScanPhase<ScanOperation>>(
+            [this](ScanOperation& finished)
+            {
+                const auto scannedBytes = finished.totalBytes();
+                setScanResultForRoot(finished.remotePath(), finished.ejectEntries(), scannedBytes);
+            }
+        );
+    }
+    scanPhase_->addRoot(std::move(scan));
 }

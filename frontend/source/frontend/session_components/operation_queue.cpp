@@ -755,7 +755,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
@@ -784,7 +785,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                localRefresh
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::BulkUpload)
@@ -813,7 +815,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::ArchiveDownload)
@@ -838,7 +841,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                localRefresh
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::ArchiveUpload)
@@ -863,7 +867,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::Rename)
@@ -1011,12 +1016,39 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
     if (!operation)
         return; // Scan-only operations (for sync) may not be in the display map — that is fine.
 
-    if (operation->type() == SharedData::OperationType::Scan ||
-        operation->type() == SharedData::OperationType::LocalScan)
+    // Bulk, delete and archive operations report their own scan phase under their id.
+    switch (operation->type())
     {
-        auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
-        if (renderer)
-            renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+        case SharedData::OperationType::Scan:
+        case SharedData::OperationType::LocalScan:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedScanOperation>(); card)
+                card->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::BulkDownload:
+        case SharedData::OperationType::BulkUpload:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedBulkOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::Delete:
+        case SharedData::OperationType::BulkDelete:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedDeleteOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::ArchiveDownload:
+        case SharedData::OperationType::ArchiveUpload:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedTransferOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        default:
+            break;
     }
 }
 

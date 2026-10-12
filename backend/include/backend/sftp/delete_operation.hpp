@@ -1,6 +1,8 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
 #include <ssh/file_stream.hpp>
 #include <nui/utility/move_detector.hpp>
 
@@ -40,9 +42,24 @@ class DeleteOperation : public Operation
 
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */);
 
+    /**
+     * @brief Deletes exactly @p targets, last first, without a scan. For a bulk delete of files.
+     */
+    void setTargets(std::vector<Paths::RemotePath> targets);
+
+    /**
+     * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first.
+     */
+    void scanFirst(std::unique_ptr<ScanOperation> scan);
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
+    }
+
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
     }
 
     /**
@@ -79,5 +96,7 @@ class DeleteOperation : public Operation
     std::size_t deletedThusFar_{0};
     std::size_t totalToDelete_{0};
     std::vector<SharedData::DirectoryEntry> entries_{};
+    std::unique_ptr<ScanPhaseDriver> scanPhase_{};
+    bool scanDelivered_{false};
     bool recursive_{false};
 };

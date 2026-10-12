@@ -2,6 +2,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
 
 #include <utility/format_bytes.hpp>
@@ -18,7 +19,8 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         std::filesystem::path remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
-        std::function<void()> onCompleteAction
+        std::function<void()> onCompleteAction,
+        bool scanning = false
     )
         : OperationCard{
               type,
@@ -37,6 +39,7 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
           }}
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
+        , scanPhase_{scanning}
     {}
 
     Nui::ElementRenderer body() const override
@@ -85,12 +88,14 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
                 div{
                     class_ = "opq-bytes-per-second"
                 }(
-                    observe(bytesPerSecond_).generate(
-                        [](std::make_signed_t<std::size_t> bytesPerSecond)
-                        {
-                            return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
-                        }
-                    )
+                    observe(bytesPerSecond_, scanPhase_.scanning, scanPhase_.totalScanned),
+                    [this]()
+                    {
+                        if (scanPhase_.scanning.value() && !isCompletedState())
+                            return scanPhase_.text();
+                        const auto bytesPerSecond = bytesPerSecond_.value();
+                        return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                    }
                 )
             ),
             progressBar_()
@@ -98,8 +103,15 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         // clang-format on
     }
 
+    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
+    {
+        scanPhase_.setProgress(scannedBytes, scannedEntries);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
     void setProgress(SharedData::TransferProgress progress)
     {
+        scanPhase_.end();
         progressBar_.max(progress.max);
         progressBar_.setProgress(progress.current - progress.min);
         bytesPerSecond_ = progress.bytesPerSecond;
@@ -143,4 +155,5 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
     std::filesystem::path localPath_;
     std::filesystem::path remotePath_;
+    ScanPhaseStatus scanPhase_;
 };

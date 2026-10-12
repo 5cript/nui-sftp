@@ -270,6 +270,9 @@ void OperationQueue::cancelAll()
 
             self->operations_.clear();
             self->priorityOperations_.clear();
+            auto waiting = std::exchange(self->syncScanCallbacks_, {});
+            for (auto& [id, callback] : waiting)
+                callback(std::unexpected(std::string{"The scan was cancelled."}));
             Log::info("All operations in the queue have been canceled.");
         }
     );
@@ -295,6 +298,7 @@ void OperationQueue::cancel(Ids::OperationId id)
             const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
             if (erasedFromRegular == 0)
                 std::erase_if(self->priorityOperations_, cancelPredicate);
+            self->failSyncScan(id, "The scan was cancelled.");
         }
     );
 }
@@ -404,9 +408,16 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             // a backup for reconnect adoption.
             self->bulkResumeStash_.erase(operationCompleted.operationId);
 
+            if (self->completionObserver_)
+                self->completionObserver_(operationCompleted);
             self->hub_->callRemote(self->rpcName("onOperationCompleted"), std::move(operationCompleted));
         }
     );
+}
+
+void OperationQueue::setCompletionObserver(std::function<void(OperationCompleted const&)> observer)
+{
+    completionObserver_ = std::move(observer);
 }
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
@@ -545,6 +556,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
 
         if (!item.result.has_value())
         {
+            failSyncScan(id, item.result.error().toString());
             completeOperation(
                 makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, item.result.error())
             );
@@ -555,94 +567,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            auto* next = (item.queueIndex + 1 < queue.size()) ? queue[item.queueIndex + 1].second.get() : nullptr;
-            if (operation->type() == SharedData::OperationType::Scan)
-            {
-                // Walk past any additional queued scans to find the archive
-                // op that consumes multi-root scan batches — each per-root
-                // scan delivers its slice into the same ArchiveDownload.
-                Operation* nextNonScan = nullptr;
-                for (std::size_t lookahead = item.queueIndex + 1; lookahead < queue.size(); ++lookahead)
-                {
-                    auto* candidate = queue[lookahead].second.get();
-                    if (candidate->type() != SharedData::OperationType::Scan)
-                    {
-                        nextNonScan = candidate;
-                        break;
-                    }
-                }
-                if (next && next->type() == SharedData::OperationType::BulkDownload)
-                {
-                    auto* scan = static_cast<ScanOperation*>(operation.get());
-                    static_cast<BulkDownloadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
-                }
-                else if (next && next->type() == SharedData::OperationType::Delete)
-                {
-                    auto* scan = static_cast<ScanOperation*>(operation.get());
-                    static_cast<DeleteOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
-                }
-                else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveDownload)
-                {
-                    auto* scan = static_cast<ScanOperation*>(operation.get());
-                    static_cast<ArchiveDownloadOperation*>(nextNonScan)
-                        ->setScanResultForRoot(scan->remotePath(), scan->ejectEntries(), scan->totalBytes());
-                }
-                else
-                {
-                    const auto cbIt = syncScanCallbacks_.find(id.value());
-                    if (cbIt != syncScanCallbacks_.end())
-                    {
-                        auto* scan = static_cast<ScanOperation*>(operation.get());
-                        auto tree = scan->ejectScanTree();
-                        auto callback = std::move(cbIt->second);
-                        syncScanCallbacks_.erase(cbIt);
-                        callback(std::move(tree));
-                    }
-                    else
-                        Log::error("Scan operation completed but no following BulkOperation to set results to.");
-                }
-            }
-            else if (operation->type() == SharedData::OperationType::LocalScan)
-            {
-                // Mirror the remote-Scan branch: walk past other LocalScans so
-                // multi-root ArchiveUpload sits any number of slots ahead.
-                Operation* nextNonScan = nullptr;
-                for (std::size_t lookahead = item.queueIndex + 1; lookahead < queue.size(); ++lookahead)
-                {
-                    auto* candidate = queue[lookahead].second.get();
-                    if (candidate->type() != SharedData::OperationType::LocalScan)
-                    {
-                        nextNonScan = candidate;
-                        break;
-                    }
-                }
-                if (next && next->type() == SharedData::OperationType::BulkUpload)
-                {
-                    auto* scan = static_cast<LocalScanOperation*>(operation.get());
-                    static_cast<BulkUploadOperation*>(next)->setScanResult(scan->ejectEntries(), scan->totalBytes());
-                }
-                else if (nextNonScan && nextNonScan->type() == SharedData::OperationType::ArchiveUpload)
-                {
-                    auto* scan = static_cast<LocalScanOperation*>(operation.get());
-                    static_cast<ArchiveUploadOperation*>(nextNonScan)
-                        ->setScanResultForRoot(scan->localPath(), scan->ejectEntries(), scan->totalBytes());
-                }
-                else
-                {
-                    const auto cbIt = syncScanCallbacks_.find(id.value());
-                    if (cbIt != syncScanCallbacks_.end())
-                    {
-                        auto* scan = static_cast<LocalScanOperation*>(operation.get());
-                        auto tree = scan->ejectScanTree();
-                        auto callback = std::move(cbIt->second);
-                        syncScanCallbacks_.erase(cbIt);
-                        callback(std::move(tree));
-                    }
-                    else
-                        Log::error("LocalScan operation completed but no following BulkOperation to set results to.");
-                }
-            }
-
+            deliverSyncScan(id, *operation);
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
             queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
@@ -654,6 +579,25 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         }
     }
     return moreWork;
+}
+
+void OperationQueue::deliverSyncScan(Ids::OperationId const& id, Operation& operation)
+{
+    const auto type = operation.type();
+    if (type != SharedData::OperationType::Scan && type != SharedData::OperationType::LocalScan)
+        return;
+
+    // Scans of transfers and deletes run inside their consumer, a standalone scan belongs to a sync.
+    auto callback = syncScanCallbacks_.extract(id.value());
+    if (callback.empty())
+    {
+        Log::error("OperationQueue: Scan '{}' completed without a sync session waiting for it.", id.value());
+        return;
+    }
+    auto tree = type == SharedData::OperationType::Scan
+        ? static_cast<ScanOperation&>(operation).ejectScanTree()
+        : static_cast<LocalScanOperation&>(operation).ejectScanTree();
+    callback.mapped()(std::move(tree));
 }
 
 bool OperationQueue::work()
@@ -787,19 +731,6 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     }
     else if (result->isDirectory())
     {
-        // operationId is assigned to BulkDownload so the frontend's completion callback
-        // (registered on operationId) fires only after all files are fully downloaded,
-        // not when the preceding scan finishes.
-        const auto scanId = Ids::generateOperationId();
-        auto scan = std::make_unique<ScanOperation>(
-            sftp,
-            ScanOperation::ScanOperationOptions{
-                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
-                .remotePath = remotePath,
-                .futureTimeout = std::chrono::seconds{5},
-            }
-        );
-
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp,
             BulkDownloadOperation::BulkDownloadOperationOptions{
@@ -812,19 +743,21 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             }
         );
 
+        // The scan is part of the bulk, so cancelling or moving the card acts on both.
+        bulk->scanFirst(
+            std::make_unique<ScanOperation>(
+                sftp,
+                ScanOperation::ScanOperationOptions{
+                    .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
+                    .remotePath = remotePath,
+                    .futureTimeout = resolvedTimeout,
+                }
+            )
+        );
+
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
-        targetQueue.emplace_back(scanId, std::move(scan));
         targetQueue.emplace_back(operationId, std::move(bulk));
 
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = scanId,
-                .type = SharedData::OperationType::Scan,
-                .mode = mode,
-                .remotePath = remotePath,
-            }
-        );
         hub_->callRemote(
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
@@ -834,6 +767,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
+                .scanPhase = true,
             }
         );
 
@@ -977,34 +911,23 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
 
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    // Scans first so the dispatcher can hand each scan's results to the
-    // archive op sitting one-or-more slots ahead.  They share a single queue
-    // position (adjacency scan → ... → scan → archive), which the scan-
-    // completion handler in workQueue walks past to reach the archive op.
+    // Directory roots are scanned by the archive operation itself before it packs.
+    auto archive = std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
-        const auto scanId = Ids::generateOperationId();
-        auto scan = std::make_unique<ScanOperation>(
-            sftp,
-            ScanOperation::ScanOperationOptions{
-                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
-                .remotePath = rootPath,
-                .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-            }
-        );
-        targetQueue.emplace_back(scanId, std::move(scan));
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = scanId,
-                .type = SharedData::OperationType::Scan,
-                .mode = mode,
-                .remotePath = rootPath,
-            }
+        archive->addScanRoot(
+            std::make_unique<ScanOperation>(
+                sftp,
+                ScanOperation::ScanOperationOptions{
+                    .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
+                    .remotePath = rootPath,
+                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                }
+            )
         );
     }
-
-    targetQueue.emplace_back(operationId, std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts)));
+    const auto scanPhase = archive->scanning();
+    targetQueue.emplace_back(operationId, std::move(archive));
 
     Log::info(
         "OperationQueue::{}::onOperationAdded (ArchiveDownload, {} entries, {} bytes, {} pre-scans)",
@@ -1022,6 +945,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
             .insertRefresh = true,
             .totalBytes = totalPayloadBytes,
             .localPath = localArchivePath,
+            .scanPhase = scanPhase,
         }
     );
 
@@ -1111,29 +1035,17 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    // Scans first: the scan-complete dispatcher walks past subsequent scans
-    // to reach this archive op and feeds each LocalScan's slice into its
-    // setScanResultForRoot.  Queue layout: [LocalScan...] ... [ArchiveUpload].
+    // Directory roots are scanned by the archive operation itself before it packs.
+    auto archive = std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
-        const auto scanId = Ids::generateOperationId();
-        auto scan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
-            .progressCallback = makeScanProgressCallback("onLocalScanProgress", scanId),
+        archive->addScanRoot(std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
+            .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
             .localPath = rootPath,
-        });
-        targetQueue.emplace_back(scanId, std::move(scan));
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = scanId,
-                .type = SharedData::OperationType::LocalScan,
-                .mode = mode,
-                .localPath = rootPath,
-            }
-        );
+        }));
     }
-
-    targetQueue.emplace_back(operationId, std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts)));
+    const auto scanPhase = archive->scanning();
+    targetQueue.emplace_back(operationId, std::move(archive));
 
     Log::info(
         "OperationQueue::{}::onOperationAdded (ArchiveUpload, {} paths, ~{} bytes, {} pre-scans)",
@@ -1151,6 +1063,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
             .insertRefresh = true,
             .totalBytes = estimatedTotalBytes,
             .remotePath = remoteArchivePath,
+            .scanPhase = scanPhase,
         }
     );
     return {};
@@ -1377,16 +1290,10 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
     else if (stat.type() == std::filesystem::file_type::directory)
     {
-        auto scan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
-            .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
-            .localPath = localPath,
-        });
-
-        const auto bulkId = Ids::generateOperationId();
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp,
             BulkUploadOperation::BulkUploadOperationOptions{
-                .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkId),
+                .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", operationId),
                 .remotePath = remotePath,
                 .localPath = localPath,
                 .individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout),
@@ -1394,45 +1301,38 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .concurrency = bulkConcurrency_,
             }
         );
+        // The scan is part of the bulk, so cancelling or moving the card acts on both.
+        bulk->scanFirst(
+            std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
+                .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
+                .localPath = localPath,
+            })
+        );
 
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
-        targetQueue.emplace_back(operationId, std::move(scan));
-        targetQueue.emplace_back(bulkId, std::move(bulk));
+        targetQueue.emplace_back(operationId, std::move(bulk));
 
         hub_->callRemote(
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
-                .type = SharedData::OperationType::LocalScan,
-                .mode = mode,
-                .localPath = localPath,
-            }
-        );
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = bulkId,
                 .type = SharedData::OperationType::BulkUpload,
                 .mode = mode,
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
+                .scanPhase = true,
             }
         );
 
-        // Synthetic single-entry resume — keyed by the bulk card's id
-        // (bulkId here, since the BulkUpload onOperationAdded uses bulkId
-        // as the frontend's card id).  Adopt walks the same scan+bulk
-        // path on replay.
+        // Synthetic single-entry resume backup: adopting it walks the same scan and bulk path.
         SharedData::BulkAddRequest synthetic{
             .entries = {SharedData::BulkAddEntry{.src = localPath, .dst = remotePath, .isDirectory = true}},
             .allowOverwrite = allowOverwrite,
             .insertRefresh = insertRefresh,
             .mode = mode,
         };
-        bulkResumeStash_.insert_or_assign(
-            bulkId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = std::move(synthetic)}
-        );
+        bulkResumeStash_.insert_or_assign(operationId, BulkResumeEntry{.request = std::move(synthetic)});
 
         return {};
     }
@@ -1564,41 +1464,16 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     // Assumed in strand
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    auto statFut = sftp.stat(remotePath);
+    // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
+    auto statFut = sftp.lstat(remotePath);
     if (statFut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
     {
-        Log::error("addDeleteOperation: stat timed out for '{}'", remotePath.string());
+        Log::error("addDeleteOperation: lstat timed out for '{}'", remotePath.value());
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
     }
     const auto statResult = statFut.get();
-    const bool isDirectory = statResult.has_value() && statResult->isDirectoryLike();
+    const bool isDirectory = statResult.has_value() && statResult->isDirectory();
     const auto isBulk = recursive && isDirectory;
-
-    if (isBulk)
-    {
-        const auto scanId = Ids::generateOperationId();
-
-        auto scan = std::make_unique<ScanOperation>(
-            sftp,
-            ScanOperation::ScanOperationOptions{
-                .progressCallback = makeScanProgressCallback("onScanProgress", scanId),
-                .remotePath = remotePath,
-                .futureTimeout = std::chrono::seconds{5},
-            }
-        );
-
-        targetQueue.emplace_back(scanId, std::move(scan));
-
-        hub_->callRemote(
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = scanId,
-                .type = SharedData::OperationType::Scan,
-                .mode = mode,
-                .remotePath = remotePath,
-            }
-        );
-    }
 
     auto operation = std::make_unique<DeleteOperation>(
         sftp,
@@ -1623,9 +1498,23 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
             },
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
-            .recursive = recursive && isDirectory,
+            .recursive = isBulk,
         }
     );
+    if (isBulk)
+    {
+        // The scan is part of the delete, so cancelling or moving the card acts on both.
+        operation->scanFirst(
+            std::make_unique<ScanOperation>(
+                sftp,
+                ScanOperation::ScanOperationOptions{
+                    .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
+                    .remotePath = remotePath,
+                    .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
+                }
+            )
+        );
+    }
 
     targetQueue.emplace_back(operationId, std::move(operation));
 
@@ -1637,6 +1526,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
             .mode = mode,
             .insertRefresh = insertRefresh,
             .remotePath = remotePath,
+            .scanPhase = isBulk,
         }
     );
 
