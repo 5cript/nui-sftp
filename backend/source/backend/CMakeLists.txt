@@ -4,6 +4,7 @@ add_library(
         session_manager.cpp
         session.cpp
         rpc_filesystem.cpp
+        local_delete_guard.cpp
         rpc_system.cpp
         theme_finder.cpp
         dropped_entry.cpp
@@ -29,6 +30,7 @@ add_library(
         sftp/bulk_upload_operation.cpp
         sftp/bulk_resume_registry.cpp
         sftp/delete_operation.cpp
+        sftp/local_delete_operation.cpp
         sftp/rename_operation.cpp
         sftp/archive_download_operation.cpp
         sftp/archive_upload_operation.cpp

@@ -759,6 +759,22 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.scanPhase.value_or(false)
             );
         }
+        else if (added.type == SharedData::OperationType::LocalDelete)
+        {
+            return std::make_unique<DisplayedDeleteOperation>(
+                added.operationId,
+                *impl_->confirmDialog,
+                added.type,
+                added.localPath ? added.localPath->toUtf8() : std::string{},
+                Paths::RemotePath{},
+                [this](OperationCard<DisplayedDeleteOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                std::function<void()>{}
+            );
+        }
         else if (added.type == SharedData::OperationType::BulkDownload)
         {
             if (!added.localPath)
@@ -955,7 +971,8 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
     // Both Delete (per-directory recursive) and BulkDelete (the file/empty-dir
     // aggregate) cards render via DisplayedDeleteOperation and emit onDeleteProgress.
     if (operation->type() != SharedData::OperationType::Delete &&
-        operation->type() != SharedData::OperationType::BulkDelete)
+        operation->type() != SharedData::OperationType::BulkDelete &&
+        operation->type() != SharedData::OperationType::LocalDelete)
     {
         Log::error("Received delete progress for operation id: {} which is not a delete", progress.operationId.value());
         return;

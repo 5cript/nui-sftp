@@ -2,6 +2,7 @@
 #include <backend/sftp/download_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <backend/sftp/delete_operation.hpp>
+#include <backend/sftp/local_delete_operation.hpp>
 #include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/bulk_download_operation.hpp>
@@ -47,6 +48,10 @@ auto Operation::visit(FunctionT&& func) const
         case Rename:
         {
             return func(static_cast<RenameOperation const&>(*this));
+        }
+        case LocalDelete:
+        {
+            return func(static_cast<LocalDeleteOperation const&>(*this));
         }
         case ArchiveDownload:
         {

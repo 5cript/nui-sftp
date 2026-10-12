@@ -88,6 +88,7 @@ operationQueue:
   cancelOperationText: "Are you sure you want to cancel the operation?"
   deletingItem: "Deleting: '{}'"
   deletingSelectedIn: "Deleting selected items in {}"
+  deletingLocallyIn: "Deleting local items in {}"
   entriesFailed: "{} entries failed:\n"
   errorButton: "Error!"
   livePage: "Live"

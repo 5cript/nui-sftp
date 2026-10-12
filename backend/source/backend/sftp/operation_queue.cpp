@@ -1,4 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/local_delete_guard.hpp>
 #include <utility/remote_path_bridge.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
@@ -100,6 +101,16 @@ namespace
                         .completionTime = std::chrono::system_clock::now(),
                         .remotePath = unlessEmpty(op.remotePath()),
                         .error = error,
+                    };
+                },
+                [reason, operationId, error](LocalDeleteOperation const& op)
+                {
+                    return OperationQueue::OperationCompleted{
+                        .reason = reason,
+                        .operationId = operationId,
+                        .completionTime = std::chrono::system_clock::now(),
+                        .error = error,
+                        .failedEntries = op.getFailed(),
                     };
                 },
                 [reason, operationId, error](RenameOperation const& op)
@@ -1462,6 +1473,64 @@ std::size_t OperationQueue::addBulkUploadOperation(
     }
 
     return request.entries.size();
+}
+
+std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
+    Ids::OperationId operationId,
+    std::vector<Paths::LocalPath> targets,
+    SharedData::OperationMode mode
+)
+{
+    // Assumed in strand
+    if (targets.empty())
+        return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = "no targets"});
+    const auto home = localHomeDirectory();
+    for (auto const& target : targets)
+    {
+        if (auto allowed = refuseProtectedLocalDelete(target, home); !allowed)
+        {
+            Log::error("Refusing to delete locally: {}", allowed.error());
+            return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = target.toUtf8()});
+        }
+    }
+
+    const auto commonParent = targets.front().parent().value_or(targets.front());
+    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    targetQueue.emplace_back(
+        operationId,
+        std::make_unique<LocalDeleteOperation>(LocalDeleteOperation::LocalDeleteOperationOptions{
+            .itemsRemovedProgress =
+                [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
+                    std::string const& path, std::uint64_t itemsDeleted, std::uint64_t totalItems
+                )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return;
+                self->hub_->callRemote(
+                    name,
+                    SharedData::BulkDeleteProgress{
+                        .operationId = operationId,
+                        .currentFile = path,
+                        .filesDeleted = itemsDeleted,
+                        .totalFiles = totalItems,
+                    }
+                );
+            },
+            .targets = std::move(targets),
+        })
+    );
+
+    hub_->callRemote(
+        rpcName("onOperationAdded"),
+        SharedData::OperationAdded{
+            .operationId = operationId,
+            .type = SharedData::OperationType::LocalDelete,
+            .mode = mode,
+            .localPath = commonParent,
+        }
+    );
+    return {};
 }
 
 std::expected<void, Operation::Error>

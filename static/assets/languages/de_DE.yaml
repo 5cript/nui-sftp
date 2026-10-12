@@ -146,6 +146,7 @@ operationQueue:
   cancelOperationText: "Sind Sie sicher, dass Sie die Operation abbrechen möchten?"
   deletingItem: "Lösche: '{}'"
   deletingSelectedIn: "Lösche ausgewählte Elemente in {}"
+  deletingLocallyIn: "Lösche lokale Elemente in {}"
   entriesFailed: "{} Einträge fehlgeschlagen:\n"
   errorButton: "Fehler!"
   livePage: "Live"

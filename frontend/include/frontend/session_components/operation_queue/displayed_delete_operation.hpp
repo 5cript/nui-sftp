@@ -75,7 +75,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
 
     std::optional<ResumableOp> resumableDescriptor() const override
     {
-        if (isCompletedState())
+        // A local delete runs in this process and needs no connection to be redone.
+        if (isCompletedState() || type_ == SharedData::OperationType::LocalDelete)
             return std::nullopt;
         ResumableOp out;
         // BulkDelete reuses this card class; differentiate so the resume
@@ -118,6 +119,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                         [this](){
                             if (type_ == SharedData::OperationType::BulkDelete)
                                 return fmt::format(fmt::runtime(language->get("operationQueue", "deletingSelectedIn")), removePath_.generic_string());
+                            if (type_ == SharedData::OperationType::LocalDelete)
+                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingLocallyIn")), displayPath_);
                             if (currentFile.value().empty())
                                 return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), removePath_.generic_string());
                             return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), currentFile.value());
