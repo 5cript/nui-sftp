@@ -10,7 +10,7 @@
 #include <backend/rpc_helper.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -85,8 +85,8 @@ class OperationQueue
     std::expected<void, Operation::Error> addDownloadOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
-        std::filesystem::path const& localPath,
-        std::filesystem::path const& remotePath,
+        Paths::LocalPath const& localPath,
+        Paths::RemotePath const& remotePath,
         bool allowOverwrite,
         bool isBigFile,
         bool insertRefresh,
@@ -97,8 +97,8 @@ class OperationQueue
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
-        std::filesystem::path const& localPath,
-        std::filesystem::path const& remotePath,
+        Paths::LocalPath const& localPath,
+        Paths::RemotePath const& remotePath,
         bool allowOverwrite,
         bool isBigFile,
         bool insertRefresh,
@@ -179,7 +179,7 @@ class OperationQueue
      */
     std::size_t addBulkDownloadOperation(
         SecureShell::SftpSession& sftp,
-        SharedData::BulkAddRequest const& request,
+        SharedData::BulkDownloadRequest const& request,
         std::function<Ids::OperationId(std::size_t)> operationIdFor,
         Ids::OperationId bulkCardId
     );
@@ -194,7 +194,7 @@ class OperationQueue
      *                     @p operationIdFor. */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
-        SharedData::BulkAddRequest const& request,
+        SharedData::BulkUploadRequest const& request,
         std::function<Ids::OperationId(std::size_t)> operationIdFor,
         Ids::OperationId bulkCardId
     );

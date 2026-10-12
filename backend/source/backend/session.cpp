@@ -6,7 +6,7 @@
 #include <roar/utility/base64.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/sync_execution.hpp>
 
@@ -900,12 +900,19 @@ void Session::registerRpcSftpAddDownloadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
+                auto remote = parseRemotePath(remotePath);
+                if (!remote)
+                    return reply.error(remote.error());
+                auto local = parseLocalPath(localPath);
+                if (!local)
+                    return reply.error(local.error());
+
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         newOperationIdString,
-                        localPath,
-                        remotePath,
+                        local = *std::move(local),
+                        remote = *std::move(remote),
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
@@ -919,8 +926,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                         const auto result = self->operationQueue_->addDownloadOperation(
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
-                            localPath,
-                            remotePath,
+                            local,
+                            remote,
                             allowOverwrite,
                             bigFile,
                             insertRefresh,
@@ -932,8 +939,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                         {
                             Log::error(
                                 "Failed to add download operation for file '{}' to '{}': {}",
-                                remotePath,
-                                localPath,
+                                remote.value(),
+                                local.toUtf8(),
                                 result.error().toString()
                             );
                             return reply.error("Failed to add download operation: " + result.error().toString());
@@ -942,8 +949,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                         Log::info(
                             "Added download operation with id '{}' for file '{}' to '{}'",
                             newOperationIdString,
-                            remotePath,
-                            localPath
+                            remote.value(),
+                            local.toUtf8()
                         );
 
                         self->resetQueueThrottle();
@@ -1128,12 +1135,18 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::vector<std::string> const& operationIdStrings,
-                SharedData::BulkAddRequest const& request
+                nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
+
+                // Parsed here, so an invalid path is answered with an error instead of no reply at all.
+                auto parsed = parseRequest<SharedData::BulkDownloadRequest>(requestJson, "bulk download");
+                if (!parsed)
+                    return reply.error(parsed.error());
+                auto request = *std::move(parsed);
 
                 // Expect N per-entry ids + 1 dedicated aggregate-bulk-card id at the end.
                 if (operationIdStrings.size() != request.entries.size() + 1)
@@ -1180,12 +1193,18 @@ void Session::registerRpcSftpAddBulkUploadOperation()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::vector<std::string> const& operationIdStrings,
-                SharedData::BulkAddRequest const& request
+                nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
+
+                // Parsed here, so an invalid path is answered with an error instead of no reply at all.
+                auto parsed = parseRequest<SharedData::BulkUploadRequest>(requestJson, "bulk upload");
+                if (!parsed)
+                    return reply.error(parsed.error());
+                auto request = *std::move(parsed);
 
                 if (operationIdStrings.size() != request.entries.size() + 1)
                     return reply.error("addBulkUpload: operationIds and entries length mismatch");
@@ -1242,12 +1261,19 @@ void Session::registerRpcSftpAddUploadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
+                auto local = parseLocalPath(localPath);
+                if (!local)
+                    return reply.error(local.error());
+                auto remote = parseRemotePath(remotePath);
+                if (!remote)
+                    return reply.error(remote.error());
+
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         newOperationIdString,
-                        localPath,
-                        remotePath,
+                        local = *std::move(local),
+                        remote = *std::move(remote),
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
@@ -1261,8 +1287,8 @@ void Session::registerRpcSftpAddUploadOperation()
                         const auto result = self->operationQueue_->addUploadOperation(
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
-                            localPath,
-                            remotePath,
+                            local,
+                            remote,
                             allowOverwrite,
                             bigFile,
                             insertRefresh,
@@ -1274,8 +1300,8 @@ void Session::registerRpcSftpAddUploadOperation()
                         {
                             Log::error(
                                 "Failed to add upload operation for file '{}' to '{}': {}",
-                                localPath,
-                                remotePath,
+                                local.toUtf8(),
+                                remote.value(),
                                 result.error().toString()
                             );
                             return reply.error("Failed to add upload operation: " + result.error().toString());
@@ -1284,8 +1310,8 @@ void Session::registerRpcSftpAddUploadOperation()
                         Log::info(
                             "Added upload operation with id '{}' for file '{}' to '{}'",
                             newOperationIdString,
-                            localPath,
-                            remotePath
+                            local.toUtf8(),
+                            remote.value()
                         );
 
                         self->resetQueueThrottle();

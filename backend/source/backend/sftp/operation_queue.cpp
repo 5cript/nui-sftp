@@ -449,10 +449,15 @@ void OperationQueue::adoptBulkResume(
 )
 {
     Log::info(
-        "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' (kind={}, {} entries)",
+        "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' ({} entries)",
         operationId.value(),
-        static_cast<int>(entry.kind),
-        entry.request.entries.size()
+        std::visit(
+            [](auto const& request)
+            {
+                return request.entries.size();
+            },
+            entry.request
+        )
     );
 
     // For bulk download/upload the frontend reserves one extra id at the
@@ -660,8 +665,8 @@ void OperationQueue::paused(bool pause)
 std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::filesystem::path const& localPath,
-    std::filesystem::path const& remotePath,
+    Paths::LocalPath const& localPath,
+    Paths::RemotePath const& remotePath,
     bool allowOverwrite,
     bool isBigFile,
     bool insertRefresh,
@@ -791,15 +796,15 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         // Synthetic single-entry resume backup: re-issuing this through
         // adopt walks the same scan+bulk path, so the entry list itself
         // doesn't matter — we just need the directory paths preserved.
-        SharedData::BulkAddRequest synthetic{
-            .entries = {SharedData::BulkAddEntry{.src = remotePath, .dst = localPath, .isDirectory = true}},
+        SharedData::BulkDownloadRequest synthetic{
+            .entries = {SharedData::BulkDownloadEntry{
+                .source = remotePath, .destination = localPath, .isDirectory = true
+            }},
             .allowOverwrite = allowOverwrite,
             .insertRefresh = insertRefresh,
             .mode = mode,
         };
-        bulkResumeStash_.insert_or_assign(
-            operationId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = std::move(synthetic)}
-        );
+        bulkResumeStash_.insert_or_assign(operationId, BulkResumeEntry{.request = std::move(synthetic)});
 
         return {};
     }
@@ -1094,7 +1099,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 
 std::size_t OperationQueue::addBulkDownloadOperation(
     SecureShell::SftpSession& sftp,
-    SharedData::BulkAddRequest const& request,
+    SharedData::BulkDownloadRequest const& request,
     std::function<Ids::OperationId(std::size_t)> operationIdFor,
     Ids::OperationId bulkCardId
 )
@@ -1122,8 +1127,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             const auto result = addDownloadOperation(
                 sftp,
                 operationIdFor(idx),
-                entry.dst,
-                entry.src,
+                entry.destination,
+                entry.source,
                 request.allowOverwrite,
                 /*isBigFile*/ false,
                 // Propagate the request's flag so manual folder downloads refresh
@@ -1138,7 +1143,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             {
                 Log::error(
                     "Bulk download: directory entry '{}' failed to queue: {}",
-                    entry.src.generic_string(),
+                    entry.source.value(),
                     result.error().toString()
                 );
                 continue;
@@ -1194,24 +1199,17 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 .type = SharedData::OperationType::BulkDownload,
                 .mode = request.mode,
                 .insertRefresh = request.insertRefresh,
-                .localPath = firstDst.parent_path(),
-                .remotePath = firstSrc.parent_path(),
+                .localPath = localLabel,
+                .remotePath = remoteLabel,
             }
         );
     }
 
     Log::info("Bulk download: queued one bulk card (for files) + {} directory entries", directoryCount);
 
-    // Stash the request keyed by the aggregate bulk card id so a teardown
-    // can hand it to the resume registry.  Mixed file/directory entries
-    // are preserved as-is — adopt re-issues the request through this same
-    // function which performs the same file/directory partition.
-    if (!request.entries.empty())
-    {
-        bulkResumeStash_.insert_or_assign(
-            bulkCardId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkDownload, .request = request}
-        );
-    }
+    // Stashed under the card id so a teardown can hand it to the resume registry.
+    if (!fileUnit.entries.empty())
+        bulkResumeStash_.insert_or_assign(bulkCardId, BulkResumeEntry{.request = std::move(fileUnit)});
 
     return request.entries.size();
 }
@@ -1219,8 +1217,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
 std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::filesystem::path const& localPath,
-    std::filesystem::path const& remotePath,
+    Paths::LocalPath const& localPath,
+    Paths::RemotePath const& remotePath,
     bool allowOverwrite,
     bool isBigFile,
     bool insertRefresh,
@@ -1230,14 +1228,16 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 {
     // Assumed in strand
 
+    const auto localNativePath = localPath.native();
+
     std::error_code ec;
     // lstat-style: do not follow links here so dangling symlinks can still be uploaded as
     // symlinks (UploadOperation::handleSymlink recreates the literal on the remote).
-    const auto symStat = std::filesystem::symlink_status(localPath, ec);
+    const auto symStat = std::filesystem::symlink_status(localNativePath, ec);
 
     if (ec)
     {
-        Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
+        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), ec.message());
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
     }
 
@@ -1245,10 +1245,10 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     std::filesystem::file_status stat = symStat;
     if (!isSymlink)
     {
-        stat = std::filesystem::status(localPath, ec);
+        stat = std::filesystem::status(localNativePath, ec);
         if (ec)
         {
-            Log::error("Failed to stat local file '{}': {}", localPath.generic_string(), ec.message());
+            Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), ec.message());
             return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
         }
     }
@@ -1350,8 +1350,10 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         );
 
         // Synthetic single-entry resume backup: adopting it walks the same scan and bulk path.
-        SharedData::BulkAddRequest synthetic{
-            .entries = {SharedData::BulkAddEntry{.src = localPath, .dst = remotePath, .isDirectory = true}},
+        SharedData::BulkUploadRequest synthetic{
+            .entries = {SharedData::BulkUploadEntry{
+                .source = localPath, .destination = remotePath, .isDirectory = true
+            }},
             .allowOverwrite = allowOverwrite,
             .insertRefresh = insertRefresh,
             .mode = mode,
@@ -1369,7 +1371,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
 std::size_t OperationQueue::addBulkUploadOperation(
     SecureShell::SftpSession& sftp,
-    SharedData::BulkAddRequest const& request,
+    SharedData::BulkUploadRequest const& request,
     std::function<Ids::OperationId(std::size_t)> operationIdFor,
     Ids::OperationId bulkCardId
 )
@@ -1394,8 +1396,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
             const auto result = addUploadOperation(
                 sftp,
                 operationIdFor(idx),
-                entry.src,
-                entry.dst,
+                entry.source,
+                entry.destination,
                 request.allowOverwrite,
                 /*isBigFile*/ false,
                 // Propagate the request's flag so manual folder uploads refresh
@@ -1410,7 +1412,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             {
                 Log::error(
                     "Bulk upload: directory entry '{}' failed to queue: {}",
-                    entry.src.generic_string(),
+                    entry.source.toUtf8(),
                     result.error().toString()
                 );
                 continue;
@@ -1458,20 +1460,16 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 .type = SharedData::OperationType::BulkUpload,
                 .mode = request.mode,
                 .insertRefresh = request.insertRefresh,
-                .localPath = firstSrc.parent_path(),
-                .remotePath = firstDst.parent_path(),
+                .localPath = localLabel,
+                .remotePath = remoteLabel,
             }
         );
     }
 
     Log::info("Bulk upload: queued one bulk card (for files) + {} directory entries", directoryCount);
 
-    if (!request.entries.empty())
-    {
-        bulkResumeStash_.insert_or_assign(
-            bulkCardId, BulkResumeEntry{.kind = BulkResumeEntry::Kind::BulkUpload, .request = request}
-        );
-    }
+    if (!fileUnit.entries.empty())
+        bulkResumeStash_.insert_or_assign(bulkCardId, BulkResumeEntry{.request = std::move(fileUnit)});
 
     return request.entries.size();
 }
