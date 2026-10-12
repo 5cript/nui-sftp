@@ -215,8 +215,6 @@ namespace SharedData::Sync
             return EnqueuePlanEntry{
                 .relKey = key,
                 .action = action,
-                .localAbsPath = (trees.localRoot / key).generic_string(),
-                .remoteAbsPath = (trees.remoteRoot / key).generic_string(),
                 .sizeBytes = node.type == FileType::Directory ? 0u : node.size,
                 .mtime = node.mtime,
                 .mtimeNsec = node.mtimeNsec,
@@ -278,8 +276,6 @@ namespace SharedData::Sync
                 EnqueuePlanEntry{
                     .relKey = node.relKey,
                     .action = node.action,
-                    .localAbsPath = (trees.localRoot / node.relKey).generic_string(),
-                    .remoteAbsPath = (trees.remoteRoot / node.relKey).generic_string(),
                     .sizeBytes = node.isDirectory
                         ? 0u
                         : (scan ? scan->size : (sourceIsLocal ? node.localSize : node.remoteSize)),

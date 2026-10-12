@@ -170,6 +170,28 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
         std::unordered_set<std::string> const& selectedRelKeys
     ) const;
 
+    struct ResolvedPlanEntry
+    {
+        SharedData::Sync::EnqueuePlanEntry entry;
+        ResolvedPaths paths;
+    };
+
+    struct ResolvedPlan
+    {
+        std::vector<ResolvedPlanEntry> entries{};
+        /** @brief Keys of entries that have no path on one side, like a name Windows cannot store. */
+        std::vector<std::string> refused{};
+    };
+
+    /**
+     * @brief @ref buildEnqueuePlanInStrand with every entry resolved below the session roots.
+     *        Precondition: running on @ref strand().
+     */
+    ResolvedPlan resolvePlanInStrand(
+        SharedData::Sync::DiffSection section,
+        std::unordered_set<std::string> const& selectedRelKeys
+    ) const;
+
   private:
     SharedData::Sync::DiffTreeStore& storeFor(SharedData::Sync::DiffSection section);
     SharedData::Sync::DiffTreeStore const& storeFor(SharedData::Sync::DiffSection section) const;

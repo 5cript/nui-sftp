@@ -8,6 +8,7 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -138,7 +139,7 @@ void Session::start()
             self->registerRpcSftpOpenSyncSession();
             self->registerRpcSftpRecomputeSyncDiff();
             self->registerRpcSftpLoadSyncDiffChildren();
-            self->registerRpcSftpBuildSyncEnqueuePlan();
+            self->registerRpcSftpExecuteSyncSelection();
             self->registerRpcSftpCancelSyncDiff();
             self->registerRpcSftpCloseSyncSession();
             self->registerOperationQueuePauseUnpause();
@@ -1555,49 +1556,61 @@ void Session::registerRpcSftpLoadSyncDiffChildren()
         );
 }
 
-void Session::registerRpcSftpBuildSyncEnqueuePlan()
+void Session::registerRpcSftpExecuteSyncSelection()
 {
-    on(fmt::format("Session::{}::sftp::buildSyncEnqueuePlan", id_.value()))
+    // The backend plans the selection and resolves every row below its own sync roots, so no absolute path
+    // round-trips through the frontend.
+    on(fmt::format("Session::{}::sftp::executeSyncSelection", id_.value()))
         .perform(
             [weak = weak_from_this()](
-                RpcHelper::RpcOnce&& reply,
-                std::string const& syncSessionIdString,
-                SharedData::Sync::DiffSection section,
-                std::vector<std::string> const& selectedRelKeys,
-                std::string const& expectedGenerationString
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self || !self->operationQueue_)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                const auto syncSessionId = Ids::makeSyncSessionId(syncSessionIdString);
-                auto session = self->operationQueue_->syncSession(syncSessionId);
+                SharedData::Sync::SyncExecutionRequest request{};
+                try
+                {
+                    request = requestJson.get<SharedData::Sync::SyncExecutionRequest>();
+                }
+                catch (std::exception const& exception)
+                {
+                    return reply.error(fmt::format("Invalid sync request: {}", exception.what()));
+                }
+
+                auto session = self->operationQueue_->syncSession(request.syncSessionId);
                 if (!session)
-                    return reply({{"error", "Sync session not found"}});
-
-                const std::uint64_t expectedGeneration = std::stoull(expectedGenerationString);
-                auto selected = std::unordered_set<std::string>{selectedRelKeys.begin(), selectedRelKeys.end()};
+                    return reply.error("Sync session not found");
 
                 auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
                 boost::asio::post(
                     session->strand(),
-                    [session, section, selected = std::move(selected), expectedGeneration, replyShared]()
+                    [self, session, request = std::move(request), channelIdString, replyShared]() mutable
                     {
-                        if (session->generation() != expectedGeneration)
-                        {
-                            replyShared->error("stale generation");
-                            return;
-                        }
-                        const auto plan = session->buildEnqueuePlanInStrand(section, selected);
-                        nlohmann::json payload = nlohmann::json::array();
-                        for (auto const& entry : plan)
-                        {
-                            nlohmann::json j;
-                            SharedData::to_json(j, entry);
-                            payload.push_back(std::move(j));
-                        }
-                        (*replyShared)(std::move(payload));
+                        if (session->generation() != request.generation)
+                            return replyShared->error("stale generation");
+
+                        auto plan = session->resolvePlanInStrand(
+                            request.section, std::unordered_set<std::string>{request.relKeys.begin(), request.relKeys.end()}
+                        );
+                        self->withSftpChannelDo(
+                            Ids::makeChannelId(channelIdString),
+                            [self, session, plan = std::move(plan), request = std::move(request)](
+                                RpcHelper::RpcOnce&& reply, auto&& channel
+                            ) mutable
+                            {
+                                auto result = self->operationQueue_->executeSyncPlan(
+                                    *channel, *session, std::move(plan), request
+                                );
+                                self->resetQueueThrottle();
+                                nlohmann::json json;
+                                SharedData::to_json(json, result);
+                                reply(std::move(json));
+                            },
+                            std::move(*replyShared)
+                        );
                     }
                 );
             }

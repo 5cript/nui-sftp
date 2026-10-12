@@ -1475,6 +1475,173 @@ std::size_t OperationQueue::addBulkUploadOperation(
     return request.entries.size();
 }
 
+namespace
+{
+    /**
+     * @brief Creates @p directory and its missing parents below @p root, which has to exist.
+     */
+    bool createRemoteDirectoryBelow(
+        SecureShell::SftpSession& sftp,
+        Paths::RemotePath const& root,
+        Paths::RemotePath const& directory,
+        std::chrono::seconds timeout
+    )
+    {
+        std::vector<Paths::RemotePath> chain;
+        for (auto current = std::optional{directory}; current && *current != root && current->isWithin(root);
+             current = current->parent())
+            chain.push_back(*current);
+        for (auto iter = chain.rbegin(); iter != chain.rend(); ++iter)
+        {
+            auto created = sftp.createDirectoryIfItDoesntExist(*iter);
+            if (created.wait_for(timeout) != std::future_status::ready || !created.get().has_value())
+            {
+                Log::error("Sync: could not create remote directory '{}'.", iter->value());
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
+    SecureShell::SftpSession& sftp,
+    SyncSession const& session,
+    SyncSession::ResolvedPlan plan,
+    SharedData::Sync::SyncExecutionRequest const& request
+)
+{
+    // Assumed in strand
+    using SharedData::Sync::Action;
+    const auto timeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
+    SharedData::Sync::SyncExecutionResult result{.failed = std::move(plan.refused)};
+
+    SharedData::BulkUploadRequest uploads{.allowOverwrite = true, .mode = request.mode};
+    SharedData::BulkDownloadRequest downloads{.allowOverwrite = true, .mode = request.mode};
+    SharedData::BulkDeleteRequest remoteDeletes{.mode = request.mode, .listedContentOnly = true};
+    std::vector<Paths::LocalPath> localDeletes;
+    const auto localHome = localHomeDirectory();
+
+    for (auto& [entry, paths] : plan.entries)
+    {
+        switch (entry.action)
+        {
+            case Action::Upload:
+            {
+                if (entry.isDirectory)
+                {
+                    auto& target = createRemoteDirectoryBelow(sftp, session.remoteRoot(), paths.remote, timeout)
+                        ? result.createdDirectories
+                        : result.failed;
+                    target.push_back(std::move(entry.relKey));
+                    break;
+                }
+                result.uploadSources.push_back(paths.local.toUtf8());
+                uploads.entries.push_back({
+                    .source = std::move(paths.local),
+                    .destination = std::move(paths.remote),
+                    .sizeBytes = entry.sizeBytes,
+                });
+                result.uploads.push_back(std::move(entry.relKey));
+                break;
+            }
+            case Action::Download:
+            {
+                if (entry.isDirectory)
+                {
+                    std::error_code error{};
+                    std::filesystem::create_directories(paths.local.native(), error);
+                    (error ? result.failed : result.createdDirectories).push_back(std::move(entry.relKey));
+                    break;
+                }
+                result.downloadSources.push_back(paths.remote.value());
+                downloads.entries.push_back({
+                    .source = std::move(paths.remote),
+                    .destination = std::move(paths.local),
+                    .sizeBytes = entry.sizeBytes,
+                    .mtime = entry.mtime,
+                    .mtimeNsec = entry.mtimeNsec,
+                });
+                result.downloads.push_back(std::move(entry.relKey));
+                break;
+            }
+            case Action::DeleteRemote:
+            {
+                if (!refuseProtectedDeleteTarget(sftp, paths.remote).has_value())
+                {
+                    result.failed.push_back(std::move(entry.relKey));
+                    break;
+                }
+                result.remoteDeleteSources.push_back(paths.remote.value());
+                remoteDeletes.entries.push_back({.target = std::move(paths.remote), .isDirectory = entry.isDirectory});
+                result.remoteDeletes.push_back(std::move(entry.relKey));
+                break;
+            }
+            case Action::DeleteLocal:
+            {
+                if (auto allowed = refuseProtectedLocalDelete(paths.local, localHome); !allowed)
+                {
+                    Log::error("Sync: refusing to delete locally: {}", allowed.error());
+                    result.failed.push_back(std::move(entry.relKey));
+                    break;
+                }
+                result.localDeleteSources.push_back(paths.local.toUtf8());
+                localDeletes.push_back(std::move(paths.local));
+                result.localDeletes.push_back(std::move(entry.relKey));
+                break;
+            }
+        }
+    }
+
+    if (!uploads.entries.empty())
+    {
+        addBulkUploadOperation(
+            sftp,
+            uploads,
+            [](std::size_t)
+            {
+                return Ids::generateOperationId();
+            },
+            request.uploadId
+        );
+    }
+    if (!downloads.entries.empty())
+    {
+        addBulkDownloadOperation(
+            sftp,
+            downloads,
+            [](std::size_t)
+            {
+                return Ids::generateOperationId();
+            },
+            request.downloadId
+        );
+    }
+    if (!remoteDeletes.entries.empty() && addBulkDeleteOperation(sftp, remoteDeletes, request.remoteDeleteId) == 0)
+    {
+        std::ranges::move(result.remoteDeletes, std::back_inserter(result.failed));
+        result.remoteDeletes.clear();
+        result.remoteDeleteSources.clear();
+    }
+    if (!localDeletes.empty() && !addLocalDeleteOperation(request.localDeleteId, std::move(localDeletes), request.mode))
+    {
+        std::ranges::move(result.localDeletes, std::back_inserter(result.failed));
+        result.localDeletes.clear();
+        result.localDeleteSources.clear();
+    }
+
+    Log::info(
+        "Sync: queued {} uploads, {} downloads, {} remote and {} local deletes, created {} directories, {} failed",
+        result.uploads.size(),
+        result.downloads.size(),
+        result.remoteDeletes.size(),
+        result.localDeletes.size(),
+        result.createdDirectories.size(),
+        result.failed.size()
+    );
+    return result;
+}
+
 std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     Ids::OperationId operationId,
     std::vector<Paths::LocalPath> targets,

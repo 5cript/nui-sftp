@@ -18,6 +18,7 @@
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 #include <shared_data/sync/scan_node.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 
 #include <deque>
 #include <filesystem>

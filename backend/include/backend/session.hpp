@@ -209,7 +209,7 @@ class Session
     void registerRpcSftpOpenSyncSession();
     void registerRpcSftpRecomputeSyncDiff();
     void registerRpcSftpLoadSyncDiffChildren();
-    void registerRpcSftpBuildSyncEnqueuePlan();
+    void registerRpcSftpExecuteSyncSelection();
     void registerRpcSftpCancelSyncDiff();
     void registerRpcSftpCloseSyncSession();
     void registerOperationQueuePauseUnpause();

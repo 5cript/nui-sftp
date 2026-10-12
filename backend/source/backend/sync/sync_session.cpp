@@ -169,3 +169,26 @@ SyncSession::buildEnqueuePlanInStrand(DiffSection section, std::unordered_set<st
 {
     return storeFor(section).buildPlan(selectedRelKeys, scanTrees());
 }
+
+SyncSession::ResolvedPlan
+SyncSession::resolvePlanInStrand(DiffSection section, std::unordered_set<std::string> const& selectedRelKeys) const
+{
+    ResolvedPlan result;
+    for (auto& entry : buildEnqueuePlanInStrand(section, selectedRelKeys))
+    {
+        auto paths = Paths::RelativePath::make(entry.relKey).and_then(
+            [this](Paths::RelativePath const& relative)
+            {
+                return resolve(relative);
+            }
+        );
+        if (!paths)
+        {
+            Log::warn("SyncSession: '{}' has no path on both sides: {}", entry.relKey, paths.error().toString());
+            result.refused.push_back(std::move(entry.relKey));
+            continue;
+        }
+        result.entries.push_back(ResolvedPlanEntry{.entry = std::move(entry), .paths = *std::move(paths)});
+    }
+    return result;
+}

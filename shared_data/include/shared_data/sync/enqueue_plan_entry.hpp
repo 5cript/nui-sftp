@@ -23,15 +23,12 @@ namespace SharedData::Sync
      *    side creates missing directories as needed via the bulk upload/download
      *    flow.
      *
-     * Both @ref localAbsPath and @ref remoteAbsPath are always populated (the sides
-     * the action does not touch simply carry the path that would apply if it did).
+     * Entries carry no paths: the backend resolves @ref relKey below its own sync roots.
      */
     struct EnqueuePlanEntry
     {
         std::string relKey{};
         Action action{Action::Upload};
-        std::string localAbsPath{};
-        std::string remoteAbsPath{};
         std::uint64_t sizeBytes{0};
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
@@ -40,7 +37,7 @@ namespace SharedData::Sync
     BOOST_DESCRIBE_STRUCT(
         EnqueuePlanEntry,
         (),
-        (relKey, action, localAbsPath, remoteAbsPath, sizeBytes, mtime, mtimeNsec, isDirectory)
+        (relKey, action, sizeBytes, mtime, mtimeNsec, isDirectory)
     )
 
     inline void to_json(nlohmann::json& j, EnqueuePlanEntry const& e)

@@ -25,8 +25,6 @@ namespace SharedData::Sync
     {
         ScanNode const* local{nullptr};
         ScanNode const* remote{nullptr};
-        std::filesystem::path localRoot{};
-        std::filesystem::path remoteRoot{};
     };
 
     /**
