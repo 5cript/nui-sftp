@@ -80,7 +80,7 @@ namespace Test
             std::string const& filename
         )
         {
-            auto fut = sftp.listDirectory(remoteDir);
+            auto fut = sftp.listDirectory(remote(remoteDir.generic_string()));
             if (fut.wait_for(5s) != std::future_status::ready)
                 return false;
             auto result = fut.get();
@@ -405,7 +405,7 @@ namespace Test
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat((remoteRoot / "the_link").generic_string());
+        auto lstatFut = sftp->lstat(remote((remoteRoot / "the_link").generic_string()));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());

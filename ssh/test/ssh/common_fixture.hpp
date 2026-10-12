@@ -4,6 +4,7 @@
 
 #include <utility/node/node.hpp>
 #include <ssh/session.hpp>
+#include <paths/remote_path.hpp>
 #include <nui/utility/scope_exit.hpp>
 
 #pragma clang diagnostic push
@@ -48,6 +49,14 @@ static const char publicKey[] = {
 
 namespace SecureShell::Test
 {
+    /**
+     * @brief A remote path from a test literal, which is known to be valid.
+     */
+    inline Paths::RemotePath remote(std::string_view path)
+    {
+        return Paths::RemotePath::make(path).value();
+    }
+
     class CommonFixture : public ::testing::Test
     {
       public:

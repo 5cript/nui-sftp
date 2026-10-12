@@ -56,7 +56,7 @@ namespace Test
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -67,12 +67,40 @@ namespace Test
         EXPECT_NE(it, listResult.value().end());
     }
 
+    TEST_F(UploadOperationTests, InvalidRemotePathsAreRefusedBeforeTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // Relative and ".." paths cannot be built as a RemotePath at all, unset and the root remain.
+        for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
+        {
+            UploadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remotePath,
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
+            auto prepareResult = operation.prepare();
+            ASSERT_FALSE(prepareResult.has_value()) << remotePath.value();
+            EXPECT_EQ(prepareResult.error().type, Operation::ErrorType::InvalidPath) << remotePath.value();
+        }
+
+        auto fut = sftp->listDirectory(remote("/home"));
+        ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+        auto listResult = fut.get();
+        ASSERT_TRUE(listResult.has_value());
+        for (auto const& entry : *listResult)
+            EXPECT_NE(entry.name, "testfile.txt.filepart");
+    }
+
     TEST_F(UploadOperationTests, CanPrepareUploadByAdoptingFilepart)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        auto createFuture = sftp->createFile("/home/test/testfile.txt.filepart");
+        auto createFuture = sftp->createFile(remote("/home/test/testfile.txt.filepart"));
         ASSERT_EQ(createFuture.wait_for(5s), std::future_status::ready);
         auto createResult = createFuture.get();
         ASSERT_TRUE(createResult.has_value());
@@ -87,7 +115,7 @@ namespace Test
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -121,7 +149,7 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -134,7 +162,7 @@ namespace Test
         ASSERT_TRUE(closeResult.has_value());
 
         auto readFut = sftp->openFile(
-            "/home/test/testfile.txt", SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+            remote("/home/test/testfile.txt"), SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
         ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
         auto readResult = readFut.get();
 
@@ -261,7 +289,7 @@ namespace Test
         // First upload, but only part of it
         {
             auto openFut = sftp->openFile(
-                "/home/test/testfile.txt.filepart",
+                remote("/home/test/testfile.txt.filepart"),
                 SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
                 std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
             ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
@@ -306,7 +334,7 @@ namespace Test
         // Verify final file content
         {
             auto readFut = sftp->openFile(
-                "/home/test/testfile.txt",
+                remote("/home/test/testfile.txt"),
                 SecureShell::SftpSession::OpenType::Read,
                 std::filesystem::perms::owner_read);
             ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
@@ -354,7 +382,7 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -387,7 +415,7 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -527,7 +555,7 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -603,7 +631,7 @@ namespace Test
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
         // The remote entry must be a symlink, not a file copy of the target.
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_to_file");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_to_file"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -638,7 +666,7 @@ namespace Test
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_to_dir");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_to_dir"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -669,7 +697,7 @@ namespace Test
         ASSERT_TRUE(status.has_value()) << "dangling symlink upload failed";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_dangling");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_dangling"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -700,7 +728,7 @@ namespace Test
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_skip");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_skip"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         EXPECT_FALSE(entry.has_value()) << "SkipSymlink must not create a remote entry";
@@ -742,7 +770,7 @@ namespace Test
         ASSERT_TRUE(status.has_value()) << "symlink-over-file overwrite failed";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/sym_overwrite_target");
+        auto lstatFut = sftp->lstat(remote("/home/test/sym_overwrite_target"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -772,7 +800,7 @@ namespace Test
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
@@ -806,11 +834,11 @@ namespace Test
         ASSERT_TRUE(status.has_value()) << "upload should succeed when parent is auto-created";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/newly_created/testfile.txt");
+        auto lstatFut = sftp->lstat(remote("/home/test/newly_created/testfile.txt"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         ASSERT_TRUE(lstatFut.get().has_value()) << "uploaded file should exist at the nested path";
 
-        auto dirFut = sftp->lstat("/home/test/newly_created");
+        auto dirFut = sftp->lstat(remote("/home/test/newly_created"));
         ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
         auto dirEntry = dirFut.get();
         ASSERT_TRUE(dirEntry.has_value());
@@ -836,14 +864,14 @@ namespace Test
 
         for (auto const* path : {"/home/test/a", "/home/test/a/b", "/home/test/a/b/c", "/home/test/a/b/c/d"})
         {
-            auto fut = sftp->lstat(path);
+            auto fut = sftp->lstat(remote(path));
             ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
             auto entry = fut.get();
             ASSERT_TRUE(entry.has_value()) << "intermediate directory missing: " << path;
             EXPECT_EQ(entry->type, SharedData::FileType::Directory) << path;
         }
 
-        auto fileFut = sftp->lstat("/home/test/a/b/c/d/testfile.txt");
+        auto fileFut = sftp->lstat(remote("/home/test/a/b/c/d/testfile.txt"));
         ASSERT_EQ(fileFut.wait_for(5s), std::future_status::ready);
         EXPECT_TRUE(fileFut.get().has_value());
     }
@@ -885,7 +913,7 @@ namespace Test
         ASSERT_FALSE(workResult.has_value());
         EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::SftpError);
 
-        auto dirFut = sftp->lstat("/home/test/still_missing_dir");
+        auto dirFut = sftp->lstat(remote("/home/test/still_missing_dir"));
         ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
         EXPECT_FALSE(dirFut.get().has_value()) << "parent dir must NOT have been created";
     }
@@ -913,7 +941,7 @@ namespace Test
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/missing/for/symlink/uploaded_link");
+        auto lstatFut = sftp->lstat(remote("/home/test/missing/for/symlink/uploaded_link"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -928,7 +956,7 @@ namespace Test
         // First upload, but only part of it
         {
             auto openFut = sftp->openFile(
-                "/home/test/testfile.txt.filepart",
+                remote("/home/test/testfile.txt.filepart"),
                 SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
                 std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
             ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);

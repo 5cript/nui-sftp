@@ -69,6 +69,29 @@ namespace Test
         EXPECT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
     }
 
+    TEST_F(DownloadOperationTests, InvalidRemotePathsAreRefusedBeforeTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        // Relative and ".." paths cannot be built as a RemotePath at all, unset and the root remain.
+        for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
+        {
+            DownloadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remotePath,
+                    .localPath = toLocal(localPath),
+                }
+            };
+            auto prepareResult = operation.prepare();
+            ASSERT_FALSE(prepareResult.has_value()) << remotePath.value();
+            EXPECT_EQ(prepareResult.error().type, Operation::ErrorType::InvalidPath) << remotePath.value();
+        }
+        EXPECT_FALSE(std::filesystem::exists(localPath));
+    }
+
     TEST_F(DownloadOperationTests, CanDownloadFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

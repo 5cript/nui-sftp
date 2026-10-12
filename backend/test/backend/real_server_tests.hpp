@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ssh/sftp_session.hpp>
+#include <paths/remote_path.hpp>
 #include <utility/node/node.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -13,6 +14,14 @@ using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 extern std::filesystem::path programDirectory;
+
+/**
+ * @brief A remote path from a test literal, which is known to be valid.
+ */
+inline Paths::RemotePath remote(std::string_view path)
+{
+    return Paths::RemotePath::make(path).value();
+}
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
