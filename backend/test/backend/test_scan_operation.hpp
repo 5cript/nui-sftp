@@ -398,4 +398,30 @@ namespace Test
             result = operation.work();
         EXPECT_FALSE(result.has_value());
     }
+
+    TEST_F(ScanOperationTests, HostileNamesAreRejectedOrMarked)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test/Documents"}, {"name", "x/.."}}));
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test/Documents"}, {"name", ".."}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ScanOperation flat{*sftp, {.remotePath = remote("/home/test/Documents")}};
+        ASSERT_EQ(runScanToCompletion(flat), ScanOperation::WorkStatus::Complete);
+        const auto rejected = flat.rejectedPaths();
+        ASSERT_EQ(rejected.size(), 1u);
+        EXPECT_EQ(rejected.front(), "/home/test/Documents/x/..") << "joined for display only";
+        for (auto const& entry : flat.ejectEntries())
+            EXPECT_NE(entry.name, "x/..");
+
+        ScanOperation tree{*sftp, {.remotePath = remote("/home/test/Documents"), .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(tree), ScanOperation::WorkStatus::Complete);
+        const auto root = tree.ejectScanTree();
+        const auto hostile = std::ranges::find_if(root.children, [](auto const& child) {
+            return child.name == "x/..";
+        });
+        ASSERT_NE(hostile, root.children.end());
+        EXPECT_EQ(hostile->availability, SharedData::Sync::Availability::InvalidName);
+        EXPECT_EQ(std::ranges::count_if(root.children, [](auto const& child) { return child.name == ".."; }), 0);
+    }
 }
