@@ -28,6 +28,9 @@ class CommandLineInterface {
                 if (this.eventMap.has(command.command)) {
                     this.eventMap.get(command.command)(command);
                 }
+                if (command.ack === true) {
+                    process.stdout.write(JSON.stringify({ ack: command.command }) + '\n');
+                }
             }
         });
     }

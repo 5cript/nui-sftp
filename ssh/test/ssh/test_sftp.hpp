@@ -815,4 +815,79 @@ namespace SecureShell::Test
         EXPECT_EQ(callCount.load(), 3);
         EXPECT_LT(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
     }
+
+    TEST_F(SftpTests, MockServerCanFailReads)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("failReadsAfter", {{"bytes", 0}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto file = fut.get().value().lock();
+        ASSERT_TRUE(file);
+
+        std::array<char, 64> buffer{};
+        auto readFut = file->readSome(buffer.data(), buffer.size());
+        ASSERT_EQ(readFut.wait_for(1s), std::future_status::ready);
+        EXPECT_FALSE(readFut.get().has_value());
+    }
+
+    TEST_F(SftpTests, MockServerCanDenyDirectoryListing)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto listFut = sftp->listDirectory(remote("/home/test/Documents"));
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        EXPECT_FALSE(listFut.get().has_value());
+    }
+
+    TEST_F(SftpTests, MockServerListsRawNamesVerbatim)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test"}, {"name", "x/.."}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto listFut = sftp->listDirectory(remote("/home/test"));
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        const auto listResult = listFut.get();
+        ASSERT_TRUE(listResult.has_value());
+        const auto iter = std::find_if(listResult->begin(), listResult->end(), [](auto const& entry) {
+            return entry.name == "x/..";
+        });
+        EXPECT_NE(iter, listResult->end());
+    }
+
+    TEST_F(SftpTests, MockServerPosixRenameExtensionOverwrites)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "posix-rename@openssh.com"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->rename(remote("/home/test/file1.txt"), remote("/home/test/file2.txt"));
+        ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+
+        auto listFut = sftp->listDirectory(remote("/home/test"));
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        const auto listResult = listFut.get();
+        ASSERT_TRUE(listResult.has_value());
+        EXPECT_EQ(std::count_if(listResult->begin(), listResult->end(), [](auto const& entry) {
+            return entry.name == "file1.txt" || entry.name == "file2.txt";
+        }), 1);
+    }
+
+    TEST_F(SftpTests, MockServerPlainRenameDoesNotOverwrite)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->rename(remote("/home/test/file1.txt"), remote("/home/test/file2.txt"));
+        ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
+        EXPECT_FALSE(fut.get().has_value());
+    }
 }

@@ -32,6 +32,8 @@ set_target_properties(nui-sftp-ssh-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 find_program(NODE node)
 find_program(NPM npm)
 
+file(GLOB TEST_SSH2_SERVER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/source/*.mjs")
+
 target_compile_definitions(nui-sftp-ssh-test PRIVATE -DNODE_EXECUTABLE="${NODE}" -DNPM_EXECUTABLE="${NPM}")
 
 add_custom_command(
@@ -64,6 +66,7 @@ add_custom_command(
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/node_modules/.package-lock.json"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/sftp_server.mjs"
         "${CMAKE_CURRENT_LIST_DIR}/test_ssh2_servers/shell_emulator.mjs"
+        ${TEST_SSH2_SERVER_SOURCES}
     COMMENT "Building test_ssh2_servers with webpack"
 )
 add_custom_target(
