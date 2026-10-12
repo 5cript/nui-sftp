@@ -367,8 +367,7 @@ namespace Test
             metaPath = inst->instanceDir() / "metadata.json";
         }
         ASSERT_TRUE(fs::exists(metaPath));
-        std::ifstream fin{metaPath};
-        auto meta = nlohmann::json::parse(fin);
+        auto const meta = nlohmann::json::parse(std::ifstream{metaPath});
         ASSERT_TRUE(meta.contains("deadAt"));
         EXPECT_FALSE(meta["deadAt"].is_null());
         fs::remove_all(metaPath.parent_path());
