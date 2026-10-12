@@ -496,15 +496,17 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
     const auto bytesRead = static_cast<std::size_t>(currentLocalFile_.gcount());
     if (bytesRead == 0u)
     {
-        Log::warn(
+        Log::error(
             "ArchiveUploadOperation: local '{}' truncated mid-read (expected {} more bytes)",
             resolved.localFullPath.generic_string(),
             remaining
         );
-        const auto closeResult = finaliseEntryInStrand();
-        if (!closeResult.has_value())
-            return std::unexpected(closeResult.error());
-        return true;
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' ended {} bytes early", resolved.source.toUtf8(), remaining
+            ),
+        });
     }
 
     const auto writeResult = currentEntry_->write(std::span<std::byte const>{
@@ -551,14 +553,21 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseEntryInStr
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
     if (currentEntryBytesRead_ != resolved.tarMeta.size)
     {
-        Log::warn(
-            "ArchiveUploadOperation: entry '{}' truncated ({} of {} bytes) — archive padded with zeros",
+        Log::error(
+            "ArchiveUploadOperation: entry '{}' is incomplete ({} of {} bytes)",
             resolved.tarMeta.path.generic_string(),
             currentEntryBytesRead_,
             resolved.tarMeta.size
         );
-        ++currentEntryIndex_;
-        return {};
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' holds {} of {} bytes",
+                resolved.header.path,
+                currentEntryBytesRead_,
+                resolved.header.size
+            ),
+        });
     }
 
     const auto closeResult = std::move(handle).close();

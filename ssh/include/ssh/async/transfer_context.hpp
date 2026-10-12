@@ -1,9 +1,12 @@
 #pragma once
 
 #include <ssh/async/processing_thread.hpp>
+#include <ssh/sftp_error.hpp>
 
-#include <memory>
 #include <atomic>
+#include <memory>
+#include <mutex>
+#include <optional>
 
 namespace SecureShell
 {
@@ -14,15 +17,42 @@ namespace SecureShell
       public:
         using SignedSizeType = std::make_signed_t<std::size_t>;
 
+        /**
+         * @brief How the transfer ended. Only Completed means every byte was transferred.
+         */
+        enum class Outcome
+        {
+            Running,
+            Completed,
+            Failed,
+            Canceled,
+        };
+
         // may update bytesTransferred_
         friend FileStream;
 
         bool paused() const;
         void pause(bool doPause);
+        /**
+         * @brief Ends the transfer as canceled unless it already ended.
+         */
         void cancel();
+        /**
+         * @brief Ends the transfer as failed with the given error unless it already ended.
+         */
+        void fail(SftpError error);
+        /**
+         * @brief Ends the transfer as completed unless it already ended.
+         */
+        void complete();
         SignedSizeType bytesTransferred() const;
         SignedSizeType bytesPerSecond() const;
         bool hasEnded() const;
+        Outcome outcome() const;
+        /**
+         * @brief The error a failed transfer ended with.
+         */
+        std::optional<SftpError> error() const;
         void calculateBytesPerSecond();
 
         /**
@@ -34,7 +64,13 @@ namespace SecureShell
         void addBytesTransferred(SignedSizeType delta);
 
       private:
+        void end(Outcome outcome);
+
+      private:
+        std::atomic<Outcome> outcome_{Outcome::Running};
         std::atomic_bool ended_{false};
+        mutable std::mutex errorMutex_{};
+        std::optional<SftpError> error_{};
         std::atomic_bool paused_{false};
         std::atomic<SignedSizeType> bytesTransferred_{0};
         std::atomic<SignedSizeType> lastBytesTransferred_{0};

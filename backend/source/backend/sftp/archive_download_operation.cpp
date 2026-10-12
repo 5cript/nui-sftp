@@ -517,15 +517,17 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
     const auto bytesRead = readResult.value();
     if (bytesRead == 0)
     {
-        Log::warn(
+        Log::error(
             "ArchiveDownloadOperation: premature EOF on '{}' (expected {} more bytes)",
             resolved.remoteFullPath.generic_string(),
             remaining
         );
-        const auto closeResult = finaliseEntryInStrand();
-        if (!closeResult.has_value())
-            return std::unexpected(closeResult.error());
-        return true;
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' ended {} bytes early", resolved.source.value(), remaining
+            ),
+        });
     }
 
     const auto writeResult = currentEntry_->write(std::span<std::byte const>{
@@ -578,14 +580,21 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseEntryInS
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
     if (currentEntryBytesRead_ != resolved.tarMeta.size)
     {
-        Log::warn(
-            "ArchiveDownloadOperation: entry '{}' truncated ({} of {} bytes) — archive padded with zeros",
+        Log::error(
+            "ArchiveDownloadOperation: entry '{}' is incomplete ({} of {} bytes)",
             resolved.tarMeta.path.generic_string(),
             currentEntryBytesRead_,
             resolved.tarMeta.size
         );
-        ++currentEntryIndex_;
-        return {};
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' holds {} of {} bytes",
+                resolved.header.path,
+                currentEntryBytesRead_,
+                resolved.header.size
+            ),
+        });
     }
 
     const auto closeResult = std::move(handle).close();

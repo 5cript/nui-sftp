@@ -158,7 +158,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->writeAsyncInStrand(
-                    totalSize_,
+                    static_cast<SecureShell::IFileStream::SignedSizeType>(leftToUpload_),
                     buffer_.data(),
                     buffer_.size(),
                     [this](SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -202,6 +202,9 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             {
                 if (asyncTransferContext_->hasEnded())
                 {
+                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                        return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
+                    leftToUpload_ = 0;
                     options_.progressCallback(0ull, totalSize_, totalSize(), asyncTransferContext_->bytesPerSecond());
                     state_ = Finalizing;
                     [[fallthrough]];
@@ -211,7 +214,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     options_.progressCallback(
                         0ull,
                         totalSize_,
-                        asyncTransferContext_->bytesTransferred(),
+                        totalSize_ - leftToUpload_ +
+                            static_cast<std::size_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
                     return WorkStatus::MoreWork;
@@ -385,6 +389,11 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
     {
         Log::error("UploadOperation: Read more data than expected.");
         return enterErrorState<bool>({.type = ErrorType::ImplementationError});
+    }
+    if (readCount == 0 && leftToUpload_ > 0)
+    {
+        Log::error("UploadOperation: The local file ended before its expected size was read.");
+        return enterErrorState<bool>({.type = ErrorType::SourceFileNotGood});
     }
     leftToUpload_ -= readCount;
 
@@ -726,6 +735,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
     {
         Log::error("UploadOperation: File stream expired.");
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
+    }
+
+    // Every byte must have been written before the temp file may replace the destination.
+    if (leftToUpload_ != 0)
+    {
+        Log::error("UploadOperation: {} bytes were not uploaded.", leftToUpload_);
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SizeMismatch,
+                .extraInfo = fmt::format(
+                    "Sent {} of {} bytes for {}", totalSize_ - leftToUpload_, totalSize_, options_.localPath.toUtf8()
+                ),
+            }
+        );
     }
 
     stream->closeInStrand();

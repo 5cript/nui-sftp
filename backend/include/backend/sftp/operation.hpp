@@ -7,6 +7,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
 #include <ssh/async/processing_strand.hpp>
+#include <ssh/async/transfer_context.hpp>
 #include <log/log.hpp>
 
 #include <ids/ids.hpp>
@@ -162,6 +163,16 @@ class Operation
     void enterState(OperationState newState)
     {
         state_ = newState;
+    }
+
+    /**
+     * @brief The error of an async transfer that ended without completing.
+     */
+    static Error asyncTransferError(SecureShell::AsyncTransferContext const& context)
+    {
+        if (auto error = context.error(); error.has_value())
+            return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+        return Error{.type = ErrorType::SftpError, .extraInfo = "The transfer ended before it completed"};
     }
 
   protected:

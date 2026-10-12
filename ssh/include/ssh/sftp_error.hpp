@@ -17,6 +17,10 @@ namespace SecureShell
         FileNull,
         TaskPushFailed,
         BufferUnavailable,
+        // The remote file ended before the expected number of bytes was read.
+        UnexpectedEndOfFile,
+        // The local side of a transfer could not be read or written.
+        LocalIoFailure,
     };
 
     struct SftpError

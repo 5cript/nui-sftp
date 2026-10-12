@@ -6,7 +6,18 @@
 
 namespace SecureShell
 {
-    BOOST_DESCRIBE_ENUM(WrapperErrors, None, OwnerNull, SharedPtrDestroyed, ShortWrite, FileNull)
+    BOOST_DESCRIBE_ENUM(
+        WrapperErrors,
+        None,
+        OwnerNull,
+        SharedPtrDestroyed,
+        ShortWrite,
+        FileNull,
+        TaskPushFailed,
+        BufferUnavailable,
+        UnexpectedEndOfFile,
+        LocalIoFailure
+    )
     BOOST_DESCRIBE_STRUCT(SftpError, (), (message, sshError, sftpError, wrapperError))
 
     inline void from_json(nlohmann::json const& json, WrapperErrors& error)

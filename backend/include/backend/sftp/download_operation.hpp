@@ -134,4 +134,10 @@ class DownloadOperation : public Operation
     std::ofstream localFile_;
     SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
+    /** @brief Bytes already present in an adopted partial file. */
+    std::uint64_t resumeOffset_{0u};
+    /** @brief Bytes in the temp file so far, counted instead of tellp, which append mode misreports on Windows. */
+    std::uint64_t bytesInFile_{0u};
+    /** @brief An adopted partial file already holds the whole content. */
+    bool transferComplete_{false};
 };

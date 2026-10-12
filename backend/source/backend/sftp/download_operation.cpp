@@ -99,6 +99,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 options_.progressCallback(1, 1, 1, 0);
                 return WorkStatus::Complete;
             }
+            if (transferComplete_)
+            {
+                state_ = Finalizing;
+                return WorkStatus::MoreWork;
+            }
             if (options_.bigFileOptimized)
             {
                 auto stream = fileStream_.lock();
@@ -108,7 +113,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->readAsyncInStrand(
-                    options_.entry->size,
+                    static_cast<SecureShell::IFileStream::SignedSizeType>(options_.entry->size - resumeOffset_),
                     buffer_.data(),
                     buffer_.size(),
                     [this](SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -153,6 +158,8 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             {
                 if (asyncTransferContext_->hasEnded())
                 {
+                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                        return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
                     options_.progressCallback(
                         0ull, options_.entry->size, options_.entry->size, asyncTransferContext_->bytesPerSecond()
                     );
@@ -164,7 +171,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     options_.progressCallback(
                         0ull,
                         options_.entry->size,
-                        asyncTransferContext_->bytesTransferred(),
+                        resumeOffset_ + static_cast<std::uint64_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
                     return WorkStatus::MoreWork;
@@ -400,6 +407,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
                 tempPath.generic_string()
             );
             localFile_.close();
+            transferComplete_ = true;
             return {};
         }
         else if (static_cast<std::uint64_t>(localFile_.tellp()) > options_.entry->size)
@@ -414,7 +422,15 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         else
         {
             Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath.generic_string());
-            auto seekResult = stream.seekInStrand(localFile_.tellp());
+            localFile_.open(tempPath, std::ios::binary | std::ios::app);
+            if (!localFile_.is_open())
+            {
+                Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
+                return std::unexpected(Error{.type = ErrorType::OpenFailure});
+            }
+            resumeOffset_ = existingSize;
+            bytesInFile_ = existingSize;
+            auto seekResult = stream.seekInStrand(resumeOffset_);
             if (!seekResult.has_value())
                 return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
@@ -533,15 +549,30 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
+    if (options_.entry->isSymlink())
+    {
+        // Following a link transfers its target, so the target's size and times apply.
+        const auto targetInfo = stream->statInStrand();
+        if (!targetInfo.has_value())
+        {
+            Log::error("DownloadOperation: Failed to stat the symlink target.");
+            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = targetInfo.error()});
+        }
+        if (!targetInfo->isRegularFile())
+            return std::unexpected(Error{.type = ErrorType::NotAFile});
+        options_.entry->type = targetInfo->type;
+        options_.entry->size = targetInfo->size;
+        options_.entry->mtime = targetInfo->mtime;
+        options_.entry->mtimeNsec = targetInfo->mtimeNsec;
+        options_.entry->permissions = targetInfo->permissions;
+    }
+
     auto openResult = openOrAdoptFileInStrand(*stream);
     if (!openResult.has_value())
     {
         Log::error("DownloadOperation: Failed to open file.");
         return std::unexpected(openResult.error());
     }
-
-    if (options_.entry->isSymlink())
-        return {};
 
     buffer_ = sftp_->bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
     if (buffer_.empty())
@@ -640,6 +671,33 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
 
     localFile_.close();
 
+    auto tempPath = localNativePath_;
+    tempPath += options_.tempFileSuffix;
+
+    // A short file must never replace the destination.
+    std::error_code sizeError{};
+    const auto writtenSize = std::filesystem::file_size(tempPath, sizeError);
+    if (sizeError || writtenSize != options_.entry->size)
+    {
+        Log::error(
+            "DownloadOperation: '{}' holds {} bytes instead of {}.",
+            tempPath.generic_string(),
+            sizeError ? 0u : writtenSize,
+            options_.entry->size
+        );
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SizeMismatch,
+                .extraInfo = fmt::format(
+                    "Received {} of {} bytes for {}",
+                    sizeError ? 0u : writtenSize,
+                    options_.entry->size,
+                    options_.remotePath.value()
+                ),
+            }
+        );
+    }
+
     if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
     {
         Log::error(
@@ -650,8 +708,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     }
 
     std::error_code ec{};
-    auto tempPath = options_.localPath;
-    tempPath += options_.tempFileSuffix;
     std::filesystem::rename(tempPath, options_.localPath, ec);
     if (ec)
     {
