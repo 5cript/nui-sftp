@@ -306,7 +306,12 @@ const server = new Server({
 
                     logMessage('OPEN', filename, flags, attrs);
 
-                    const result = fakeFilesystem.find(filename);
+                    let result = fakeFilesystem.find(filename);
+                    // OPEN follows symlinks like a real server.
+                    if (result !== undefined && result.type === 'symlink') {
+                        filename = result.target;
+                        result = fakeFilesystem.find(filename);
+                    }
                     if (result === undefined) {
                         const anyWriteFlag = flags & (OPEN_MODE.WRITE | OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.APPEND);
                         if (anyWriteFlag) {

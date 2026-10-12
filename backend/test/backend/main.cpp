@@ -21,6 +21,7 @@
 #include "test_file_change_filter.hpp"
 #include "test_password_request.hpp"
 #include "test_sync_session.hpp"
+#include "test_transfer_failures.hpp"
 
 #include <log/log.hpp>
 
