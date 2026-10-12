@@ -3,7 +3,9 @@
 #include <log/log.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/strand.hpp>
 
 #ifdef __APPLE__
 #    include <util.h>
@@ -20,6 +22,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -158,21 +161,129 @@ namespace PTY
             std::size_t writtenOffset_;
             bool isWaitingForWritable_;
         };
+
+        /**
+         * @brief Reads the pty master on a strand. Handlers only hold a weak reference, so the owner can drop it at
+         * any time. All stream access happens on the strand, including the final close.
+         */
+        class MasterReader : public std::enable_shared_from_this<MasterReader>
+        {
+          public:
+            /**
+             * @brief Creates a reader that takes ownership of the master file descriptor and starts reading.
+             * @param executor The executor to run the read handlers on, wrapped into a strand.
+             * @param master The pty master file descriptor, closed when the reader is destroyed.
+             * @param onStdout Called on the strand for every chunk read.
+             */
+            static std::shared_ptr<MasterReader> start(
+                boost::asio::any_io_executor const& executor,
+                int master,
+                std::function<void(std::string_view)> onStdout
+            )
+            {
+                auto reader = std::shared_ptr<MasterReader>{
+                    new MasterReader{boost::asio::make_strand(executor), master, std::move(onStdout)}
+                };
+                boost::asio::post(
+                    reader->stream_.get_executor(),
+                    [weak = reader->weak_from_this()]()
+                    {
+                        if (const auto self = weak.lock())
+                            self->waitReadable();
+                    }
+                );
+                return reader;
+            }
+
+            /**
+             * @brief Stops reading and closes the file descriptor on the strand. Thread safe, does not block.
+             * The output callback is not invoked after this returns, except for a chunk already being delivered.
+             */
+            void stop()
+            {
+                stopped_ = true;
+                boost::asio::post(
+                    stream_.get_executor(),
+                    [self = shared_from_this()]()
+                    {
+                        self->onStdout_ = {};
+                        boost::system::error_code ignored;
+                        self->stream_.close(ignored);
+                    }
+                );
+            }
+
+            ~MasterReader() = default;
+            MasterReader(MasterReader const&) = delete;
+            MasterReader(MasterReader&&) = delete;
+            MasterReader& operator=(MasterReader const&) = delete;
+            MasterReader& operator=(MasterReader&&) = delete;
+
+          private:
+            MasterReader(
+                boost::asio::any_io_executor executor,
+                int master,
+                std::function<void(std::string_view)> onStdout
+            )
+                : stopped_{false}
+                , onStdout_{std::move(onStdout)}
+                , buffer_{std::make_shared<std::vector<char>>(4096u)}
+                , stream_{std::move(executor), master}
+            {}
+
+            void waitReadable()
+            {
+                stream_.async_wait(
+                    boost::asio::posix::stream_descriptor::wait_read,
+                    [weak = weak_from_this()](boost::system::error_code error)
+                    {
+                        const auto self = weak.lock();
+                        if (!self || error || self->stopped_)
+                            return;
+                        self->readSome();
+                    }
+                );
+            }
+
+            void readSome()
+            {
+                stream_.async_read_some(
+                    boost::asio::buffer(*buffer_),
+                    [weak = weak_from_this(), buffer = buffer_](boost::system::error_code error, std::size_t bytesRead)
+                    {
+                        const auto self = weak.lock();
+                        if (!self || error || bytesRead == 0 || self->stopped_)
+                            return;
+
+                        if (self->onStdout_)
+                            self->onStdout_(std::string_view{buffer->data(), bytesRead});
+
+                        self->waitReadable();
+                    }
+                );
+            }
+
+          private:
+            /** @brief Set by stop() from any thread, checked by the handlers on the strand. */
+            std::atomic_bool stopped_;
+            /** @brief Only accessed on the strand. */
+            std::function<void(std::string_view)> onStdout_;
+            /** @brief Shared with the pending read handler, so it outlives an aborted read. */
+            std::shared_ptr<std::vector<char>> buffer_;
+            /** @brief Bound to the strand, owns the master file descriptor. */
+            boost::asio::posix::stream_descriptor stream_;
+        };
     }
 
     struct PseudoTerminal::Implementation
     {
       public:
         boost::asio::any_io_executor executor;
+        /** @brief Pty master, 0 when closed. Owned by the reader while reading. */
         int master;
         int slave;
         std::string name;
-
-        std::atomic_bool isReading;
-        std::function<void(std::string_view)> onStdout;
-        std::function<void(std::string_view)> onStderr;
-        std::unique_ptr<boost::asio::posix::stream_descriptor> stream;
-        std::vector<char> buffer;
+        std::shared_ptr<MasterReader> reader;
         std::shared_ptr<InputQueue> input;
 
         void closeInput()
@@ -183,56 +294,14 @@ namespace PTY
 
         void stopReading()
         {
-            if (isReading)
+            if (reader)
             {
                 // Keeping the duplicate open would keep the pty alive after the master is closed.
                 closeInput();
-                stream.reset();
-                isReading = false;
-                onStdout = {};
-                onStderr = {};
+                reader->stop();
+                reader.reset();
                 master = 0;
             }
-        }
-
-        void asyncRead()
-        {
-            stream->async_wait(
-                boost::asio::posix::stream_descriptor::wait_read,
-                [this](boost::system::error_code ec)
-                {
-                    if (ec)
-                    {
-                        stopReading();
-                        return;
-                    }
-
-                    stream->async_read_some(
-                        boost::asio::buffer(buffer),
-                        [this](boost::system::error_code ec, std::size_t bytesRead)
-                        {
-                            if (ec)
-                            {
-                                stopReading();
-                                return;
-                            }
-
-                            if (bytesRead == 0)
-                            {
-                                stopReading();
-                                return;
-                            }
-
-                            std::string_view data{buffer.data(), bytesRead};
-
-                            if (onStdout)
-                                onStdout(data);
-
-                            asyncRead();
-                        }
-                    );
-                }
-            );
         }
 
         Implementation(boost::asio::any_io_executor executor)
@@ -240,11 +309,7 @@ namespace PTY
             , master{0}
             , slave{0}
             , name{}
-            , isReading{false}
-            , onStdout{}
-            , onStderr{}
-            , stream{}
-            , buffer(4096)
+            , reader{}
             , input{}
         {}
     };
@@ -391,8 +456,7 @@ namespace PTY
     {
         if (!moveDetector_.wasMoved())
         {
-            if (impl_->isReading)
-                stopReading();
+            stopReading();
 
             impl_->closeInput();
 
@@ -403,20 +467,13 @@ namespace PTY
 
     void PseudoTerminal::startReading(
         std::function<void(std::string_view)> onStdout,
-        std::function<void(std::string_view)> onStderr
+        [[maybe_unused]] std::function<void(std::string_view)> onStderr
     )
     {
-        if (impl_->master == 0)
+        if (impl_->master == 0 || impl_->reader)
             return;
 
-        impl_->onStdout = onStdout;
-        impl_->onStderr = onStderr;
-
-        impl_->isReading = true;
-
-        impl_->stream = std::make_unique<boost::asio::posix::stream_descriptor>(impl_->executor, impl_->master);
-
-        impl_->asyncRead();
+        impl_->reader = MasterReader::start(impl_->executor, impl_->master, std::move(onStdout));
     }
     void PseudoTerminal::stopReading()
     {
@@ -432,6 +489,8 @@ namespace PTY
 
     void PseudoTerminal::resize(short width, short height)
     {
+        if (impl_->master == 0)
+            return;
         winsize size{
             .ws_row = static_cast<unsigned short>(height),
             .ws_col = static_cast<unsigned short>(width),
