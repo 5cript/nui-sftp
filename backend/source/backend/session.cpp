@@ -1630,7 +1630,8 @@ void Session::registerRpcSftpRename()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::string const& oldName,
-                std::string const& newName
+                std::string const& newName,
+                bool overwrite
             )
             {
                 auto self = weak.lock();
@@ -1639,19 +1640,37 @@ void Session::registerRpcSftpRename()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), oldName, newName](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    [weak = self->weak_from_this(), oldName, newName, overwrite](
+                        RpcHelper::RpcOnce&& reply, auto&& channel
+                    )
                     {
                         auto self = weak.lock();
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        auto fut = channel->rename(Utility::pathFromUtf8(oldName), Utility::pathFromUtf8(newName));
+                        const auto oldPath = Paths::RemotePath::make(oldName);
+                        const auto newPath = Paths::RemotePath::make(newName);
+                        if (!oldPath || !newPath || !oldPath->parent() || oldPath->parent() != newPath->parent())
+                            return reply.error("backend.rename.invalidName");
+
+                        // Never replaces an existing item unless the user confirmed it.
+                        auto fut = channel->performPromise(
+                            [channel, oldPath = *oldPath, newPath = *newPath, overwrite]()
+                            {
+                                return overwrite ? channel->renameReplaceInStrand(oldPath, newPath, ".nui-sftp-old")
+                                                 : channel->renameNoReplaceInStrand(oldPath, newPath);
+                            }
+                        );
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to rename file: timeout");
 
                         const auto result = fut.get();
                         if (!result.has_value())
+                        {
+                            if (result.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+                                return reply.error("backend.rename.targetExists");
                             return reply.error("Failed to rename file: " + result.error().toString());
+                        }
                         reply({{"success", true}});
                     },
                     std::move(reply)

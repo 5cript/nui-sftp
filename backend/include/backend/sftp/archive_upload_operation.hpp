@@ -66,6 +66,9 @@ class ArchiveUploadOperation : public Operation
         /** @brief Refuse to overwrite an existing remote file. */
         bool mayOverwrite{false};
 
+        /** @brief The archive is written next to its destination under this suffix and renamed into place. */
+        std::string tempFileSuffix{".filepart"};
+
         std::chrono::seconds futureTimeout{5};
     };
 
@@ -199,4 +202,8 @@ class ArchiveUploadOperation : public Operation
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
     std::unique_ptr<ScanPhase<LocalScanOperation>> scanPhase_{};
+    /** @brief Where the archive is written before it replaces the destination. */
+    Paths::RemotePath tempPath_{};
+    /** @brief The temp file exists on the server and must go if the upload does not complete. */
+    bool tempCreated_{false};
 };

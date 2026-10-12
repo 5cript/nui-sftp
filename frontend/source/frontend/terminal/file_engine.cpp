@@ -1085,13 +1085,14 @@ void FileEngine::performDelete(
 void FileEngine::rename(
     std::filesystem::path const& oldPath,
     std::filesystem::path const& newPath,
+    bool overwrite,
     std::function<void(bool, std::string const& info)> onComplete
 )
 {
     Log::info("Requesting to rename file: {} -> {}", oldPath.generic_string(), newPath.generic_string());
 
     lazyOpen(
-        [this, oldPath, newPath, onComplete = std::move(onComplete)](
+        [this, oldPath, newPath, overwrite, onComplete = std::move(onComplete)](
             auto const& channelId, std::string const& info
         ) mutable
         {
@@ -1115,8 +1116,9 @@ void FileEngine::rename(
                     onComplete(true, "Success");
                 },
                 channelId.value().value(),
-                oldPath.generic_string(),
-                newPath.generic_string()
+                oldPath.value(),
+                newPath.value(),
+                overwrite
             );
         }
     );

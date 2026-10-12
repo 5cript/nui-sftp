@@ -308,41 +308,38 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 
     const auto target = std::filesystem::read_symlink(options_.localPath);
 
-    // sftp_symlink fails if the link path already exists. If we're allowed to overwrite,
-    // remove whatever is there first (file or link — directories are left alone since
-    // that almost certainly isn't what the user wants).
-    if (options_.mayOverwrite)
-    {
-        const auto statResult = sftp_->lstatInStrand(options_.remotePath);
-        if (statResult.has_value() && statResult->type != SharedData::FileType::Directory)
-        {
-            const auto rmResult = sftp_->removeFileInStrand(options_.remotePath);
-            if (!rmResult.has_value())
-            {
-                Log::warn(
-                    "UploadOperation: Could not remove existing '{}' before symlink: {}.",
-                    options_.remotePath.generic_string(),
-                    rmResult.error().message
-                );
-            }
-        }
-    }
-
     if (options_.createMissingDirectories)
     {
         if (auto res = ensureRemoteDirectoryExistsInStrand(options_.remotePath.parent_path()); !res.has_value())
             return std::unexpected(res.error());
     }
 
-    const auto result = sftp_->createSymLinkInStrand(target, options_.remotePath);
+    // The link is created under the temp name and renamed into place, so an existing destination is
+    // never removed before its replacement exists.
+    std::ignore = sftp_->removeFileInStrand(tempPath_);
+    const auto result = sftp_->createSymLinkInStrand(Paths::nativeToUtf8(target), tempPath_);
     if (!result.has_value())
     {
         Log::error(
-            "UploadOperation: Failed to create symlink at '{}': {}.",
-            options_.remotePath.generic_string(),
-            result.error().message
+            "UploadOperation: Failed to create symlink at '{}': {}.", tempPath_.value(), result.error().message
         );
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
+    }
+
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
+    if (!renameResult.has_value())
+    {
+        std::ignore = sftp_->removeFileInStrand(tempPath_);
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        Log::error(
+            "UploadOperation: Failed to move symlink to '{}': {}.",
+            options_.remotePath.value(),
+            renameResult.error().message
+        );
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
     }
     return {};
 }
@@ -755,36 +752,23 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
 
     stream->closeInStrand();
 
-    // Recheck if the destination already exists.
-    {
-        const auto result = sftp_->statInStrand(options_.remotePath);
-        if (!result.has_value())
-        {
-            // Interpret error as ok — either does not exist or something else is wrong;
-            // try to rename anyway.
-        }
-        else
-        {
-            if (!options_.mayOverwrite)
-            {
-                Log::warn(
-                    "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                    options_.remotePath.generic_string()
-                );
-                return std::unexpected(Error{.type = ErrorType::FileExists});
-            }
-            else
-            {
-                std::ignore = sftp_->removeFileInStrand(options_.remotePath);
-            }
-        }
-    }
-
+    // The destination is never deleted ahead of the rename: replacing is atomic or moves it aside, and
+    // without permission to overwrite the rename fails instead of replacing.
     auto tempPath = options_.remotePath;
     tempPath += options_.tempFileSuffix;
-    const auto renameResult = sftp_->renameInStrand(tempPath, options_.remotePath);
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
     if (!renameResult.has_value())
     {
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+        {
+            Log::warn(
+                "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
+                options_.remotePath.value()
+            );
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        }
         Log::error("Failed to rename remote sftp file: {}", renameResult.error().message);
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
     }

@@ -691,53 +691,69 @@ void LocalSideModel::onDropExternal(
         onTransfer(items, subDir);
 }
 
+void LocalSideModel::renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite)
+{
+    Nui::val args = Nui::val::object();
+    args.set("oldPath", from.toUtf8());
+    args.set("newPath", to.toUtf8());
+    args.set("overwrite", overwrite);
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::rename",
+        [this, from, to, overwrite](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+            {
+                Log::error("Invalid response from RpcFilesystem::rename");
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "renameFailed"),
+                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            if (!val["success"].as<bool>())
+            {
+                const auto errorKey = val["error"].as<std::string>();
+                if (errorKey == "backend.rename.targetExists" && !overwrite)
+                {
+                    confirmReplaceOnRename(
+                        std::string{to.filename()->view()},
+                        [this, from, to]()
+                        {
+                            renameItem(from, to, true);
+                        }
+                    );
+                    return;
+                }
+                const auto error = language->translate(errorKey);
+                Log::error("Failed to rename item: {}", error);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "renameFailed"),
+                    .text = error,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            Log::info("Item renamed successfully");
+            onRefresh();
+        },
+        args
+    );
+}
+
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 {
-    Log::info("Rename item requested: {}", item.path.generic_string());
+    Log::info("Rename item requested: {}", item.name);
 
-    auto doRename = [item, this](std::string const& newName)
-    {
-        Nui::val args = Nui::val::object();
-        args.set("oldPath", (*currentPath_ / item.path).generic_string());
-        args.set("newPath", (*currentPath_ / newName).generic_string());
-
-        Nui::RpcClient::callWithBackChannel(
-            "RpcFilesystem::rename",
-            [this](Nui::val val)
-            {
-                if (!val.hasOwnProperty("success"))
-                {
-                    Log::error("Invalid response from RpcFilesystem::rename");
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("localSideModel", "renameFailed"),
-                        .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                    return;
-                }
-
-                const auto success = val["success"].as<bool>();
-                if (!success)
-                {
-                    const auto error = language->translate(val["error"].as<std::string>());
-                    Log::error("Failed to rename item: {}", error);
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("localSideModel", "renameFailed"),
-                        .text = error,
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                    return;
-                }
-
-                Log::info("Item renamed successfully");
-                // Refresh list:
-                onRefresh();
-            },
-            args
-        );
-    };
+    // The item's own path: the explorer may already show another directory.
+    auto from = localPathOf(item);
+    if (!from)
+        return showPathRefused(language->get("localSideModel", "renameFailed"), from.error());
 
     inputDialog_->open({
         .whatFor = language->get("remoteSideModel", "rename"),
@@ -746,15 +762,17 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
             fmt::format(fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()),
         .initialValue = item.path.filename().string(),
         .isPassword = false,
-        .onConfirm = [doRename, item](std::optional<std::string> const& name)
+        .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
         {
             if (!name || name->empty())
                 return;
             if (*name == item.path.filename().string())
                 return;
+            if (!isValidItemName(*name))
+                return showInvalidItemName(*name);
 
             Log::info("Renaming item to: {}", *name);
-            doRename(*name);
+            renameItem(from, *directory / *segment, false);
         },
     });
 }

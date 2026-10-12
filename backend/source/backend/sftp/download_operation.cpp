@@ -703,7 +703,13 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         );
     }
 
-    if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
+    // Without permission to overwrite, the rename itself refuses an existing file: no check-then-rename race.
+    std::error_code ec{};
+    if (options_.mayOverwrite)
+        std::filesystem::rename(tempPath, localNativePath_, ec);
+    else if (auto renamed = Utility::renameNoReplace(tempPath, localNativePath_); !renamed.has_value())
+        ec = renamed.error();
+    if (ec == std::errc::file_exists)
     {
         Log::error(
             "DownloadOperation: File '{}' already exists and may not be overwritten.",
@@ -711,9 +717,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         );
         return std::unexpected(Error{.type = ErrorType::FileExists});
     }
-
-    std::error_code ec{};
-    std::filesystem::rename(tempPath, options_.localPath, ec);
     if (ec)
     {
         Log::error("DownloadOperation: Failed to rename file: {}", ec.message());

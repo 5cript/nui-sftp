@@ -255,9 +255,14 @@ class FileEngine
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /**
+     * @brief Renames on the server. Fails with "backend.rename.targetExists" when @p newPath exists and
+     *        @p overwrite is false.
+     */
     void rename(
         std::filesystem::path const& oldPath,
         std::filesystem::path const& newPath,
+        bool overwrite,
         std::function<void(bool, std::string const& info)> onComplete
     );
 

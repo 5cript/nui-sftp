@@ -21,6 +21,62 @@ std::shared_ptr<FileEngine> SideModel::engine()
     return fileEngine_;
 }
 
+bool SideModel::isValidItemName(std::string_view name)
+{
+    if (name.empty() || name == "." || name == "..")
+        return false;
+    return name.find_first_of(std::string_view{"/\\\0", 3}) == std::string_view::npos;
+}
+
+void SideModel::showInvalidItemName(std::string const& name)
+{
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("fileExplorer", "invalidItemNameHeader"),
+        .text = fmt::format(fmt::runtime(language->get("fileExplorer", "invalidItemName")), name),
+        .buttons = ConfirmDialog::Button::Ok,
+    });
+}
+
+void SideModel::showPathRefused(std::string const& headerText, Paths::PathError const& error)
+{
+    Log::error("{}: {}", headerText, error.toString());
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = headerText,
+        .text = error.toString(),
+        .buttons = ConfirmDialog::Button::Ok,
+    });
+}
+
+void SideModel::showExistenceCheckFailed(std::string const& reason)
+{
+    Log::error("Transfer stopped, the existence check failed: {}", reason);
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("fileExplorer", "existenceCheckFailedHeader"),
+        .text = fmt::format(fmt::runtime(language->get("fileExplorer", "existenceCheckFailed")), reason),
+        .buttons = ConfirmDialog::Button::Ok,
+    });
+}
+
+void SideModel::confirmReplaceOnRename(std::string const& name, std::function<void()> onReplace)
+{
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+        .headerText = language->get("fileExplorer", "renameTargetExistsHeader"),
+        .text = fmt::format(fmt::runtime(language->get("fileExplorer", "renameTargetExists")), name),
+        .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+        .focusButton = ConfirmDialog::Button::No,
+        .onClose =
+            [onReplace = std::move(onReplace)](std::optional<ConfirmDialog::Button> button)
+        {
+            if (button == ConfirmDialog::Button::Yes)
+                onReplace();
+        },
+    });
+}
+
 bool SideModel::isComplete() const
 {
     return operationQueue_ != nullptr && fileEngine_ != nullptr;

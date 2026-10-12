@@ -9,6 +9,10 @@ confirmDialog:
   neverShowAgain: "Never show again"
   andMore: "... and {} more"
 fileExplorer:
+  invalidItemNameHeader: "Invalid Name"
+  invalidItemName: "'{}' cannot be used as a name. A name may not be empty, '.' or '..', and may not contain '/' or '\\'."
+  renameTargetExistsHeader: "Item Exists"
+  renameTargetExists: "'{}' already exists. Replace it?"
   contextMenu:
     download: "Download"
     upload: "Upload"
@@ -1126,6 +1130,9 @@ terminalPanel:
   saveDialogTitle: "Save terminal contents"
   saveToFile: "Save terminal to file"
 backend:
+  rename:
+    targetExists: "An item with this name already exists."
+    invalidName: "The new name must be a plain name in the same directory."
   rpcFilesystem:
     deletionPrevented: "File deletion is prevented by configuration."
     renamePrevented: "File renaming is prevented by configuration."

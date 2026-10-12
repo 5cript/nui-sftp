@@ -877,6 +877,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     ArchiveDownloadOperation::Options opts{};
     opts.entries = std::move(entries);
     opts.localArchivePath = localArchivePath;
+    opts.tempFileSuffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix
+    );
     opts.compression = compression;
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;
@@ -1002,6 +1005,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     ArchiveUploadOperation::Options opts{};
     opts.localPaths = std::move(localPaths);
     opts.remoteArchivePath = remoteArchivePath;
+    opts.tempFileSuffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
+    );
     opts.compression = compression;
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;

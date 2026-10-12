@@ -129,7 +129,10 @@ ArchiveUploadOperation::ArchiveUploadOperation(SecureShell::SftpSession& sftp, O
     : Operation{}
     , sftp_{&sftp}
     , options_{std::move(options)}
-{}
+{
+    remoteArchivePath_ = options_.remoteArchivePath;
+    tempPath_ = remoteArchivePath_.withFilenameSuffix(options_.tempFileSuffix).value_or(Paths::RemotePath{});
+}
 
 ArchiveUploadOperation::~ArchiveUploadOperation()
 {
@@ -382,13 +385,14 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
             .extraInfo = "no local files could be stat'd",
         });
 
-    using OpenType = SecureShell::SftpSession::OpenType;
-    OpenType openType = OpenType::Write | OpenType::Create | OpenType::Truncate;
-    if (!options_.mayOverwrite)
-        openType = OpenType::Write | OpenType::Create | OpenType::Exclusive;
+    // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
+    if (!options_.mayOverwrite && sftp_->lstatInStrand(remoteArchivePath_).has_value())
+        return std::unexpected(Error{.type = ErrorType::FileExists});
 
+    // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
+    using OpenType = SecureShell::SftpSession::OpenType;
     const auto openResult = sftp_->openFileInStrand(
-        options_.remoteArchivePath, openType, std::filesystem::perms{0644u}
+        tempPath_, OpenType::Write | OpenType::Create | OpenType::Truncate, std::filesystem::perms{0644u}
     );
     if (!openResult.has_value())
     {
@@ -406,6 +410,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
         });
     }
     remoteStream_ = openResult.value();
+    tempCreated_ = true;
 
     // Wrap the SFTP terminal sink in the requested codec. Auto means derive
     // from the user-facing remote path so the bytes on the wire match the
@@ -627,6 +632,22 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
     if (auto stream = remoteStream_.lock(); stream)
         stream->close(false);
     remoteStream_.reset();
+
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remoteArchivePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remoteArchivePath_);
+    if (!renameResult.has_value())
+    {
+        Log::error(
+            "ArchiveUploadOperation: cannot move the archive to '{}': {}",
+            options_.remoteArchivePath.value(),
+            renameResult.error().message
+        );
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
+    }
+    tempCreated_ = false;
     return {};
 }
 
@@ -666,6 +687,15 @@ void ArchiveUploadOperation::cleanup()
     if (auto stream = remoteStream_.lock(); stream)
         stream->close(false);
     remoteStream_.reset();
+
+    if (tempCreated_)
+    {
+        tempCreated_ = false;
+        if (auto* processingStrand = sftp_->strand(); processingStrand && processingStrand->withinProcessingThread())
+            std::ignore = sftp_->removeFileInStrand(tempPath_);
+        else
+            std::ignore = sftp_->removeFile(tempPath_).wait_for(options_.futureTimeout);
+    }
 }
 
 void ArchiveUploadOperation::addScanRoot(std::unique_ptr<LocalScanOperation> scan)

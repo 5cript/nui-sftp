@@ -122,6 +122,11 @@ class LocalSideModel
   private:
     void enqueueRefresh(bool otherModel);
 
+    /**
+     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
+     */
+    void renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite);
+
     void uploadItemsConfirmed(
         std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems,
         std::shared_ptr<std::vector<bool>> existsResults,

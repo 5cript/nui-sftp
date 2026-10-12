@@ -472,14 +472,111 @@ namespace SecureShell
     SftpSession::renameInStrand(std::filesystem::path const& source, std::filesystem::path const& destination)
     {
         assert(strand_->withinProcessingThread());
-        auto s = source.generic_string();
-        auto d = destination.generic_string();
-
-        auto result = sftp_rename(session_, s.c_str(), d.c_str());
+        if (auto valid = requireSet(source); !valid)
+            return std::unexpected(valid.error());
+        if (auto valid = requireSet(destination); !valid)
+            return std::unexpected(valid.error());
+        auto result = sftp_rename(session_, source.c_str(), destination.c_str());
         if (result != SSH_OK)
         {
             return std::unexpected(lastError());
         }
+        return {};
+    }
+
+    bool SftpSession::supportsExtensionInStrand(char const* name, char const* version) const
+    {
+        assert(strand_->withinProcessingThread());
+        return sftp_extension_supported(session_, name, version) == 1;
+    }
+
+    std::expected<void, SftpSession::Error>
+    SftpSession::renameNoReplaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination)
+    {
+        assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(source); !valid)
+            return std::unexpected(valid.error());
+        if (auto valid = requireSet(destination); !valid)
+            return std::unexpected(valid.error());
+        const auto alreadyExists = [&destination]()
+        {
+            return SftpError{
+                .message = fmt::format("'{}' already exists", destination.value()),
+                .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
+            };
+        };
+
+        const auto sourceInfo = lstatInStrand(source);
+        if (!sourceInfo.has_value())
+            return std::unexpected(sourceInfo.error());
+
+        // A hard link fails when the destination exists, so the move cannot replace anything.
+        if (sourceInfo->isRegularFile() && supportsExtensionInStrand("hardlink@openssh.com"))
+        {
+            if (sftp_hardlink(session_, source.c_str(), destination.c_str()) != SSH_OK)
+            {
+                if (lstatInStrand(destination).has_value())
+                    return std::unexpected(alreadyExists());
+                return std::unexpected(lastError());
+            }
+            return removeFileInStrand(source);
+        }
+
+        // libssh sends posix-rename@openssh.com when the server offers it, which replaces. Plain SFTP v3 rename
+        // refuses an existing destination. So only a server with posix-rename but without hardlink leaves the
+        // window between this check and the rename; OpenSSH offers both.
+        if (lstatInStrand(destination).has_value())
+            return std::unexpected(alreadyExists());
+        return renameInStrand(source, destination);
+    }
+
+    std::expected<void, SftpSession::Error> SftpSession::renameReplaceInStrand(
+        Paths::RemotePath const& source,
+        Paths::RemotePath const& destination,
+        std::string_view asideSuffix
+    )
+    {
+        assert(strand_->withinProcessingThread());
+        if (auto valid = requireSet(source); !valid)
+            return std::unexpected(valid.error());
+        if (auto valid = requireSet(destination); !valid)
+            return std::unexpected(valid.error());
+        if (supportsExtensionInStrand("posix-rename@openssh.com"))
+            return renameInStrand(source, destination);
+
+        // Plain SFTP rename refuses an existing destination: move it aside instead of deleting it first.
+        const auto destinationInfo = lstatInStrand(destination);
+        if (!destinationInfo.has_value())
+            return renameInStrand(source, destination);
+        if (destinationInfo->isDirectory())
+        {
+            return std::unexpected(
+                SftpError{
+                    .message = fmt::format("'{}' is a directory", destination.value()),
+                    .sftpError = SSH_FX_FAILURE,
+                }
+            );
+        }
+
+        const auto aside = destination.withFilenameSuffix(asideSuffix);
+        if (!aside)
+        {
+            return std::unexpected(
+                SftpError{
+                    .message = fmt::format("Invalid suffix '{}' for '{}'", asideSuffix, destination.value()),
+                    .wrapperError = WrapperErrors::InvalidPath,
+                }
+            );
+        }
+        if (auto movedAside = renameInStrand(destination, *aside); !movedAside.has_value())
+            return movedAside;
+        if (auto renamed = renameInStrand(source, destination); !renamed.has_value())
+        {
+            std::ignore = renameInStrand(*aside, destination);
+            return renamed;
+        }
+        if (auto removed = removeFileInStrand(*aside); !removed.has_value())
+            Log::warn("SftpSession: Could not remove '{}': {}", aside->value(), removed.error().toString());
         return {};
     }
 
@@ -711,7 +808,7 @@ namespace SecureShell
         for (int depth = 0; depth < maxDepth; ++depth)
         {
             std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                sftp_lstat(session_, currentPath.generic_string().c_str()), sftp_attributes_free
+                sftp_lstat(session_, currentPath.c_str()), sftp_attributes_free
             };
             if (attributes == nullptr)
             {
@@ -735,7 +832,7 @@ namespace SecureShell
             }
 
             const auto readLinkResult = std::unique_ptr<char, decltype(&ssh_string_free_char)>(
-                sftp_readlink(session_, currentPath.generic_string().c_str()), ssh_string_free_char
+                sftp_readlink(session_, currentPath.c_str()), ssh_string_free_char
             );
             if (readLinkResult == nullptr)
                 return std::unexpected(lastError());
@@ -767,7 +864,9 @@ namespace SecureShell
     SftpSession::createSymLinkInStrand(std::filesystem::path const& target, std::filesystem::path const& linkPath)
     {
         assert(strand_->withinProcessingThread());
-        const auto result = sftp_symlink(session_, target.generic_string().c_str(), linkPath.generic_string().c_str());
+        if (auto valid = requireSet(linkPath); !valid)
+            return std::unexpected(valid.error());
+        const auto result = sftp_symlink(session_, target.c_str(), linkPath.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};

@@ -263,9 +263,34 @@ namespace SecureShell
 
         /**
          * @brief In-strand variant of rename. Must be called from within the processing thread.
+         *        Replaces an existing destination when the server supports posix-rename, use
+         *        @ref renameNoReplaceInStrand or @ref renameReplaceInStrand to choose.
          */
         std::expected<void, Error>
         renameInStrand(std::filesystem::path const& source, std::filesystem::path const& destination);
+
+        /**
+         * @brief Renames without ever replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it
+         *        exists. Regular files move atomically through hardlink@openssh.com where the server has it.
+         */
+        std::expected<void, Error>
+        renameNoReplaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
+
+        /**
+         * @brief Renames over an existing @p destination without a moment where it is missing: atomically with
+         *        posix-rename@openssh.com, otherwise by moving the destination aside to @p asideSuffix and
+         *        back if the rename fails.
+         */
+        std::expected<void, Error> renameReplaceInStrand(
+            Paths::RemotePath const& source,
+            Paths::RemotePath const& destination,
+            std::string_view asideSuffix
+        );
+
+        /**
+         * @brief Whether the server announced the SFTP extension @p name with @p version.
+         */
+        bool supportsExtensionInStrand(char const* name, char const* version = "1") const;
 
         enum class OpenType : int
         {

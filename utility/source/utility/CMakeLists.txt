@@ -22,6 +22,7 @@ else()
         PRIVATE
         node/node.cpp
         permissions.cpp
+        rename.cpp
         resources.cpp
     )
 

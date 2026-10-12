@@ -3,6 +3,8 @@
 #include <shared_data/directory_entry.hpp>
 #include <utility/path_utf.hpp>
 #include <utility/localized_message.hpp>
+#include <utility/rename.hpp>
+#include <utility/rename_target.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
@@ -295,9 +297,23 @@ void RpcFilesystem::registerRename()
                 const auto newPathUtf8 = parameters["newPath"].get<std::string>();
                 const auto oldPath = Utility::pathFromUtf8(oldPathUtf8);
                 const auto newPath = Utility::pathFromUtf8(newPathUtf8);
+                const bool overwrite = parameters.contains("overwrite") && parameters["overwrite"].is_boolean() &&
+                    parameters["overwrite"].get<bool>();
 
+                if (!Utility::isRenameInPlace(oldPath, newPath))
+                {
+                    Log::error("RpcFilesystem::rename refused to move '{}' to '{}'.", oldPathUtf8, newPathUtf8);
+                    return reply.error("backend.rename.invalidName");
+                }
+
+                // Never replaces an existing item unless the user confirmed it.
                 std::error_code ec;
-                std::filesystem::rename(oldPath, newPath, ec);
+                if (overwrite)
+                    std::filesystem::rename(oldPath, newPath, ec);
+                else if (auto renamed = Utility::renameNoReplace(oldPath, newPath); !renamed.has_value())
+                    ec = renamed.error();
+                if (ec == std::errc::file_exists)
+                    return reply.error("backend.rename.targetExists");
                 if (ec)
                 {
                     Log::error("Failed to rename from '{}' to '{}': {}", oldPathUtf8, newPathUtf8, ec.message());

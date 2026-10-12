@@ -4,6 +4,7 @@
 #include <tar_archive/error.hpp>
 
 #include <log/log.hpp>
+#include <utility/rename.hpp>
 
 #include <cstddef>
 #include <cstring>
@@ -653,11 +654,14 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
         return std::unexpected(archiveErrorToOperationError(finaliseResult.error()));
     }
 
-    if (std::filesystem::exists(options_.localArchivePath) && !options_.mayOverwrite)
-        return std::unexpected(Error{.type = ErrorType::FileExists});
-
+    // Without permission to overwrite, the rename itself refuses an existing archive: no check-then-rename race.
     std::error_code renameErr{};
-    std::filesystem::rename(tempPath_, options_.localArchivePath, renameErr);
+    if (options_.mayOverwrite)
+        std::filesystem::rename(tempPath_, localArchiveNativePath_, renameErr);
+    else if (auto renamed = Utility::renameNoReplace(tempPath_, localArchiveNativePath_); !renamed.has_value())
+        renameErr = renamed.error();
+    if (renameErr == std::errc::file_exists)
+        return std::unexpected(Error{.type = ErrorType::FileExists});
     if (renameErr)
     {
         Log::error("ArchiveDownloadOperation: rename failed: {}", renameErr.message());

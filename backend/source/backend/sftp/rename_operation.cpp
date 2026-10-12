@@ -30,7 +30,13 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
         }
         case (Running):
         {
-            auto fut = sftp_->rename(sourcePath_, destinationPath_);
+            // A queued rename mirrors a local move and must not replace what is at the destination.
+            auto fut = sftp_->performPromise(
+                [this]()
+                {
+                    return sftp_->renameNoReplaceInStrand(sourcePath_, destinationPath_);
+                }
+            );
             if (fut.wait_for(futureTimeout_) != std::future_status::ready)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
 
