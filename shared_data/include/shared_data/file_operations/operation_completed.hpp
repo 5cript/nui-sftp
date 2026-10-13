@@ -11,7 +11,6 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
-#include <filesystem>
 #include <chrono>
 
 namespace SharedData
