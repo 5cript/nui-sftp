@@ -140,9 +140,10 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path() / "alpha.txt"},
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = {},
-            }};
+            }
+        };
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveUploadOperation::ErrorType::InvalidPath);
@@ -157,8 +158,9 @@ namespace Test
             *sftp,
             {
                 .localPaths = {},
-                .remoteArchivePath = "/home/test/nothing.tar",
-            }};
+                .remoteArchivePath = remote("/home/test/nothing.tar"),
+            }
+        };
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveUploadOperation::ErrorType::InvalidPath);
@@ -173,11 +175,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path() / "alpha.txt"},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "single.tar");
@@ -196,10 +199,11 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path() / "alpha.txt"},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "alpha.tar.gz");
@@ -217,10 +221,11 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path() / "alpha.txt"},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "alpha.tar.zst");
@@ -240,13 +245,14 @@ namespace Test
             {
                 .localPaths =
                     {
-                        srcDir_.path() / "alpha.txt",
-                        srcDir_.path() / "beta.txt",
+                        toLocal(srcDir_.path() / "alpha.txt"),
+                        toLocal(srcDir_.path() / "beta.txt"),
                     },
-                .remoteArchivePath = remoteArchive,
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "pair.tar");
@@ -271,11 +277,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path()},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(srcDir_.path())},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -300,11 +307,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path()},
-                .remoteArchivePath = "/home/test/missing_scan.tar",
+                .localPaths = {toLocal(srcDir_.path())},
+                .remoteArchivePath = remote("/home/test/missing_scan.tar"),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         // No setScanResultForRoot — the op must not self-recurse; it has to
         // surface an ImplementationError like its download counterpart.
         const auto result = runToCompletion(operation);
@@ -327,11 +335,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path()},
-                .remoteArchivePath = "/home/test/wrong_key.tar",
+                .localPaths = {toLocal(srcDir_.path())},
+                .remoteArchivePath = remote("/home/test/wrong_key.tar"),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         operation.setScanResultForRoot(
             otherDir.path(), std::move(otherScan.entries), otherScan.totalBytes
         );
@@ -357,11 +366,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {firstDir.path(), secondDir.path()},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(firstDir.path()), toLocal(secondDir.path())},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         operation.setScanResultForRoot(
             firstDir.path(), std::move(firstScan.entries), firstScan.totalBytes
         );
@@ -393,11 +403,12 @@ namespace Test
                 // A regular-file root (no scan needed) alongside a directory
                 // root (which does need a scan) — the op must succeed and
                 // must not mis-flag the file as missing-scan.
-                .localPaths = {topFile, srcDir_.path()},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(topFile), toLocal(srcDir_.path())},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -423,11 +434,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path()},
-                .remoteArchivePath = remoteArchive,
+                .localPaths = {toLocal(srcDir_.path())},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -448,11 +460,12 @@ namespace Test
         ArchiveUploadOperation operation{
             *sftp,
             {
-                .localPaths = {srcDir_.path() / "alpha.txt"},
-                .remoteArchivePath = "/home/test/done.tar",
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
+                .remoteArchivePath = remote("/home/test/done.tar"),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         auto again = operation.work();
@@ -473,15 +486,16 @@ namespace Test
             {
                 .progressCallback =
                     [&](std::uint64_t, std::uint64_t max, std::uint64_t current, std::make_signed_t<std::size_t>)
-                    {
-                        lastMax = max;
-                        lastCurrent = current;
-                    },
-                .localPaths = {srcDir_.path() / "alpha.txt"},
-                .remoteArchivePath = "/home/test/progress.tar",
+                {
+                    lastMax = max;
+                    lastCurrent = current;
+                },
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
+                .remoteArchivePath = remote("/home/test/progress.tar"),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         EXPECT_EQ(lastMax, std::string{"alpha payload"}.size());
