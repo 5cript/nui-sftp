@@ -1,4 +1,5 @@
 #include <backend/sftp/upload_operation.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <ssh/sftp_session.hpp>
 

@@ -1,6 +1,6 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
-#include <utility/remote_path_bridge.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>

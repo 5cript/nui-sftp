@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <tar_archive/error.hpp>

@@ -1,6 +1,7 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
+#include <paths/native.hpp>
+#include <paths/local_path.hpp>
 
-#include <utility/path_utf.hpp>
 
 #include <nlohmann/json.hpp>
 #include <log/log.hpp>
@@ -344,7 +345,13 @@ namespace FileTracking
                     reply.error("Instance not found: " + instanceId);
                     return;
                 }
-                auto watch = inst->addWatch(Utility::pathFromUtf8(path), recursive, std::move(downloadTempSuffix));
+                const auto watchedPath = Paths::LocalPath::fromUtf8(path);
+                if (!watchedPath)
+                {
+                    reply.error(fmt::format("Cannot watch '{}': {}", path, watchedPath.error().toString()));
+                    return;
+                }
+                auto watch = inst->addWatch(watchedPath->native(), recursive, std::move(downloadTempSuffix));
                 if (!watch)
                 {
                     reply.error("Failed to add watch on path: " + path);

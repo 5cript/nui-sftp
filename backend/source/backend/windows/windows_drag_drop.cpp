@@ -1,10 +1,10 @@
 
 #include <backend/windows/windows_drag_drop.hpp>
+#include <paths/native.hpp>
 #include <backend/windows/cotask_mem_string.hpp>
 #include <backend/dropped_entry.hpp>
 #include <shared_data/directory_entry.hpp>
 
-#include <utility/path_utf.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 

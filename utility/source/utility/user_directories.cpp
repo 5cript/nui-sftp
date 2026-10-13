@@ -1,5 +1,4 @@
 #include <utility/user_directories.hpp>
-#include <utility/path_utf.hpp>
 
 #include <optional>
 #include <ranges>
@@ -51,9 +50,9 @@ namespace Utility
         }
     }
 
-    std::vector<UserDirectory> parseUserDirectories(std::string_view content, std::filesystem::path const& home)
+    std::vector<UserDirectory> parseUserDirectories(std::string_view content, std::string_view home)
     {
-        auto homeString = pathToUtf8Generic(home);
+        std::string homeString{home};
         while (homeString.size() > 1 && homeString.ends_with('/'))
             homeString.pop_back();
         const std::string_view homePrefix = homeString == "/" ? std::string_view{} : std::string_view{homeString};
@@ -90,7 +89,7 @@ namespace Utility
 
             directories.push_back({
                 .name = std::string{key.substr(prefix.size(), key.size() - prefix.size() - suffix.size())},
-                .path = pathFromUtf8(*expanded),
+                .path = *std::move(expanded),
             });
         }
         return directories;

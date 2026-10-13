@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_download_operation.hpp>
+#include <paths/native.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
 #include <utility/permissions.hpp>

@@ -1,7 +1,8 @@
 #include <ssh/sftp_session.hpp>
+#include <paths/native.hpp>
 #include <ssh/session.hpp>
 #include <ssh/file_information.hpp>
-#include <ssh/u8_path.hpp>
+#include <paths/native.hpp>
 #include <paths/relative_path.hpp>
 
 #include <algorithm>

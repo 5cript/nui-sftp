@@ -1,4 +1,5 @@
 #include <backend/sftp/download_operation.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <log/log.hpp>

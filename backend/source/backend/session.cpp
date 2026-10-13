@@ -1,7 +1,7 @@
 #include <backend/session.hpp>
+#include <paths/native.hpp>
 #include <backend/existence_check.hpp>
 
-#include <utility/path_utf.hpp>
 #include <paths/paths.hpp>
 
 #include <roar/utility/base64.hpp>
@@ -727,7 +727,7 @@ void Session::registerRpcSftpUserDirectories()
                         for (auto const& directory : *result)
                         {
                             directories.push_back(
-                                {{"name", directory.name}, {"path", Utility::pathToUtf8Generic(directory.path)}}
+                                {{"name", directory.name}, {"path", directory.path}}
                             );
                         }
                         Log::info("Read {} user directories in '{}'", directories.size(), home);
