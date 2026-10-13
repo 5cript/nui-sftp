@@ -101,10 +101,11 @@ namespace Test
             DownloadOperation download{
                 sftp,
                 {
-                    .remotePath = remotePath,
-                    .localPath = localPath,
+                    .remotePath = remote(remotePath.generic_string()),
+                    .localPath = toLocal(localPath),
                     .mayOverwrite = true,
-                }};
+                }
+            };
             for (int i = 0; i < 500; ++i)
             {
                 auto result = download.work();

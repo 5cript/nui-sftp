@@ -50,9 +50,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
@@ -108,10 +109,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .tryContinue = true,
-            }};
+            }
+        };
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
@@ -134,9 +136,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -191,9 +194,10 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -215,10 +219,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .mayOverwrite = false,
-                }};
+                }
+            };
 
             auto workResult = operation.work();
             ASSERT_FALSE(workResult.has_value());
@@ -236,9 +241,10 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -260,10 +266,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .mayOverwrite = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -311,10 +318,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .tryContinue = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -367,9 +375,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/emptyfile.txt",
-                .localPath = programDirectory / "temp" / "emptyfile.txt",
-            }};
+                .remotePath = remote("/home/test/emptyfile.txt"),
+                .localPath = toLocal(temporaryRoot / "emptyfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -400,9 +409,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -434,9 +444,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -462,9 +473,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
+            }
+        };
 
         auto firstResult = operation.work();
         ASSERT_FALSE(firstResult.has_value());
@@ -482,9 +494,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/nonexistent_dir/file.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/nonexistent_dir/file.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -499,9 +512,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -516,9 +530,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory,
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(programDirectory),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -540,9 +555,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/largefile.txt",
-                .localPath = programDirectory / "temp" / "largefile.txt",
-            }};
+                .remotePath = remote("/home/test/largefile.txt"),
+                .localPath = toLocal(temporaryRoot / "largefile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -622,9 +638,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_to_file",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_sym_to_file"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -658,9 +675,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_to_dir",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_sym_to_dir"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -689,9 +707,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_dangling",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_dangling"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "dangling symlink upload failed";
@@ -719,10 +738,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_skip",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/uploaded_sym_skip"),
+                .localPath = toLocal(linkPath),
                 .symlinkHandling = Persistence::SymlinkHandling::SkipSymlink,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -747,9 +767,10 @@ namespace Test
             UploadOperation first{
                 *sftp,
                 {
-                    .remotePath = "/home/test/sym_overwrite_target",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/sym_overwrite_target"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
             auto s = runToCompletion(first);
             ASSERT_TRUE(s.has_value());
         }
@@ -762,10 +783,11 @@ namespace Test
         UploadOperation symOp{
             *sftp,
             {
-                .remotePath = "/home/test/sym_overwrite_target",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/sym_overwrite_target"),
+                .localPath = toLocal(linkPath),
                 .mayOverwrite = true,
-            }};
+            }
+        };
         auto status = runToCompletion(symOp);
         ASSERT_TRUE(status.has_value()) << "symlink-over-file overwrite failed";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
@@ -793,9 +815,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/sym_prepare_check",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/sym_prepare_check"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
@@ -825,10 +848,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/newly_created/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/newly_created/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "upload should succeed when parent is auto-created";
@@ -853,10 +877,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/a/b/c/d/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/a/b/c/d/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "deeply nested upload should succeed";
@@ -885,10 +910,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -904,10 +930,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/still_missing_dir/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/still_missing_dir/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = false,
-            }};
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -932,10 +959,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/missing/for/symlink/uploaded_link",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/missing/for/symlink/uploaded_link"),
+                .localPath = toLocal(linkPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -978,10 +1006,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .tryContinue = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
