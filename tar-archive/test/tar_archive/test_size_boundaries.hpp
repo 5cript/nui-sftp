@@ -33,11 +33,10 @@ namespace TarArchive::Test
             return payload;
         }
 
-        SharedData::DirectoryEntry regularAtSize(std::uint64_t size)
+        TarArchive::MemberHeader regularAtSize(std::uint64_t size)
         {
-            SharedData::DirectoryEntry entry{};
+            TarArchive::MemberHeader entry{};
             entry.path = "payload.bin";
-            entry.fullPath = "payload.bin";
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);

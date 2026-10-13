@@ -92,12 +92,31 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = {},
             }};
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::InvalidPath);
+    }
+
+    TEST_F(ArchiveDownloadOperationTests, RootWithoutNameIsRefused)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ArchiveDownloadOperation operation{
+            *sftp,
+            {
+                .roots = {makeDirectoryEntry("/")},
+                .localArchivePath = toLocal(archiveDir_.path() / "root.tar"),
+            }
+        };
+        operation.setScanResultForRoot(remote("/"), {SharedData::DirectoryEntry{.type = SharedData::FileType::Directory}}, 0u);
+        const auto result = runToCompletion(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::InvalidPath);
+        EXPECT_FALSE(std::filesystem::exists(archiveDir_.path() / "root.tar"));
     }
 
     TEST_F(ArchiveDownloadOperationTests, NoEntriesFails)
@@ -108,7 +127,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {},
+                .roots = {},
                 .localArchivePath = toLocal(archiveDir_.path() / "empty.tar"),
             }
         };
@@ -126,7 +145,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
@@ -152,7 +171,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 // Auto: detected from extension.
             }
@@ -175,7 +194,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
             }
         };
@@ -195,7 +214,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
             }
         };
@@ -215,7 +234,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeFileEntry("/home/test/file1.txt", 17u),
                         makeFileEntry("/home/test/file2.txt", 17u),
@@ -244,12 +263,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry(rootPath)},
+                .roots = {makeDirectoryEntry(rootPath.generic_string())},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
         };
-        operation.setScanResultForRoot(rootPath, std::move(scan.entries), scan.totalBytes);
+        operation.setScanResultForRoot(remote(rootPath.generic_string()), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -270,7 +289,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/home/test/Documents")},
+                .roots = {makeDirectoryEntry("/home/test/Documents")},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
@@ -296,13 +315,13 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/home/test/Documents")},
+                .roots = {makeDirectoryEntry("/home/test/Documents")},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
         };
         operation.setScanResultForRoot(
-            "/home/test/Pictures", std::move(pictures.entries), pictures.totalBytes
+            remote("/home/test/Pictures"), std::move(pictures.entries), pictures.totalBytes
         );
         const auto result = runToCompletion(operation);
         ASSERT_FALSE(result.has_value());
@@ -321,7 +340,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeDirectoryEntry("/home/test/Documents"),
                         makeDirectoryEntry("/home/test/Pictures"),
@@ -331,10 +350,10 @@ namespace Test
             }
         };
         operation.setScanResultForRoot(
-            "/home/test/Documents", std::move(documents.entries), documents.totalBytes
+            remote("/home/test/Documents"), std::move(documents.entries), documents.totalBytes
         );
         operation.setScanResultForRoot(
-            "/home/test/Pictures", std::move(pictures.entries), pictures.totalBytes
+            remote("/home/test/Pictures"), std::move(pictures.entries), pictures.totalBytes
         );
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -356,7 +375,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeFileEntry("/home/test/file1.txt", 17u),
                         makeDirectoryEntry("/home/test/Documents"),
@@ -369,7 +388,7 @@ namespace Test
         // the directory root does. This asserts the op still succeeds in that
         // mixed configuration and doesn't treat file1.txt as missing-scan.
         operation.setScanResultForRoot(
-            "/home/test/Documents", std::move(documents.entries), documents.totalBytes
+            remote("/home/test/Documents"), std::move(documents.entries), documents.totalBytes
         );
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -396,12 +415,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/var")},
+                .roots = {makeDirectoryEntry("/var")},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
         };
-        operation.setScanResultForRoot("/var", std::move(scan.entries), scan.totalBytes);
+        operation.setScanResultForRoot(remote("/var"), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -422,7 +441,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/large.txt", 65536u)},
+                .roots = {makeFileEntry("/home/test/large.txt", 65536u)},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
@@ -444,7 +463,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
             }
@@ -469,7 +488,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 .mayOverwrite = false,
             }
@@ -493,7 +512,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
@@ -514,7 +533,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archiveDir_.path() / "finished.tar"),
                 .compression = TarArchive::Compression::None,
             }
@@ -543,7 +562,7 @@ namespace Test
                     lastMax = max;
                     lastCurrent = current;
                 },
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archiveDir_.path() / "with_progress.tar"),
                 .compression = TarArchive::Compression::None,
             }
@@ -565,7 +584,7 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
                 .createMissingDirectories = true,

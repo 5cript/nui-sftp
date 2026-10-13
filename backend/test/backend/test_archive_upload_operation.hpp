@@ -283,7 +283,7 @@ namespace Test
                 .mayOverwrite = true,
             }
         };
-        operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
+        operation.setScanResultForRoot(toLocal(srcDir_.path()), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "tree.tar");
@@ -342,7 +342,7 @@ namespace Test
             }
         };
         operation.setScanResultForRoot(
-            otherDir.path(), std::move(otherScan.entries), otherScan.totalBytes
+            toLocal(otherDir.path()), std::move(otherScan.entries), otherScan.totalBytes
         );
         const auto result = runToCompletion(operation);
         ASSERT_FALSE(result.has_value());
@@ -373,10 +373,10 @@ namespace Test
             }
         };
         operation.setScanResultForRoot(
-            firstDir.path(), std::move(firstScan.entries), firstScan.totalBytes
+            toLocal(firstDir.path()), std::move(firstScan.entries), firstScan.totalBytes
         );
         operation.setScanResultForRoot(
-            secondDir.path(), std::move(secondScan.entries), secondScan.totalBytes
+            toLocal(secondDir.path()), std::move(secondScan.entries), secondScan.totalBytes
         );
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -409,7 +409,7 @@ namespace Test
                 .mayOverwrite = true,
             }
         };
-        operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
+        operation.setScanResultForRoot(toLocal(srcDir_.path()), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "mixed_up.tar");
@@ -440,7 +440,7 @@ namespace Test
                 .mayOverwrite = true,
             }
         };
-        operation.setScanResultForRoot(srcDir_.path(), std::move(scan.entries), scan.totalBytes);
+        operation.setScanResultForRoot(toLocal(srcDir_.path()), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "nested_up.tar");

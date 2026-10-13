@@ -14,11 +14,10 @@ namespace TarArchive::Test
 {
     namespace
     {
-        SharedData::DirectoryEntry makeRegularEntry(std::string const& path, std::uint64_t size)
+        TarArchive::MemberHeader makeRegularEntry(std::string const& path, std::uint64_t size)
         {
-            SharedData::DirectoryEntry entry{};
-            entry.path = std::filesystem::path{path};
-            entry.fullPath = entry.path;
+            TarArchive::MemberHeader entry{};
+            entry.path = path;
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -66,9 +65,8 @@ namespace TarArchive::Test
 
     TEST(TarHeader, BuildRecordsForDirectoryHasTrailingSlashAndNoSize)
     {
-        SharedData::DirectoryEntry entry{};
+        TarArchive::MemberHeader entry{};
         entry.path = "var/log";
-        entry.fullPath = "var/log";
         entry.type = SharedData::FileType::Directory;
         entry.permissions = static_cast<std::filesystem::perms>(0755u);
 
@@ -114,9 +112,8 @@ namespace TarArchive::Test
 
     TEST(TarHeader, RejectsUnsupportedFileType)
     {
-        SharedData::DirectoryEntry entry{};
+        TarArchive::MemberHeader entry{};
         entry.path = "foo";
-        entry.fullPath = "foo";
         entry.type = SharedData::FileType::Unknown;
         const auto built = buildRecords(entry);
         ASSERT_FALSE(built.has_value());
@@ -125,9 +122,8 @@ namespace TarArchive::Test
 
     TEST(TarHeader, SymlinkPopulatesLinkNameField)
     {
-        SharedData::DirectoryEntry entry{};
+        TarArchive::MemberHeader entry{};
         entry.path = "link";
-        entry.fullPath = "link";
         entry.type = SharedData::FileType::Symlink;
         entry.linkTarget = "target.txt";
         entry.permissions = static_cast<std::filesystem::perms>(0777u);
@@ -155,9 +151,8 @@ namespace TarArchive::Test
 
     TEST(TarHeader, LargeSizeTriggersPaxExtendedHeader)
     {
-        SharedData::DirectoryEntry entry{};
+        TarArchive::MemberHeader entry{};
         entry.path = "big.bin";
-        entry.fullPath = "big.bin";
         entry.type = SharedData::FileType::Regular;
         entry.size = 1ull << 34;
         entry.permissions = static_cast<std::filesystem::perms>(0644u);

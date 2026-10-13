@@ -29,9 +29,8 @@ namespace TarArchive::Test
         const std::string longName = std::string(180u, 'a') + "/" + std::string(200u, 'b') + "/file.bin";
         const std::string contents = "payload for long path entry";
 
-        SharedData::DirectoryEntry meta{};
-        meta.path = std::filesystem::path{longName};
-        meta.fullPath = meta.path;
+        TarArchive::MemberHeader meta{};
+        meta.path = longName;
         meta.type = SharedData::FileType::Regular;
         meta.size = contents.size();
         meta.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -59,16 +58,15 @@ namespace TarArchive::Test
         ASSERT_TRUE(next.has_value());
         ASSERT_TRUE(next->has_value());
         auto entry = std::move(**next);
-        EXPECT_EQ(entry.directoryEntry().path.generic_string(), longName);
-        EXPECT_EQ(entry.directoryEntry().size, contents.size());
+        EXPECT_EQ(entry.header().path, longName);
+        EXPECT_EQ(entry.header().size, contents.size());
     }
 
     TEST(TarPax, LongSymlinkTargetRoundTripsViaExtendedHeader)
     {
         const std::string linkText = std::string(250u, 'x');
-        SharedData::DirectoryEntry meta{};
+        TarArchive::MemberHeader meta{};
         meta.path = "link";
-        meta.fullPath = "link";
         meta.type = SharedData::FileType::Symlink;
         meta.linkTarget = linkText;
         meta.permissions = static_cast<std::filesystem::perms>(0777u);

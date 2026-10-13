@@ -73,13 +73,12 @@ namespace TarArchive::Test
             return std::system(full.c_str());
         }
 
-        SharedData::DirectoryEntry regularEntryForPath(
+        TarArchive::MemberHeader regularEntryForPath(
             std::string const& archiveName, std::uint64_t size
         )
         {
-            SharedData::DirectoryEntry entry{};
-            entry.path = std::filesystem::path{archiveName};
-            entry.fullPath = entry.path;
+            TarArchive::MemberHeader entry{};
+            entry.path = archiveName;
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -237,8 +236,8 @@ namespace TarArchive::Test
             ASSERT_TRUE(next->has_value()) << "premature end of archive";
 
             auto entry = std::move(**next);
-            EXPECT_EQ(entry.directoryEntry().path.generic_string(), fixture.name);
-            EXPECT_EQ(entry.directoryEntry().size, fixture.payload.size());
+            EXPECT_EQ(entry.header().path, fixture.name);
+            EXPECT_EQ(entry.header().size, fixture.payload.size());
 
             std::vector<std::byte> accumulator;
             std::array<std::byte, 1024u> scratch{};
