@@ -320,7 +320,7 @@ namespace SecureShell::Test
 
         std::vector<std::pair<std::string, std::string>> directories;
         for (auto const& directory : *result)
-            directories.emplace_back(directory.name, directory.path.generic_string());
+            directories.emplace_back(directory.name, directory.path);
         EXPECT_EQ(
             directories,
             (std::vector<std::pair<std::string, std::string>>{

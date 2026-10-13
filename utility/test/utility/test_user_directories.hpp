@@ -13,11 +13,11 @@ namespace Utility::Test
     namespace
     {
         std::vector<std::pair<std::string, std::string>>
-        parsed(std::string_view content, std::filesystem::path const& home = "/home/user")
+        parsed(std::string_view content, std::string_view home = "/home/user")
         {
             std::vector<std::pair<std::string, std::string>> result;
             for (auto const& directory : parseUserDirectories(content, home))
-                result.emplace_back(directory.name, directory.path.generic_string());
+                result.emplace_back(directory.name, directory.path);
             return result;
         }
 

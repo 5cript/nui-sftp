@@ -2,7 +2,7 @@
 
 #include "common_fixture.hpp"
 #include <ssh/session.hpp>
-#include <ssh/u8_path.hpp>
+#include <paths/native.hpp>
 #include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
@@ -286,7 +286,7 @@ namespace SecureShell::Test
         ASSERT_FALSE(session.has_value());
         const auto& error = session.error();
         EXPECT_NE(error.find("Cannot open the private key file"), std::string::npos) << error;
-        EXPECT_NE(error.find(u8Path(missingKey)), std::string::npos) << error;
+        EXPECT_NE(error.find(Paths::nativeToUtf8(missingKey)), std::string::npos) << error;
         EXPECT_EQ(error.find("Unknown authentication result"), std::string::npos) << error;
     }
 
