@@ -38,7 +38,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
 LocalScanOperation::~LocalScanOperation() = default;
 
 std::expected<std::vector<SharedData::DirectoryEntry>, LocalScanOperation::Error>
-LocalScanOperation::scanner(std::filesystem::path const& path)
+LocalScanOperation::scanner(Paths::RelativePath const& relative)
 {
     // Non-recursive mode: only list the root directory.  The walker still invokes the
     // scanner for each child directory it discovers, but we short-circuit those calls so
@@ -47,6 +47,15 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
+    const auto joined = localPath_.join(relative);
+    if (!joined)
+    {
+        return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
+            {.type = ErrorType::InvalidName, .extraInfo = joined.error().toString()}
+        );
+    }
+    const auto path = joined->native();
+
     // No skip_permission_denied: an unreadable directory would list as empty and sync would delete the
     // remote copy of its content.
     std::error_code iterErrc{};
@@ -54,14 +63,6 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
     if (iterErrc)
         return listingFailed(path, relative, iterErrc);
     const auto end = std::filesystem::directory_iterator();
-
-    const auto relDir = [&]() -> std::filesystem::path {
-        std::error_code errc{};
-        auto rel = std::filesystem::relative(path, localPath_, errc);
-        if (errc || rel.empty() || rel == std::filesystem::path{"."})
-            return {};
-        return rel;
-    }();
 
     if (respectIgnoreFiles_)
     {
@@ -72,7 +73,7 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             if (!std::filesystem::is_regular_file(ignorePath, errc))
                 continue;
             if (auto content = readLocalFile(ignorePath))
-                ignoreMatcher_.addFile(relDir, *content);
+                ignoreMatcher_.addFile(relative, *content);
         }
     }
 
@@ -156,8 +157,10 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             }
             if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
             {
-                const auto childRel = relDir.empty() ? filename : (relDir / filename);
-                if (ignoreMatcher_.isIgnored(childRel, type == SharedData::DirectoryEntry::FileType::Directory))
+                // A name that is no segment cannot match a rule, the walker rejects it.
+                const auto segment = Paths::PathSegment::make(name);
+                if (segment &&
+                    ignoreMatcher_.isIgnored(relative / *segment, type == SharedData::DirectoryEntry::FileType::Directory))
                     continue;
             }
 
@@ -228,8 +231,15 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
     {
         case (NotStarted):
         {
+            if (localPath_.empty())
+            {
+                Log::error("LocalScanOperation: No root to scan.");
+                return enterErrorState<WorkStatus>(
+                    {.type = ErrorType::ImplementationError, .extraInfo = "The scan has no root."}
+                );
+            }
             state_ = Running;
-            Log::info("LocalScanOperation: Starting scan of '{}'.", localPath_.generic_string());
+            Log::info("LocalScanOperation: Starting scan of '{}'.", localPath_.toUtf8());
             progressCallback_(0, 0, 0);
             return WorkStatus::MoreWork;
         }
@@ -240,7 +250,7 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
             {
                 if (walker.completed())
                 {
-                    Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.generic_string());
+                    Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.toUtf8());
                     state_ = Completed;
                     return WorkStatus::Complete;
                 }
@@ -294,7 +304,7 @@ std::expected<void, LocalScanOperation::Error> LocalScanOperation::cancel(bool a
 {
     if (adoptCancelState)
     {
-        Log::info("LocalScanOperation: Scan of '{}' canceled.", localPath_.generic_string());
+        Log::info("LocalScanOperation: Scan of '{}' canceled.", localPath_.toUtf8());
         enterState(OperationState::Canceled);
     }
     return {};

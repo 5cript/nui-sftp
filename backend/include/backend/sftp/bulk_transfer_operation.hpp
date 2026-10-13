@@ -131,7 +131,15 @@ class BulkTransferOperation : public Operation
      */
     void addRejectedEntries(std::vector<std::string> const& paths);
 
-    std::vector<std::pair<std::filesystem::path, Error>> getFailed() const;
+    /**
+     * @brief Records directories the scan could not list as failed, their content is not transferred.
+     */
+    void addUnreadableDirectories(std::vector<std::string> const& paths);
+
+    /**
+     * @brief The entries that were skipped, by their source path.
+     */
+    std::vector<std::pair<std::string, Error>> getFailed() const;
 
     std::size_t inFlightCount() const noexcept
     {
@@ -175,6 +183,16 @@ class BulkTransferOperation : public Operation
      * @brief Path shown to the user for the entry, the remote side for both directions.
      */
     std::string displayPath(std::size_t entryIndex) const;
+
+    /**
+     * @brief The source path of the entry, the key a failure is reported under.
+     */
+    std::string failureSource(std::size_t entryIndex) const;
+
+    /**
+     * @brief The entry below the source root by its names as listed, for entries without valid paths.
+     */
+    std::string describeEntry(std::size_t entryIndex) const;
 
     std::vector<SharedData::DirectoryEntry> const& entries() const noexcept
     {
@@ -221,6 +239,11 @@ class BulkTransferOperation : public Operation
      * @brief Log prefix, e.g. "BulkDownloadOperation".
      */
     virtual std::string_view logName() const noexcept = 0;
+
+    /**
+     * @brief The remote side is the source, as for a download.
+     */
+    virtual bool sourceIsRemote() const noexcept = 0;
 
   private:
     struct Slot
@@ -281,7 +304,7 @@ class BulkTransferOperation : public Operation
     std::uint64_t completedBytes_{0};
     std::uint64_t totalBytes_{0};
     int budget_{1};
-    std::vector<std::pair<std::filesystem::path, Error>> failedEntries_{};
+    std::vector<std::pair<std::string, Error>> failedEntries_{};
     std::vector<std::uint32_t> failedEntryIndices_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number
     // flicker; sampling the cumulative byte count keeps one coherent rate per bulk.

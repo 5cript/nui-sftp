@@ -22,7 +22,8 @@ namespace SharedData::Sync
      * @brief Directory walker that produces a sorted @ref ScanNode tree directly.
      *
      * Mirrors the scanner contract of @ref Utility::DeepDirectoryWalker — the caller
-     * supplies a scanner that returns a batch of @ref DirectoryEntry for one directory —
+     * supplies a scanner that returns a batch of @ref DirectoryEntry for one directory, given
+     * relative to the root —
      * but internally stitches results into a nested ScanNode tree with:
      *
      *  - sibling sort by name applied per directory as entries arrive, and
@@ -36,13 +37,12 @@ namespace SharedData::Sync
     requires std::is_invocable_r_v<
         std::expected<std::vector<SharedData::DirectoryEntry>, WalkErrorType>,
         ScannerT,
-        std::filesystem::path const&>
+        Paths::RelativePath const&>
     class TreeDirectoryWalker : public Utility::BaseDirectoryWalker
     {
       public:
         /**
-         * @param rootPath Directory the walk starts at.
-         * @param scanner Lists one directory.
+         * @param scanner Lists one directory, given relative to the root.
          * @param recursive When false only the root is listed. Its subdirectories stay in the tree with
          *        @ref ScanNode::childrenKnown set to false so the diff never deletes what nobody saw.
          * @param isUnreadable Classifies a scanner error of a directory below the root. A directory it
@@ -60,15 +60,14 @@ namespace SharedData::Sync
             bool requireLocalNames = false,
             std::vector<std::string> excludedSuffixes = {}
         )
-            : rootPath_{std::move(rootPath)}
-            , scanner_{std::forward<ForwardingScannerT>(scanner)}
+            : scanner_{std::forward<ForwardingScannerT>(scanner)}
             , recursive_{recursive}
             , requireLocalNames_{requireLocalNames}
             , isUnreadable_{std::move(isUnreadable)}
         {
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
-            queue_.push_back(QueuedDir{.node = &root_, .fullPath = rootPath_, .depth = 0});
+            queue_.push_back(QueuedDir{.node = &root_, .relativePath = {}, .depth = 0});
             ++totalEntries_;
         }
 
@@ -98,7 +97,7 @@ namespace SharedData::Sync
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
             queue_.clear();
-            queue_.push_back(QueuedDir{.node = &root_, .fullPath = rootPath_, .depth = 0});
+            queue_.push_back(QueuedDir{.node = &root_, .relativePath = {}, .depth = 0});
             currentIndex_ = 0;
             totalBytes_ = 0;
             totalEntries_ = 1;
@@ -115,7 +114,7 @@ namespace SharedData::Sync
             const auto pending = queue_.front();
             queue_.pop_front();
 
-            auto result = scanner_(pending.fullPath);
+            auto result = scanner_(pending.relativePath);
             if (!result)
             {
                 const bool belowRoot = pending.depth > 0;
@@ -261,11 +260,10 @@ namespace SharedData::Sync
         struct QueuedDir
         {
             ScanNode* node;
-            std::filesystem::path fullPath;
+            Paths::RelativePath relativePath;
             std::size_t depth;
         };
 
-        std::filesystem::path rootPath_;
         ScannerT scanner_;
         bool recursive_{true};
         bool requireLocalNames_{false};

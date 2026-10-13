@@ -238,7 +238,7 @@ class OperationCard : public OperationCardInterface
                     {
                         transformedItems.reserve(failedEntries_.value().size());
                         for (const auto& [path, entryError] : failedEntries_.value())
-                            transformedItems.push_back({.text = fmt::format("{}: {}", path.string(), entryError.toString())});
+                            transformedItems.push_back({.text = fmt::format("{}: {}", path, entryError.toString())});
                     }
 
                     confirmDialog_->open(ConfirmDialog::OpenOptions{
@@ -343,7 +343,7 @@ class OperationCard : public OperationCardInterface
         // return error;
     }
 
-    void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries) override
+    void failedEntries(std::vector<std::pair<std::string, SharedData::OperationError>> entries) override
     {
         failedEntries_ = std::move(entries);
     }
@@ -365,6 +365,6 @@ class OperationCard : public OperationCardInterface
     std::function<void(OperationCard const& operation)> doRemoveSelf_;
     std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown_;
     std::function<void()> onCompleteAction_;
-    Nui::Observed<std::vector<std::pair<std::filesystem::path, SharedData::OperationError>>> failedEntries_;
+    Nui::Observed<std::vector<std::pair<std::string, SharedData::OperationError>>> failedEntries_;
     std::function<void()> kickToTopHandler_;
 };

@@ -188,7 +188,7 @@ class OperationQueue
      */
     void addFailedEntriesCallback(
         Ids::OperationId const& opId,
-        std::function<void(std::vector<std::filesystem::path> const& failedPaths)> callback
+        std::function<void(std::vector<std::string> const& failedPaths)> callback
     );
     /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
      *         Automatically removed when the operation completes.

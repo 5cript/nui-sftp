@@ -893,14 +893,11 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     // preceding ScanOperation per root. The archive operation consumes those
     // scans' results via setScanResultForRoot and never recurses itself, so
     // scan work is always visible as a separate queue card.
-    std::vector<std::filesystem::path> directoryRootPaths;
+    std::vector<Paths::RemotePath> directoryRootPaths;
     for (auto const& entry : entries)
     {
-        if (entry.type == SharedData::FileType::Directory)
-        {
-            const auto rootFullPath = entry.fullPath.empty() ? entry.path : entry.fullPath;
-            directoryRootPaths.push_back(rootFullPath);
-        }
+        if (root.entry.type == SharedData::FileType::Directory)
+            directoryRootPaths.push_back(root.path);
     }
 
     ArchiveDownloadOperation::Options opts{};
@@ -1022,7 +1019,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     // Local directory roots get a visible LocalScanOperation each; the
     // archive op itself never recurses and instead consumes each scan's
     // output via setScanResultForRoot — keyed by the root's local path.
-    std::vector<std::filesystem::path> directoryRootPaths;
+    std::vector<Paths::LocalPath> directoryRootPaths;
     for (auto const& localPath : localPaths)
     {
         std::error_code isDirErr{};

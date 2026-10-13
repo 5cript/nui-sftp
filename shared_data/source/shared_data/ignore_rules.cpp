@@ -15,21 +15,6 @@ namespace SharedData
             return text;
         }
 
-        /** @brief Returns true if @p ancestor is an ancestor (or equal to) @p descendant. */
-        bool isAncestorOrEqual(std::filesystem::path const& ancestor, std::filesystem::path const& descendant)
-        {
-            auto ancestorIter = ancestor.begin();
-            auto descendantIter = descendant.begin();
-            for (; ancestorIter != ancestor.end(); ++ancestorIter, ++descendantIter)
-            {
-                if (descendantIter == descendant.end())
-                    return false;
-                if (*ancestorIter != *descendantIter)
-                    return false;
-            }
-            return true;
-        }
-
         /** @brief True if pattern contains a '/' that is not the final char. */
         bool patternIsAnchored(std::string_view pattern)
         {
@@ -133,28 +118,26 @@ namespace SharedData
         return patterns;
     }
 
-    void IgnoreMatcher::addFile(std::filesystem::path const& relDir, std::string_view content)
+    void IgnoreMatcher::addFile(Paths::RelativePath const& relDir, std::string_view content)
     {
         auto patterns = parseIgnoreFile(content);
         if (patterns.empty())
             return;
-        ruleSets_.push_back(IgnoreRuleSet{.originDir = relDir.lexically_normal(), .patterns = std::move(patterns)});
+        ruleSets_.push_back(IgnoreRuleSet{.originDir = relDir, .patterns = std::move(patterns)});
     }
 
-    bool IgnoreMatcher::isIgnored(std::filesystem::path const& relPath, bool isDirectory) const
+    bool IgnoreMatcher::isIgnored(Paths::RelativePath const& relPath, bool isDirectory) const
     {
-        const auto normalized = relPath.lexically_normal();
-
         bool ignored = false;
         for (auto const& ruleSet : ruleSets_)
         {
-            if (!isAncestorOrEqual(ruleSet.originDir, normalized))
+            if (relPath == ruleSet.originDir || !relPath.isWithin(ruleSet.originDir))
                 continue;
 
-            auto relToOrigin = normalized.lexically_relative(ruleSet.originDir);
-            if (relToOrigin.empty() || relToOrigin == std::filesystem::path{"."})
-                continue;
-            const auto relToOriginStr = relToOrigin.generic_string();
+            const auto relToOriginStr = ruleSet.originDir.empty()
+                ? relPath.value()
+                : relPath.value().substr(ruleSet.originDir.value().size() + 1u);
+            const auto relToOrigin = *Paths::RelativePath::make(relToOriginStr);
 
             for (auto const& pattern : ruleSet.patterns)
             {
@@ -168,9 +151,9 @@ namespace SharedData
                 }
                 else
                 {
-                    for (auto const& component : relToOrigin)
+                    for (auto const& component : relToOrigin.segments())
                     {
-                        if (globMatch(pattern.pattern, component.generic_string()))
+                        if (globMatch(pattern.pattern, component.view()))
                         {
                             matched = true;
                             break;

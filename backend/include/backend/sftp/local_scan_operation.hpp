@@ -7,6 +7,7 @@
 #include <shared_data/sync/scan_node.hpp>
 #include <shared_data/sync/tree_directory_walker.hpp>
 #include <utility/directory_traversal.hpp>
+#include <paths/paths.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -22,7 +23,7 @@ class LocalScanOperation : public Operation
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
             progressCallback = [](auto, auto, auto) {};
-        std::filesystem::path localPath{};
+        Paths::LocalPath localPath{};
         bool respectIgnoreFiles{false};
         /// When false, only the root directory is listed; subdirectories are not descended into.
         bool recursive{true};
@@ -67,7 +68,7 @@ class LocalScanOperation : public Operation
         return 1;
     }
 
-    std::filesystem::path localPath() const
+    Paths::LocalPath const& localPath() const
     {
         return localPath_;
     }
@@ -76,13 +77,13 @@ class LocalScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan));
+            walker_ = std::make_unique<WalkerType>(std::move(scan));
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -92,9 +93,9 @@ class LocalScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
         if (!walker_)
@@ -165,7 +166,10 @@ class LocalScanOperation : public Operation
 
     std::uint64_t totalBytes() const;
 
-    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
+    /**
+     * @brief Lists the directory at @p relative below the scanned root.
+     */
+    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
     /**
@@ -179,7 +183,7 @@ class LocalScanOperation : public Operation
     );
 
   private:
-    std::filesystem::path localPath_;
+    Paths::LocalPath localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
     bool respectIgnoreFiles_;

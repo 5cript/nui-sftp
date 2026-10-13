@@ -63,6 +63,11 @@ class BulkDownloadOperation : public BulkTransferOperation
     ) override;
     bool isSkippableError(Error const& error) const override;
 
+    bool sourceIsRemote() const noexcept override
+    {
+        return true;
+    }
+
     std::string_view logName() const noexcept override
     {
         return "BulkDownloadOperation";

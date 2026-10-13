@@ -23,7 +23,7 @@ ScanOperation::~ScanOperation() = default;
 namespace
 {
     std::optional<std::string>
-    readRemoteFile(SecureShell::SftpSession& sftp, std::filesystem::path const& path, std::chrono::seconds timeout)
+    readRemoteFile(SecureShell::SftpSession& sftp, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
         auto openFut =
             sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
@@ -55,7 +55,7 @@ namespace
 }
 
 std::expected<std::vector<SharedData::DirectoryEntry>, ScanOperation::Error>
-ScanOperation::scanner(std::filesystem::path const& path)
+ScanOperation::scanner(Paths::RelativePath const& relative)
 {
     if (!recursive_ && rootScanned_)
         return std::vector<SharedData::DirectoryEntry>{};
@@ -109,8 +109,8 @@ ScanOperation::scanner(std::filesystem::path const& path)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*sftp_, path / entry.path, futureTimeout_))
-            ignoreMatcher_.addFile(relDir, *content);
+        if (auto content = readRemoteFile(*sftp_, path / *Paths::PathSegment::make(name), futureTimeout_))
+            ignoreMatcher_.addFile(relative, *content);
     }
 
     if (ignoreMatcher_.empty())
@@ -120,10 +120,10 @@ ScanOperation::scanner(std::filesystem::path const& path)
     filtered.reserve(entries.size());
     for (auto& entry : entries)
     {
-        const auto childRel =
-            relDir.empty() ? std::filesystem::path{entry.path} : (relDir / entry.path);
+        // A name that is no segment cannot match a rule, the walker rejects it.
+        const auto segment = Paths::PathSegment::make(entry.name);
         const bool isDir = entry.type == SharedData::DirectoryEntry::FileType::Directory;
-        if (ignoreMatcher_.isIgnored(childRel, isDir))
+        if (segment && ignoreMatcher_.isIgnored(relative / *segment, isDir))
             continue;
         filtered.push_back(std::move(entry));
     }
@@ -143,8 +143,15 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
     {
         case (NotStarted):
         {
+            if (remotePath_.empty())
+            {
+                Log::error("ScanOperation: No root to scan.");
+                return enterErrorState<WorkStatus>(
+                    {.type = ErrorType::ImplementationError, .extraInfo = "The scan has no root."}
+                );
+            }
             state_ = Running;
-            Log::info("ScanOperation: Starting scan of '{}'.", remotePath_.generic_string());
+            Log::info("ScanOperation: Starting scan of '{}'.", remotePath_.value());
             progressCallback_(0, 0, 0);
             return WorkStatus::MoreWork;
         }
@@ -157,7 +164,7 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
             {
                 if (walker.completed())
                 {
-                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
+                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.value());
                     state_ = Completed;
                     return WorkStatus::Complete;
                 }
@@ -211,7 +218,7 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
 {
     if (adoptCancelState)
     {
-        Log::info("ScanOperation: Scan of '{}' canceled.", remotePath_.generic_string());
+        Log::info("ScanOperation: Scan of '{}' canceled.", remotePath_.value());
         enterState(OperationState::Canceled);
     }
     return {};

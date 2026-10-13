@@ -125,9 +125,9 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     else
     {
         auto const& root = entries_[0];
-        if (!root.isDirectory())
+        if (!root.isDirectory() || root.parent)
         {
-            Log::error("{}: First entry is not a directory: {}.", logName(), root.path.string());
+            Log::error("{}: The first entry is not the root directory of the scan.", logName());
             return enterErrorState<WorkStatus>(
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "First entry must be a directory."}
             );
@@ -297,7 +297,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         if (isSkippableError(error))
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
-            failedEntries_.emplace_back(SharedData::fullPath(entries_, entries_[slot.entryIndex]), error);
+            failedEntries_.emplace_back(failureSource(slot.entryIndex), error);
             failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
             finishSlot(slot);
             if (common_.failFast)
@@ -481,7 +481,7 @@ void BulkTransferOperation::addRejectedEntries(std::vector<std::string> const& p
     }
 }
 
-std::vector<std::pair<std::filesystem::path, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
+std::vector<std::pair<std::string, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
 {
     return failedEntries_;
 }

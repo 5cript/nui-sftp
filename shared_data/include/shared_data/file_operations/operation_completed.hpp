@@ -26,7 +26,8 @@ namespace SharedData
         std::optional<Paths::LocalPath> localPath{std::nullopt};
         std::optional<Paths::RemotePath> remotePath{std::nullopt};
         std::optional<OperationError> error{std::nullopt};
-        std::vector<std::pair<std::filesystem::path, OperationError>> failedEntries{};
+        /** @brief The skipped entries of a bulk by their source path, a remote path for downloads. */
+        std::vector<std::pair<std::string, OperationError>> failedEntries{};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationCompleted,

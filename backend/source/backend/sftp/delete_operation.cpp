@@ -151,16 +151,28 @@ void DeleteOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&& en
 void DeleteOperation::appendScanResult(Paths::RemotePath const& root, std::vector<SharedData::DirectoryEntry> const& entries)
 {
     scanDelivered_ = true;
-    for (auto const& entry : entries)
+    for (std::size_t index = 0; index < entries.size(); ++index)
     {
-        const auto path = SharedData::fullPath(entries, entry);
-        auto target = Utility::toRemotePath(path);
-        if (!target || target->isRoot() || !target->isWithin(root))
+        auto const& entry = entries[index];
+        // The scan root is the first entry and the only one without a parent, everything else lies below it.
+        if (index > 0 && !entry.parent)
         {
-            invalidScanEntry_ = Utility::pathToUtf8Generic(path);
+            invalidScanEntry_ = fmt::format("{} has a second root", root.value());
             break;
         }
-        targets_.push_back(*std::move(target));
+        const auto relative = SharedData::relativePath(entries, entry);
+        if (!relative || root.empty())
+        {
+            invalidScanEntry_ = relative ? std::string{"no scan root"} : relative.error().toString();
+            break;
+        }
+        auto target = root / *relative;
+        if (target.isRoot())
+        {
+            invalidScanEntry_ = target.value();
+            break;
+        }
+        targets_.push_back(std::move(target));
     }
     if (invalidScanEntry_)
         targets_.clear();
@@ -196,7 +208,7 @@ void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
         scanPhase_ = std::make_unique<ScanPhase<ScanOperation>>(
             [this](ScanOperation& finished)
             {
-                appendScanResult(Utility::toRemotePathOrUnset(finished.remotePath()), finished.ejectEntries());
+                appendScanResult(finished.remotePath(), finished.ejectEntries());
             }
         );
     }

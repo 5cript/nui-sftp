@@ -347,9 +347,19 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
     for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
         auto const& child = entries[idx];
-        const auto relPath = SharedData::fullPathRelative(entries, child);
-        const auto childArchivePath = archivePrefix / relPath;
-        const auto childLocalFull = localRootFullPath / relPath;
+        auto source = SharedData::relativePath(entries, child)
+                          .and_then(
+                              [&localRoot](Paths::RelativePath const& relative)
+                              {
+                                  return localRoot.join(relative);
+                              }
+                          );
+        if (!source)
+        {
+            Log::warn("ArchiveUploadOperation: skipping pre-scanned child: {}", source.error().toString());
+            continue;
+        }
+        const auto memberPath = archivePrefix / *SharedData::relativePath(entries, child);
 
         if (child.type == SharedData::FileType::Regular)
         {

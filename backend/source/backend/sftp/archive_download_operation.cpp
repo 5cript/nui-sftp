@@ -396,9 +396,14 @@ void ArchiveDownloadOperation::appendPrescannedInStrand(
     for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
         auto const& child = entries[idx];
-        const auto relPath = SharedData::fullPathRelative(entries, child);
-        const auto childArchivePath = archivePrefix / relPath;
-        const auto childFullRemote = remoteRootFullPath / relPath;
+        const auto relative = SharedData::relativePath(entries, child);
+        if (!relative)
+        {
+            Log::warn("ArchiveDownloadOperation: skipping pre-scanned child: {}", relative.error().toString());
+            continue;
+        }
+        const auto memberPath = archivePrefix / *relative;
+        const auto source = remoteRoot / *relative;
 
         if (child.type == SharedData::FileType::Regular)
         {
