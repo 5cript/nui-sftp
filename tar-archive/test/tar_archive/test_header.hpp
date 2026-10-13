@@ -129,7 +129,7 @@ namespace TarArchive::Test
         entry.path = "link";
         entry.fullPath = "link";
         entry.type = SharedData::FileType::Symlink;
-        entry.linkTarget = std::filesystem::path{"target.txt"};
+        entry.linkTarget = "target.txt";
         entry.permissions = static_cast<std::filesystem::perms>(0777u);
 
         const auto built = buildRecords(entry);

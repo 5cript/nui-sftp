@@ -411,7 +411,7 @@ namespace Test
             SharedData::DirectoryEntry{
                 .path = "the_link",
                 .type = SharedData::FileType::Symlink,
-                .linkTarget = targetFile,
+                .linkTarget = targetFile.generic_string(),
                 .parent = 0,
             }
         );

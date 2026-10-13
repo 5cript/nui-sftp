@@ -70,7 +70,7 @@ namespace TarArchive::Test
         meta.path = "link";
         meta.fullPath = "link";
         meta.type = SharedData::FileType::Symlink;
-        meta.linkTarget = std::filesystem::path{linkText};
+        meta.linkTarget = linkText;
         meta.permissions = static_cast<std::filesystem::perms>(0777u);
 
         const auto path = paxDirectory() / "longlink.tar";
@@ -90,8 +90,8 @@ namespace TarArchive::Test
         ASSERT_TRUE(next.has_value());
         ASSERT_TRUE(next->has_value());
         auto entry = std::move(**next);
-        EXPECT_EQ(entry.directoryEntry().type, SharedData::FileType::Symlink);
-        ASSERT_TRUE(entry.directoryEntry().linkTarget.has_value());
-        EXPECT_EQ(entry.directoryEntry().linkTarget->generic_string(), linkText);
+        EXPECT_EQ(entry.header().type, SharedData::FileType::Symlink);
+        ASSERT_TRUE(entry.header().linkTarget.has_value());
+        EXPECT_EQ(*entry.header().linkTarget, linkText);
     }
 }

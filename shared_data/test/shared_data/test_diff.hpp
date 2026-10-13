@@ -110,7 +110,7 @@ namespace SharedData::Sync::Test
     /**
      * @brief Builds a symlink node with a given raw link target.
      */
-    inline ScanNode makeSymlink(std::string const& name, std::filesystem::path const& target, std::uint64_t mtime = 0)
+    inline ScanNode makeSymlink(std::string const& name, std::string const& target, std::uint64_t mtime = 0)
     {
         return ScanNode{
             .name = name,
@@ -662,6 +662,12 @@ namespace SharedData::Sync::Test
         auto remoteLink = makeSymlink("link", "/other", 200);
         remoteLink.linkTarget.reset();
         EXPECT_FALSE(entriesDiffer(localLink, remoteLink));
+    }
+
+    TEST(SyncDiffTests, SymlinkTargetsDifferingOnlyInRepeatedSeparatorsDoNotDiffer)
+    {
+        EXPECT_FALSE(entriesDiffer(makeSymlink("link", "../a//b"), makeSymlink("link", "../a/b")));
+        EXPECT_TRUE(entriesDiffer(makeSymlink("link", "a/b"), makeSymlink("link", "a/b/c")));
     }
 
     TEST(SyncDiffTests, DirectoryAgainstSymlinkIsATypeConflict)
