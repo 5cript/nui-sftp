@@ -89,7 +89,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -108,7 +108,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = false,
             }};
 
@@ -130,7 +130,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = true,
             }};
 
@@ -153,7 +153,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = false,
             }};
 
@@ -188,7 +188,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = true,
             }};
 
@@ -213,7 +213,7 @@ namespace Test
                     [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t) {
                         ++callbackInvocations;
                     },
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -229,7 +229,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist_dir",
+                .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
             }};
 
@@ -257,7 +257,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
+                .remotePath = remote("/home/test/file1.txt"),
                 .recursive = false,
             }};
 
@@ -283,7 +283,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -302,7 +302,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist_dir",
+                .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
             }};
 
@@ -327,7 +327,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = true,
             }};
 
@@ -352,7 +352,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
                 .ignoreHidden = true,
             }};

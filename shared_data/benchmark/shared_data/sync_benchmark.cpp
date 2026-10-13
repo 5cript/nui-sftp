@@ -172,12 +172,12 @@ int main(int argc, char** argv)
             [&]
             {
                 auto scanner = [&listing](
-                                   std::filesystem::path const& path
+                                   Paths::RelativePath const& relative
                                ) -> std::expected<std::vector<SharedData::DirectoryEntry>, int>
                 {
-                    return listing.at(path.generic_string());
+                    return listing.at(relative.empty() ? std::string{"/root"} : "/root/" + relative.value());
                 };
-                TreeDirectoryWalker<int, decltype(scanner), false> walker{"/root", std::move(scanner)};
+                TreeDirectoryWalker<int, decltype(scanner), false> walker{std::move(scanner)};
                 if (!walker.walkAll())
                     std::abort();
                 auto tree = std::move(walker).ejectTree();

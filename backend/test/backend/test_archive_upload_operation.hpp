@@ -71,7 +71,7 @@ namespace Test
         static LocalScanBundle runLocalScan(std::filesystem::path const& path)
         {
             LocalScanOperation scan{
-                LocalScanOperation::ScanOperationOptions{.localPath = path},
+                LocalScanOperation::ScanOperationOptions{.localPath = toLocal(path)},
             };
             while (true)
             {

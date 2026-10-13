@@ -89,18 +89,18 @@ namespace Test
 
     TEST_F(LocalScanOperationTests, CanCreateLocalScanOperation)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
     }
 
     TEST_F(LocalScanOperationTests, LocalScanOperationTypeIsLocalScan)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::LocalScan);
     }
 
     TEST_F(LocalScanOperationTests, LocalScanOperationIsBarrier)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_TRUE(operation.isBarrier());
     }
 
@@ -108,7 +108,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -124,7 +124,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -140,7 +140,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = true,
             }};
 
@@ -158,7 +158,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -181,7 +181,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "subdir",
+                .localPath = toLocal(scanRoot_.path() / "subdir"),
                 .recursive = true,
             }};
 
@@ -202,7 +202,7 @@ namespace Test
                     [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t) {
                         ++callbackInvocations;
                     },
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -214,7 +214,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
                 .ignoreHidden = true,
             }};
@@ -231,7 +231,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
                 .ignoreHidden = false,
             }};
@@ -247,7 +247,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "does_not_exist",
+                .localPath = toLocal(scanRoot_.path() / "does_not_exist"),
                 .recursive = false,
             }};
 
@@ -280,7 +280,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "file1.txt",
+                .localPath = toLocal(scanRoot_.path() / "file1.txt"),
                 .recursive = false,
             }};
 
@@ -312,7 +312,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -327,7 +327,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "does_not_exist",
+                .localPath = toLocal(scanRoot_.path() / "does_not_exist"),
                 .recursive = false,
             }};
 
@@ -354,7 +354,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = true,
             }};
 
@@ -370,13 +370,13 @@ namespace Test
 
     TEST_F(LocalScanOperationTests, ScanStrandIsNullForLocalScan)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_EQ(operation.strand(), nullptr);
     }
 
     TEST_F(LocalScanOperationTests, BuildTreeNestsAndSortsEntries)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = true, .buildTree = true}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
 
         const auto tree = operation.ejectScanTree();
@@ -393,7 +393,7 @@ namespace Test
 
     TEST_F(LocalScanOperationTests, NonRecursiveBuildTreeMarksSubdirectoriesUnknown)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = false, .buildTree = true}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = false, .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
 
         const auto tree = operation.ejectScanTree();
@@ -414,7 +414,7 @@ namespace Test
     {
         writeFile(scanRoot_.path() / ".gitignore", "*.md\ndeeper/\n");
         LocalScanOperation operation{
-            {.localPath = scanRoot_.path(),
+            {.localPath = toLocal(scanRoot_.path()),
                 .respectIgnoreFiles = true,
                 .recursive = true,
                 .ignoreHidden = true,

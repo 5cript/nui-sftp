@@ -22,18 +22,25 @@ namespace Utility::Test
         template <bool IncludesDotAndDotDot = false>
         auto withWalkerDo(auto&& fn)
         {
-            auto scan = [this](std::filesystem::path const& path)
+            auto scan = [this](Paths::RelativePath const& relative)
                 -> std::expected<std::vector<SharedData::DirectoryEntry>, std::string> {
                 if (scanner_)
-                    return scanner_(path);
+                    return scanner_(absolutePath(relative));
                 else
                     return std::unexpected("No Scanner Installed In Test"s);
             };
             using WalkerType =
                 DeepDirectoryWalker<SharedData::DirectoryEntry, std::string, decltype(scan), IncludesDotAndDotDot>;
             if (!walker_)
-                walker_ = std::make_unique<WalkerType>(isolateDirectory_.path(), std::move(scan));
+                walker_ = std::make_unique<WalkerType>(std::move(scan));
             return fn(static_cast<WalkerType&>(*walker_));
+        }
+
+        std::filesystem::path absolutePath(Paths::RelativePath const& relative) const
+        {
+            if (relative.empty())
+                return isolateDirectory_.path();
+            return isolateDirectory_.path() / relative.value();
         }
 
         std::filesystem::path createFileIn(std::filesystem::path const& dir, std::size_t size)
@@ -336,11 +343,11 @@ namespace Utility::Test
         createSomeFilesIn(subSubDir, fileCount);
 
         std::vector<std::filesystem::path> paths{};
-        const auto walkResult = withWalkerDo([&paths](auto& walker) {
+        const auto walkResult = withWalkerDo([this, &paths](auto& walker) {
             auto res = walker.walkAll();
             auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                return walker.fullPath(entry);
+            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                return absolutePath(walker.relativePath(entry));
             });
             return res;
         });
@@ -423,11 +430,11 @@ namespace Utility::Test
         };
 
         std::vector<std::filesystem::path> paths{};
-        const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
+        const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
             auto res = walker.walk();
             auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                return walker.fullPath(entry);
+            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                return absolutePath(walker.relativePath(entry));
             });
             return res;
         });
@@ -480,12 +487,12 @@ namespace Utility::Test
 
         auto doTheWalk = [this, &paths]() {
             paths.clear();
-            const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
+            const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
                 walker.reset();
                 auto res = walker.walk();
                 auto const& entries = walker.entries();
-                std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                    return walker.fullPath(entry);
+                std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                    return absolutePath(walker.relativePath(entry));
                 });
                 return res;
             });

@@ -41,8 +41,8 @@ namespace SharedData::Sync::Test
 
     inline auto makeScanner(FakeFilesystem& filesystem)
     {
-        return
-            [&filesystem](std::filesystem::path const& path) -> std::expected<std::vector<DirectoryEntry>, std::string>
+        // The walked root is "/root", the walker names directories relative to it.
+        return [&filesystem](Paths::RelativePath const& relative) -> std::expected<std::vector<DirectoryEntry>, std::string>
         {
             const auto key = relative.empty() ? std::string{"/root"} : "/root/" + relative.value();
             filesystem.listed.push_back(key);
@@ -57,8 +57,7 @@ namespace SharedData::Sync::Test
     inline std::expected<ScanNode, std::string> walkFake(FakeFilesystem& filesystem, bool recursive = true)
     {
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), IncludesDots> walker{
-            "/root", std::move(scanner), recursive
+        TreeDirectoryWalker<std::string, decltype(scanner), IncludesDots> walker{std::move(scanner), recursive
         };
         auto result = walker.walkAll();
         if (!result)
@@ -175,7 +174,7 @@ namespace SharedData::Sync::Test
         filesystem.addFile("/root/dir", "b", 50);
 
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), false> walker{"/root", std::move(scanner)};
+        TreeDirectoryWalker<std::string, decltype(scanner), false> walker{std::move(scanner)};
         ASSERT_TRUE(walker.walkAll().has_value());
         EXPECT_TRUE(walker.completed());
         EXPECT_EQ(walker.totalEntries(), 4u) << "root, a, dir, b";

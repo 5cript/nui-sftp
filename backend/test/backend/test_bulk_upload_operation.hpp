@@ -43,7 +43,7 @@ namespace Test
 
         ScanBundle runLocalScan(std::filesystem::path const& localPath, bool recursive = true)
         {
-            LocalScanOperation scan{{.localPath = localPath, .recursive = recursive}};
+            LocalScanOperation scan{{.localPath = toLocal(localPath), .recursive = recursive}};
             for (int iteration = 0; iteration < 500; ++iteration)
             {
                 auto workResult = scan.work();
@@ -286,7 +286,7 @@ namespace Test
 
         const auto failed = operation.getFailed();
         ASSERT_EQ(failed.size(), 1u);
-        EXPECT_EQ(failed.front().first.filename().generic_string(), "does_not_exist_locally.txt");
+        EXPECT_TRUE(failed.front().first.ends_with("/does_not_exist_locally.txt")) << failed.front().first;
     }
 
     TEST_F(BulkUploadOperationTests, FailFastAbortsWholeOperationOnRecoverableError)
@@ -644,6 +644,6 @@ namespace Test
         EXPECT_TRUE(remoteHasEntry(*sftp, "/home/test", "present_concurrent.txt"));
         const auto failed = operation.getFailed();
         ASSERT_EQ(failed.size(), 1u);
-        EXPECT_EQ(failed.front().first.filename().generic_string(), "missing.txt");
+        EXPECT_TRUE(failed.front().first.ends_with("/missing.txt")) << failed.front().first;
     }
 }

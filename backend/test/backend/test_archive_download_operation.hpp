@@ -57,7 +57,7 @@ namespace Test
         {
             ScanOperation scan{
                 sftp,
-                ScanOperation::ScanOperationOptions{.remotePath = path},
+                ScanOperation::ScanOperationOptions{.remotePath = remote(path.generic_string())},
             };
             while (true)
             {

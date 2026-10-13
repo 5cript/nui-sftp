@@ -39,7 +39,7 @@ namespace Test
         ScanBundle
         runScan(SecureShell::SftpSession& sftp, std::filesystem::path const& remotePath, bool recursive = true)
         {
-            ScanOperation scan{sftp, {.remotePath = remotePath, .recursive = recursive}};
+            ScanOperation scan{sftp, {.remotePath = remote(remotePath.generic_string()), .recursive = recursive}};
             for (int iteration = 0; iteration < 500; ++iteration)
             {
                 auto workResult = scan.work();
@@ -282,7 +282,7 @@ namespace Test
 
         const auto failed = operation.getFailed();
         ASSERT_EQ(failed.size(), 1u);
-        EXPECT_EQ(failed.front().first.filename().generic_string(), "does_not_exist.txt");
+        EXPECT_TRUE(failed.front().first.ends_with("/does_not_exist.txt")) << failed.front().first;
     }
 
     TEST_F(BulkDownloadOperationTests, ScannedTreeWithoutRootsFails)
@@ -852,7 +852,7 @@ namespace Test
 
         const auto failed = operation.getFailed();
         ASSERT_EQ(failed.size(), 1u);
-        EXPECT_EQ(failed.front().first.filename().generic_string(), "does_not_exist.txt");
+        EXPECT_TRUE(failed.front().first.ends_with("/does_not_exist.txt")) << failed.front().first;
     }
 
     TEST_F(BulkDownloadOperationTests, FailFastAbortsWholeOperationWithConcurrency)
