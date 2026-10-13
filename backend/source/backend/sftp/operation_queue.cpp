@@ -460,14 +460,11 @@ void OperationQueue::adoptBulkResume(
         )
     );
 
-    // For bulk download/upload the frontend reserves one extra id at the
-    // back of the per-entry id list for the aggregate card.  On adopt we
-    // reuse the original aggregate id (so the surviving frontend card
-    // re-attaches) and synthesise fresh per-entry ids since their cards
-    // no longer exist in the new session.
-    auto operationIdFor = [](std::size_t)
+    // A transfer backup holds either the files of one bulk card or a single directory, both resume under the
+    // stashed id so the surviving card re-attaches.
+    auto operationIdFor = [&operationId](std::size_t)
     {
-        return Ids::generateOperationId();
+        return operationId;
     };
 
     std::visit(
@@ -1119,6 +1116,12 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     std::vector<BulkDownloadOperation::PrescannedFile> files;
     files.reserve(request.entries.size());
     std::size_t directoryCount = 0;
+    // Each directory resumes as its own unit under its own id, so the card's backup holds only the files.
+    SharedData::BulkDownloadRequest fileUnit{
+        .allowOverwrite = request.allowOverwrite,
+        .insertRefresh = request.insertRefresh,
+        .mode = request.mode,
+    };
     for (std::size_t idx = 0; idx < request.entries.size(); ++idx)
     {
         auto const& entry = request.entries[idx];
@@ -1151,6 +1154,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             ++directoryCount;
             continue;
         }
+        fileUnit.entries.push_back(entry);
         files.push_back(
             BulkDownloadOperation::PrescannedFile{
                 .source = entry.source,
@@ -1388,6 +1392,12 @@ std::size_t OperationQueue::addBulkUploadOperation(
     std::vector<BulkUploadOperation::PrescannedFile> files;
     files.reserve(request.entries.size());
     std::size_t directoryCount = 0;
+    // Each directory resumes as its own unit under its own id, so the card's backup holds only the files.
+    SharedData::BulkUploadRequest fileUnit{
+        .allowOverwrite = request.allowOverwrite,
+        .insertRefresh = request.insertRefresh,
+        .mode = request.mode,
+    };
     for (std::size_t idx = 0; idx < request.entries.size(); ++idx)
     {
         auto const& entry = request.entries[idx];
@@ -1420,6 +1430,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             ++directoryCount;
             continue;
         }
+        fileUnit.entries.push_back(entry);
         files.push_back(
             BulkUploadOperation::PrescannedFile{
                 .source = entry.source,
