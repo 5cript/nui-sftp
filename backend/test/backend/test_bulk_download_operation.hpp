@@ -137,7 +137,7 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test/file1.txt",
+                .name = "/home/test/file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 17,
             }
@@ -206,20 +206,19 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "Documents",
+                .name = "Documents",
                 .type = SharedData::FileType::Directory,
                 .parent = 0,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "doc1.txt",
+                .name = "doc1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Document 1 content"}.size(),
                 .parent = 1,
@@ -248,13 +247,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist.txt",
+                .name = "does_not_exist.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -262,7 +260,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,
@@ -347,13 +345,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist.txt",
+                .name = "does_not_exist.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -361,7 +358,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,
@@ -401,20 +398,19 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "weird",
+                .name = "weird",
                 .type = SharedData::FileType::Fifo,
                 .parent = 0,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,
@@ -439,13 +435,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "link_to_file1.txt",
+                .name = "link_to_file1.txt",
                 .type = SharedData::FileType::Symlink,
                 .parent = 0,
             }
@@ -518,7 +513,7 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test/file1.txt",
+                .name = "/home/test/file1.txt",
                 .type = SharedData::FileType::Regular,
             }
         );
@@ -758,13 +753,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,
@@ -772,14 +766,14 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "Documents",
+                .name = "Documents",
                 .type = SharedData::FileType::Directory,
                 .parent = 0,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "doc1.txt",
+                .name = "doc1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Document 1 content"}.size(),
                 .parent = 2,
@@ -787,7 +781,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "doc2.txt",
+                .name = "doc2.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Document 2 content"}.size(),
                 .parent = 2,
@@ -818,13 +812,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist.txt",
+                .name = "does_not_exist.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -832,7 +825,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,
@@ -865,13 +858,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "/home/test",
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist.txt",
+                .name = "does_not_exist.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -879,7 +871,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Fake file content"}.size(),
                 .parent = 0,

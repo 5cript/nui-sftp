@@ -159,7 +159,7 @@ namespace SharedData::Sync::Test
     TEST(TreeDirectoryWalkerTests, ScannerErrorsAbortTheWalk)
     {
         FakeFilesystem filesystem;
-        filesystem.directories["/root"].push_back(DirectoryEntry{.path = "unlisted", .type = FileType::Directory});
+        filesystem.directories["/root"].push_back(DirectoryEntry{.name = "unlisted", .type = FileType::Directory});
 
         const auto tree = walkFake(filesystem);
         ASSERT_FALSE(tree.has_value());

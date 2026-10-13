@@ -90,7 +90,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_GT(result.value().size(), 0);
         auto it = std::find_if(result.value().begin(), result.value().end(), [](const auto& entry) {
-            return entry.path == "file1.txt";
+            return entry.name == "file1.txt";
         });
         EXPECT_NE(it, result.value().end());
     }
@@ -122,7 +122,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(listResult.has_value());
 
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "newdir";
+            return entry.name == "newdir";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -154,7 +154,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(listResult.has_value());
 
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "newfile.txt";
+            return entry.name == "newfile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -186,7 +186,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(listResult.has_value());
 
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "file1.txt";
+            return entry.name == "file1.txt";
         });
         EXPECT_EQ(it, listResult.value().end());
     }
@@ -366,7 +366,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(listResult.has_value());
 
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "file1_renamed.txt";
+            return entry.name == "file1_renamed.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -387,7 +387,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(listResult.has_value());
 
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "Documents_renamed";
+            return entry.name == "Documents_renamed";
         });
         EXPECT_NE(it, listResult.value().end());
     }

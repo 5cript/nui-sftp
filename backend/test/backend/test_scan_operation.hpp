@@ -43,7 +43,7 @@ namespace Test
             std::string const& filename)
         {
             return std::any_of(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
         }
 
@@ -52,7 +52,7 @@ namespace Test
             std::string const& filename)
         {
             auto iter = std::find_if(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
             return iter == entries.end() ? nullptr : &*iter;
         }

@@ -84,7 +84,7 @@ namespace Utility::Test
                 for (auto const& dirEntry : std::filesystem::directory_iterator(path))
                 {
                     SharedData::DirectoryEntry entry{};
-                    entry.path = dirEntry.path().filename();
+                    entry.name = dirEntry.path().filename().string();
                     entry.type =
                         dirEntry.is_directory() ? SharedData::FileType::Directory : SharedData::FileType::Regular;
                     entry.size = dirEntry.is_regular_file() ? dirEntry.file_size() : 0;
@@ -411,19 +411,19 @@ namespace Utility::Test
             [](std::filesystem::path const&) -> std::expected<std::vector<SharedData::DirectoryEntry>, std::string> {
             return std::vector<SharedData::DirectoryEntry>{
                 SharedData::DirectoryEntry{
-                    .path = ".",
+                    .name = ".",
                     .type = SharedData::FileType::Directory,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "..",
+                    .name = "..",
                     .type = SharedData::FileType::Directory,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "file0",
+                    .name = "file0",
                     .type = SharedData::FileType::Regular,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "dir0",
+                    .name = "dir0",
                     .type = SharedData::FileType::Directory,
                 },
             };
@@ -455,19 +455,19 @@ namespace Utility::Test
     {
         std::vector<SharedData::DirectoryEntry> results{
             SharedData::DirectoryEntry{
-                .path = "file0",
+                .name = "file0",
                 .type = SharedData::FileType::Regular,
             },
             SharedData::DirectoryEntry{
-                .path = ".",
+                .name = ".",
                 .type = SharedData::FileType::Directory,
             },
             SharedData::DirectoryEntry{
-                .path = "dir0",
+                .name = "dir0",
                 .type = SharedData::FileType::Directory,
             },
             SharedData::DirectoryEntry{
-                .path = "..",
+                .name = "..",
                 .type = SharedData::FileType::Directory,
             },
         };

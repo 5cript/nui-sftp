@@ -91,7 +91,7 @@ namespace Test
                 result.value().end(),
                 [&](auto const& entry)
                 {
-                    return entry.path.filename().generic_string() == filename;
+                    return entry.name == filename;
                 }
             );
         }
@@ -162,7 +162,7 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path() / "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
             }
         );
@@ -205,20 +205,19 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path(),
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "subdir",
+                .name = "subdir",
                 .type = SharedData::FileType::Directory,
                 .parent = 0,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Bulk upload file one"}.size(),
                 .parent = 1,
@@ -250,13 +249,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path(),
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist_locally.txt",
+                .name = "does_not_exist_locally.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -264,7 +262,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Bulk upload file one"}.size(),
                 .parent = 0,
@@ -299,13 +297,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path(),
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "does_not_exist_locally.txt",
+                .name = "does_not_exist_locally.txt",
                 .type = SharedData::FileType::Regular,
                 .size = 10,
                 .parent = 0,
@@ -313,7 +310,7 @@ namespace Test
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Bulk upload file one"}.size(),
                 .parent = 0,
@@ -354,20 +351,19 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path(),
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "weird",
+                .name = "weird",
                 .type = SharedData::FileType::Fifo,
                 .parent = 0,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
                 .size = std::string{"Bulk upload file one"}.size(),
                 .parent = 0,
@@ -403,13 +399,12 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path(),
                 .type = SharedData::FileType::Directory,
             }
         );
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = "the_link",
+                .name = "the_link",
                 .type = SharedData::FileType::Symlink,
                 .linkTarget = targetFile.generic_string(),
                 .parent = 0,
@@ -487,7 +482,7 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> entries;
         entries.push_back(
             SharedData::DirectoryEntry{
-                .path = uploadSrc_.path() / "file1.txt",
+                .name = "file1.txt",
                 .type = SharedData::FileType::Regular,
             }
         );

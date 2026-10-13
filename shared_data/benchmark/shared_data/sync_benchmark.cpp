@@ -154,7 +154,7 @@ int main(int argc, char** argv)
             {
                 for (std::size_t file = files; file-- > 0;)
                     entries.push_back(
-                        {.path = fmt::format("file{:05}.txt", file), .type = SharedData::FileType::Regular, .size = 1}
+                        {.name = fmt::format("file{:05}.txt", file), .type = SharedData::FileType::Regular, .size = 1}
                     );
                 total += files;
                 return;
@@ -162,7 +162,7 @@ int main(int argc, char** argv)
             for (std::size_t directory = 10; directory-- > 0;)
             {
                 const auto name = fmt::format("dir{:03}", directory);
-                entries.push_back({.path = name, .type = SharedData::FileType::Directory});
+                entries.push_back({.name = name, .type = SharedData::FileType::Directory});
                 build(path + "/" + name, depth + 1);
             }
         };

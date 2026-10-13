@@ -62,7 +62,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt.filepart";
+            return entry.name == "testfile.txt.filepart";
         });
 
         EXPECT_NE(it, listResult.value().end());
@@ -122,7 +122,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt.filepart";
+            return entry.name == "testfile.txt.filepart";
         });
 
         EXPECT_NE(it, listResult.value().end());
@@ -157,7 +157,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt";
+            return entry.name == "testfile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
 
@@ -396,7 +396,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "emptyfile.txt";
+            return entry.name == "emptyfile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -431,7 +431,7 @@ namespace Test
         ASSERT_TRUE(listResult.has_value());
         auto filepartIt =
             std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-                return entry.path == "testfile.txt.filepart";
+                return entry.name == "testfile.txt.filepart";
             });
         EXPECT_EQ(filepartIt, listResult.value().end());
     }
@@ -576,7 +576,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "largefile.txt";
+            return entry.name == "largefile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -828,7 +828,7 @@ namespace Test
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "sym_prepare_check.filepart";
+            return entry.name == "sym_prepare_check.filepart";
         });
         EXPECT_EQ(it, listResult.value().end()) << ".filepart must not be created for symlink uploads";
     }

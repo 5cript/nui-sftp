@@ -139,7 +139,7 @@ namespace Test
         constexpr std::uint32_t expectedMtimeNsec = 500000000u; // 0.5s
 
         SharedData::DirectoryEntry entry{};
-        entry.path = "/home/test/file1.txt";
+        entry.name = "file1.txt";
         entry.type = SharedData::FileType::Regular;
         entry.size = std::string{"Fake file content"}.size();
         entry.mtime = expectedMtime;
