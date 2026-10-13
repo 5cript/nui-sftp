@@ -83,7 +83,6 @@ namespace SharedData
 
         std::filesystem::path path{};
         std::filesystem::path fullPath{};
-        std::filesystem::path longName{};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
         std::uint64_t size{0};
@@ -99,9 +98,9 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         std::string acl{};
-        // For symlinks: raw value returned by readlink (i.e. the link literal, not the resolved target).
+        // For symlinks: raw value returned by readlink (i.e. the link literal, not the resolved target) as UTF-8.
         // nullopt when not a symlink or when unavailable. This is what the sync diff compares by.
-        std::optional<std::filesystem::path> linkTarget{};
+        std::optional<std::string> linkTarget{};
         // For symlinks: the full entry of the symlink target (if known). nullptr means unknown.
         std::shared_ptr<DirectoryEntry> resolvedTarget{nullptr};
 

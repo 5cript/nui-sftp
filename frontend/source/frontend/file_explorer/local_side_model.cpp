@@ -881,7 +881,7 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                 {
                     const auto link = source["linkTarget"];
                     if (!link.isNull() && !link.isUndefined())
-                        out.linkTarget = std::filesystem::path{link.template as<std::string>()};
+                        out.linkTarget = link.template as<std::string>();
                 }
                 return out;
             };
@@ -1040,7 +1040,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 {
                     const auto link = source["linkTarget"];
                     if (!link.isNull() && !link.isUndefined())
-                        entry.linkTarget = std::filesystem::path{link.template as<std::string>()};
+                        entry.linkTarget = link.template as<std::string>();
                 }
                 return entry;
             };

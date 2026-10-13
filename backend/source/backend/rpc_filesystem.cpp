@@ -412,18 +412,11 @@ void RpcFilesystem::registerListFiles()
                     if (dirEntry.type == SharedData::FileType::Symlink)
                     {
                         std::error_code linkEc;
-                        auto linkTarget = std::filesystem::read_symlink(entryPath, linkEc);
+                        const auto linkTarget = std::filesystem::read_symlink(entryPath, linkEc);
                         if (!linkEc)
-                            dirEntry.linkTarget = std::move(linkTarget);
+                            dirEntry.linkTarget = Paths::nativeToUtf8(linkTarget);
 
                         auto resolved = std::make_shared<SharedData::DirectoryEntry>();
-                        std::error_code pathEc;
-                        auto canonical = std::filesystem::canonical(entryPath, pathEc);
-                        if (!pathEc)
-                            resolved->path = std::move(canonical);
-                        else if (dirEntry.linkTarget.has_value())
-                            resolved->path = *dirEntry.linkTarget;
-
                         resolved->type = SharedData::fileTypeFromStdFilesystemType(entry.status().type());
                         resolved->permissions = entry.status().permissions();
 #ifndef _WIN32
@@ -566,9 +559,9 @@ void RpcFilesystem::registerProperties()
                 if (entry.type == SharedData::FileType::Symlink)
                 {
                     std::error_code linkEc;
-                    auto linkTarget = std::filesystem::read_symlink(path, linkEc);
+                    const auto linkTarget = std::filesystem::read_symlink(path, linkEc);
                     if (!linkEc)
-                        entry.linkTarget = std::move(linkTarget);
+                        entry.linkTarget = Paths::nativeToUtf8(linkTarget);
 
                     auto resolved = std::make_shared<SharedData::DirectoryEntry>();
                     std::error_code pathEc;
@@ -576,7 +569,7 @@ void RpcFilesystem::registerProperties()
                     if (!pathEc)
                         resolved->path = std::move(canonical);
                     else if (entry.linkTarget.has_value())
-                        resolved->path = *entry.linkTarget;
+                        resolvedPath = *entry.linkTarget;
 
                     std::error_code statusEc;
                     const auto resolvedStatus = std::filesystem::status(path, statusEc);

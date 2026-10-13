@@ -9,7 +9,6 @@ namespace SecureShell
             SharedData::DirectoryEntry{
                 // Server names are UTF-8, a narrow std::string would be read in the ANSI code page on Windows.
                 .path = attributes->name ? pathFromU8(attributes->name) : std::filesystem::path{},
-                .longName = attributes->longname ? std::string{attributes->longname} : std::string{},
                 .flags = attributes->flags,
                 .type = static_cast<SharedData::FileType>(attributes->type),
                 .size = attributes->size,

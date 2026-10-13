@@ -1,5 +1,6 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include <log/log.hpp>
+#include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
 
@@ -137,13 +138,13 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                 }
             }
 
-            std::optional<std::filesystem::path> linkTarget{};
+            std::optional<std::string> linkTarget{};
             if (isSymlink)
             {
                 std::error_code errc{};
-                auto target = std::filesystem::read_symlink(entry.path(), errc);
+                const auto target = std::filesystem::read_symlink(entry.path(), errc);
                 if (!errc)
-                    linkTarget = std::move(target);
+                    linkTarget = Paths::nativeToUtf8(target);
             }
 
             const auto filename = entry.path().filename();

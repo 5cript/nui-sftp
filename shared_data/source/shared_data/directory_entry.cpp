@@ -22,8 +22,6 @@ namespace SharedData
         };
         if (!entry.fullPath.empty())
             j["fullPath"] = Utility::pathToUtf8Generic(entry.fullPath);
-        if (!entry.longName.empty())
-            j["longName"] = Utility::pathToUtf8Generic(entry.longName);
         if (entry.flags != 0)
             j["flags"] = entry.flags;
         if (entry.uid != 0)
@@ -45,7 +43,7 @@ namespace SharedData
         if (!entry.acl.empty())
             j["acl"] = entry.acl;
         if (entry.linkTarget)
-            j["linkTarget"] = Utility::pathToUtf8Generic(*entry.linkTarget);
+            j["linkTarget"] = *entry.linkTarget;
         if (entry.resolvedTarget)
             j["resolvedTarget"] = *entry.resolvedTarget;
     }
@@ -63,7 +61,6 @@ namespace SharedData
         entry.path = Utility::pathFromUtf8(j.at("path").get<std::string>());
         j.at("type").get_to(entry.type);
         getOptionalPath("fullPath", entry.fullPath);
-        getOptionalPath("longName", entry.longName);
         getOptional("flags", entry.flags);
         getOptional("size", entry.size);
         getOptional("uid", entry.uid);
@@ -79,7 +76,7 @@ namespace SharedData
         getOptional("mtimeNsec", entry.mtimeNsec);
         getOptional("acl", entry.acl);
         if (auto found = j.find("linkTarget"); found != j.end() && !found->is_null())
-            entry.linkTarget = Utility::pathFromUtf8(found->get<std::string>());
+            entry.linkTarget = found->get<std::string>();
         if (auto found = j.find("resolvedTarget"); found != j.end() && !found->is_null())
         {
             DirectoryEntry target{};

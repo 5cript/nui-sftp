@@ -41,7 +41,7 @@ namespace SharedData::Sync
         std::uint32_t mtimeNsec{0};
         std::filesystem::perms permissions{std::filesystem::perms::unknown};
         /// For symlinks: the raw link literal. What the diff compares by.
-        std::optional<std::filesystem::path> linkTarget{};
+        std::optional<std::string> linkTarget{};
         std::uint32_t uid{0};
         std::uint32_t gid{0};
         /// Sorted ascending by name (POSIX byte comparison).

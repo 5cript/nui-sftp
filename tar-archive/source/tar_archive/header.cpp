@@ -599,7 +599,7 @@ namespace TarArchive
         if (ustar.typeflag == TypeFlag::SymbolicLink)
         {
             const std::string linkText = overrides.linkPath.value_or(ustar.linkName);
-            entry.linkTarget = std::filesystem::path{linkText};
+            entry.linkTarget = linkText;
         }
         return entry;
     }
@@ -624,7 +624,7 @@ namespace TarArchive
                 return std::unexpected(
                     makeError(TarErrorCode::InvalidHeader, "symlink entry has no linkTarget set")
                 );
-            linkTargetText = meta.linkTarget->generic_string();
+            linkTargetText = *meta.linkTarget;
         }
 
         const std::uint64_t payloadSize = isDirectory ? 0u : meta.size;

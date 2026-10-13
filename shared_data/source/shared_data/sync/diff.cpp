@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -327,6 +328,26 @@ namespace SharedData::Sync
         return !name.empty() && name.front() == '.';
     }
 
+    /**
+     * @brief Link literals compare with repeated separators collapsed, "a//b" points where "a/b" does.
+     */
+    bool linkTargetsDiffer(std::string_view local, std::string_view remote)
+    {
+        const auto collapsed = [](std::string_view text)
+        {
+            std::string result;
+            result.reserve(text.size());
+            for (auto const character : text)
+            {
+                if (character == '/' && !result.empty() && result.back() == '/')
+                    continue;
+                result.push_back(character);
+            }
+            return result;
+        };
+        return collapsed(local) != collapsed(remote);
+    }
+
     bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode)
     {
         if (localNode.type != remoteNode.type)
@@ -334,7 +355,7 @@ namespace SharedData::Sync
         if (localNode.type == FileType::Symlink)
         {
             if (localNode.linkTarget && remoteNode.linkTarget)
-                return *localNode.linkTarget != *remoteNode.linkTarget;
+                return linkTargetsDiffer(*localNode.linkTarget, *remoteNode.linkTarget);
             return false;
         }
         if (localNode.size != remoteNode.size)
