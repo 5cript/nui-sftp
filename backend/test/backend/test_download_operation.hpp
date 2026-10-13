@@ -140,7 +140,6 @@ namespace Test
 
         SharedData::DirectoryEntry entry{};
         entry.path = "/home/test/file1.txt";
-        entry.fullPath = "/home/test/file1.txt";
         entry.type = SharedData::FileType::Regular;
         entry.size = std::string{"Fake file content"}.size();
         entry.mtime = expectedMtime;
