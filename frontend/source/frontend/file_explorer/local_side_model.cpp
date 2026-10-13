@@ -1147,7 +1147,8 @@ void LocalSideModel::uploadItemsConfirmed(
     while (index < candidates.size())
     {
         auto const& candidate = candidates[index];
-        const bool exists = (existsResults && index < existsResults->size()) ? (*existsResults)[index] : false;
+        // Without an answer the destination counts as existing, so the user is asked.
+        const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
 
         if (!exists)
         {

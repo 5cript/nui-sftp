@@ -777,7 +777,8 @@ void RemoteSideModel::downloadItemsConfirmed(
         // call before the loop started, so this adds zero RPC round-trips.
         // Defensive: if results are missing or shorter than expected, treat
         // the file as not-existing.
-        const bool exists = (existsResults && index < existsResults->size()) ? (*existsResults)[index] : false;
+        // Without an answer the destination counts as existing, so the user is asked.
+        const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
 
         if (!exists)
         {
@@ -1033,8 +1034,7 @@ void RemoteSideModel::onTransfer(
                     "RpcFilesystem::existsBatch",
                     [this, candidates = std::move(candidates)](Nui::val response) mutable
                     {
-                        auto existsResults = std::make_shared<std::vector<bool>>();
-
+                        // An unknown destination is never taken for absent, the batch overwrites what it accepts.
                         if (!response.hasOwnProperty("success") || !response["success"].as<bool>() ||
                             !response.hasOwnProperty("exists"))
                         {
@@ -1043,7 +1043,14 @@ void RemoteSideModel::onTransfer(
                                                                  : std::string{"RpcFilesystem::existsBatch"}
                             );
                         }
-                        else
+
+                        auto existsResults = std::make_shared<std::vector<bool>>();
+                        auto arr = response["exists"];
+                        const auto length = arr["length"].as<long long>();
+                        existsResults->reserve(static_cast<std::size_t>(length));
+                        for (long long idx = 0; idx < length; ++idx)
+                            existsResults->push_back(arr[static_cast<int>(idx)].as<bool>());
+                        if (existsResults->size() != candidates.size())
                         {
                             return showExistenceCheckFailed(
                                 fmt::format("{} of {} answers", existsResults->size(), candidates.size())

@@ -13,6 +13,8 @@ fileExplorer:
   invalidItemName: "'{}' cannot be used as a name. A name may not be empty, '.' or '..', and may not contain '/' or '\\'."
   renameTargetExistsHeader: "Item Exists"
   renameTargetExists: "'{}' already exists. Replace it?"
+  existenceCheckFailedHeader: "Existence Check Failed"
+  existenceCheckFailed: "Could not check which destinations already exist, nothing was transferred: {}"
   contextMenu:
     download: "Download"
     upload: "Upload"
