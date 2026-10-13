@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
+#include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
 #include <paths/local_path.hpp>
 
@@ -152,7 +153,7 @@ namespace FileTracking
 
                 Log::info("forceCleanOrphanedInstanceDirs: removing orphaned instance '{}'", dirPath.filename().string());
                 std::error_code rmErr;
-                fs::remove_all(dirPath, rmErr);
+                Utility::removeAllNoFollow(dirPath, rmErr);
                 if (rmErr)
                     Log::warn("forceCleanOrphanedInstanceDirs: failed to remove '{}': {}", dirPath.filename().string(), rmErr.message());
                 else

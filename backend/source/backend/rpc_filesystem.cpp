@@ -1,4 +1,5 @@
 #include <backend/rpc_filesystem.hpp>
+#include <utility/link_safe_remove.hpp>
 #include <log/log.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <paths/native.hpp>
@@ -240,7 +241,7 @@ void RpcFilesystem::registerRemove()
                 }
 
                 std::error_code ec;
-                const auto filesRemoved = std::filesystem::remove_all(path, ec);
+                const auto filesRemoved = Utility::removeAllNoFollow(path, ec);
                 if (ec)
                 {
                     Log::error("Failed to recursively remove path: {}: {}", pathUtf8, ec.message());
@@ -303,7 +304,7 @@ void RpcFilesystem::registerRemoveMultiple()
                     std::error_code ec;
                     if (recursive)
                     {
-                        removedCount += std::filesystem::remove_all(path, ec);
+                        removedCount += Utility::removeAllNoFollow(path, ec);
                     }
                     else
                     {

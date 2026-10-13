@@ -1,4 +1,5 @@
 #include <backend/sftp/local_scan_operation.hpp>
+#include <utility/link_safe_remove.hpp>
 #include <log/log.hpp>
 #include <paths/native.hpp>
 
@@ -88,7 +89,13 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
             auto const& entry = *iter;
             const auto status = entry.symlink_status();
             SharedData::DirectoryEntry::FileType type;
+#ifdef _WIN32
+            // A junction is a reparse point that std::filesystem reports as a directory.
+            std::error_code linkError{};
+            const bool isSymlink = std::filesystem::is_symlink(status) || Utility::isLinkOrJunction(entry.path(), linkError);
+#else
             const bool isSymlink = std::filesystem::is_symlink(status);
+#endif
             if (isSymlink)
             {
 #ifdef _WIN32

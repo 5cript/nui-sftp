@@ -23,6 +23,7 @@ else()
         node/node.cpp
         permissions.cpp
         rename.cpp
+        link_safe_remove.cpp
         resources.cpp
     )
 

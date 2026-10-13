@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <utility/link_safe_remove.hpp>
 #include <backend/file_tracking/change_filter.hpp>
 
 #include <efsw/efsw.hpp>
@@ -252,7 +253,7 @@ namespace FileTracking
         impl_->lock.reset();
 
         std::error_code err;
-        std::filesystem::remove_all(impl_->instanceDir, err);
+        Utility::removeAllNoFollow(impl_->instanceDir, err);
         if (err)
             Log::warn("cleanupNow: failed to remove '{}': {}", impl_->instanceDir.string(), err.message());
 
