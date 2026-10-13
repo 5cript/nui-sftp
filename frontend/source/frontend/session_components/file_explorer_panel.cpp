@@ -292,7 +292,7 @@ void FileExplorerPanel::onDrop(
         std::back_inserter(items),
         [](SharedData::DirectoryEntry const& entry)
         {
-            return NuiFileExplorer::Item{entry};
+            return NuiFileExplorer::Item::dropped(dropped.entry, dropped.path.toUtf8());
         }
     );
 

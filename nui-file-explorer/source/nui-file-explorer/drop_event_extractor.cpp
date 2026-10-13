@@ -206,7 +206,7 @@ namespace NuiFileExplorer
                 if (looksLikeAPath(part))
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
-                    result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = part}});
+                    result.externDroppedItems->push_back(Item::dropped(SharedData::DirectoryEntry{}, *path));
                 }
             }
             return result;
@@ -223,7 +223,7 @@ namespace NuiFileExplorer
                 if (looksLikeAPath(extractedLink))
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
-                    result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = extractedLink}});
+                    result.externDroppedItems->push_back(Item::dropped(SharedData::DirectoryEntry{}, *path));
                     result.issueWebkitWarning = STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s;
                     return result;
                 }

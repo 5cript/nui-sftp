@@ -88,7 +88,6 @@ namespace SharedData
         using FileType = SharedData::FileType;
 
         std::filesystem::path path{};
-        std::filesystem::path fullPath{};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
         std::uint64_t size{0};

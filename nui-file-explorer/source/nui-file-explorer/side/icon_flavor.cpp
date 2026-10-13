@@ -114,7 +114,7 @@ namespace NuiFileExplorer
                 !(itemRect.right() < boxRect.left() || itemRect.left() > boxRect.right() ||
                     itemRect.bottom() < boxRect.top() || itemRect.top() > boxRect.bottom());
 
-            if (intersects && item.item.path.filename() != "..")
+            if (intersects && !item.item.isParentLink)
                 impl().selectionManager.select(item);
         }
     }

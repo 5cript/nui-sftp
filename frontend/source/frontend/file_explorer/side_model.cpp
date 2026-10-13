@@ -127,23 +127,26 @@ void SideModel::onDirectoryListing(
         return;
     }
 
+    // Servers send "." and "..", the parent link below stands for the parent instead.
     std::erase_if(
         *directoryEntries,
         [](auto const& entry)
         {
-            return entry.path.filename() == ".";
+            return entry.name == "." || entry.name == "..";
         }
     );
     listedPath_ = directory;
 
     std::vector<NuiFileExplorer::Item> items{};
+    if (hasParent(directory))
+        items.push_back(NuiFileExplorer::Item::parentLink(directory.parent_path(), "nui://app.example/icons/folder.svg"));
     std::transform(
         begin(*directoryEntries),
         end(*directoryEntries),
         std::back_inserter(items),
-        [this](auto const& entry)
+        [this, &directory](auto const& entry)
         {
-            return NuiFileExplorer::Item{
+            auto item = NuiFileExplorer::Item{
                 entry,
                 [&entry, this]() -> std::string
                 {
@@ -162,6 +165,8 @@ void SideModel::onDirectoryListing(
                     return "nui://app.example/icons/file.svg";
                 }()
             };
+            item.fullPath = directory / entry.name;
+            return item;
         }
     );
 

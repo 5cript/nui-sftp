@@ -148,6 +148,15 @@ namespace NuiFileExplorer
             std::sort(items.begin(), partitionBorder, predicate);
             if (partitionBorder != items.end())
                 std::sort(partitionBorder, items.end(), predicate);
+            // The parent link leads in every order.
+            std::stable_partition(
+                items.begin(),
+                items.end(),
+                [](auto const& entry)
+                {
+                    return entry.item.isParentLink;
+                }
+            );
         }
 
         void sortByName(bool ascending)
@@ -158,8 +167,8 @@ namespace NuiFileExplorer
                     [](auto const& lhs, auto const& rhs)
                     {
                         return Utility::Algorithm::caseInsensitiveCompare(
-                                   lhs.item.path.filename().string(),
-                                   rhs.item.path.filename().string()) < 0;
+                                   lhs.item.displayName(),
+                                   rhs.item.displayName()) < 0;
                     }
                 );
             }
@@ -169,8 +178,8 @@ namespace NuiFileExplorer
                     [](auto const& lhs, auto const& rhs)
                     {
                         return Utility::Algorithm::caseInsensitiveCompare(
-                                   lhs.item.path.filename().string(),
-                                   rhs.item.path.filename().string()) > 0;
+                                   lhs.item.displayName(),
+                                   rhs.item.displayName()) > 0;
                     }
                 );
             }

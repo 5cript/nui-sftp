@@ -346,8 +346,8 @@ namespace NuiFileExplorer
             std::views::filter(
                 [showHidden](auto const& item)
                 {
-                    const auto filename = item.path.filename().string();
-                    return showHidden || filename.empty() || filename[0] != '.' || filename == "..";
+                    const auto filename = item.displayName();
+                    return showHidden || item.isParentLink || filename.empty() || filename[0] != '.';
                 }
             );
         for (auto const& item : visibleItems)
@@ -623,7 +623,7 @@ namespace NuiFileExplorer
                 clickItems.end(),
                 [](auto const& itm)
                 {
-                    return itm.path.filename() == "..";
+                    return itm.isParentLink;
                 }
             ),
             clickItems.end()
@@ -1107,7 +1107,7 @@ namespace NuiFileExplorer
         for (auto& item : impl_->items.value())
         {
             item.searchHighlight(
-                matchesQuery(item.item.path.generic_string(), normalizedQuery, queryTokens)
+                matchesQuery(item.item.displayName(), normalizedQuery, queryTokens)
                     ? ItemWithInternals::SearchHighlight::Highlight
                     : ItemWithInternals::SearchHighlight::Muted
             );
@@ -1181,7 +1181,7 @@ namespace NuiFileExplorer
             auto const& items = impl_->items.value();
             for (std::size_t itemIdx = 0; itemIdx < items.size(); ++itemIdx)
             {
-                if (matchesQuery(items[itemIdx].item.path.generic_string(), normalizedQuery, queryTokens))
+                if (matchesQuery(items[itemIdx].item.displayName(), normalizedQuery, queryTokens))
                 {
                     const auto absoluteIndex = static_cast<long long>(itemIdx);
                     impl_->filterMatchPosition.emplace(

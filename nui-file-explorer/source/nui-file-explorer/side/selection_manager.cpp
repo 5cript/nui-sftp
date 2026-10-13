@@ -124,7 +124,17 @@ namespace NuiFileExplorer
         const auto& vec = items_->value();
         if (idx >= vec.size())
             return false;
-        return vec[idx].item.path.filename() != "..";
+        return !vec[idx].item.isParentLink && (!isVisible_ || isVisible_(idx));
+    }
+
+    void SelectionManager::setVisibilityPredicate(std::function<bool(std::size_t)> isVisible)
+    {
+        isVisible_ = std::move(isVisible);
+    }
+
+    void SelectionManager::refreshSelection()
+    {
+        rebuildSelection();
     }
 
     // =========================================================================

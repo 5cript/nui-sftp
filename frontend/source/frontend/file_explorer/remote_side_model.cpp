@@ -150,7 +150,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
 
     std::vector<NuiFileExplorer::ContextMenuItem> items;
 
-    if (singleItem && selectedItems.front().isDirectoryLike() && selectedItems.front().path.filename() != "..")
+    if (singleItem && selectedItems.front().isDirectoryLike() && !selectedItems.front().isParentLink)
     {
         const auto& selPath = selectedItems.front().fullPath;
         const auto& favs = favorites_->value();

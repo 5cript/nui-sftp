@@ -20,8 +20,6 @@ namespace SharedData
             {"mtime", entry.mtime},
             {"mtimeNsec", entry.mtimeNsec},
         };
-        if (!entry.fullPath.empty())
-            j["fullPath"] = Utility::pathToUtf8Generic(entry.fullPath);
         if (entry.flags != 0)
             j["flags"] = entry.flags;
         if (entry.uid != 0)
@@ -49,10 +47,6 @@ namespace SharedData
     }
     void from_json(nlohmann::json const& j, DirectoryEntry& entry)
     {
-        const auto getOptionalPath = [&](char const* key, std::filesystem::path& target) {
-            if (auto found = j.find(key); found != j.end() && !found->is_null())
-                target = Utility::pathFromUtf8(found->get<std::string>());
-        };
         const auto getOptional = [&](char const* key, auto& target) {
             if (auto found = j.find(key); found != j.end() && !found->is_null())
                 found->get_to(target);
@@ -60,7 +54,6 @@ namespace SharedData
 
         entry.path = Utility::pathFromUtf8(j.at("path").get<std::string>());
         j.at("type").get_to(entry.type);
-        getOptionalPath("fullPath", entry.fullPath);
         getOptional("flags", entry.flags);
         getOptional("size", entry.size);
         getOptional("uid", entry.uid);
