@@ -13,6 +13,7 @@
 
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <utility/overloaded.hpp>
 #include <constants/sftp.hpp>
 
 #include <nui/frontend/attributes.hpp>
@@ -703,7 +704,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.remotePath,
+                added.remotePath->value(),
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -721,7 +722,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.localPath,
+                added.localPath->toUtf8(),
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -743,13 +744,15 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 "Creating {} operation card for operation id: {}. path: {}",
                 added.type == SharedData::OperationType::BulkDelete ? "bulk delete" : "delete",
                 added.operationId.value(),
-                added.remotePath ? added.remotePath->generic_string() : "???"s
+                added.remotePath ? added.remotePath->value() : "???"s
             );
             return std::make_unique<DisplayedDeleteOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
                 added.type,
-                added.remotePath ? *added.remotePath : std::filesystem::path{},
+                added.remotePath ? added.remotePath->value() : std::string{},
+                added.type == SharedData::OperationType::Delete ? added.remotePath.value_or(Paths::RemotePath{})
+                                                                : Paths::RemotePath{},
                 [this](OperationCard<DisplayedDeleteOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -851,7 +854,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 *impl_->confirmDialog,
                 added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
                 *added.localPath,
-                std::filesystem::path{},
+                Paths::RemotePath{},
                 [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -876,7 +879,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 SharedData::OperationType::ArchiveUpload,
                 *impl_->confirmDialog,
                 added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
-                std::filesystem::path{},
+                Paths::LocalPath{},
                 *added.remotePath,
                 [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
@@ -889,7 +892,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         }
         else if (added.type == SharedData::OperationType::Rename)
         {
-            if (!added.localPath || !added.remotePath)
+            if (!added.source || !added.destination)
             {
                 Log::error(
                     "Received OperationAdded for Rename id: {} without source or destination", added.operationId.value()
@@ -899,8 +902,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedRenameOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.localPath,
-                *added.remotePath,
+                *added.source,
+                *added.destination,
                 [this](OperationCard<DisplayedRenameOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -2405,58 +2408,24 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
 {
     if (!impl_->fileEngine)
     {
-        Log::error(
-            "OperationQueue::enqueueResumable: no file engine, cannot resume kind={} src={}",
-            static_cast<int>(op.kind),
-            op.src.generic_string()
-        );
+        Log::error("OperationQueue::enqueueResumable: no file engine, cannot resume an operation");
         return;
     }
 
-    Log::info(
-        "OperationQueue::enqueueResumable: dispatching kind={} src={} dst={}",
-        static_cast<int>(op.kind),
-        op.src.generic_string(),
-        op.dst.generic_string()
-    );
-
-    auto reportSingle = [kind = op.kind,
-                            src = op.src,
-                            dst = op.dst](std::optional<Ids::OperationId> const& opId, std::string const& info)
+    auto report = [](std::string description)
     {
-        if (opId)
+        return
+            [description = std::move(description)](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
-            Log::info(
-                "Resumed operation kind={} src={} dst={} as id {}",
-                static_cast<int>(kind),
-                src.generic_string(),
-                dst.generic_string(),
-                opId->value()
-            );
-        }
-        else
-        {
-            Log::error(
-                "Failed to re-enqueue operation kind={} src={} dst={}: {}",
-                static_cast<int>(kind),
-                src.generic_string(),
-                dst.generic_string(),
-                info
-            );
-        }
+            if (opId)
+                Log::info("Resumed {} as id {}", description, opId->value());
+            else
+                Log::error("Failed to resume {}: {}", description, info);
+        };
     };
 
-    // Build a minimal Item from a path.  The size hint biases the backend
-    // toward the streaming/big-file code path so a partial transfer can
-    // resume; the small-file path doesn't honour tryContinue.
-    auto makeItem = [](std::filesystem::path const& path)
-    {
-        SharedData::DirectoryEntry entry{};
-        entry.path = path;
-        entry.type = SharedData::FileType::Regular;
-        entry.size = static_cast<std::uint64_t>(Constants::bigFileCutOff) + 1;
-        return NuiFileExplorer::Item{entry};
-    };
+    // Resumes take the big-file path, the small-file path does not honour tryContinue.
+    constexpr auto resumeSize = static_cast<std::uint64_t>(Constants::bigFileCutOff) + 1;
 
     std::visit(
         Utility::overloaded{

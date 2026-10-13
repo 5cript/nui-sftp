@@ -15,8 +15,8 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         SharedData::OperationType type,
         ConfirmDialog& confirmDialog,
         long long max,
-        std::filesystem::path localPath,
-        std::filesystem::path remotePath,
+        Paths::LocalPath localPath,
+        Paths::RemotePath remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction,
@@ -53,8 +53,10 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         const bool isDownloadOrientation =
             type_ == SharedData::OperationType::Download ||
             type_ == SharedData::OperationType::ArchiveDownload;
-        const auto& srcPath = isDownloadOrientation ? remotePath_ : localPath_;
-        const auto& dstPath = isDownloadOrientation ? localPath_ : remotePath_;
+        const auto remoteText = remotePath_.value();
+        const auto localText = localPath_.toUtf8();
+        const auto& srcPath = isDownloadOrientation ? remoteText : localText;
+        const auto& dstPath = isDownloadOrientation ? localText : remoteText;
         const bool hasBothPaths = !srcPath.empty() && !dstPath.empty();
         const auto& solePath = srcPath.empty() ? dstPath : srcPath;
 
@@ -63,20 +65,20 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         {
             routeDiv = div{
                 class_ = "opq-transfer-route",
-                alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
+                alt = fmt::format("{} \u2192 {}", srcPath, dstPath)
             }(
-                span{class_ = "opq-route-segment"}(srcPath.generic_string()),
+                span{class_ = "opq-route-segment"}(srcPath),
                 span{class_ = "opq-route-arrow"}(Svgs::arrowRight()),
-                span{class_ = "opq-route-segment"}(dstPath.generic_string())
+                span{class_ = "opq-route-segment"}(dstPath)
             );
         }
         else
         {
             routeDiv = div{
                 class_ = "opq-transfer-route",
-                alt = solePath.generic_string()
+                alt = solePath
             }(
-                span{class_ = "opq-route-segment"}(solePath.generic_string())
+                span{class_ = "opq-route-segment"}(solePath)
             );
         }
 
@@ -133,27 +135,23 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
     {
         if (isCompletedState())
             return std::nullopt;
-        ResumableOp out;
         if (type_ == SharedData::OperationType::Download)
-        {
-            out.kind = ResumableOp::Kind::Download;
-            out.src = remotePath_;
-            out.dst = localPath_;
-        }
-        else
-        {
-            out.kind = ResumableOp::Kind::Upload;
-            out.src = localPath_;
-            out.dst = remotePath_;
-        }
-        out.allowOverwrite = true;
-        return out;
+            return Resumable::Download{
+                .source = remotePath_, .destination = localPath_, .allowOverwrite = allowOverwrite_
+            };
+        if (type_ == SharedData::OperationType::Upload)
+            return Resumable::Upload{.source = localPath_, .destination = remotePath_, .allowOverwrite = allowOverwrite_};
+        // An archive card does not know the entries it packs, so it cannot be redone.
+        return std::nullopt;
     }
 
   private:
     Components::ProgressBar progressBar_;
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
-    std::filesystem::path localPath_;
-    std::filesystem::path remotePath_;
+    /** @brief Empty for an archive upload. */
+    Paths::LocalPath localPath_;
+    bool allowOverwrite_{false};
+    /** @brief Unset for an archive download. */
+    Paths::RemotePath remotePath_;
     ScanPhaseStatus scanPhase_;
 };

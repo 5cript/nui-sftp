@@ -25,6 +25,17 @@ using namespace std::chrono_literals;
 
 namespace
 {
+    /**
+     * @brief No path instead of an unset one, which the frontend would refuse to read.
+     */
+    template <typename PathT>
+    std::optional<PathT> unlessEmpty(PathT path)
+    {
+        if (path.empty())
+            return std::nullopt;
+        return path;
+    }
+
     OperationQueue::OperationCompleted makeCompletedOperation(
         OperationQueue::CompletionReason reason,
         Ids::OperationId operationId,
@@ -51,7 +62,7 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
-                        .remotePath = op.remotePath(),
+                        .remotePath = unlessEmpty(op.remotePath()),
                         .error = error,
                     };
                 },
@@ -61,7 +72,7 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
-                        .localPath = op.localPath(),
+                        .localPath = unlessEmpty(op.localPath()),
                         .error = error,
                     };
                 },

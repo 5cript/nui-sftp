@@ -4,6 +4,7 @@
 #include <shared_data/shared_data.hpp>
 #include <shared_data/file_operations/operation_error.hpp>
 #include <utility/describe.hpp>
+#include <paths/paths.hpp>
 #include <utility/enum_string_convert.hpp>
 #include <shared_data/time_point.hpp>
 
@@ -22,8 +23,8 @@ namespace SharedData
         OperationCompletionReason reason;
         Ids::OperationId operationId;
         std::chrono::system_clock::time_point completionTime;
-        std::optional<std::filesystem::path> localPath{std::nullopt};
-        std::optional<std::filesystem::path> remotePath{std::nullopt};
+        std::optional<Paths::LocalPath> localPath{std::nullopt};
+        std::optional<Paths::RemotePath> remotePath{std::nullopt};
         std::optional<OperationError> error{std::nullopt};
         std::vector<std::pair<std::filesystem::path, OperationError>> failedEntries{};
     };

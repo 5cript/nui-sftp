@@ -13,7 +13,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
         SharedData::OperationType type,
-        std::filesystem::path removePath,
+        std::string displayPath,
+        Paths::RemotePath target,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction,
@@ -27,7 +28,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
               std::move(doDeletionCountdown),
               std::move(onCompleteAction)
           }
-        , removePath_{std::move(removePath)}
+        , displayPath_{std::move(displayPath)}
+        , target_{std::move(target)}
         , scanPhase_{scanning}
         , progressBar_({
               .height = std::string{progressHeight},
@@ -78,22 +80,12 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         // A local delete runs in this process and needs no connection to be redone.
         if (isCompletedState() || type_ == SharedData::OperationType::LocalDelete)
             return std::nullopt;
-        ResumableOp out;
-        // BulkDelete reuses this card class; differentiate so the resume
-        // routes to the backend's saved-entry-list path instead of the
-        // single-Delete frontend path.
+        // A bulk delete is re-issued by the backend from its own backup.
         if (type_ == SharedData::OperationType::BulkDelete)
-        {
-            out.kind = ResumableOp::Kind::BulkDelete;
-            out.operationId = operationId();
-        }
-        else
-        {
-            out.kind = ResumableOp::Kind::Delete;
-            out.recursive = true;
-        }
-        out.src = removePath_;
-        return out;
+            return Resumable::Bulk{.operationId = operationId()};
+        if (target_.empty())
+            return std::nullopt;
+        return Resumable::Delete{.target = target_, .recursive = recursive_};
     }
 
     Nui::ElementRenderer body() const override
@@ -110,7 +102,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
             div{}(
                 div{
                     class_ = "opq-transfer-route",
-                    alt = removePath_.generic_string()
+                    alt = displayPath_
                 }(
                     span{
                         class_ = "opq-route-segment"
@@ -118,11 +110,11 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                         observe(currentFile),
                         [this](){
                             if (type_ == SharedData::OperationType::BulkDelete)
-                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingSelectedIn")), removePath_.generic_string());
+                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingSelectedIn")), displayPath_);
                             if (type_ == SharedData::OperationType::LocalDelete)
                                 return fmt::format(fmt::runtime(language->get("operationQueue", "deletingLocallyIn")), displayPath_);
                             if (currentFile.value().empty())
-                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), removePath_.generic_string());
+                                return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), displayPath_);
                             return fmt::format(fmt::runtime(language->get("operationQueue", "deletingItem")), currentFile.value());
                         }
                     )
@@ -147,7 +139,9 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     Nui::Observed<std::string> currentFile{""};
     Nui::Observed<std::uint64_t> filesDeleted_{0ull};
     Nui::Observed<std::uint64_t> totalFiles_{0ull};
-    std::filesystem::path removePath_;
+    std::string displayPath_;
+    /** @brief The remote item a single delete removes, unset for local and bulk deletes. */
+    Paths::RemotePath target_;
     ScanPhaseStatus scanPhase_;
     Components::ProgressBar progressBar_;
 };

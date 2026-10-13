@@ -20,8 +20,8 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
         SharedData::OperationType type,
-        std::filesystem::path localPath,
-        std::filesystem::path remotePath,
+        Paths::LocalPath localPath,
+        Paths::RemotePath remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction,
@@ -134,21 +134,23 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
                     style = "flex-grow: 1; overflow: hidden; min-width: 0;"
                 }(
                     [this]() -> Nui::ElementRenderer {
-                        const auto& srcPath = type_ == SharedData::OperationType::BulkUpload ? localPath_ : remotePath_;
-                        const auto& dstPath = type_ == SharedData::OperationType::BulkUpload ? remotePath_ : localPath_;
+                        const auto localText = localPath_.toUtf8();
+                        const auto remoteText = remotePath_.value();
+                        const auto& srcPath = type_ == SharedData::OperationType::BulkUpload ? localText : remoteText;
+                        const auto& dstPath = type_ == SharedData::OperationType::BulkUpload ? remoteText : localText;
                         return div{
                             class_ = "opq-transfer-route",
-                            alt = fmt::format("{} → {}", srcPath.generic_string(), dstPath.generic_string())
+                            alt = fmt::format("{} → {}", srcPath, dstPath)
                         }(
                             span{
                                 class_ = "opq-route-segment"
-                            }(srcPath.generic_string()),
+                            }(srcPath),
                             span{
                                 class_ = "opq-route-arrow"
                             }(Svgs::arrowRight()),
                             span{
                                 class_ = "opq-route-segment"
-                            }(dstPath.generic_string())
+                            }(dstPath)
                         );
                     }()
                 ),
@@ -225,22 +227,7 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
     {
         if (isCompletedState())
             return std::nullopt;
-        ResumableOp out;
-        if (type_ == SharedData::OperationType::BulkDownload)
-        {
-            out.kind = ResumableOp::Kind::BulkDownload;
-            out.src = remotePath_;
-            out.dst = localPath_;
-        }
-        else
-        {
-            out.kind = ResumableOp::Kind::BulkUpload;
-            out.src = localPath_;
-            out.dst = remotePath_;
-        }
-        out.allowOverwrite = true;
-        out.operationId = operationId();
-        return out;
+        return Resumable::Bulk{.operationId = operationId()};
     }
 
   private:
@@ -353,8 +340,8 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
     }
 
   private:
-    std::filesystem::path localPath_;
-    std::filesystem::path remotePath_;
+    Paths::LocalPath localPath_;
+    Paths::RemotePath remotePath_;
     ScanPhaseStatus scanPhase_;
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
