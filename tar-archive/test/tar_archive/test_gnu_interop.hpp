@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <span>
 #include <sstream>
 #include <string>
@@ -108,6 +109,15 @@ namespace TarArchive::Test
             tarChecked_ = true;
             tarAvailable_ =
                 !tarBinary_.empty() && std::filesystem::exists(tarBinary_);
+            // GNU tar reads "C:/x" as the file x on a remote host named C unless told otherwise.
+            const auto versionOutput = gnuInteropDirectory() / "tar_version.txt";
+            if (tarAvailable_ && runShell(tarBinary_ + " --version", versionOutput) == 0)
+            {
+                std::ifstream stream{versionOutput};
+                const std::string version{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
+                if (version.find("GNU tar") != std::string::npos)
+                    tarBinary_ += " --force-local";
+            }
         }
 
         void SetUp() override
@@ -148,7 +158,7 @@ namespace TarArchive::Test
         }
 
         const int status = runShell(
-            tarBinary_ + " -tf '" + archivePath.string() + "'", listOutput
+            tarBinary_ + " -tf '" + archivePath.generic_string() + "'", listOutput
         );
         ASSERT_EQ(status, 0) << "tar -tf exited with non-zero status";
 
@@ -183,8 +193,8 @@ namespace TarArchive::Test
         }
 
         const std::string command =
-            tarBinary_ + " -xf '" + archivePath.string() +
-            "' -C '" + extractDir.string() + "'";
+            tarBinary_ + " -xf '" + archivePath.generic_string() +
+            "' -C '" + extractDir.generic_string() + "'";
         const int status = runShell(command, directory / "library_content.log");
         ASSERT_EQ(status, 0) << "tar -xf exited with non-zero status";
 
@@ -217,8 +227,8 @@ namespace TarArchive::Test
 
         const auto archivePath = directory / "tar_produced.tar";
 
-        std::string createCommand = tarBinary_ + " -cf '" + archivePath.string() + "' -C '" +
-                                    sourceTree.string() + "'";
+        std::string createCommand = tarBinary_ + " -cf '" + archivePath.generic_string() + "' -C '" +
+                                    sourceTree.generic_string() + "'";
         for (auto const& fixture : fixtures)
             createCommand += " " + fixture.name;
 
@@ -282,7 +292,7 @@ namespace TarArchive::Test
         }
 
         const int status = runShell(
-            tarBinary_ + " -tzf '" + archivePath.string() + "'", listOutput
+            tarBinary_ + " -tzf '" + archivePath.generic_string() + "'", listOutput
         );
         ASSERT_EQ(status, 0) << "tar -tzf exited with non-zero status";
 
