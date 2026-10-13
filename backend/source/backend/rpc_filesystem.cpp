@@ -6,6 +6,7 @@
 #include <utility/rename.hpp>
 #include <utility/rename_target.hpp>
 #include <backend/local_delete_guard.hpp>
+#include <backend/existence_check.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
@@ -665,26 +666,14 @@ void RpcFilesystem::registerDoesExistBatch()
         .perform(
             [](RpcHelper::RpcOnce&& reply, std::vector<std::string> const& paths)
             {
-                std::vector<bool> results;
-                results.reserve(paths.size());
-                for (auto const& pathUtf8 : paths)
+                auto results = localPathsExist(paths);
+                if (!results)
                 {
-                    std::error_code ec;
-                    const auto status = std::filesystem::exists(Utility::pathFromUtf8(pathUtf8), ec);
-                    if (ec)
-                    {
-                        Log::warn(
-                            "RpcFilesystem::existsBatch: stat failed for '{}': {} (treating as not-exists)",
-                            pathUtf8,
-                            ec.message()
-                        );
-                        results.push_back(false);
-                        continue;
-                    }
-                    results.push_back(status);
+                    Log::error("RpcFilesystem::existsBatch: {}", results.error());
+                    return reply.error(results.error());
                 }
                 Log::info("RpcFilesystem::existsBatch: probed {} paths", paths.size());
-                return reply({{"success", true}, {"exists", results}});
+                return reply({{"success", true}, {"exists", *results}});
             }
         );
 }

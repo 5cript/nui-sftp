@@ -1,4 +1,5 @@
 #include <backend/session.hpp>
+#include <backend/existence_check.hpp>
 
 #include <utility/path_utf.hpp>
 #include <paths/paths.hpp>
@@ -1904,9 +1905,9 @@ void Session::registerRpcSftpExistsBatch()
 {
     // Batched existence probe over SFTP.  Lets the frontend ask whether N
     // remote paths exist in a single round-trip — eliminates the per-file
-    // SFTP stat latency that made multi-file uploads feel slow.  Stat
-    // failures degrade to "not exists" per-entry rather than failing the
-    // whole batch (mirrors RpcFilesystem::existsBatch on the local side).
+    // SFTP stat latency that made multi-file uploads feel slow.  Only "no such
+    // file" is absent, any other failure fails the whole batch: the frontend
+    // overwrites what it takes for absent.
     on(fmt::format("Session::{}::sftp::existsBatch", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -1921,21 +1922,14 @@ void Session::registerRpcSftpExistsBatch()
                     Ids::makeChannelId(channelIdString),
                     [paths](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        // Small drops: a handful of stat round-trips is cheaper than reading
-                        // a potentially huge target directory in full. Above the threshold the
-                        // single readdir below wins (one round-trip instead of N).
-                        constexpr std::size_t listingThreshold = 10;
-                        if (paths.size() < listingThreshold)
+                        auto results = remotePathsExist(*channel, paths, futureTimeout);
+                        if (!results)
                         {
                             Log::error("sftp::existsBatch: {}", results.error());
                             return reply.error(results.error());
                         }
-                        Log::info(
-                            "sftp::existsBatch: probed {} paths across {} dir listing(s)",
-                            paths.size(),
-                            listingByParent.size()
-                        );
-                        reply({{"success", true}, {"exists", results}});
+                        Log::info("sftp::existsBatch: probed {} paths", paths.size());
+                        reply({{"success", true}, {"exists", *results}});
                     },
                     std::move(reply)
                 );

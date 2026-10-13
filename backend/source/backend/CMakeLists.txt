@@ -5,6 +5,7 @@ add_library(
         session.cpp
         rpc_filesystem.cpp
         local_delete_guard.cpp
+        existence_check.cpp
         rpc_system.cpp
         theme_finder.cpp
         dropped_entry.cpp
