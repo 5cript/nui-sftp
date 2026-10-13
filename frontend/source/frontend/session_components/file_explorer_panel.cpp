@@ -266,7 +266,7 @@ Nui::ElementRenderer FileExplorerPanel::makeFileExplorerElement()
 
 void FileExplorerPanel::onDrop(
     bool isLocalSide,
-    std::vector<SharedData::DirectoryEntry> entries,
+    std::vector<SharedData::DroppedItem> entries,
     std::optional<std::string> const& subdir
 )
 {
@@ -290,7 +290,7 @@ void FileExplorerPanel::onDrop(
         std::make_move_iterator(begin(entries)),
         std::make_move_iterator(end(entries)),
         std::back_inserter(items),
-        [](SharedData::DirectoryEntry const& entry)
+        [](SharedData::DroppedItem const& dropped)
         {
             return NuiFileExplorer::Item::dropped(dropped.entry, dropped.path.toUtf8());
         }

@@ -74,7 +74,7 @@ RemoteSideModel::RemoteSideModel(
                       for (auto&& entry : std::move(*entries))
                       {
                           if (entry.isDirectory())
-                              listing.emplace_back(std::move(entry).path);
+                              listing.emplace_back(std::move(entry).name);
                       }
 
                       onResultsAvailable(listing);
@@ -326,9 +326,6 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
         return;
     }
 
-    if (item.path == ".")
-        return;
-
     // The item's own path, the side may already be loading another directory.
     Log::debug("Remote onActivateItem: {}.", item.displayName());
     navigateTo(item.fullPath.empty() ? currentPath_.value() / item.name : item.fullPath);
@@ -573,13 +570,13 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         confirmText = fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteMultipleConfirm")), itemSize);
     else
         confirmText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().path.generic_string()
+            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().name
         );
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
     {
-        listItems.push_back({item.path.generic_string(), ""});
+        listItems.push_back({item.name, item.fullPath.generic_string()});
     }
 
     confirmDialog_->open(
@@ -1132,7 +1129,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
     }
 
     const auto defaultStem =
-        items.size() == 1 ? items.front().path.filename().generic_string() : language->get("fileExplorer", "archiveDefaultName");
+        items.size() == 1 ? items.front().name : language->get("fileExplorer", "archiveDefaultName");
 
     archiveTransferDialog_->open({
         .headerText = language->get("fileExplorer", "contextMenu", "downloadAsArchive"),
@@ -1238,7 +1235,7 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
-    Log::info("Rename item requested: {}", item.path.generic_string());
+    Log::info("Rename item requested: {}", item.name);
 
     // The item's own path: the explorer may already show another directory.
     auto from = remotePathOf(item);
@@ -1248,17 +1245,17 @@ void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
     inputDialog_->open({
         .whatFor = language->get("remoteSideModel", "rename"),
         .prompt =
-            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.path.filename().string()),
+            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.name),
         .headerText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()
+            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.name
         ),
-        .initialValue = item.path.filename().string(),
+        .initialValue = item.name,
         .isPassword = false,
         .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
         {
             if (!name || name->empty())
                 return;
-            if (*name == item.path.filename().string())
+            if (*name == item.name)
                 return;
             if (!isValidItemName(*name))
                 return showInvalidItemName(*name);
@@ -1277,9 +1274,14 @@ void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
-    Log::info("Properties requested: {}", item.path.generic_string());
+    Log::info("Properties requested: {}", item.name);
 
-    filePropertyDialog_->open(static_cast<SharedData::DirectoryEntry const&>(item));
+    const auto path = remotePathOf(item);
+    filePropertyDialog_->open(
+        static_cast<SharedData::DirectoryEntry const&>(item),
+        path ? path->value() : item.displayName(),
+        item.linkTarget.value_or(std::string{})
+    );
 }
 
 void RemoteSideModel::navigateTo(std::filesystem::path const& path)
@@ -1594,7 +1596,7 @@ void RemoteSideModel::placesFromHomeListing()
                     {
                         const bool isDirectory = entry.isDirectory() ||
                             (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
-                        return isDirectory && entry.path.filename().generic_string() == place.directoryName;
+                        return isDirectory && entry.name == place.directoryName;
                     }
                 );
                 if (exists)

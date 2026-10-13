@@ -51,11 +51,10 @@ LocalSideModel::LocalSideModel(
 
               Nui::val args = Nui::val::object();
               args.set("path", dirPath.generic_string());
-              args.set("fileNameOnly", false);
 
               Nui::RpcClient::callWithBackChannel(
                   "RpcFilesystem::listFiles",
-                  [onResultsAvailable = std::move(onResultsAvailable)](Nui::val val)
+                  [dirPath, onResultsAvailable = std::move(onResultsAvailable)](Nui::val val)
                   {
                       if (!val.hasOwnProperty("success"))
                       {
@@ -82,7 +81,7 @@ LocalSideModel::LocalSideModel(
                           if (static_cast<std::filesystem::file_type>(file["type"].as<int>()) ==
                               std::filesystem::file_type::directory)
                           {
-                              listing.emplace_back(file["path"].as<std::string>());
+                              listing.emplace_back(dirPath / file["name"].as<std::string>());
                           }
                       }
 
@@ -492,7 +491,8 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
     {
-        listItems.push_back({item.path.generic_string(), ""});
+        listItems.push_back({item.name, item.fullPath.generic_string()});
+        anyDirectory = anyDirectory || item.type == NuiFileExplorer::Item::Type::Directory;
     }
 
     confirmDialog_->open(
@@ -769,16 +769,16 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 
     inputDialog_->open({
         .whatFor = language->get("remoteSideModel", "rename"),
-        .prompt = fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.path.filename().string()),
+        .prompt = fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.name),
         .headerText =
-            fmt::format(fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()),
-        .initialValue = item.path.filename().string(),
+            fmt::format(fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.name),
+        .initialValue = item.name,
         .isPassword = false,
         .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
         {
             if (!name || name->empty())
                 return;
-            if (*name == item.path.filename().string())
+            if (*name == item.name)
                 return;
             if (!isValidItemName(*name))
                 return showInvalidItemName(*name);
@@ -809,11 +809,11 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::properties",
-        [this, fallback = std::move(fallback)](Nui::val val) mutable
+        [this, fallback = std::move(fallback), displayPath = path->toUtf8()](Nui::val val) mutable
         {
-            const auto useFallback = [this, &fallback]()
+            const auto useFallback = [this, &fallback, &displayPath]()
             {
-                filePropertyDialog_->open(fallback);
+                filePropertyDialog_->open(fallback, displayPath);
             };
 
             if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
@@ -859,7 +859,7 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                 };
 
                 SharedData::DirectoryEntry out{
-                    .path = source["path"].template as<std::string>(),
+                    .name = source["name"].template as<std::string>(),
                     .type = SharedData::fileTypeFromStdFilesystemType(
                         static_cast<std::filesystem::file_type>(source["type"].template as<int>())
                     ),
@@ -895,7 +895,10 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                     full.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(extractFull(target));
             }
 
-            filePropertyDialog_->open(full);
+            std::string resolvedPath{};
+            if (val.hasOwnProperty("resolvedPath") && val["resolvedPath"].isString())
+                resolvedPath = val["resolvedPath"].as<std::string>();
+            filePropertyDialog_->open(full, displayPath, std::move(resolvedPath));
         },
         args
     );
@@ -934,7 +937,6 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
 
     Nui::val args = Nui::val::object();
     args.set("path", currentPath_.value().generic_string());
-    args.set("fileNameOnly", true);
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::listFiles",
@@ -1019,7 +1021,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 };
 
                 SharedData::DirectoryEntry entry{
-                    .path = source["path"].template as<std::string>(),
+                    .name = source["name"].template as<std::string>(),
                     .type = SharedData::fileTypeFromStdFilesystemType(
                         static_cast<std::filesystem::file_type>(source["type"].template as<int>())
                     ),
@@ -1407,7 +1409,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
 
 void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
 {
-    Log::info("Open item requested: {}. Open with: {}", item.path.generic_string(), openWith);
+    Log::info("Open item requested: {}. Open with: {}", item.name, openWith);
     auto path = localPathOf(item);
     if (!path)
         return showPathRefused(language->get("localSideModel", "failedToOpenFile"), path.error());
@@ -1542,7 +1544,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
     }
 
     const auto defaultStem =
-        items.size() == 1 ? items.front().path.filename().generic_string() : language->get("fileExplorer", "archiveDefaultName");
+        items.size() == 1 ? items.front().name : language->get("fileExplorer", "archiveDefaultName");
 
     archiveTransferDialog_->open({
         .headerText = language->get("fileExplorer", "contextMenu", "uploadAsArchive"),

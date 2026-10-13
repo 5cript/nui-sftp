@@ -1,19 +1,11 @@
 #include <shared_data/directory_entry.hpp>
 
-#include <utility/path_utf.hpp>
-
 namespace SharedData
 {
-    // Paths cross the RPC boundary as UTF-8. In-memory they are std::filesystem::path (native
-    // encoding: UTF-16 on Windows, UTF-8 on POSIX), so conversion happens here and nowhere else.
-    // Default nlohmann serialization of fs::path on MSVC uses path.string(), which goes through
-    // the active code page — that would corrupt any non-ASCII character, hence the explicit
-    // Utility::pathToUtf8Generic / pathFromUtf8 calls.
-
     void to_json(nlohmann::json& j, DirectoryEntry const& entry)
     {
         j = nlohmann::json{
-            {"path", Utility::pathToUtf8Generic(entry.path)},
+            {"name", entry.name},
             {"type", entry.type},
             {"size", entry.size},
             {"permissions", entry.permissions},
@@ -52,7 +44,7 @@ namespace SharedData
                 found->get_to(target);
         };
 
-        entry.path = Utility::pathFromUtf8(j.at("path").get<std::string>());
+        j.at("name").get_to(entry.name);
         j.at("type").get_to(entry.type);
         getOptional("flags", entry.flags);
         getOptional("size", entry.size);

@@ -372,7 +372,6 @@ void RpcFilesystem::registerListFiles()
                 }
 
                 auto directoryPath = Utility::pathFromUtf8(parameters["path"].get<std::string>());
-                const auto fileNameOnly = parameters.value("fileNameOnly", false);
                 nlohmann::json fileList = nlohmann::json::array();
 
 #ifdef _WIN32
@@ -399,7 +398,7 @@ void RpcFilesystem::registerListFiles()
                     const auto entryPath = entry.path();
 
                     SharedData::DirectoryEntry dirEntry{};
-                    dirEntry.path = fileNameOnly ? entryPath.filename() : entryPath;
+                    dirEntry.name = Paths::nativeToUtf8(entryPath.filename());
                     dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
                     dirEntry.permissions = entry.symlink_status().permissions();
 
@@ -535,7 +534,8 @@ void RpcFilesystem::registerProperties()
                 const auto path = Utility::pathFromUtf8(parameters["path"].get<std::string>());
 
                 SharedData::DirectoryEntry entry{};
-                entry.path = path;
+                entry.name = Paths::nativeToUtf8(path.filename());
+                std::string resolvedPath{};
 
                 std::error_code symEc;
                 const auto symStatus = std::filesystem::symlink_status(path, symEc);
@@ -565,9 +565,12 @@ void RpcFilesystem::registerProperties()
 
                     auto resolved = std::make_shared<SharedData::DirectoryEntry>();
                     std::error_code pathEc;
-                    auto canonical = std::filesystem::canonical(path, pathEc);
+                    const auto canonical = std::filesystem::canonical(path, pathEc);
                     if (!pathEc)
-                        resolved->path = std::move(canonical);
+                    {
+                        resolvedPath = Paths::nativeToUtf8(canonical);
+                        resolved->name = Paths::nativeToUtf8(canonical.filename());
+                    }
                     else if (entry.linkTarget.has_value())
                         resolvedPath = *entry.linkTarget;
 
@@ -591,7 +594,13 @@ void RpcFilesystem::registerProperties()
                 }
 
                 Log::info("Successfully retrieved properties for path '{}'", Utility::pathToUtf8Generic(path));
-                return reply({{"success", true}, {"entry", nlohmann::json(entry)}});
+                // The paths go along for display, the entries carry names only.
+                return reply(
+                    {{"success", true},
+                     {"entry", nlohmann::json(entry)},
+                     {"path", Paths::nativeToUtf8(path)},
+                     {"resolvedPath", resolvedPath}}
+                );
             }
         );
 }

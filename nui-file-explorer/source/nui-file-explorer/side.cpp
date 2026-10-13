@@ -177,10 +177,10 @@ namespace NuiFileExplorer
                 {
                     // If only a single item is selected and its a directory, set that as the target subdir for the
                     // transfer. Otherwise, transfer to the current directory.
-                    std::optional<std::filesystem::path> targetSubdir = std::nullopt;
+                    std::optional<std::string> targetSubdir = std::nullopt;
                     auto selectedItems = this->selectedItems();
                     if (selectedItems.size() == 1 && selectedItems.front().isDirectory())
-                        targetSubdir = selectedItems.front().path.filename();
+                        targetSubdir = selectedItems.front().name;
                     impl_->otherSide->model().onTransfer(copiedFiles, targetSubdir);
                 }
             }
@@ -351,7 +351,7 @@ namespace NuiFileExplorer
                 }
             );
         for (auto const& item : visibleItems)
-            pathSet.insert(item.path);
+            pathSet.insert(item.fullPath);
         std::ranges::transform(
             visibleItems,
             std::back_inserter(impl_->items.value()),
@@ -591,7 +591,7 @@ namespace NuiFileExplorer
 
         if (item != nullptr)
         {
-            Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
+            Nui::WebApi::Console::log("Context menu item: ", item->item.displayName());
             auto selected = selectedItems();
 
             if (std::find_if(
@@ -599,7 +599,7 @@ namespace NuiFileExplorer
                     selected.end(),
                     [&item](auto const& sel)
                     {
-                        return sel.path == item->item.path;
+                        return sel.fullPath == item->item.fullPath;
                     }
                 ) == selected.end())
             {
@@ -713,7 +713,7 @@ namespace NuiFileExplorer
             result.begin(),
             [](auto const& item)
             {
-                return item.path;
+                return item.fullPath;
             }
         );
         return result;

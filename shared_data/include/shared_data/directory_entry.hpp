@@ -87,7 +87,12 @@ namespace SharedData
     {
         using FileType = SharedData::FileType;
 
-        std::filesystem::path path{};
+        /**
+         * @brief The name as listed, UTF-8. A server or a hostile local name can be anything, like "..", "x/.." or
+         *        empty, so it only becomes part of a path through Paths::PathSegment::make. Empty for the root of a
+         *        walk and for stat results.
+         */
+        std::string name{};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
         std::uint64_t size{0};

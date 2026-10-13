@@ -253,7 +253,7 @@ std::string Session::layoutId() const
 
 void Session::onDrop(
     bool isLocalSide,
-    std::vector<SharedData::DirectoryEntry> entries,
+    std::vector<SharedData::DroppedItem> entries,
     std::optional<std::string> const& subdir
 )
 {

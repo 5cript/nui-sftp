@@ -114,7 +114,7 @@ namespace NuiFileExplorer
     {
         const auto& vec = items_->value();
         for (std::size_t i = 0; i < vec.size(); ++i)
-            if (vec[i].item.path == path)
+            if (vec[i].item.fullPath == path)
                 return i;
         return std::nullopt;
     }
@@ -327,7 +327,7 @@ namespace NuiFileExplorer
         std::set<std::filesystem::path> result;
         for (auto const& item : items_->value())
             if (item.isSelected())
-                result.insert(item.item.path);
+                result.insert(item.item.fullPath);
         return result;
     }
 

@@ -80,7 +80,7 @@ namespace NuiFileExplorer
 
         DropEventResult result;
         if (droppedOnItem && droppedOnItem->type == Item::Type::Directory)
-            result.internalDropSubdir = droppedOnItem->path.filename().string();
+            result.internalDropSubdir = droppedOnItem->name;
 
         const auto files = dataTransferOpt->files();
         if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)

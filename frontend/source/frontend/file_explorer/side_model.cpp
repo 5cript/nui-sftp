@@ -156,11 +156,9 @@ void SideModel::onDirectoryListing(
                     if (type == NuiFileExplorer::Item::Type::BlockDevice)
                         return "nui://app.example/icons/hard-drive.svg";
 
-                    if (uiOptions_.fileGridExtensionIcons.contains(entry.path.extension().string()))
-                    {
-                        return "nui://app.example/" +
-                            uiOptions_.fileGridExtensionIcons.at(entry.path.extension().string());
-                    }
+                    const auto extension = std::filesystem::path{entry.name}.extension().string();
+                    if (uiOptions_.fileGridExtensionIcons.contains(extension))
+                        return "nui://app.example/" + uiOptions_.fileGridExtensionIcons.at(extension);
 
                     return "nui://app.example/icons/file.svg";
                 }()

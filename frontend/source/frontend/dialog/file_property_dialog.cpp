@@ -50,17 +50,22 @@ struct FilePropertyDialog::Implementation
 {
     std::string id;
     Nui::Observed<SharedData::DirectoryEntry> entry;
+    Nui::Observed<std::string> path;
     Nui::Observed<SharedData::DirectoryEntry> targetEntry;
+    Nui::Observed<std::string> targetPath;
     std::shared_ptr<Nui::Observed<int>> carouselPage;
     std::unique_ptr<Snc::Carousel> carousel;
     Snc::Dialog dialog;
 
-    Nui::ElementRenderer renderEntrySection(Nui::Observed<SharedData::DirectoryEntry>& obs);
+    Nui::ElementRenderer
+    renderEntrySection(Nui::Observed<SharedData::DirectoryEntry>& obs, Nui::Observed<std::string>& pathObs);
 
     Implementation(std::string ident)
         : id{std::move(ident)}
         , entry{}
+        , path{}
         , targetEntry{}
+        , targetPath{}
         , carouselPage{std::make_shared<Nui::Observed<int>>(0)}
         , carousel{[this]()
                    {
@@ -69,8 +74,8 @@ struct FilePropertyDialog::Implementation
                            [this](int page) -> Nui::ElementRenderer
                            {
                                if (page == 0)
-                                   return renderEntrySection(entry);
-                               return renderEntrySection(targetEntry);
+                                   return renderEntrySection(entry, path);
+                               return renderEntrySection(targetEntry, targetPath);
                            },
                            1
                        );
@@ -93,7 +98,9 @@ struct FilePropertyDialog::Implementation
 };
 
 Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
-    Nui::Observed<SharedData::DirectoryEntry>& obs)
+    Nui::Observed<SharedData::DirectoryEntry>& obs,
+    Nui::Observed<std::string>& pathObs
+)
 {
     using namespace Nui::Elements;
     using namespace Nui::Attributes;
@@ -107,8 +114,8 @@ Nui::ElementRenderer FilePropertyDialog::Implementation::renderEntrySection(
         div{}(
             span{}(language->getObserved("filePropertyDialog", "path")),
             Snc::textInput(Snc::TextInputOptions{
-                .value = observe(obs).generate([](SharedData::DirectoryEntry const& entry) {
-                    return entry.path.generic_string();
+                .value = observe(pathObs).generate([](std::string const& path) {
+                    return path;
                 }),
                 .attributes = {readOnly = true},
             })
@@ -206,9 +213,11 @@ FilePropertyDialog::FilePropertyDialog(std::string id)
     : impl_{std::make_unique<Implementation>(std::move(id))}
 {}
 
-void FilePropertyDialog::open(SharedData::DirectoryEntry const& entry)
+void FilePropertyDialog::open(SharedData::DirectoryEntry const& entry, std::string path, std::string targetPath)
 {
     impl_->entry = entry;
+    impl_->path = std::move(path);
+    impl_->targetPath = std::move(targetPath);
     *impl_->carouselPage = 0;
     if (entry.resolvedTarget)
     {

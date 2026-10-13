@@ -92,8 +92,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
     {
         entries.erase(
             std::remove_if(entries.begin(), entries.end(), [](SharedData::DirectoryEntry const& entry) {
-                const auto name = entry.path.filename().string();
-                return !name.empty() && name.front() == '.';
+                return !entry.name.empty() && entry.name.front() == '.';
             }),
             entries.end()
         );
@@ -104,7 +103,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
 
     for (auto const& entry : entries)
     {
-        const auto name = entry.path.generic_string();
+        auto const& name = entry.name;
         if (name != ".gitignore" && name != ".ignore")
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)

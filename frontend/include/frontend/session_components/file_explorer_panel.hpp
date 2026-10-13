@@ -3,6 +3,7 @@
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/ui_options.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/dropped_item.hpp>
 
 #include <nui-file-explorer/side.hpp>
 
@@ -111,7 +112,7 @@ class FileExplorerPanel
      */
     void onDrop(
         bool isLocalSide,
-        std::vector<SharedData::DirectoryEntry> entries,
+        std::vector<SharedData::DroppedItem> entries,
         std::optional<std::string> const& subdir
     );
 

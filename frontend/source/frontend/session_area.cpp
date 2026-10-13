@@ -238,7 +238,7 @@ void SessionArea::registerRpc()
 
             session->onDrop(
                 isLeft,
-                json.value("entries", nlohmann::json::array()).get<std::vector<SharedData::DirectoryEntry>>(),
+                json.value("entries", nlohmann::json::array()).get<std::vector<SharedData::DroppedItem>>(),
                 subdir
             );
         }

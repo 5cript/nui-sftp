@@ -148,13 +148,9 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
                     linkTarget = Paths::nativeToUtf8(target);
             }
 
-            const auto filename = entry.path().filename();
-            if (ignoreHidden_)
-            {
-                const auto name = filename.string();
-                if (!name.empty() && name.front() == '.')
-                    continue;
-            }
+            const auto name = Paths::nativeToUtf8(entry.path().filename());
+            if (ignoreHidden_ && !name.empty() && name.front() == '.')
+                continue;
             if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
             {
                 // A name that is no segment cannot match a rule, the walker rejects it.
@@ -166,7 +162,7 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
 
             entries.push_back(
                 SharedData::DirectoryEntry{
-                    .path = filename,
+                    .name = name,
                     .type = type,
                     .size = entry.is_regular_file() ? entry.file_size() : 0,
                     .permissions = Utility::localPermissions(status),
