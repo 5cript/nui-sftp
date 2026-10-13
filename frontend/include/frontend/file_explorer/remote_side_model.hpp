@@ -132,12 +132,7 @@ class RemoteSideModel
         std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted = nullptr
     );
 
-    void enqueueSingleDownload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
-        bool allowOverwrite,
-        bool insertRefresh
-    );
+    void enqueueSingleDownload(SharedData::BulkDownloadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
     void askNonEmptyDirectoryDeletions(
         std::vector<Paths::RemotePath> confirmedToDelete,

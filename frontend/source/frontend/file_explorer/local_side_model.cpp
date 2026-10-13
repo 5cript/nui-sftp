@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/local_side_model.hpp>
+#include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
@@ -1079,8 +1080,7 @@ void LocalSideModel::uploadItemsConfirmed(
         if (accepted->size() == 1 && !accepted->front().isDirectory)
         {
             enqueueSingleUpload(
-                NuiFileExplorer::Item{remoteEntry},
-                NuiFileExplorer::Item{localEntry},
+                accepted->front(),
                 /*allowOverwrite=*/true,
                 /*insertRefresh=*/true
             );
@@ -1234,16 +1234,16 @@ void LocalSideModel::uploadItemsConfirmed(
 }
 
 void LocalSideModel::enqueueSingleUpload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    SharedData::BulkUploadEntry const& entry,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
     operationQueue_->enqueueUpload(
-        remoteItem,
-        localItem,
-        [this, localItem](std::optional<Ids::OperationId> const& opId, std::string const& info)
+        entry.source,
+        entry.destination,
+        entry.sizeBytes,
+        [this, source = entry.source](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
             if (!opId)
             {
@@ -1252,9 +1252,7 @@ void LocalSideModel::enqueueSingleUpload(
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = "",
                     .text = fmt::format(
-                        fmt::runtime(language->get("localSideModel", "failedToEnqueueUpload")),
-                        localItem.path.generic_string(),
-                        info
+                        fmt::runtime(language->get("localSideModel", "failedToEnqueueUpload")), source.toUtf8(), info
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });
@@ -1522,10 +1520,15 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
     // Files go straight in; directories are flattened on the backend via
     // std::filesystem::recursive_directory_iterator inside the upload op's
     // prepareInStrand step.
-    std::vector<std::filesystem::path> localPaths;
+    std::vector<Paths::LocalPath> localPaths;
     localPaths.reserve(items.size());
     for (auto const& item : items)
-        localPaths.push_back(currentPath_.value() / item.path);
+    {
+        auto localPath = localPathOf(item);
+        if (!localPath)
+            return showPathRefused(language->get("localSideModel", "archiveUploadFailed"), localPath.error());
+        localPaths.push_back(*std::move(localPath));
+    }
 
     if (localPaths.empty())
         return;
@@ -1549,7 +1552,20 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
                 return;
 
             const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
-            const auto remotePath = remoteModel_->currentPath().value() / filename;
+            auto archivePath = remoteModel_->currentRemotePath().and_then(
+                [&filename](Paths::RemotePath const& directory)
+                {
+                    return Paths::PathSegment::make(filename).transform(
+                        [&directory](Paths::PathSegment const& segment)
+                        {
+                            return directory / segment;
+                        }
+                    );
+                }
+            );
+            if (!archivePath)
+                return showPathRefused(language->get("localSideModel", "archiveUploadFailed"), archivePath.error());
+            const auto remotePath = *std::move(archivePath);
 
             operationQueue_->enqueueArchiveUpload(
                 std::move(paths),
@@ -1571,9 +1587,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
                         });
                         return;
                     }
-                    Log::info(
-                        "Archive upload queued as {} (destination {})", opId->value(), remotePath.generic_string()
-                    );
+                    Log::info("Archive upload queued as {} (destination {})", opId->value(), remotePath.value());
                 }
             );
         },

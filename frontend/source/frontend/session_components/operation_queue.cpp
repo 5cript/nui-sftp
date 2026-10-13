@@ -2140,8 +2140,9 @@ Nui::ElementRenderer OperationQueue::operator()()
 }
 
 void OperationQueue::enqueueDownload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    Paths::RemotePath const& source,
+    Paths::LocalPath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
@@ -2156,16 +2157,22 @@ void OperationQueue::enqueueDownload(
         return;
     }
 
-    Log::info(
-        "Frontend Operation Queue download: {} -> {}", remoteItem.path.generic_string(), localItem.path.generic_string()
-    );
+    Log::info("Frontend Operation Queue download: {} -> {}", source.value(), destination.toUtf8());
     impl_->fileEngine->addDownload(
-        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+        source,
+        destination,
+        sizeBytes,
+        std::move(onComplete),
+        allowOverwrite,
+        insertRefresh,
+        createMissingDirectories,
+        mode
     );
 }
 void OperationQueue::enqueueUpload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    Paths::LocalPath const& source,
+    Paths::RemotePath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
@@ -2180,16 +2187,21 @@ void OperationQueue::enqueueUpload(
         return;
     }
 
-    Log::info(
-        "Frontend Operation Queue upload: {} -> {}", localItem.path.generic_string(), remoteItem.path.generic_string()
-    );
+    Log::info("Frontend Operation Queue upload: {} -> {}", source.toUtf8(), destination.value());
     impl_->fileEngine->addUpload(
-        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+        source,
+        destination,
+        sizeBytes,
+        std::move(onComplete),
+        allowOverwrite,
+        insertRefresh,
+        createMissingDirectories,
+        mode
     );
 }
 void OperationQueue::enqueueArchiveDownload(
     std::vector<SharedData::DirectoryEntry> entries,
-    std::filesystem::path const& localArchivePath,
+    Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -2207,7 +2219,7 @@ void OperationQueue::enqueueArchiveDownload(
     Log::info(
         "Frontend Operation Queue archive download: {} entries → {} (codec={}, level={})",
         entries.size(),
-        localArchivePath.generic_string(),
+        localArchivePath.toUtf8(),
         compressionCodec,
         compressionLevel
     );
@@ -2227,8 +2239,8 @@ void OperationQueue::enqueueArchiveDownload(
 }
 
 void OperationQueue::enqueueArchiveUpload(
-    std::vector<std::filesystem::path> localPaths,
-    std::filesystem::path const& remoteArchivePath,
+    std::vector<Paths::LocalPath> localPaths,
+    Paths::RemotePath const& remoteArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -2246,7 +2258,7 @@ void OperationQueue::enqueueArchiveUpload(
     Log::info(
         "Frontend Operation Queue archive upload: {} paths → {} (codec={}, level={})",
         localPaths.size(),
-        remoteArchivePath.generic_string(),
+        remoteArchivePath.value(),
         compressionCodec,
         compressionLevel
     );
@@ -2266,8 +2278,8 @@ void OperationQueue::enqueueArchiveUpload(
 }
 
 void OperationQueue::enqueueRename(
-    std::filesystem::path const& oldPath,
-    std::filesystem::path const& newPath,
+    Paths::RemotePath const& oldPath,
+    Paths::RemotePath const& newPath,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     SharedData::OperationMode mode
 )
@@ -2279,7 +2291,7 @@ void OperationQueue::enqueueRename(
         return;
     }
 
-    Log::info("Frontend Operation Queue rename: {} -> {}", oldPath.generic_string(), newPath.generic_string());
+    Log::info("Frontend Operation Queue rename: {} -> {}", oldPath.value(), newPath.value());
     impl_->fileEngine->addRename(oldPath, newPath, std::move(onComplete), mode);
 }
 void OperationQueue::enqueueDelete(

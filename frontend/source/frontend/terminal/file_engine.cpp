@@ -479,8 +479,9 @@ void FileEngine::closeSyncSession(Ids::SyncSessionId syncSessionId)
 }
 
 void FileEngine::addDownload(
-    NuiFileExplorer::Item const& remotePath,
-    NuiFileExplorer::Item const& localPath,
+    Paths::RemotePath const& source,
+    Paths::LocalPath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh,
@@ -488,13 +489,12 @@ void FileEngine::addDownload(
     SharedData::OperationMode mode
 )
 {
-    Log::info(
-        "Requesting to add download: {} -> {}", remotePath.path.generic_string(), localPath.path.generic_string()
-    );
+    Log::info("Requesting to add download: {} -> {}", source.value(), destination.toUtf8());
     lazyOpen(
         [this,
-            remotePath,
-            localPath,
+            source,
+            destination,
+            sizeBytes,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
             insertRefresh,
@@ -511,10 +511,7 @@ void FileEngine::addDownload(
             const auto operationId = Ids::generateOperationId();
 
             Log::info(
-                "Adding download (with ID '{}'): {} -> {}",
-                operationId.value(),
-                remotePath.path.generic_string(),
-                localPath.path.generic_string()
+                "Adding download (with ID '{}'): {} -> {}", operationId.value(), source.value(), destination.toUtf8()
             );
 
             Nui::RpcClient::callWithBackChannel(
@@ -533,10 +530,10 @@ void FileEngine::addDownload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                (!remotePath.fullPath.empty() ? remotePath.fullPath : remotePath.path).generic_string(),
-                (!localPath.fullPath.empty() ? localPath.fullPath : localPath.path).generic_string(),
+                source.value(),
+                destination.toUtf8(),
                 allowOverwrite,
-                remotePath.size > Constants::bigFileCutOff,
+                sizeBytes > Constants::bigFileCutOff,
                 insertRefresh,
                 createMissingDirectories,
                 static_cast<int>(mode)
@@ -547,7 +544,7 @@ void FileEngine::addDownload(
 
 void FileEngine::addArchiveDownload(
     std::vector<SharedData::DirectoryEntry> entries,
-    std::filesystem::path const& localArchivePath,
+    Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -558,7 +555,7 @@ void FileEngine::addArchiveDownload(
     Log::info(
         "Requesting archive download: {} entries → {} (codec={}, level={})",
         entries.size(),
-        localArchivePath.generic_string(),
+        localArchivePath.toUtf8(),
         compressionCodec,
         compressionLevel
     );
@@ -604,7 +601,7 @@ void FileEngine::addArchiveDownload(
                 channelId.value().value(),
                 operationId.value(),
                 entriesJson.dump(),
-                localArchivePath.generic_string(),
+                localArchivePath.toUtf8(),
                 compressionCodec,
                 compressionLevel,
                 mayOverwrite,
@@ -615,8 +612,8 @@ void FileEngine::addArchiveDownload(
 }
 
 void FileEngine::addArchiveUpload(
-    std::vector<std::filesystem::path> localPaths,
-    std::filesystem::path const& remoteArchivePath,
+    std::vector<Paths::LocalPath> localPaths,
+    Paths::RemotePath const& remoteArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -627,7 +624,7 @@ void FileEngine::addArchiveUpload(
     Log::info(
         "Requesting archive upload: {} paths → {} (codec={}, level={})",
         localPaths.size(),
-        remoteArchivePath.generic_string(),
+        remoteArchivePath.value(),
         compressionCodec,
         compressionLevel
     );
@@ -654,7 +651,7 @@ void FileEngine::addArchiveUpload(
             std::vector<std::string> localPathStrings;
             localPathStrings.reserve(localPaths.size());
             for (auto const& localPath : localPaths)
-                localPathStrings.push_back(localPath.generic_string());
+                localPathStrings.push_back(localPath.toUtf8());
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::addArchiveUpload", impl_->engine->sshSessionId().value()),
@@ -672,7 +669,7 @@ void FileEngine::addArchiveUpload(
                 channelId.value().value(),
                 operationId.value(),
                 localPathStrings,
-                remoteArchivePath.generic_string(),
+                remoteArchivePath.value(),
                 compressionCodec,
                 compressionLevel,
                 mayOverwrite,
@@ -873,8 +870,9 @@ void FileEngine::addBulkDelete(
 }
 
 void FileEngine::addUpload(
-    NuiFileExplorer::Item const& remotePath,
-    NuiFileExplorer::Item const& localPath,
+    Paths::LocalPath const& source,
+    Paths::RemotePath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     bool allowOverwrite,
     bool insertRefresh,
@@ -882,11 +880,12 @@ void FileEngine::addUpload(
     SharedData::OperationMode mode
 )
 {
-    Log::info("Requesting to add upload: {} -> {}", localPath.path.generic_string(), remotePath.path.generic_string());
+    Log::info("Requesting to add upload: {} -> {}", source.toUtf8(), destination.value());
     lazyOpen(
         [this,
-            remotePath,
-            localPath,
+            source,
+            destination,
+            sizeBytes,
             onOperationCreated = std::move(onOperationCreated),
             allowOverwrite,
             insertRefresh,
@@ -903,10 +902,7 @@ void FileEngine::addUpload(
             const auto operationId = Ids::generateOperationId();
 
             Log::info(
-                "Adding upload (with ID '{}'): {} -> {}",
-                operationId.value(),
-                localPath.path.generic_string(),
-                remotePath.path.generic_string()
+                "Adding upload (with ID '{}'): {} -> {}", operationId.value(), source.toUtf8(), destination.value()
             );
 
             Nui::RpcClient::callWithBackChannel(
@@ -925,10 +921,10 @@ void FileEngine::addUpload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                (!localPath.fullPath.empty() ? localPath.fullPath : localPath.path).generic_string(),
-                (!remotePath.fullPath.empty() ? remotePath.fullPath : remotePath.path).generic_string(),
+                source.toUtf8(),
+                destination.value(),
                 allowOverwrite,
-                remotePath.size > Constants::bigFileCutOff,
+                sizeBytes > Constants::bigFileCutOff,
                 insertRefresh,
                 createMissingDirectories,
                 static_cast<int>(mode)
@@ -1119,15 +1115,13 @@ void FileEngine::rename(
 }
 
 void FileEngine::addRename(
-    std::filesystem::path const& sourcePath,
-    std::filesystem::path const& destinationPath,
+    Paths::RemotePath const& sourcePath,
+    Paths::RemotePath const& destinationPath,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
     SharedData::OperationMode mode
 )
 {
-    Log::info(
-        "Requesting to add rename operation: {} -> {}", sourcePath.generic_string(), destinationPath.generic_string()
-    );
+    Log::info("Requesting to add rename operation: {} -> {}", sourcePath.value(), destinationPath.value());
     lazyOpen(
         [this, sourcePath, destinationPath, onOperationCreated = std::move(onOperationCreated), mode](
             auto const& channelId, std::string const& info
@@ -1145,8 +1139,8 @@ void FileEngine::addRename(
             Log::info(
                 "Adding rename (with ID '{}'): {} -> {}",
                 operationId.value(),
-                sourcePath.generic_string(),
-                destinationPath.generic_string()
+                sourcePath.value(),
+                destinationPath.value()
             );
 
             Nui::RpcClient::callWithBackChannel(
@@ -1163,8 +1157,8 @@ void FileEngine::addRename(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                sourcePath.generic_string(),
-                destinationPath.generic_string(),
+                sourcePath.value(),
+                destinationPath.value(),
                 static_cast<int>(mode)
             );
         }

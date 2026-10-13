@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
 #include <frontend/session_components/file_tracking.hpp>
@@ -622,15 +623,15 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 }
 
 void RemoteSideModel::enqueueSingleDownload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    SharedData::BulkDownloadEntry const& entry,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
     operationQueue_->enqueueDownload(
-        remoteItem,
-        localItem,
+        entry.source,
+        entry.destination,
+        entry.sizeBytes,
         [this](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
             if (!opId)
@@ -684,8 +685,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         if (accepted->size() == 1 && !accepted->front().isDirectory)
         {
             enqueueSingleDownload(
-                NuiFileExplorer::Item{remoteEntry},
-                NuiFileExplorer::Item{localEntry},
+                accepted->front(),
                 /*allowOverwrite=*/true,
                 /*insertRefresh=*/true
             );
@@ -1086,7 +1086,20 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                 return;
 
             const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
-            const auto localPath = localModel_->currentPath().value() / filename;
+            auto archivePath = localModel_->currentLocalPath().and_then(
+                [&filename](Paths::LocalPath const& directory)
+                {
+                    return Paths::LocalPathSegment::make(filename).transform(
+                        [&directory](Paths::LocalPathSegment const& segment)
+                        {
+                            return directory / segment;
+                        }
+                    );
+                }
+            );
+            if (!archivePath)
+                return showPathRefused(language->get("remoteSideModel", "archiveDownloadFailed"), archivePath.error());
+            const auto localPath = *std::move(archivePath);
 
             operationQueue_->enqueueArchiveDownload(
                 std::move(entries),
@@ -1108,9 +1121,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                         });
                         return;
                     }
-                    Log::info(
-                        "Archive download queued as {} (destination {})", opId->value(), localPath.generic_string()
-                    );
+                    Log::info("Archive download queued as {} (destination {})", opId->value(), localPath.toUtf8());
                 }
             );
         },
@@ -1322,25 +1333,32 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
 
     Log::info("FileTracking: createInstance succeeded, id={}, dir={}", instanceId.value(), instanceDirStr);
 
-    std::filesystem::path remotePath = currentPath_.value() / item.path;
-    std::filesystem::path localPath = instanceDir / item.path.filename();
-
-    NuiFileExplorer::Item remoteItem = item;
-    remoteItem.path = remotePath;
-    remoteItem.fullPath = remotePath;
-    NuiFileExplorer::Item localItem = item;
-    localItem.path = localPath;
-    // FileEngine::addDownload prefers `fullPath` over `path` when serializing
-    // the destination. Without overwriting it here, `localItem.fullPath` would
-    // still hold the source item's *remote* fullPath (carried over by the
-    // copy-construction above), and the backend would receive the remote path
-    // as both source and destination — making it try to write
-    // `<remotePath>.filepart` next to the remote file (permission denied).
-    localItem.fullPath = localPath;
+    const auto instanceDirectory = Paths::LocalPath::fromUtf8(instanceDirStr);
+    const auto remotePath = remotePathOf(item);
+    const auto localPath = remotePath.and_then(
+        [&instanceDirectory](Paths::RemotePath const& path)
+        {
+            return Paths::LocalPathSegment::make(*path.filename())
+                .and_then(
+                    [&instanceDirectory](Paths::LocalPathSegment const& segment)
+                    {
+                        return instanceDirectory.transform(
+                            [&segment](Paths::LocalPath const& directory)
+                            {
+                                return directory / segment;
+                            }
+                        );
+                    }
+                );
+        }
+    );
+    if (!localPath)
+        return showPathRefused(language->get("remoteSideModel", "downloadFailed"), localPath.error());
 
     operationQueue_->enqueueDownload(
-        remoteItem,
-        localItem,
+        *remotePath,
+        *localPath,
+        item.size,
         [this, instanceId, instanceDir, remotePath, localPath, openWith, synchronize](
             std::optional<Ids::OperationId> const& opId, std::string const& info
         )

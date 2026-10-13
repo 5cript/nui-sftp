@@ -506,29 +506,22 @@ void FileTrackingPanel::startWatching(
                 if (!it->moveRemoteOnLocalMove || !impl_->operationQueue)
                     return;
 
-                std::filesystem::path newLocalPath = std::filesystem::path{directory} / filename;
-
-                std::filesystem::path oldRelPath = oldLocalPath.lexically_relative(instanceDir);
-                std::filesystem::path newRelPath = newLocalPath.lexically_relative(instanceDir);
-
-                // Check that newRelPath is inside the instanceDir to avoid arbitrary remote renames
-                if (newRelPath.empty() || newRelPath.string().starts_with(".."))
+                // Both ends must lie inside the instance directory to avoid arbitrary remote renames.
+                auto oldRemotePath = remotePathOfChange(*oldLocalPath, instanceDirectory, remotePath);
+                auto newRemotePath = remotePathOfChange(*changedLocalPath, instanceDirectory, remotePath);
+                if (!oldRemotePath || !newRemotePath)
                 {
                     Log::warn(
-                        "FileTracking: ignoring move event for instance {} because new path is outside instance dir: "
-                        "{}",
+                        "FileTracking: not mirroring the move in instance {}: {}",
                         instanceId.value(),
-                        newRelPath.generic_string()
+                        (oldRemotePath ? newRemotePath.error() : oldRemotePath.error()).toString()
                     );
                     return;
                 }
 
-                std::filesystem::path oldRemotePath = remotePath.parent_path() / oldRelPath;
-                std::filesystem::path newRemotePath = remotePath.parent_path() / newRelPath;
-
                 impl_->operationQueue->enqueueRename(
-                    oldRemotePath,
-                    newRemotePath,
+                    *oldRemotePath,
+                    *newRemotePath,
                     [instanceId](std::optional<Ids::OperationId> const& opId, std::string const& info)
                     {
                         if (!opId)
@@ -549,24 +542,22 @@ void FileTrackingPanel::startWatching(
             if (!impl_->operationQueue)
                 return;
 
-            (*it->uploading) = true;
-
-            std::filesystem::path changedLocalPath = std::filesystem::path{directory} / filename;
-            std::filesystem::path relPath = changedLocalPath.lexically_relative(instanceDir);
-            std::filesystem::path changedRemotePath = remotePath.parent_path() / relPath;
-
-            NuiFileExplorer::Item localItem{SharedData::DirectoryEntry{
-                .path = changedLocalPath,
-                .type = SharedData::FileType::Regular,
-            }};
-            NuiFileExplorer::Item remoteItem{SharedData::DirectoryEntry{
-                .path = changedRemotePath,
-                .type = SharedData::FileType::Regular,
-            }};
+            const auto source = *changedLocalPath;
+            const auto destination = remotePathOfChange(source, instanceDirectory, remotePath);
+            if (!destination)
+            {
+                Log::warn(
+                    "FileTracking: not uploading the change in instance {}: {}",
+                    instanceId.value(),
+                    destination.error().toString()
+                );
+                return;
+            }
 
             impl_->operationQueue->enqueueUpload(
-                remoteItem,
-                localItem,
+                source,
+                *destination,
+                /*sizeBytes=*/0,
                 [this, instanceId](std::optional<Ids::OperationId> const& opId, std::string const& info)
                 {
                     if (!opId)

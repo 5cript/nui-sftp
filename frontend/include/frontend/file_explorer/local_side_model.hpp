@@ -136,12 +136,7 @@ class LocalSideModel
         std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted = nullptr
     );
 
-    void enqueueSingleUpload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
-        bool allowOverwrite,
-        bool insertRefresh
-    );
+    void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
   private:
     /**

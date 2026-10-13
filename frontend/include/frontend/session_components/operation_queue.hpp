@@ -65,8 +65,9 @@ class OperationQueue
     void deactivate();
 
     void enqueueDownload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
+        Paths::RemotePath const& source,
+        Paths::LocalPath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
@@ -74,8 +75,9 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueUpload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
+        Paths::LocalPath const& source,
+        Paths::RemotePath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
@@ -83,8 +85,8 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueRename(
-        std::filesystem::path const& oldPath,
-        std::filesystem::path const& newPath,
+        Paths::RemotePath const& oldPath,
+        Paths::RemotePath const& newPath,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
@@ -136,7 +138,7 @@ class OperationQueue
      */
     void enqueueArchiveDownload(
         std::vector<SharedData::DirectoryEntry> entries,
-        std::filesystem::path const& localArchivePath,
+        Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -146,8 +148,8 @@ class OperationQueue
 
     /** @brief Upload analogue of enqueueArchiveDownload — see its docs. */
     void enqueueArchiveUpload(
-        std::vector<std::filesystem::path> localPaths,
-        std::filesystem::path const& remoteArchivePath,
+        std::vector<Paths::LocalPath> localPaths,
+        Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,

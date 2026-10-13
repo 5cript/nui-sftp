@@ -124,8 +124,9 @@ class FileEngine
     void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
     void addDownload(
-        NuiFileExplorer::Item const& remotePath,
-        NuiFileExplorer::Item const& localPath,
+        Paths::RemotePath const& source,
+        Paths::LocalPath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
@@ -133,8 +134,9 @@ class FileEngine
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void addUpload(
-        NuiFileExplorer::Item const& remotePath,
-        NuiFileExplorer::Item const& localPath,
+        Paths::LocalPath const& source,
+        Paths::RemotePath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
@@ -178,7 +180,7 @@ class FileEngine
      */
     void addArchiveDownload(
         std::vector<SharedData::DirectoryEntry> entries,
-        std::filesystem::path const& localArchivePath,
+        Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -192,8 +194,8 @@ class FileEngine
      *        addArchiveDownload with source/destination reversed.
      */
     void addArchiveUpload(
-        std::vector<std::filesystem::path> localPaths,
-        std::filesystem::path const& remoteArchivePath,
+        std::vector<Paths::LocalPath> localPaths,
+        Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -262,8 +264,8 @@ class FileEngine
     );
 
     void addRename(
-        std::filesystem::path const& sourcePath,
-        std::filesystem::path const& destinationPath,
+        Paths::RemotePath const& sourcePath,
+        Paths::RemotePath const& destinationPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
