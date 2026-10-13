@@ -2,6 +2,7 @@
 
 #include <backend/sftp/operation.hpp>
 #include <ssh/sftp_session.hpp>
+#include <paths/remote_path.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -11,8 +12,8 @@ class RenameOperation : public Operation
   public:
     struct RenameOperationOptions
     {
-        std::filesystem::path sourcePath{};
-        std::filesystem::path destinationPath{};
+        Paths::RemotePath sourcePath{};
+        Paths::RemotePath destinationPath{};
         std::chrono::seconds futureTimeout{5};
     };
 
@@ -51,19 +52,19 @@ class RenameOperation : public Operation
         return SharedData::OperationType::Rename;
     }
 
-    std::filesystem::path const& sourcePath() const
+    Paths::RemotePath const& sourcePath() const
     {
         return sourcePath_;
     }
 
-    std::filesystem::path const& destinationPath() const
+    Paths::RemotePath const& destinationPath() const
     {
         return destinationPath_;
     }
 
   private:
     SecureShell::SftpSession* sftp_;
-    std::filesystem::path sourcePath_;
-    std::filesystem::path destinationPath_;
+    Paths::RemotePath sourcePath_;
+    Paths::RemotePath destinationPath_;
     std::chrono::seconds futureTimeout_;
 };

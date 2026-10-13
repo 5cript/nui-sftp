@@ -1353,11 +1353,20 @@ void Session::registerRpcSftpAddRenameOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
+                auto source = parseRemotePath(sourcePath);
+                if (!source)
+                    return reply.error(source.error());
+                auto destination = parseRemotePath(destinationPath);
+                if (!destination)
+                    return reply.error(destination.error());
+
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), newOperationIdString, sourcePath, destinationPath, mode](
-                        RpcHelper::RpcOnce&& reply, auto&& channel
-                    )
+                    [weak = self->weak_from_this(),
+                        newOperationIdString,
+                        source = *std::move(source),
+                        destination = *std::move(destination),
+                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
                         auto self = weak.lock();
                         if (!self)
@@ -1366,8 +1375,8 @@ void Session::registerRpcSftpAddRenameOperation()
                         const auto result = self->operationQueue_->addRenameOperation(
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
-                            sourcePath,
-                            destinationPath,
+                            source,
+                            destination,
                             static_cast<SharedData::OperationMode>(mode)
                         );
 
@@ -1375,8 +1384,8 @@ void Session::registerRpcSftpAddRenameOperation()
                         {
                             Log::error(
                                 "Failed to add rename operation for '{}' to '{}': {}",
-                                sourcePath,
-                                destinationPath,
+                                source.value(),
+                                destination.value(),
                                 result.error().toString()
                             );
                             return reply.error("Failed to add rename operation: " + result.error().toString());
@@ -1385,8 +1394,8 @@ void Session::registerRpcSftpAddRenameOperation()
                         Log::info(
                             "Added rename operation with id '{}' for '{}' to '{}'",
                             newOperationIdString,
-                            sourcePath,
-                            destinationPath
+                            source.value(),
+                            destination.value()
                         );
 
                         self->resetQueueThrottle();

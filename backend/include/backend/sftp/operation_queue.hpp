@@ -249,8 +249,8 @@ class OperationQueue
     std::expected<void, Operation::Error> addRenameOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
-        std::filesystem::path const& sourcePath,
-        std::filesystem::path const& destinationPath,
+        Paths::RemotePath const& sourcePath,
+        Paths::RemotePath const& destinationPath,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 

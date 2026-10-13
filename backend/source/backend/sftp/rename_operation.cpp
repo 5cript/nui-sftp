@@ -45,7 +45,7 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
                 return enterErrorState<WorkStatus>({
                     .type = ErrorType::RenameFailure,
                     .sftpError = result.error(),
-                    .extraInfo = sourcePath_.generic_string(),
+                    .extraInfo = sourcePath_.value(),
                 });
 
             state_ = Completed;
@@ -85,11 +85,7 @@ std::expected<void, RenameOperation::Error> RenameOperation::cancel(bool adoptCa
 {
     if (adoptCancelState)
     {
-        Log::info(
-            "RenameOperation: Rename of '{}' to '{}' canceled.",
-            sourcePath_.generic_string(),
-            destinationPath_.generic_string()
-        );
+        Log::info("RenameOperation: Rename of '{}' to '{}' canceled.", sourcePath_.value(), destinationPath_.value());
         state_ = OperationState::Canceled;
     }
     return {};

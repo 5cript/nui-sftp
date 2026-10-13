@@ -119,8 +119,7 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
-                        .localPath = op.sourcePath(),
-                        .remotePath = op.destinationPath(),
+                        .remotePath = unlessEmpty(op.destinationPath()),
                         .error = error,
                     };
                 },
@@ -1929,8 +1928,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
 std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::filesystem::path const& sourcePath,
-    std::filesystem::path const& destinationPath,
+    Paths::RemotePath const& sourcePath,
+    Paths::RemotePath const& destinationPath,
     SharedData::OperationMode mode
 )
 {
@@ -1954,8 +1953,8 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
             .operationId = operationId,
             .type = SharedData::OperationType::Rename,
             .mode = mode,
-            .localPath = sourcePath,
-            .remotePath = destinationPath,
+            .source = sourcePath,
+            .destination = destinationPath,
         }
     );
 
