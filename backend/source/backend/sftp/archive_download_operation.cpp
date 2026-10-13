@@ -123,8 +123,12 @@ ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sft
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
 
-    tempPath_ = options_.localArchivePath;
-    tempPath_ += options_.tempFileSuffix;
+    if (!options_.localArchivePath.empty())
+    {
+        localArchiveNativePath_ = options_.localArchivePath.native();
+        tempPath_ = localArchiveNativePath_;
+        tempPath_ += options_.tempFileSuffix;
+    }
 }
 
 ArchiveDownloadOperation::~ArchiveDownloadOperation()
@@ -184,7 +188,7 @@ ArchiveDownloadOperation::workInStrand()
                 return enterErrorState<WorkStatus>(
                     {.type = ErrorType::ImplementationError, .extraInfo = "archive has no roots"}
                 );
-            if (std::filesystem::exists(options_.localArchivePath) && !options_.mayOverwrite)
+            if (std::filesystem::exists(localArchiveNativePath_) && !options_.mayOverwrite)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
 
             const auto prepareResult = prepareInStrand();
@@ -293,9 +297,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
         return std::unexpected(Error{.type = ErrorType::OpenFailure, .extraInfo = "The temporary file path is a symlink"});
     }
 
-    auto sinkOrError = openArchiveSink(
-        tempPath_, options_.localArchivePath, options_.compression, options_.compressionOptions
-    );
+    auto sinkOrError =
+        openArchiveSink(tempPath_, localArchiveNativePath_, options_.compression, options_.compressionOptions);
     if (!sinkOrError.has_value())
     {
         Log::error(

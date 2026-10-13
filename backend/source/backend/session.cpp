@@ -995,13 +995,16 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                     Log::error("addArchiveDownload: failed to parse entries JSON: {}", exc.what());
                     return reply({{"error", std::string{"Invalid entries payload: "} + exc.what()}});
                 }
+                auto archivePath = parseLocalPath(localArchivePath);
+                if (!archivePath)
+                    return reply.error(archivePath.error());
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         newOperationIdString,
                         entries = std::move(entries),
-                        localArchivePath,
+                        localArchivePath = *std::move(archivePath),
                         compressionCodec,
                         compressionLevel,
                         mayOverwrite,
@@ -1017,7 +1020,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
                             std::move(entries),
-                            std::filesystem::path{localArchivePath},
+                            localArchivePath,
                             codec,
                             compressionLevel,
                             mayOverwrite,
@@ -1028,7 +1031,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                         {
                             Log::error(
                                 "Failed to add archive-download operation to '{}': {}",
-                                localArchivePath,
+                                localArchivePath.toUtf8(),
                                 result.error().toString()
                             );
                             return reply.error(
@@ -1039,7 +1042,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                         Log::info(
                             "Added archive-download operation '{}' → '{}' ({} entries)",
                             newOperationIdString,
-                            localArchivePath,
+                            localArchivePath.toUtf8(),
                             entries.size()
                         );
 
@@ -1072,17 +1075,25 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                std::vector<std::filesystem::path> localPaths;
+                std::vector<Paths::LocalPath> localPaths;
                 localPaths.reserve(localPathStrings.size());
                 for (auto const& pathString : localPathStrings)
-                    localPaths.emplace_back(pathString);
+                {
+                    auto localPath = parseLocalPath(pathString);
+                    if (!localPath)
+                        return reply.error(localPath.error());
+                    localPaths.push_back(*std::move(localPath));
+                }
+                auto archivePath = parseRemotePath(remoteArchivePath);
+                if (!archivePath)
+                    return reply.error(archivePath.error());
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         newOperationIdString,
                         localPaths = std::move(localPaths),
-                        remoteArchivePath,
+                        remoteArchivePath = *std::move(archivePath),
                         compressionCodec,
                         compressionLevel,
                         mayOverwrite,
@@ -1097,7 +1108,7 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
                             std::move(localPaths),
-                            std::filesystem::path{remoteArchivePath},
+                            remoteArchivePath,
                             codec,
                             compressionLevel,
                             mayOverwrite,
@@ -1107,13 +1118,15 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                         {
                             Log::error(
                                 "Failed to add archive-upload operation to '{}': {}",
-                                remoteArchivePath,
+                                remoteArchivePath.value(),
                                 result.error().toString()
                             );
                             return reply.error("Failed to add archive-upload operation: " + result.error().toString());
                         }
                         Log::info(
-                            "Added archive-upload operation '{}' → '{}'", newOperationIdString, remoteArchivePath
+                            "Added archive-upload operation '{}' → '{}'",
+                            newOperationIdString,
+                            remoteArchivePath.value()
                         );
                         self->resetQueueThrottle();
                         reply({{"success", true}});

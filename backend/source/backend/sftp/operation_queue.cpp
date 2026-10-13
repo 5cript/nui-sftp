@@ -851,7 +851,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
     std::vector<SharedData::DirectoryEntry> entries,
-    std::filesystem::path const& localArchivePath,
+    Paths::LocalPath const& localArchivePath,
     TarArchive::Compression compression,
     int compressionLevel,
     bool mayOverwrite,
@@ -977,8 +977,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
 std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::vector<std::filesystem::path> localPaths,
-    std::filesystem::path const& remoteArchivePath,
+    std::vector<Paths::LocalPath> localPaths,
+    Paths::RemotePath const& remoteArchivePath,
     TarArchive::Compression compression,
     int compressionLevel,
     bool mayOverwrite,
@@ -1004,7 +1004,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     for (auto const& localPath : localPaths)
     {
         std::error_code sizeErr{};
-        const auto size = std::filesystem::file_size(localPath, sizeErr);
+        const auto size = std::filesystem::file_size(localPath.native(), sizeErr);
         if (!sizeErr)
             estimatedTotalBytes += size;
     }
@@ -1016,7 +1016,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     for (auto const& localPath : localPaths)
     {
         std::error_code isDirErr{};
-        if (std::filesystem::is_directory(localPath, isDirErr))
+        if (std::filesystem::is_directory(localPath.native(), isDirErr))
             directoryRootPaths.push_back(localPath);
     }
     const auto rootCount = localPaths.size();

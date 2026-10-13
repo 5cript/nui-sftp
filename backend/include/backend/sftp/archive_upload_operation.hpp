@@ -7,6 +7,7 @@
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
+#include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <tar_archive/archive.hpp>
 #include <tar_archive/writer.hpp>
@@ -53,10 +54,10 @@ class ArchiveUploadOperation : public Operation
             progressCallback = [](auto, auto, auto, auto) {};
 
         /** @brief Local filesystem paths to pack. Each is lstat'd in-strand on start. */
-        std::vector<std::filesystem::path> localPaths{};
+        std::vector<Paths::LocalPath> localPaths{};
 
         /** @brief Destination archive path on the remote side. */
-        std::filesystem::path remoteArchivePath{};
+        Paths::RemotePath remoteArchivePath{};
 
         /** @brief Compression codec; Auto means derive from remoteArchivePath extension. */
         TarArchive::Compression compression{TarArchive::Compression::Auto};

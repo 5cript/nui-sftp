@@ -272,9 +272,17 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 
     for (auto const& localRoot : options_.localPaths)
     {
-        const auto basename =
-            localRoot.has_filename() ? localRoot.filename() : localRoot;
-        auto rootEntry = localPathToEntry(localRoot, basename);
+        const auto name = localRoot.filename();
+        if (!name)
+        {
+            Log::error("ArchiveUploadOperation: refusing root '{}', it has no name", localRoot.toUtf8());
+            return std::unexpected(Error{
+                .type = ErrorType::InvalidPath,
+                .extraInfo = fmt::format("'{}' cannot be archived under its own name", localRoot.toUtf8()),
+            });
+        }
+        const auto archivePrefix = Paths::RelativePath{} / *name;
+        auto rootEntry = localPathToEntry(localRoot.native());
         if (!rootEntry)
             continue;
 
@@ -409,16 +417,16 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
     {
         Log::error(
             "ArchiveUploadOperation: cannot open remote '{}': {}",
-            options_.remoteArchivePath.generic_string(),
+            options_.remoteArchivePath.value(),
             openResult.error().message
         );
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = openResult.error(),
-            .extraInfo = fmt::format(
-                "Opening remote archive file: {}", options_.remoteArchivePath.generic_string()
-            ),
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = openResult.error(),
+                .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
+            }
+        );
     }
     remoteStream_ = openResult.value();
     tempCreated_ = true;
@@ -426,10 +434,9 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
     // Wrap the SFTP terminal sink in the requested codec. Auto means derive
     // from the user-facing remote path so the bytes on the wire match the
     // declared file extension.
-    const auto resolvedCodec =
-        options_.compression == TarArchive::Compression::Auto
-            ? TarArchive::compressionFromExtension(options_.remoteArchivePath)
-            : options_.compression;
+    const auto resolvedCodec = options_.compression == TarArchive::Compression::Auto
+        ? TarArchive::compressionFromExtension(Paths::nativeFromUtf8(options_.remoteArchivePath.value()))
+        : options_.compression;
 
     auto wrappedSink = TarArchive::wrapSinkWithCodec(
         std::make_unique<SftpFileByteSink>(remoteStream_),
