@@ -1123,9 +1123,12 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         auto path = remotePathOf(item);
         if (!path)
             return showPathRefused(language->get("remoteSideModel", "archiveDownloadFailed"), path.error());
-        SharedData::DirectoryEntry entry = item;
-        entry.fullPath = path->value();
-        rootEntries.push_back(std::move(entry));
+        roots.push_back(
+            SharedData::ArchiveDownloadRoot{
+                .path = *std::move(path),
+                .entry = static_cast<SharedData::DirectoryEntry const&>(item),
+            }
+        );
     }
 
     const auto defaultStem =
@@ -1137,7 +1140,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
         .onConfirm =
-            [this, entries = std::move(rootEntries)](std::optional<ArchiveTransferResult> const& result) mutable
+            [this, roots = std::move(roots)](std::optional<ArchiveTransferResult> const& result) mutable
         {
             if (!result)
             {
@@ -1164,7 +1167,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
             const auto localPath = *std::move(archivePath);
 
             operationQueue_->enqueueArchiveDownload(
-                std::move(entries),
+                std::move(roots),
                 localPath,
                 backendCompressionCode(result->codec),
                 result->compressionLevel,

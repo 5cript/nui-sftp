@@ -974,7 +974,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
                 std::string const& newOperationIdString,
-                std::string const& entriesJson,
+                std::string const& rootsJson,
                 std::string const& localArchivePath,
                 int compressionCodec,
                 int compressionLevel,
@@ -986,15 +986,16 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                std::vector<SharedData::DirectoryEntry> entries;
+                // An invalid remote path fails the parse.
+                std::vector<SharedData::ArchiveDownloadRoot> roots;
                 try
                 {
-                    entries = nlohmann::json::parse(entriesJson).get<std::vector<SharedData::DirectoryEntry>>();
+                    roots = nlohmann::json::parse(rootsJson).get<std::vector<SharedData::ArchiveDownloadRoot>>();
                 }
                 catch (std::exception const& exc)
                 {
-                    Log::error("addArchiveDownload: failed to parse entries JSON: {}", exc.what());
-                    return reply({{"error", std::string{"Invalid entries payload: "} + exc.what()}});
+                    Log::error("addArchiveDownload: failed to parse roots JSON: {}", exc.what());
+                    return reply({{"error", std::string{"Invalid roots payload: "} + exc.what()}});
                 }
                 auto archivePath = parseLocalPath(localArchivePath);
                 if (!archivePath)
@@ -1004,7 +1005,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                     Ids::makeChannelId(channelIdString),
                     [weak = self->weak_from_this(),
                         newOperationIdString,
-                        entries = std::move(entries),
+                        roots = std::move(roots),
                         localArchivePath = *std::move(archivePath),
                         compressionCodec,
                         compressionLevel,
@@ -1020,7 +1021,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                         const auto result = self->operationQueue_->addArchiveDownloadOperation(
                             *channel,
                             Ids::makeOperationId(newOperationIdString),
-                            std::move(entries),
+                            std::move(roots),
                             localArchivePath,
                             codec,
                             compressionLevel,
@@ -1041,10 +1042,10 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                         }
 
                         Log::info(
-                            "Added archive-download operation '{}' → '{}' ({} entries)",
+                            "Added archive-download operation '{}' → '{}' ({} roots)",
                             newOperationIdString,
                             localArchivePath.toUtf8(),
-                            entries.size()
+                            roots.size()
                         );
 
                         self->resetQueueThrottle();

@@ -11,6 +11,7 @@
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -124,7 +125,7 @@ class OperationQueue
     std::expected<void, Operation::Error> addArchiveDownloadOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
-        std::vector<SharedData::DirectoryEntry> entries,
+        std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         TarArchive::Compression compression,
         int compressionLevel,

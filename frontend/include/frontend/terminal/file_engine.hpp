@@ -3,6 +3,7 @@
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
@@ -179,7 +180,7 @@ class FileEngine
      *        codec on the backend).
      */
     void addArchiveDownload(
-        std::vector<SharedData::DirectoryEntry> entries,
+        std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,

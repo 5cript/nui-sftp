@@ -18,6 +18,7 @@
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
@@ -137,7 +138,7 @@ class OperationQueue
      *        user-facing 1..9 slider value, remapped per-codec on the backend.
      */
     void enqueueArchiveDownload(
-        std::vector<SharedData::DirectoryEntry> entries,
+        std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,

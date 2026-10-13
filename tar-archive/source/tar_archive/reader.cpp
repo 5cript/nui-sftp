@@ -188,8 +188,8 @@ namespace TarArchive
                 continue;
             }
 
-            SharedData::DirectoryEntry meta =
-                assembleDirectoryEntry(*parsed, overrides);
+            MemberHeader meta =
+                assembleMemberHeader(*parsed, overrides);
 
             const std::uint64_t payloadSize =
                 (parsed->typeflag == TypeFlag::Directory ||

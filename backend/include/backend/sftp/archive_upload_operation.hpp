@@ -14,6 +14,7 @@
 #include <tar_archive/entry_writer.hpp>
 #include <tar_archive/compression.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <tar_archive/member_header.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -135,7 +136,7 @@ class ArchiveUploadOperation : public Operation
      *        passed in the options — prepareInStrand looks up the same key.
      */
     void setScanResultForRoot(
-        std::filesystem::path const& localRootPath,
+        Paths::LocalPath const& localRootPath,
         std::vector<SharedData::DirectoryEntry> entries,
         std::uint64_t totalBytes
     );
@@ -143,13 +144,13 @@ class ArchiveUploadOperation : public Operation
   private:
     /**
      * @brief Archive-relative metadata paired with the full local source path.
-     *        Directory entries have an empty localFullPath since they carry no
+     *        Directory entries have an unset source since they carry no
      *        payload.
      */
     struct ResolvedEntry
     {
-        SharedData::DirectoryEntry tarMeta{};
-        std::filesystem::path localFullPath{};
+        TarArchive::MemberHeader header{};
+        Paths::LocalPath source{};
     };
 
     std::expected<void, Error> prepareInStrand();
@@ -163,8 +164,8 @@ class ArchiveUploadOperation : public Operation
      */
     void appendPrescannedFromScan(
         std::vector<SharedData::DirectoryEntry> const& entries,
-        std::filesystem::path const& localRootFullPath,
-        std::filesystem::path const& archivePrefix
+        Paths::LocalPath const& localRoot,
+        Paths::RelativePath const& archivePrefix
     );
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
@@ -193,7 +194,7 @@ class ArchiveUploadOperation : public Operation
      *        path. flattenRoots looks each directory root up here and errors
      *        out if none is present — there is no self-contained recurse.
      */
-    std::map<std::filesystem::path, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
+    std::map<Paths::LocalPath, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
         prescannedRoots_{};
     /**
      * @brief Reused purely for its bytes-transferred + B/s meter machinery;

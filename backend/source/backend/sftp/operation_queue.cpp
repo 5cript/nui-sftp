@@ -860,7 +860,7 @@ namespace
 std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
-    std::vector<SharedData::DirectoryEntry> entries,
+    std::vector<SharedData::ArchiveDownloadRoot> roots,
     Paths::LocalPath const& localArchivePath,
     TarArchive::Compression compression,
     int compressionLevel,
@@ -870,9 +870,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
 {
     // Assumed in strand.
 
-    if (entries.empty())
+    if (roots.empty())
     {
-        Log::error("addArchiveDownloadOperation: no entries provided.");
+        Log::error("addArchiveDownloadOperation: no roots provided.");
         return std::unexpected(
             Operation::Error{
                 .type = Operation::ErrorType::InvalidPath,
@@ -882,26 +882,36 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     }
 
     std::uint64_t totalPayloadBytes = 0u;
-    for (auto const& entry : entries)
+    for (auto const& root : roots)
     {
-        if (entry.type == SharedData::FileType::Regular)
-            totalPayloadBytes += entry.size;
+        // Every root is packed under its own name, the remote root directory has none.
+        if (!root.path.filename())
+        {
+            return std::unexpected(
+                Operation::Error{
+                    .type = Operation::ErrorType::InvalidPath,
+                    .extraInfo = fmt::format("'{}' cannot be archived under its own name", root.path.value()),
+                }
+            );
+        }
+        if (root.entry.type == SharedData::FileType::Regular)
+            totalPayloadBytes += root.entry.size;
     }
-    const auto rootCount = entries.size();
+    const auto rootCount = roots.size();
 
     // Collect each directory root's full remote path so we can enqueue a
     // preceding ScanOperation per root. The archive operation consumes those
     // scans' results via setScanResultForRoot and never recurses itself, so
     // scan work is always visible as a separate queue card.
     std::vector<Paths::RemotePath> directoryRootPaths;
-    for (auto const& entry : entries)
+    for (auto const& root : roots)
     {
         if (root.entry.type == SharedData::FileType::Directory)
             directoryRootPaths.push_back(root.path);
     }
 
     ArchiveDownloadOperation::Options opts{};
-    opts.entries = std::move(entries);
+    opts.roots = std::move(roots);
     opts.localArchivePath = localArchivePath;
     opts.tempFileSuffix = Persistence::effectiveTempFileSuffix(
         sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix

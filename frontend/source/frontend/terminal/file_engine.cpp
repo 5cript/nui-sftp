@@ -543,7 +543,7 @@ void FileEngine::addDownload(
 }
 
 void FileEngine::addArchiveDownload(
-    std::vector<SharedData::DirectoryEntry> entries,
+    std::vector<SharedData::ArchiveDownloadRoot> roots,
     Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
@@ -553,8 +553,8 @@ void FileEngine::addArchiveDownload(
 )
 {
     Log::info(
-        "Requesting archive download: {} entries → {} (codec={}, level={})",
-        entries.size(),
+        "Requesting archive download: {} roots → {} (codec={}, level={})",
+        roots.size(),
         localArchivePath.toUtf8(),
         compressionCodec,
         compressionLevel
@@ -562,7 +562,7 @@ void FileEngine::addArchiveDownload(
 
     lazyOpen(
         [this,
-            entries = std::move(entries),
+            roots = std::move(roots),
             localArchivePath,
             compressionCodec,
             compressionLevel,
@@ -579,11 +579,9 @@ void FileEngine::addArchiveDownload(
 
             const auto operationId = Ids::generateOperationId();
 
-            // DirectoryEntry has to_json but no to_val; the RPC wire layer needs
+            // The roots have to_json but no to_val; the RPC wire layer needs
             // Nui::val conversion, so stringify here and parse on the backend.
-            nlohmann::json entriesJson = nlohmann::json::array();
-            for (auto const& entry : entries)
-                entriesJson.push_back(entry);
+            const nlohmann::json rootsJson = roots;
 
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::addArchiveDownload", impl_->engine->sshSessionId().value()),
@@ -600,7 +598,7 @@ void FileEngine::addArchiveDownload(
                 },
                 channelId.value().value(),
                 operationId.value(),
-                entriesJson.dump(),
+                rootsJson.dump(),
                 localArchivePath.toUtf8(),
                 compressionCodec,
                 compressionLevel,

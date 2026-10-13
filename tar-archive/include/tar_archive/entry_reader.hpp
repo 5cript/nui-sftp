@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tar_archive/error.hpp>
-#include <shared_data/directory_entry.hpp>
+#include <tar_archive/member_header.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -21,7 +21,7 @@ namespace TarArchive
      *
      * Lifecycle: Reader::nextEntry consumes the 512-byte USTAR record (plus any leading
      * PAX extended-header records) from the decompressed byte stream before constructing
-     * the EntryReader. By the time the caller receives the handle, directoryEntry() is
+     * the EntryReader. By the time the caller receives the handle, header() is
      * fully populated and the underlying stream is positioned at the first payload byte.
      * No further stream I/O happens until the caller calls read() or skip().
      */
@@ -42,7 +42,7 @@ namespace TarArchive
          * Available immediately on handle receipt; populated from the header records that
          * Reader::nextEntry already consumed before returning the handle.
          */
-        SharedData::DirectoryEntry const& directoryEntry() const noexcept { return meta_; }
+        MemberHeader const& header() const noexcept { return meta_; }
 
         /**
          * @brief Read up to buf.size() bytes of this entry's payload.
@@ -71,10 +71,10 @@ namespace TarArchive
       private:
         friend class Reader;
 
-        EntryReader(Reader* owner, SharedData::DirectoryEntry meta, std::uint64_t size) noexcept;
+        EntryReader(Reader* owner, MemberHeader meta, std::uint64_t size) noexcept;
 
         Reader* owner_{nullptr};
-        SharedData::DirectoryEntry meta_{};
+        MemberHeader meta_{};
         std::uint64_t size_{0};
         std::uint64_t bytesRead_{0};
         bool drained_{true};

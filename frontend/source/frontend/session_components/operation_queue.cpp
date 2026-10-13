@@ -2200,7 +2200,7 @@ void OperationQueue::enqueueUpload(
     );
 }
 void OperationQueue::enqueueArchiveDownload(
-    std::vector<SharedData::DirectoryEntry> entries,
+    std::vector<SharedData::ArchiveDownloadRoot> roots,
     Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
@@ -2217,14 +2217,14 @@ void OperationQueue::enqueueArchiveDownload(
     }
 
     Log::info(
-        "Frontend Operation Queue archive download: {} entries → {} (codec={}, level={})",
-        entries.size(),
+        "Frontend Operation Queue archive download: {} roots → {} (codec={}, level={})",
+        roots.size(),
         localArchivePath.toUtf8(),
         compressionCodec,
         compressionLevel
     );
     impl_->fileEngine->addArchiveDownload(
-        std::move(entries),
+        std::move(roots),
         localArchivePath,
         compressionCodec,
         compressionLevel,
