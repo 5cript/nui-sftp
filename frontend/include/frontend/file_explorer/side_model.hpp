@@ -136,7 +136,20 @@ class SideModel : public NuiFileExplorer::ISideModel
      */
     void confirmReplaceOnRename(std::string const& name, std::function<void()> onReplace);
 
+    /**
+     * @brief The directory has a parent to offer as "..".
+     */
+    virtual bool hasParent(std::filesystem::path const& directory) const
+    {
+        return directory.has_relative_path();
+    }
+
+    /**
+     * @brief Shows the listing of @p directory. A reply for a directory the side has navigated away from is dropped,
+     *        so no item carries the path of another directory.
+     */
     virtual void onDirectoryListing(
+        std::filesystem::path const& directory,
         std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
         std::string const& reason = {}
     );
@@ -151,6 +164,8 @@ class SideModel : public NuiFileExplorer::ISideModel
     std::vector<NuiFileExplorer::Item> items_{};
     OperationQueue* operationQueue_{nullptr};
     Nui::Observed<std::filesystem::path> currentPath_{};
+    /** @brief The directory the shown items were listed from, currentPath_ runs ahead while a listing loads. */
+    std::filesystem::path listedPath_{};
     std::filesystem::path preNavigatePath_{};
     std::function<void(bool, bool)> refreshCallback_{nullptr};
     bool reapplySelectionOnce_{false};

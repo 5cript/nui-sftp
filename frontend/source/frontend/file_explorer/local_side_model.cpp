@@ -890,23 +890,17 @@ void LocalSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
     });
 }
 
-void LocalSideModel::onDirectoryListing(
-    std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
-    std::string const& reason
-)
+bool LocalSideModel::hasParent(std::filesystem::path const& directory) const
 {
-    if (currentPath_.value().has_parent_path())
-    {
-        directoryEntries->insert(
-            directoryEntries->begin(),
-            SharedData::DirectoryEntry{
-                .path = "..",
-                .type = SharedData::FileType::Directory,
-                .size = 0,
+    // A drive root like "C:/" has no parent either.
+    return Paths::LocalPath::fromUtf8(directory.generic_string())
+        .transform(
+            [](Paths::LocalPath const& path)
+            {
+                return !path.isRoot();
             }
-        );
-    }
-    SideModel::onDirectoryListing(directoryEntries, reason);
+        )
+        .value_or(false);
 }
 
 void LocalSideModel::navigateTo(std::filesystem::path const& path)
@@ -922,9 +916,14 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::listFiles",
-        [this](Nui::val val)
+        [this, directory = currentPath_.value()](Nui::val val)
         {
             Log::debug("Received directory listing response");
+            if (directory != currentPath_.value())
+            {
+                Log::debug("Dropping the listing of '{}', the side moved on.", directory.generic_string());
+                return;
+            }
             auto revertNavigation = [this]()
             {
                 if (currentPath_.value() != preNavigatePath_)
@@ -1043,7 +1042,7 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 directoryEntries.push_back(std::move(entry));
             }
 
-            onDirectoryListing(directoryEntries);
+            onDirectoryListing(directory, std::move(directoryEntries));
         },
         args
     );

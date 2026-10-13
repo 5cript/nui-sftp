@@ -92,10 +92,17 @@ const std::vector<NuiFileExplorer::Item>& SideModel::items() const
 }
 
 void SideModel::onDirectoryListing(
+    std::filesystem::path const& directory,
     std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
     std::string const& reason
 )
 {
+    if (directory != currentPath_.value())
+    {
+        Log::debug("Dropping the listing of '{}', the side moved on.", directory.generic_string());
+        return;
+    }
+
     if (!directoryEntries)
     {
         Log::error("Failed to list directory: {}", reason);
@@ -127,12 +134,7 @@ void SideModel::onDirectoryListing(
             return entry.path.filename() == ".";
         }
     );
-
-    for (auto& entry : *directoryEntries)
-    {
-        if (entry.fullPath.empty())
-            entry.fullPath = *currentPath_ / entry.path;
-    }
+    listedPath_ = directory;
 
     std::vector<NuiFileExplorer::Item> items{};
     std::transform(

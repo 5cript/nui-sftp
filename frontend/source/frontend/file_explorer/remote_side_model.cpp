@@ -1223,7 +1223,12 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
         currentPath_.value(),
-        std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1, std::placeholders::_2)
+        [this, directory = currentPath_.value()](
+            std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
+        )
+        {
+            onDirectoryListing(directory, entries, info);
+        }
     );
 }
 

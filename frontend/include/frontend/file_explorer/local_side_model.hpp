@@ -108,10 +108,7 @@ class LocalSideModel
     void setRemoteModel(SideModel* model);
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
-    void onDirectoryListing(
-        std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
-        std::string const& reason = {}
-    ) override;
+    bool hasParent(std::filesystem::path const& directory) const override;
 
     void generatePathBoxSuggestions(
         std::filesystem::path const& path,
