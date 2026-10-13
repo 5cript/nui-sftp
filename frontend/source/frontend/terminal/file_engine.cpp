@@ -204,7 +204,7 @@ void FileEngine::userDirectories(
 }
 
 void FileEngine::createDirectory(
-    std::filesystem::path const& path,
+    Paths::RemotePath const& path,
     std::function<void(bool, std::string const& info)> onComplete
 )
 {
@@ -218,7 +218,7 @@ void FileEngine::createDirectory(
                 return;
             }
 
-            Log::info("Creating directory: {}", path.generic_string());
+            Log::info("Creating directory: {}", path.value());
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::createDirectory", impl_->engine->sshSessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
@@ -235,14 +235,14 @@ void FileEngine::createDirectory(
                     onComplete(true, "Success");
                 },
                 channelId.value().value(),
-                path.generic_string()
+                path.value()
             );
         }
     );
 }
 
 void FileEngine::createFile(
-    std::filesystem::path const& path,
+    Paths::RemotePath const& path,
     std::function<void(bool, std::string const& info)> onComplete
 )
 {
@@ -256,7 +256,7 @@ void FileEngine::createFile(
                 return;
             }
 
-            Log::info("Creating file: {}", path.generic_string());
+            Log::info("Creating file: {}", path.value());
             Nui::RpcClient::callWithBackChannel(
                 fmt::format("Session::{}::sftp::createFile", impl_->engine->sshSessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
@@ -273,7 +273,7 @@ void FileEngine::createFile(
                     onComplete(true, "Success");
                 },
                 channelId.value().value(),
-                path.generic_string()
+                path.value()
             );
         }
     );
@@ -1011,75 +1011,14 @@ void FileEngine::remove(
     );
 }
 
-void FileEngine::performDelete(
-    std::vector<NuiFileExplorer::Item> files,
-    std::vector<std::filesystem::path> directoriesEmpty,
-    std::function<void(bool, std::string const& info)> onComplete
-)
-{
-    lazyOpen(
-        [this,
-            onComplete = std::move(onComplete),
-            files = std::move(files),
-            directoriesEmpty = std::move(directoriesEmpty)](auto const& channelId, std::string const& info) mutable
-        {
-            if (!channelId)
-            {
-                Log::error("Cannot add upload, no channel");
-                onComplete(false, info);
-                return;
-            }
-
-            std::vector<std::string> transformedPaths;
-            transformedPaths.reserve(files.size() + directoriesEmpty.size());
-            std::transform(
-                files.begin(),
-                files.end(),
-                std::back_inserter(transformedPaths),
-                [](auto const& item)
-                {
-                    return item.path.generic_string();
-                }
-            );
-            std::transform(
-                directoriesEmpty.begin(),
-                directoriesEmpty.end(),
-                std::back_inserter(transformedPaths),
-                [](auto const& path)
-                {
-                    return path.generic_string();
-                }
-            );
-
-            Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::deleteFiles", impl_->engine->sshSessionId().value()),
-                [onComplete = std::move(onComplete)](Nui::val val)
-                {
-                    Nui::WebApi::Console::log(val);
-
-                    if (val.hasOwnProperty("error"))
-                    {
-                        Log::error("(Frontend) Failed to delete files: {}", val["error"].as<std::string>());
-                        onComplete(false, val["error"].as<std::string>());
-                        return;
-                    }
-                    onComplete(true, "Success");
-                },
-                channelId.value().value(),
-                transformedPaths
-            );
-        }
-    );
-}
-
 void FileEngine::rename(
-    std::filesystem::path const& oldPath,
-    std::filesystem::path const& newPath,
+    Paths::RemotePath const& oldPath,
+    Paths::RemotePath const& newPath,
     bool overwrite,
     std::function<void(bool, std::string const& info)> onComplete
 )
 {
-    Log::info("Requesting to rename file: {} -> {}", oldPath.generic_string(), newPath.generic_string());
+    Log::info("Requesting to rename file: {} -> {}", oldPath.value(), newPath.value());
 
     lazyOpen(
         [this, oldPath, newPath, overwrite, onComplete = std::move(onComplete)](
@@ -1218,7 +1157,7 @@ void FileEngine::removeOnQueueUnchecked(
 }
 
 void FileEngine::existsBatchRemote(
-    std::vector<std::filesystem::path> const& paths,
+    std::vector<Paths::RemotePath> const& paths,
     std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
 )
 {
@@ -1227,7 +1166,7 @@ void FileEngine::existsBatchRemote(
     std::vector<std::string> pathStrings;
     pathStrings.reserve(paths.size());
     for (auto const& path : paths)
-        pathStrings.push_back(path.generic_string());
+        pathStrings.push_back(path.value());
 
     lazyOpen(
         [this,

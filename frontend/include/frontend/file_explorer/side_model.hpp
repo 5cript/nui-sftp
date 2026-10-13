@@ -10,6 +10,7 @@
 #include <shared_data/opener_capabilities.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <paths/paths.hpp>
 
 #include <source_location>
 

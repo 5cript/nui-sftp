@@ -15,12 +15,16 @@
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
 #include <nui/event_system/observed_value.hpp>
+#include <paths/paths.hpp>
 
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
+
+class RemoteSideModel;
 
 class LocalSideModel
     : public SideModel
@@ -105,7 +109,12 @@ class LocalSideModel
     {
         return openerCaps_;
     }
-    void setRemoteModel(SideModel* model);
+    void setRemoteModel(RemoteSideModel* model);
+
+    /**
+     * @brief The directory the shown items were listed from, an error before the first listing.
+     */
+    std::expected<Paths::LocalPath, Paths::PathError> currentLocalPath() const;
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
     bool hasParent(std::filesystem::path const& directory) const override;
@@ -124,8 +133,17 @@ class LocalSideModel
      */
     void renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite);
 
+    /**
+     * @brief Where @p item is: a listed item below the directory it was listed from, a dropped one at its own
+     *        absolute path. A listed name that is no single path segment, like "..", names no item.
+     */
+    std::expected<Paths::LocalPath, Paths::PathError> localPathOf(NuiFileExplorer::Item const& item) const;
+
+    /**
+     * @brief Uploads @p candidates, asking per existing destination whether to overwrite it.
+     */
     void uploadItemsConfirmed(
-        std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> uploadItems,
+        std::vector<SharedData::BulkUploadEntry> candidates,
         std::shared_ptr<std::vector<bool>> existsResults,
         std::size_t index = 0,
         bool overwriteNever = false,
@@ -144,7 +162,7 @@ class LocalSideModel
      */
     void probeOpenerCapabilities();
 
-    SideModel* remoteModel_{nullptr};
+    RemoteSideModel* remoteModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
     std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
     std::function<void(std::vector<std::string>)> onFavoritesChanged_;

@@ -2,6 +2,7 @@
 #include <frontend/session_components/operation_queue.hpp>
 
 #include <nui-file-explorer/item.hpp>
+#include <paths/paths.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
@@ -30,9 +31,9 @@ using namespace std::string_literals;
 struct TrackedEntry
 {
     Ids::InstanceId instanceId;
-    std::filesystem::path instanceDir;
-    std::filesystem::path remotePath;
-    std::filesystem::path localPath;
+    Paths::LocalPath instanceDirectory;
+    Paths::RemotePath remotePath;
+    Paths::LocalPath localPath;
     bool autoReupload{true};
     bool moveRemoteOnLocalMove{false};
     bool deleteRemote{false};
@@ -227,8 +228,8 @@ struct FileTrackingPanel::Implementation
         auto uploadingObs = entry.uploading;
 
         return ResizableTable::TableRow{
-            entry.localPath.filename().generic_string(),
-            entry.remotePath.generic_string(),
+            entry.localPath.filename() ? std::string{entry.localPath.filename()->view()} : entry.localPath.toUtf8(),
+            entry.remotePath.value(),
             ResizableTable::TableCell{
                 [this, instanceIdStr, isChecked = entry.autoReupload](std::unique_ptr<ResizableTable::ISelfController>)
                     -> Nui::ElementRenderer
@@ -408,23 +409,52 @@ void FileTrackingPanel::deactivate()
     impl_->cleanupRunning = false;
 }
 
+namespace
+{
+    /**
+     * @brief The remote path a change at @p changed maps to. The instance directory stands for the directory of
+     *        @p remotePath, a change outside it or of the instance directory itself maps to nothing.
+     */
+    std::expected<Paths::RemotePath, Paths::PathError> remotePathOfChange(
+        Paths::LocalPath const& changed,
+        Paths::LocalPath const& instanceDirectory,
+        Paths::RemotePath const& remotePath
+    )
+    {
+        const auto remoteDirectory = remotePath.parent();
+        if (!remoteDirectory)
+            return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::EscapesRoot, .input = remotePath.value()});
+        return changed.relativeTo(instanceDirectory)
+            .and_then(
+                [&changed, &remoteDirectory](
+                    Paths::RelativePath const& relative
+                ) -> std::expected<Paths::RemotePath, Paths::PathError>
+                {
+                    if (relative.empty())
+                        return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::Empty, .input = changed.toUtf8()});
+                    return *remoteDirectory / relative;
+                }
+            );
+    }
+}
+
 void FileTrackingPanel::startWatching(
     Ids::InstanceId const& instanceId,
-    std::filesystem::path const& instanceDir,
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath
+    Paths::LocalPath const& instanceDirectory,
+    Paths::RemotePath const& remotePath,
+    Paths::LocalPath const& localPath
 )
 {
     Log::info(
         "FileTracking: starting watch for instance {} (remote: {}, local: {})",
         instanceId.value(),
-        remotePath.generic_string(),
-        localPath.generic_string()
+        remotePath.value(),
+        localPath.toUtf8()
     );
 
     impl_->fileChangeListeners[instanceId.value()] = Nui::RpcClient::autoRegisterFunction(
         fmt::format("FileTracking::{}::onFileChanged", instanceId.value()),
-        [this, instanceId, remotePath, localPath, instanceDir](Nui::val payload)
+        [this, instanceId, remotePath, localPath, instanceDirectory](Nui::val payload)
         {
             const auto action = payload["action"].as<std::string>();
             const auto directory = payload["directory"].as<std::string>();
@@ -432,14 +462,18 @@ void FileTrackingPanel::startWatching(
 
             Log::debug("FileTracking: file changed in instance {}: {} {}", instanceId.value(), action, filename);
 
+            const auto localPathOfChange = [&directory](std::string const& name)
+            {
+                return Paths::LocalPath::fromUtf8(fmt::format("{}/{}", directory, name));
+            };
             // Only the tracked file or directory maps to the remote side, anything else in the instance
             // directory (Finder's .DS_Store for one) would land next to it on the server.
-            const auto isTracked = [&localPath](std::filesystem::path const& changedLocalPath)
+            const auto isTracked = [&localPath](std::expected<Paths::LocalPath, Paths::PathError> const& changed)
             {
-                const auto relative = changedLocalPath.lexically_relative(localPath);
-                return !relative.empty() && *relative.begin() != "..";
+                return changed && changed->isWithin(localPath);
             };
-            if (!isTracked(std::filesystem::path{directory} / filename))
+            const auto changedLocalPath = localPathOfChange(filename);
+            if (!isTracked(changedLocalPath))
             {
                 Log::debug("FileTracking: ignoring change outside the tracked item: {}", filename);
                 return;
@@ -498,8 +532,7 @@ void FileTrackingPanel::startWatching(
                 return;
             }
 
-            const auto oldLocalPath =
-                std::filesystem::path{directory} / payload["oldFilename"].as<std::string>();
+            const auto oldLocalPath = localPathOfChange(payload["oldFilename"].as<std::string>());
             // An atomic save renames a temporary from outside the tracked item over it, a change of its content.
             if (action == "Moved" && isTracked(oldLocalPath))
             {
@@ -554,33 +587,7 @@ void FileTrackingPanel::startWatching(
                 return;
             }
 
-            impl_->operationQueue->enqueueUpload(
-                source,
-                *destination,
-                /*sizeBytes=*/0,
-                [this, instanceId](std::optional<Ids::OperationId> const& opId, std::string const& info)
-                {
-                    if (!opId)
-                    {
-                        Log::error(
-                            "FileTracking: failed to enqueue upload for instance {}: {}", instanceId.value(), info
-                        );
-                    }
-                    auto& vec = impl_->entries.value();
-                    for (auto& ent : vec)
-                    {
-                        if (ent.instanceId.value() == instanceId.value())
-                        {
-                            (*ent.uploading) = false;
-                            break;
-                        }
-                    }
-                },
-                true, // allowOverwrite — re-upload always overwrites
-                false, // insertRefresh
-                false, // createMissingDirectories
-                SharedData::OperationMode::PriorityQueued
-            );
+            impl_->queueReupload(instanceId, source, *destination);
         }
     );
 
@@ -588,7 +595,7 @@ void FileTrackingPanel::startWatching(
     impl_->entries.value().push_back(
         TrackedEntry{
             .instanceId = instanceId,
-            .instanceDir = instanceDir,
+            .instanceDirectory = instanceDirectory,
             .remotePath = remotePath,
             .localPath = localPath,
             .autoReupload = ftOpts.autoReupload,

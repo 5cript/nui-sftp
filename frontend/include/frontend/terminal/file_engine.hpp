@@ -58,8 +58,8 @@ class FileEngine
     );
 
     void
-    createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
-    void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
+    createDirectory(Paths::RemotePath const& path, std::function<void(bool, std::string const& info)> onComplete);
+    void createFile(Paths::RemotePath const& path, std::function<void(bool, std::string const& info)> onComplete);
 
     /**
      * @brief Opens a backend-resident SyncSession and queues both scans.  The scans
@@ -257,8 +257,8 @@ class FileEngine
      *        @p overwrite is false.
      */
     void rename(
-        std::filesystem::path const& oldPath,
-        std::filesystem::path const& newPath,
+        Paths::RemotePath const& oldPath,
+        Paths::RemotePath const& newPath,
         bool overwrite,
         std::function<void(bool, std::string const& info)> onComplete
     );
@@ -288,7 +288,7 @@ class FileEngine
      *                    diagnostic.
      */
     void existsBatchRemote(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
     );
 
@@ -296,11 +296,6 @@ class FileEngine
 
   private:
     void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen);
-    void performDelete(
-        std::vector<NuiFileExplorer::Item> files,
-        std::vector<std::filesystem::path> directoriesEmpty,
-        std::function<void(bool, std::string const& info)> onComplete
-    );
 
   private:
     struct Implementation;
