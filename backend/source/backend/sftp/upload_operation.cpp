@@ -81,12 +81,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 Log::error("UploadOperation: Invalid local path.");
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             }
-            const auto localStatus = std::filesystem::symlink_status(options_.localPath);
+            const auto localStatus = std::filesystem::symlink_status(localNativePath_);
             if (!std::filesystem::is_regular_file(localStatus) && !std::filesystem::is_symlink(localStatus))
             {
                 Log::error(
-                    "UploadOperation: Local path '{}' is not a regular file or symlink.",
-                    options_.localPath.generic_string()
+                    "UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.toUtf8()
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
             }
@@ -97,23 +96,23 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             }
             else
             {
-                if (!std::filesystem::is_regular_file(std::filesystem::status(options_.localPath)))
+                if (!std::filesystem::is_regular_file(std::filesystem::status(localNativePath_)))
                 {
                     Log::error(
                         "UploadOperation: Local path '{}' is a directory, but a file was expected.",
-                        options_.localPath.generic_string()
+                        options_.localPath.toUtf8()
                     );
                     return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
                 }
-                if (!std::filesystem::exists(options_.localPath))
+                if (!std::filesystem::exists(localNativePath_))
                 {
-                    Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string());
+                    Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileNotFound});
                 }
-                localFile_.open(options_.localPath, std::ios::binary);
+                localFile_.open(localNativePath_, std::ios::binary);
                 if (!localFile_.is_open())
                 {
-                    Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.generic_string());
+                    Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::OpenFailure});
                 }
                 localFile_.seekg(0, std::ios::end);
@@ -122,9 +121,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 localFile_.seekg(0, std::ios::beg);
                 if (!localFile_.good())
                 {
-                    Log::error(
-                        "UploadOperation: Failed to seek in local file: {}", options_.localPath.generic_string()
-                    );
+                    Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileSeekFailure});
                 }
                 const auto prepareResult = prepareInStrand();
@@ -306,11 +303,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
-        Log::info("UploadOperation: Skipping symlink as per options: {}.", options_.localPath.string());
+        Log::info("UploadOperation: Skipping symlink as per options: {}.", options_.localPath.toUtf8());
         return {};
     }
 
-    const auto target = std::filesystem::read_symlink(options_.localPath);
+    const auto target = std::filesystem::read_symlink(localNativePath_);
 
     if (options_.createMissingDirectories)
     {
@@ -430,7 +427,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         {
             Log::warn(
                 "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                options_.remotePath.generic_string()
+                options_.remotePath.value()
             );
             return std::unexpected(Error{.type = ErrorType::FileExists});
         }
@@ -567,12 +564,10 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         Log::error("UploadOperation: Invalid remote path '{}'.", options_.remotePath.value());
         return enterErrorState({.type = ErrorType::InvalidPath, .extraInfo = options_.remotePath.value()});
     }
-    const auto localStatus = std::filesystem::symlink_status(options_.localPath);
+    const auto localStatus = std::filesystem::symlink_status(localNativePath_);
     if (!std::filesystem::is_regular_file(localStatus) && !std::filesystem::is_symlink(localStatus))
     {
-        Log::error(
-            "UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.generic_string()
-        );
+        Log::error("UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::NotAFile});
     }
 
@@ -583,26 +578,25 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return {};
     }
 
-    if (!std::filesystem::is_regular_file(std::filesystem::status(options_.localPath)))
+    if (!std::filesystem::is_regular_file(std::filesystem::status(localNativePath_)))
     {
         Log::error(
-            "UploadOperation: Local path '{}' is a directory, but a file was expected.",
-            options_.localPath.generic_string()
+            "UploadOperation: Local path '{}' is a directory, but a file was expected.", options_.localPath.toUtf8()
         );
         return enterErrorState({.type = ErrorType::NotAFile});
     }
 
     // Initial check. Check again later before rename
-    if (!std::filesystem::exists(options_.localPath))
+    if (!std::filesystem::exists(localNativePath_))
     {
-        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string());
+        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::FileNotFound});
     }
 
-    localFile_.open(options_.localPath, std::ios::binary);
+    localFile_.open(localNativePath_, std::ios::binary);
     if (!localFile_.is_open())
     {
-        Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.generic_string());
+        Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::OpenFailure});
     }
 
@@ -613,7 +607,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
     if (!localFile_.good())
     {
-        Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.generic_string());
+        Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::FileSeekFailure});
     }
 
@@ -636,9 +630,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     }
 
     Log::debug(
-        "UploadOperation: Prepared upload of '{}' to '{}'.",
-        options_.localPath.generic_string(),
-        options_.remotePath.generic_string()
+        "UploadOperation: Prepared upload of '{}' to '{}'.", options_.localPath.toUtf8(), options_.remotePath.value()
     );
 
     return {};
@@ -679,8 +671,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
     {
         Log::info(
             "UploadOperation: Upload of '{}' to '{}' canceled.",
-            options_.remotePath.generic_string(),
-            options_.localPath.generic_string()
+            options_.remotePath.value(),
+            options_.localPath.toUtf8()
         );
         state_ = OperationState::Canceled;
     }
@@ -728,9 +720,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
         return result;
 
     Log::debug(
-        "UploadOperation: Finalized upload of '{}' to '{}'.",
-        options_.remotePath.generic_string(),
-        options_.localPath.generic_string()
+        "UploadOperation: Finalized upload of '{}' to '{}'.", options_.remotePath.value(), options_.localPath.toUtf8()
     );
     return {};
 }
@@ -783,7 +773,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
     // don't see the file as modified (best-effort; a failure is only a warning).
     {
         std::error_code errc{};
-        const auto ftime = std::filesystem::last_write_time(options_.localPath, errc);
+        const auto ftime = std::filesystem::last_write_time(localNativePath_, errc);
         if (!errc)
         {
             const auto sctime = std::chrono::file_clock::to_sys(ftime);
@@ -799,7 +789,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
             {
                 Log::warn(
                     "UploadOperation: Failed to set mtime on '{}': {}.",
-                    options_.remotePath.generic_string(),
+                    options_.remotePath.value(),
                     mtimeResult.error().message
                 );
             }
@@ -807,9 +797,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
         else
         {
             Log::warn(
-                "UploadOperation: Could not read local mtime for '{}': {}.",
-                options_.localPath.generic_string(),
-                errc.message()
+                "UploadOperation: Could not read local mtime for '{}': {}.", options_.localPath.toUtf8(), errc.message()
             );
         }
     }

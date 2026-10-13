@@ -5,6 +5,7 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 
@@ -24,8 +25,8 @@ class UploadOperation : public Operation
             std::make_signed_t<std::size_t> bytesPerSecond
         )>
             progressCallback = [](auto, auto, auto, auto) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        Paths::RemotePath remotePath{};
+        Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
         bool tryContinue{false};
@@ -76,12 +77,12 @@ class UploadOperation : public Operation
         return SharedData::OperationType::Upload;
     }
 
-    std::filesystem::path remotePath() const
+    Paths::RemotePath const& remotePath() const
     {
         return options_.remotePath;
     }
 
-    std::filesystem::path localPath() const
+    Paths::LocalPath const& localPath() const
     {
         return options_.localPath;
     }

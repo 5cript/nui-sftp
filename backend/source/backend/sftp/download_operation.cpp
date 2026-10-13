@@ -74,11 +74,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 Log::error("DownloadOperation: Invalid local path.");
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             }
-            if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
+            if (std::filesystem::exists(localNativePath_) && !options_.mayOverwrite)
             {
                 Log::error(
                     "DownloadOperation: File '{}' already exists and may not be overwritten.",
-                    options_.localPath.generic_string()
+                    options_.localPath.toUtf8()
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
             }
@@ -246,7 +246,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
-        Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.string());
+        Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.value());
         return {};
     }
 
@@ -258,12 +258,12 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
     std::error_code ec{};
     if (options_.createMissingDirectories)
     {
-        std::filesystem::create_directories(options_.localPath.parent_path(), ec);
+        std::filesystem::create_directories(localNativePath_.parent_path(), ec);
         if (ec)
         {
             Log::error(
                 "DownloadOperation: Failed to create parent dirs for symlink '{}': {}.",
-                options_.localPath.generic_string(),
+                options_.localPath.toUtf8(),
                 ec.message()
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
@@ -278,9 +278,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
     if (ec)
     {
         Log::error(
-            "DownloadOperation: Failed to create symlink at '{}': {}.",
-            options_.localPath.generic_string(),
-            ec.message()
+            "DownloadOperation: Failed to create symlink at '{}': {}.", options_.localPath.toUtf8(), ec.message()
         );
         return std::unexpected(Error{.type = ErrorType::CannotCreateSymlink});
     }
@@ -382,7 +380,7 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
 std::expected<void, DownloadOperation::Error>
 DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
-    auto tempPath = options_.localPath;
+    auto tempPath = localNativePath_;
     tempPath += options_.tempFileSuffix;
 
     if (options_.createMissingDirectories)
@@ -499,13 +497,12 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     }
 
     // Initial check. Check again later before rename.
-    if (std::filesystem::exists(options_.localPath))
+    if (std::filesystem::exists(localNativePath_))
     {
         if (!options_.mayOverwrite)
         {
             Log::error(
-                "DownloadOperation: File '{}' already exists and may not be overwritten.",
-                options_.localPath.generic_string()
+                "DownloadOperation: File '{}' already exists and may not be overwritten.", options_.localPath.toUtf8()
             );
             return enterErrorState({.type = ErrorType::FileExists});
         }
@@ -561,7 +558,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
             Error{
                 .type = ErrorType::SftpError,
                 .sftpError = streamOpenResult.error(),
-                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.string())
+                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value())
             }
         );
     }
@@ -636,8 +633,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::cancel(bool ado
     {
         Log::info(
             "DownloadOperation: Download of '{}' to '{}' canceled.",
-            options_.remotePath.generic_string(),
-            options_.localPath.generic_string()
+            options_.remotePath.value(),
+            options_.localPath.toUtf8()
         );
         state_ = OperationState::Canceled;
     }
@@ -658,7 +655,7 @@ void DownloadOperation::cleanup()
 
     localFile_.close();
 
-    auto tempPath = options_.localPath;
+    auto tempPath = localNativePath_;
     tempPath += options_.tempFileSuffix;
     if (options_.doCleanup && std::filesystem::exists(tempPath))
         std::filesystem::remove(tempPath);
@@ -732,8 +729,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     if (ec == std::errc::file_exists)
     {
         Log::error(
-            "DownloadOperation: File '{}' already exists and may not be overwritten.",
-            options_.localPath.generic_string()
+            "DownloadOperation: File '{}' already exists and may not be overwritten.", options_.localPath.toUtf8()
         );
         return std::unexpected(Error{.type = ErrorType::FileExists});
     }
@@ -793,13 +789,11 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         )};
         const auto fileTime = std::chrono::file_clock::from_sys(sysTime);
         std::error_code mtimeError{};
-        std::filesystem::last_write_time(options_.localPath, fileTime, mtimeError);
+        std::filesystem::last_write_time(localNativePath_, fileTime, mtimeError);
         if (mtimeError)
         {
             Log::warn(
-                "DownloadOperation: Failed to set mtime on '{}': {}.",
-                options_.localPath.generic_string(),
-                mtimeError.message()
+                "DownloadOperation: Failed to set mtime on '{}': {}.", options_.localPath.toUtf8(), mtimeError.message()
             );
         }
     }

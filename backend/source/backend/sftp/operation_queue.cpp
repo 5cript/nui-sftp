@@ -40,8 +40,8 @@ namespace
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
-                        .localPath = op.localPath(),
-                        .remotePath = op.remotePath(),
+                        .localPath = unlessEmpty(op.localPath()),
+                        .remotePath = unlessEmpty(op.remotePath()),
                         .error = error,
                     };
                 },
