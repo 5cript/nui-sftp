@@ -842,6 +842,11 @@ const server = new Server({
 
                     logMessage('LSTAT', path);
 
+                    if (faults.deniedStats.has(path)) {
+                        logMessage('Fault: permission denied');
+                        return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                    }
+
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
                         logMessage('File not found');
