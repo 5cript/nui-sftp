@@ -9,6 +9,7 @@
 #include <nui/utility/scope_exit.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -504,6 +505,36 @@ namespace Test
         LocalScanOperation flat{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
         ASSERT_EQ(runScanToCompletion(flat), LocalScanOperation::WorkStatus::Complete);
         EXPECT_FALSE(hasEntryNamed(flat.ejectEntries(), "pipe")) << "transfers never see untransferable entries";
+    }
+#endif
+
+#ifdef _WIN32
+    TEST_F(LocalScanOperationTests, JunctionIsExcludedAndNotWalked)
+    {
+        const auto outside = scanRoot_.path().parent_path() / ("junction_target_" + scanRoot_.path().filename().string());
+        std::filesystem::create_directories(outside);
+        std::ofstream{outside / "inside.txt"} << "inside";
+        auto removeOutside = Nui::ScopeExit{[&outside]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::remove_all(outside, errorCode);
+        }};
+        const auto link = scanRoot_.path() / "linked";
+        const auto command = "cmd /c mklink /J \"" + link.string() + "\" \"" + outside.string() + "\" >nul";
+        ASSERT_EQ(std::system(command.c_str()), 0);
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        const auto tree = operation.ejectScanTree();
+        auto const* linked = SharedData::Sync::findScanNode(tree, "linked");
+        ASSERT_NE(linked, nullptr);
+        EXPECT_EQ(linked->availability, SharedData::Sync::Availability::Excluded);
+        EXPECT_EQ(SharedData::Sync::findScanNode(tree, "linked/inside.txt"), nullptr) << "a junction is never walked";
+
+        LocalScanOperation flat{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(flat), LocalScanOperation::WorkStatus::Complete);
+        const auto entries = flat.ejectEntries();
+        EXPECT_FALSE(hasEntryNamed(entries, "linked"));
+        EXPECT_FALSE(hasEntryNamed(entries, "inside.txt")) << "an upload never leaves its tree through a junction";
     }
 #endif
 }

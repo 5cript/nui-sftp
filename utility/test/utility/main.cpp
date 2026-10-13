@@ -7,6 +7,7 @@
 #include "test_move_to_front.hpp"
 #include "test_permissions.hpp"
 #include "test_rename.hpp"
+#include "test_link_safe_remove.hpp"
 #include "test_shell_integration.hpp"
 #include "test_typed_line_buffer.hpp"
 #include "test_user_directories.hpp"
