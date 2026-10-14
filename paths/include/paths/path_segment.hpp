@@ -1,66 +1,58 @@
 #pragma once
 
 #include <paths/path_error.hpp>
+#include <paths/utf8.hpp>
 
 #include <compare>
 #include <cstdint>
 #include <expected>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace Paths
 {
-    /**
-     * @brief True when @p text is well-formed UTF-8 (no overlong forms, no surrogates).
-     */
-    inline bool isValidUtf8(std::string_view text)
-    {
-        std::size_t index = 0;
-        while (index < text.size())
-        {
-            const auto lead = static_cast<unsigned char>(text[index]);
-            std::size_t length = 0;
-            std::uint32_t codePoint = 0;
-            if (lead < 0x80u)
-            {
-                ++index;
-                continue;
-            }
-            if ((lead & 0xE0u) == 0xC0u)
-            {
-                length = 2;
-                codePoint = lead & 0x1Fu;
-            }
-            else if ((lead & 0xF0u) == 0xE0u)
-            {
-                length = 3;
-                codePoint = lead & 0x0Fu;
-            }
-            else if ((lead & 0xF8u) == 0xF0u)
-            {
-                length = 4;
-                codePoint = lead & 0x07u;
-            }
-            else
-                return false;
+    class RelativePath;
+    class RemotePath;
+    class LocalPath;
 
-            if (index + length > text.size())
-                return false;
-            for (std::size_t offset = 1; offset < length; ++offset)
-            {
-                const auto continuation = static_cast<unsigned char>(text[index + offset]);
-                if ((continuation & 0xC0u) != 0x80u)
-                    return false;
-                codePoint = (codePoint << 6u) | (continuation & 0x3Fu);
-            }
-            constexpr std::uint32_t minimumForLength[] = {0u, 0u, 0x80u, 0x800u, 0x10000u};
-            if (codePoint < minimumForLength[length] || codePoint > 0x10FFFFu ||
-                (codePoint >= 0xD800u && codePoint <= 0xDFFFu))
-                return false;
-            index += length;
+    namespace Detail
+    {
+        /**
+         * @brief The parts of @p text between '/' separators as string views, empty parts included. Empty text has
+         *        no parts.
+         */
+        inline auto splitAtSlashes(std::string_view text)
+        {
+            return text | std::views::split('/') |
+                std::views::transform(
+                       [](auto const& part)
+                       {
+                           return std::string_view{part.begin(), part.end()};
+                       }
+                );
         }
-        return true;
+
+        /**
+         * @brief Appends @p tail to the path text @p value, with a '/' between them unless @p value ends in one.
+         */
+        inline void appendSegment(std::string& value, std::string_view tail)
+        {
+            if (!value.empty() && value.back() != '/')
+                value.push_back('/');
+            value.append(tail);
+        }
+
+        /**
+         * @brief The text after the last '/' of @p value, all of it when there is none.
+         */
+        inline std::string_view lastSegment(std::string_view value)
+        {
+            const auto slash = value.rfind('/');
+            return slash == std::string_view::npos ? value : value.substr(slash + 1);
+        }
     }
 
     /**
@@ -74,21 +66,27 @@ namespace Paths
       public:
         static std::expected<PathSegment, PathError> make(std::string_view utf8)
         {
-            const auto refuse = [utf8](PathRejection reason)
-            {
-                return std::unexpected(PathError{.reason = reason, .input = std::string{utf8}});
-            };
-            if (utf8.empty())
-                return refuse(PathRejection::Empty);
-            if (utf8 == "." || utf8 == "..")
-                return refuse(PathRejection::DotOrDotDot);
-            if (utf8.find('/') != std::string_view::npos)
-                return refuse(PathRejection::ContainsSeparator);
-            if (utf8.find('\0') != std::string_view::npos)
-                return refuse(PathRejection::ContainsNul);
-            if (!isValidUtf8(utf8))
-                return refuse(PathRejection::InvalidUtf8);
+            if (const auto rejection = rejectionOf(utf8); rejection)
+                return std::unexpected(PathError{.reason = *rejection, .input = std::string{utf8}});
             return PathSegment{std::string{utf8}};
+        }
+
+        /**
+         * @brief Why @p utf8 is no valid segment, nothing when it is one.
+         */
+        static std::optional<PathRejection> rejectionOf(std::string_view utf8)
+        {
+            if (utf8.empty())
+                return PathRejection::Empty;
+            if (utf8 == "." || utf8 == "..")
+                return PathRejection::DotOrDotDot;
+            if (utf8.find('/') != std::string_view::npos)
+                return PathRejection::ContainsSeparator;
+            if (utf8.find('\0') != std::string_view::npos)
+                return PathRejection::ContainsNul;
+            if (!isValidUtf8(utf8))
+                return PathRejection::InvalidUtf8;
+            return std::nullopt;
         }
 
         std::string const& value() const noexcept
@@ -104,6 +102,13 @@ namespace Paths
         auto operator<=>(PathSegment const&) const = default;
 
       private:
+        friend class RelativePath;
+        friend class RemotePath;
+        friend class LocalPath;
+
+        /**
+         * @brief Takes @p value as it is, for text a path type already validated.
+         */
         explicit PathSegment(std::string value)
             : value_{std::move(value)}
         {}

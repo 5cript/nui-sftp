@@ -31,15 +31,6 @@ namespace Paths
 
     // Paths travel as plain strings, invalid ones are refused when they are read.
 
-    inline void to_json(nlohmann::json& json, PathSegment const& segment)
-    {
-        json = segment.value();
-    }
-    inline void from_json(nlohmann::json const& json, PathSegment& segment)
-    {
-        segment = Detail::orThrow(PathSegment::make(json.get<std::string>()));
-    }
-
     inline void to_json(nlohmann::json& json, RelativePath const& path)
     {
         json = path.value();
@@ -102,3 +93,19 @@ namespace Paths
     }
 #endif
 }
+
+/**
+ * @brief PathSegment has no unset state, so it is read through a serializer instead of from_json.
+ */
+template <>
+struct nlohmann::adl_serializer<Paths::PathSegment>
+{
+    static Paths::PathSegment from_json(nlohmann::json const& json)
+    {
+        return Paths::Detail::orThrow(Paths::PathSegment::make(json.get<std::string>()));
+    }
+    static void to_json(nlohmann::json& json, Paths::PathSegment const& segment)
+    {
+        json = segment.value();
+    }
+};

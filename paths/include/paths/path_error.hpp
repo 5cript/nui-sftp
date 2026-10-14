@@ -1,6 +1,11 @@
 #pragma once
 
+#include <paths/utf8.hpp>
+
+#include <fmt/format.h>
+
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -17,14 +22,30 @@ namespace Paths
         ContainsNul,
         InvalidUtf8,
         NotAbsolute,
-        /// A character the local platform cannot store in a name, like '\\' or ':' on Windows.
+        /**
+         * @brief A character the local platform cannot store in a name, like '\\' or ':' on Windows.
+         */
         ReservedCharacter,
-        /// A Windows device name like CON or LPT1, with or without an extension.
+        /**
+         * @brief A Windows device name like CON or LPT1, with or without an extension.
+         */
         ReservedDeviceName,
-        /// Windows drops a trailing dot or space, the name would refer to another file.
+        /**
+         * @brief Windows drops a trailing dot or space, the name would refer to another file.
+         */
         TrailingDotOrSpace,
-        /// The path leaves the directory it is meant to stay in.
+        /**
+         * @brief The path leaves the directory it is meant to stay in.
+         */
         EscapesRoot,
+        /**
+         * @brief A Windows device or namespace path like \\.\PhysicalDrive0 or \\?\Volume{...}, no file path.
+         */
+        DevicePath,
+        /**
+         * @brief A name longer than the 255 UTF-16 code units Windows allows.
+         */
+        NameTooLong,
     };
 
     inline std::string_view toString(PathRejection rejection)
@@ -51,6 +72,10 @@ namespace Paths
                 return "ends with a dot or space";
             case PathRejection::EscapesRoot:
                 return "leaves its root directory";
+            case PathRejection::DevicePath:
+                return "is a device path";
+            case PathRejection::NameTooLong:
+                return "has a name that is too long";
         }
         return "is invalid";
     }
@@ -63,24 +88,29 @@ namespace Paths
         PathRejection reason{PathRejection::Empty};
         std::string input{};
 
+        /**
+         * @brief The input in quotes followed by the reason. Control bytes and bytes that are not part of a valid
+         *        UTF-8 sequence are written as \\xNN, so the text is always valid UTF-8.
+         */
         std::string toString() const
         {
             std::string printable;
             printable.reserve(input.size());
-            for (const auto character : input)
+            std::size_t index = 0;
+            while (index < input.size())
             {
-                const auto byte = static_cast<unsigned char>(character);
-                if (byte < 0x20u || byte == 0x7Fu)
+                const auto byte = static_cast<unsigned char>(input[index]);
+                const auto length = Detail::utf8SequenceLength(input, index);
+                if (length == 0u || byte < 0x20u || byte == 0x7Fu)
                 {
-                    constexpr std::string_view digits = "0123456789ABCDEF";
-                    printable += "\\x";
-                    printable.push_back(digits[byte >> 4u]);
-                    printable.push_back(digits[byte & 0x0Fu]);
+                    fmt::format_to(std::back_inserter(printable), "\\x{:02X}", byte);
+                    ++index;
+                    continue;
                 }
-                else
-                    printable.push_back(character);
+                printable.append(input, index, length);
+                index += length;
             }
-            return "'" + printable + "' " + std::string{Paths::toString(reason)};
+            return fmt::format("'{}' {}", printable, Paths::toString(reason));
         }
     };
 }
