@@ -12,8 +12,11 @@
 
 #include <ids/ids.hpp>
 
+#include <libssh/sftp.h>
+
 #include <optional>
 #include <expected>
+#include <system_error>
 
 class Operation
 {
@@ -163,6 +166,28 @@ class Operation
     void enterState(OperationState newState)
     {
         state_ = newState;
+    }
+
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error remoteMoveError(SecureShell::SftpError error)
+    {
+        if (error.sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+    }
+
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on this machine: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error localMoveError(std::error_code error)
+    {
+        if (error == std::errc::file_exists)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::RenameFailure};
     }
 
     /**

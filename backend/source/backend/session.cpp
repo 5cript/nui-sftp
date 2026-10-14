@@ -95,6 +95,9 @@ Session::Session(
     , operationQueue_{std::make_shared<
           OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency))}
     , bulkResumeRegistry_{bulkResumeRegistry}
+    , remoteTempFileSuffix_{Persistence::effectiveTempFileSuffix(
+          sftpOptions.uploadOptions ? sftpOptions.uploadOptions->tempFileSuffix : std::nullopt
+      )}
 {}
 
 Session::~Session()
@@ -1815,12 +1818,20 @@ void Session::registerRpcSftpRename()
                         if (!oldPath || !newPath || !oldPath->parent() || oldPath->parent() != newPath->parent())
                             return reply.error("backend.rename.invalidName");
 
-                        // Never replaces an existing item unless the user confirmed it.
                         auto fut = channel->performPromise(
-                            [channel, oldPath = *oldPath, newPath = *newPath, overwrite]()
+                            [session = std::weak_ptr{channel},
+                                oldPath = *oldPath,
+                                newPath = *newPath,
+                                overwrite,
+                                asideSuffix = Persistence::asideFileSuffix(self.remoteTempFileSuffix_)]()
+                                -> std::expected<void, SecureShell::SftpError>
                             {
-                                return overwrite ? channel->renameReplaceInStrand(oldPath, newPath, ".nui-sftp-old")
-                                                 : channel->renameNoReplaceInStrand(oldPath, newPath);
+                                const auto sftp = session.lock();
+                                if (!sftp)
+                                    return std::unexpected(
+                                        SecureShell::SftpError{.message = "The SFTP channel was closed"}
+                                    );
+                                return sftp->moveIntoPlaceInStrand(oldPath, newPath, overwrite, asideSuffix);
                             }
                         );
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)

@@ -665,18 +665,12 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
             Log::warn("ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", marked.message());
     }
 
-    // Without permission to overwrite, the rename itself refuses an existing archive: no check-then-rename race.
-    std::error_code renameErr{};
-    if (options_.mayOverwrite)
-        std::filesystem::rename(tempPath_, localArchiveNativePath_, renameErr);
-    else if (auto renamed = Utility::renameNoReplace(tempPath_, localArchiveNativePath_); !renamed.has_value())
-        renameErr = renamed.error();
-    if (renameErr == std::errc::file_exists)
-        return std::unexpected(Error{.type = ErrorType::FileExists});
-    if (renameErr)
+    if (const auto moved = Utility::moveIntoPlace(tempPath_, localArchiveNativePath_, options_.mayOverwrite); !moved)
     {
-        Log::error("ArchiveDownloadOperation: rename failed: {}", renameErr.message());
-        return std::unexpected(Error{.type = ErrorType::RenameFailure});
+        Log::error(
+            "ArchiveDownloadOperation: Failed to move the archive into place: {}", Utility::errorMessage(moved.error())
+        );
+        return std::unexpected(localMoveError(moved.error()));
     }
     return {};
 }

@@ -646,19 +646,21 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
         stream->close(false);
     remoteStream_.reset();
 
-    const auto renameResult = options_.mayOverwrite
-        ? sftp_->renameReplaceInStrand(tempPath_, remoteArchivePath_, options_.tempFileSuffix + ".old")
-        : sftp_->renameNoReplaceInStrand(tempPath_, remoteArchivePath_);
-    if (!renameResult.has_value())
+    const auto moved = sftp.moveIntoPlaceInStrand(
+        tempPath_,
+        remoteArchivePath_,
+        options_.mayOverwrite,
+        Persistence::asideFileSuffix(options_.tempFileSuffix),
+        SharedData::FileType::Regular
+    );
+    if (!moved.has_value())
     {
         Log::error(
             "ArchiveUploadOperation: cannot move the archive to '{}': {}",
             options_.remoteArchivePath.value(),
-            renameResult.error().message
+            moved.error().message
         );
-        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
-            return std::unexpected(Error{.type = ErrorType::FileExists});
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
+        return std::unexpected(remoteMoveError(moved.error()));
     }
     tempCreated_ = false;
     return {};

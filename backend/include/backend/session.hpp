@@ -297,4 +297,6 @@ class Session
     BulkResumeRegistry* bulkResumeRegistry_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
+    /** @brief The temp file suffix of uploads, which names where a replaced item is kept during a rename. */
+    std::string remoteTempFileSuffix_;
 };

@@ -329,20 +329,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
-    const auto renameResult = options_.mayOverwrite
-        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
-        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
-    if (!renameResult.has_value())
+    const auto moved = sftp_->moveIntoPlaceInStrand(
+        tempPath_,
+        remotePath_,
+        options_.mayOverwrite,
+        Persistence::asideFileSuffix(options_.tempFileSuffix),
+        SharedData::FileType::Symlink
+    );
+    if (!moved.has_value())
     {
         std::ignore = sftp_->removeFileInStrand(tempPath_);
-        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
-            return std::unexpected(Error{.type = ErrorType::FileExists});
         Log::error(
-            "UploadOperation: Failed to move symlink to '{}': {}.",
-            options_.remotePath.value(),
-            renameResult.error().message
+            "UploadOperation: Failed to move symlink to '{}': {}.", options_.remotePath.value(), moved.error().message
         );
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
+        return std::unexpected(remoteMoveError(moved.error()));
     }
     return {};
 }
@@ -775,23 +775,19 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
 
     stream->closeInStrand();
 
-    // The destination is never deleted ahead of the rename: replacing is atomic or moves it aside, and
-    // without permission to overwrite the rename fails instead of replacing.
-    const auto renameResult = options_.mayOverwrite
-        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
-        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
-    if (!renameResult.has_value())
+    const auto moved = sftp_->moveIntoPlaceInStrand(
+        tempPath_,
+        remotePath_,
+        options_.mayOverwrite,
+        Persistence::asideFileSuffix(options_.tempFileSuffix),
+        SharedData::FileType::Regular
+    );
+    if (!moved.has_value())
     {
-        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
-        {
-            Log::warn(
-                "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                options_.remotePath.value()
-            );
-            return std::unexpected(Error{.type = ErrorType::FileExists});
-        }
-        Log::error("Failed to rename remote sftp file: {}", renameResult.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
+        Log::error("UploadOperation: Failed to move '{}' into place: {}", options_.remotePath.value(), moved.error().message);
+        if (auto removed = sftp_->removeFileInStrand(tempPath_); !removed.has_value())
+            Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
+        return std::unexpected(remoteMoveError(moved.error()));
     }
 
     // Preserve the local file's mtime on the remote file so subsequent syncs

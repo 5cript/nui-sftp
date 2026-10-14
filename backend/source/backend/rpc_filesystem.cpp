@@ -376,18 +376,17 @@ void RpcFilesystem::registerRename()
                     return reply.error("backend.rename.invalidName");
                 }
 
-                // Never replaces an existing item unless the user confirmed it.
-                std::error_code ec;
-                if (overwrite)
-                    std::filesystem::rename(oldPath, newPath, ec);
-                else if (auto renamed = Utility::renameNoReplace(oldPath, newPath); !renamed.has_value())
-                    ec = renamed.error();
-                if (ec == std::errc::file_exists)
-                    return reply.error("backend.rename.targetExists");
-                if (ec)
+                if (const auto moved = Utility::moveIntoPlace(oldPath, newPath, overwrite); !moved)
                 {
-                    Log::error("Failed to rename from '{}' to '{}': {}", oldPathUtf8, newPathUtf8, ec.message());
-                    return reply.error(ec.message());
+                    if (moved.error() == std::errc::file_exists)
+                        return reply.error("backend.rename.targetExists");
+                    Log::error(
+                        "Failed to rename from '{}' to '{}': {}",
+                        oldPathUtf8,
+                        newPathUtf8,
+                        Utility::errorMessage(moved.error())
+                    );
+                    return reply.error(Utility::errorMessage(moved.error()));
                 }
 
                 Log::info("Successfully renamed from '{}' to '{}'", oldPathUtf8, newPathUtf8);

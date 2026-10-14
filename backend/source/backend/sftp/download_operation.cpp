@@ -770,23 +770,14 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
             Log::warn("DownloadOperation: Cannot mark '{}' as downloaded: {}", Paths::nativeToUtf8(tempPath), marked.message());
     }
 
-    // Without permission to overwrite, the rename itself refuses an existing file: no check-then-rename race.
-    std::error_code ec{};
-    if (options_.mayOverwrite)
-        std::filesystem::rename(tempPath, localNativePath_, ec);
-    else if (auto renamed = Utility::renameNoReplace(tempPath, localNativePath_); !renamed.has_value())
-        ec = renamed.error();
-    if (ec == std::errc::file_exists)
+    if (const auto moved = Utility::moveIntoPlace(tempPath, localNativePath_, options_.mayOverwrite); !moved)
     {
         Log::error(
-            "DownloadOperation: File '{}' already exists and may not be overwritten.", options_.localPath.toUtf8()
+            "DownloadOperation: Failed to move '{}' into place: {}",
+            options_.localPath.toUtf8(),
+            Utility::errorMessage(moved.error())
         );
-        return std::unexpected(Error{.type = ErrorType::FileExists});
-    }
-    if (ec)
-    {
-        Log::error("DownloadOperation: Failed to rename file: {}", ec.message());
-        return std::unexpected(Error{.type = ErrorType::RenameFailure});
+        return std::unexpected(localMoveError(moved.error()));
     }
 
     if (options_.inheritPermissions)
