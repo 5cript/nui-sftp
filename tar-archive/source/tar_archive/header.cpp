@@ -1,4 +1,5 @@
 #include <tar_archive/header.hpp>
+#include <paths/utf8.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -225,6 +226,17 @@ namespace TarArchive
                 return std::pair<std::string, std::string>{prefix, name};
             }
             return std::nullopt;
+        }
+
+        bool hasNonAsciiByte(std::string_view text)
+        {
+            return std::ranges::any_of(
+                text,
+                [](char character)
+                {
+                    return static_cast<unsigned char>(character) >= 0x80u;
+                }
+            );
         }
 
         std::string normaliseArchivePath(std::string value)
@@ -647,20 +659,21 @@ namespace TarArchive
         std::string truncatedPath = normalisedPath;
         std::string truncatedLink = linkTargetText;
 
+        // A name with non-ASCII bytes also gets a PAX record, which readers take as UTF-8, the ustar fields have no
+        // encoding of their own.
         auto split = trySplitUstarPath(normalisedPath, isDirectory);
-        const bool pathNeedsPax = !split.has_value();
-        if (pathNeedsPax)
-        {
+        if (!split.has_value() || hasNonAsciiByte(normalisedPath))
             paxEntries.emplace_back("path", normalisedPath);
-            truncatedPath = normalisedPath.substr(0u, fieldName.length);
+        if (!split.has_value())
+        {
+            truncatedPath = std::string{Paths::truncatedUtf8(normalisedPath, fieldName.length)};
             split = std::pair<std::string, std::string>{std::string{}, truncatedPath};
         }
 
-        const bool linkNeedsPax = linkTargetText.size() > fieldLinkName.length;
-        if (linkNeedsPax)
+        if (linkTargetText.size() > fieldLinkName.length || hasNonAsciiByte(linkTargetText))
         {
             paxEntries.emplace_back("linkpath", linkTargetText);
-            truncatedLink = linkTargetText.substr(0u, fieldLinkName.length);
+            truncatedLink = std::string{Paths::truncatedUtf8(linkTargetText, fieldLinkName.length)};
         }
 
         if (sizeExceedsOctal)
@@ -683,9 +696,8 @@ namespace TarArchive
             const std::string paxName =
                 "PaxHeaders/" + (truncatedPath.empty() ? std::string{"entry"} : truncatedPath);
             const auto paxSplit = trySplitUstarPath(paxName, false);
-            const std::string paxNameField = paxSplit
-                ? paxSplit->second
-                : paxName.substr(0u, fieldName.length);
+            const std::string paxNameField =
+                paxSplit ? paxSplit->second : std::string{Paths::truncatedUtf8(paxName, fieldName.length)};
             const std::string paxPrefixField = paxSplit ? paxSplit->first : std::string{};
 
             RawRecord paxRecord;
