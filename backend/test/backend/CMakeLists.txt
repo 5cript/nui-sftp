@@ -32,7 +32,10 @@ target_compile_definitions(nui-sftp-backend-test PRIVATE NUI_SFTP_TEST_DOCKER_DI
 
 set_target_properties(nui-sftp-backend-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
 
-gtest_discover_tests(nui-sftp-backend-test)
+# The docker shell suites prepare their images per process and start a container per test, so they run one at a
+# time; everything else runs in parallel (ctest -j).
+gtest_discover_tests(nui-sftp-backend-test TEST_FILTER "-Shells/*:Bash/*")
+gtest_discover_tests(nui-sftp-backend-test TEST_FILTER "Shells/*:Bash/*" PROPERTIES RESOURCE_LOCK docker)
 
 # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
 # And there is no need on linux.
