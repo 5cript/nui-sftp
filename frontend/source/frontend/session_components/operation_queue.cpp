@@ -59,6 +59,8 @@ struct OperationQueue::Implementation
 
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
     Nui::Observed<bool> paused{true};
+    /** @brief The profile starts the queue of every connection paused, the backend creates it paused. */
+    bool startsPaused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
@@ -311,7 +313,8 @@ OperationQueue::OperationQueue(
           ),
       }
 {
-    impl_->paused = queueOptions.startInPausedState.value_or(true);
+    impl_->startsPaused = queueOptions.startInPausedState.value_or(true);
+    impl_->paused = impl_->startsPaused;
     *impl_->autoClean = queueOptions.autoRemoveCompletedOperations.value_or(false);
     impl_->liveQueuePageSize = std::clamp(queueOptions.liveQueuePageSize.value_or(200), 1, 1000);
 
@@ -1670,6 +1673,8 @@ void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused>
         Log::info("Initial pause state of operation queue is: {}", result.paused ? "paused" : "running");
         impl_->paused = result.paused;
         Nui::globalEventContext.executeActiveEventsImmediately();
+        if (result.paused && !impl_->startsPaused)
+            unpause();
     }
     else
     {
