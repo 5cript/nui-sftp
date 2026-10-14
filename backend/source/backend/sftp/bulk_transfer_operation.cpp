@@ -488,6 +488,17 @@ void BulkTransferOperation::addRejectedEntries(std::vector<std::string> const& p
     }
 }
 
+void BulkTransferOperation::addUnreadableDirectories(std::vector<std::string> const& paths)
+{
+    for (auto const& path : paths)
+    {
+        Log::warn("{}: Skipping the content of '{}', it cannot be listed.", logName(), path);
+        failedEntries_.emplace_back(
+            path, Error{.type = ErrorType::DirectoryUnreadable, .extraInfo = "The directory cannot be listed"}
+        );
+    }
+}
+
 std::vector<std::pair<std::string, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
 {
     return failedEntries_;

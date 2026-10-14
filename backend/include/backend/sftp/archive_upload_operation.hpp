@@ -204,6 +204,8 @@ class ArchiveUploadOperation : public Operation
      */
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
+    /** @brief A scanned directory or name that cannot go into the archive, set once the scan delivered it. */
+    std::optional<Error> incompleteScan_{};
     std::unique_ptr<ScanPhase<LocalScanOperation>> scanPhase_{};
     /** @brief options_.remoteArchivePath, unset when none was given. */
     Paths::RemotePath remoteArchivePath_{};

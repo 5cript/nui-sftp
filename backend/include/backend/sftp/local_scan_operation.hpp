@@ -147,6 +147,15 @@ class LocalScanOperation : public Operation
     }
 
     /**
+     * @brief Full paths of directories below the root that could not be listed. Flat scans only, they are left out
+     *        of the entries; the tree of a sync scan keeps them as unreadable nodes.
+     */
+    std::vector<std::string> const& unreadableDirectories() const noexcept
+    {
+        return unreadableDirectories_;
+    }
+
+    /**
      * @brief Eject the scanned node tree. Only valid when @ref buildsTree() is true.
      */
     SharedData::Sync::ScanNode ejectScanTree()
@@ -183,6 +192,7 @@ class LocalScanOperation : public Operation
     );
 
   private:
+    std::vector<std::string> unreadableDirectories_{};
     Paths::LocalPath localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
