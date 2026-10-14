@@ -616,6 +616,43 @@ namespace Test
         EXPECT_FALSE(std::filesystem::is_regular_file(std::filesystem::symlink_status(localPath)));
     }
 
+    TEST_F(DownloadOperationTests, DownloadRemoteSymlinkReplacesOnlyWhenAllowed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        for (const bool mayOverwrite : {false, true})
+        {
+            const auto localPath = downloadDir_.path() / fmt::format("existing_{}", mayOverwrite);
+            std::ofstream{localPath} << "existing";
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/link_to_file1.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = mayOverwrite,
+                }
+            };
+            const auto result = [&operation]()
+            {
+                for (;;)
+                {
+                    auto step = operation.work();
+                    if (!step.has_value() || step.value() == DownloadOperation::WorkStatus::Complete)
+                        return step;
+                }
+            }();
+            ASSERT_EQ(result.has_value(), mayOverwrite);
+            if (!mayOverwrite)
+                EXPECT_EQ(result.error().type, Operation::ErrorType::FileExists);
+            EXPECT_EQ(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)), mayOverwrite);
+            if (mayOverwrite)
+                EXPECT_EQ(std::filesystem::read_symlink(localPath), "/home/test/file1.txt");
+            EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(localPath.string() + ".filepart")));
+        }
+    }
+
     TEST_F(DownloadOperationTests, DownloadRemoteSymlinkToDirectoryCreatesLocalSymlink)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
