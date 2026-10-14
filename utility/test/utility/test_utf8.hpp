@@ -37,8 +37,8 @@ namespace Utility::Tests
             ),
             replacement + U"a"
         );
-        EXPECT_EQ(Utf8::decode("\xC0\xAF"), replacement);
-        EXPECT_EQ(Utf8::decode("\xED\xA0\x80"), replacement);
+        EXPECT_EQ(Utf8::decode("\xC0\xAF"), replacement + replacement);
+        EXPECT_EQ(Utf8::decode("\xED\xA0\x80"), replacement + replacement + replacement);
     }
 
     TEST_F(Utf8Tests, EncodeRoundTripsDecode)
