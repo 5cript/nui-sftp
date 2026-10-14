@@ -161,7 +161,8 @@ void BackendSyncProvider::executeSelection(
     request.generation = generation_;
     queue_->executeSyncSelection(
         std::move(request),
-        [alive = std::weak_ptr{alive_}, onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
+        [alive = std::weak_ptr{alive_},
+            onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
         {
             // The operations are queued either way, the reply only maps them to rows of a dialog that may be gone.
             if (alive.lock())

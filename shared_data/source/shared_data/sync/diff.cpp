@@ -303,7 +303,8 @@ namespace SharedData::Sync
                 return true;
             };
 
-            const auto bumpAndCheckpoint = [&]() {
+            const auto bumpAndCheckpoint = [&]()
+            {
                 ++walk.compared;
                 if (walk.compared % progressCheckpointInterval == 0)
                     sink.onProgress(walk.compared);
