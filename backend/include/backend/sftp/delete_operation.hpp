@@ -48,7 +48,9 @@ class DeleteOperation : public Operation
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */);
 
     /**
-     * @brief Adds the scanned content of @p root, which has to lie below it, otherwise nothing is deleted.
+     * @brief Adds the entries of a scan of @p root as targets. The first entry is @p root itself, every other one
+     *        lies below it through its parents. A second root, an invalid name or the root directory refuses the
+     *        scan, then nothing is deleted.
      */
     void appendScanResult(Paths::RemotePath const& root, std::vector<SharedData::DirectoryEntry> const& entries);
 
@@ -120,7 +122,7 @@ class DeleteOperation : public Operation
     std::size_t totalToDelete_{0};
     /** @brief Deleted from the back, so a scanned directory goes after its content. */
     std::vector<Paths::RemotePath> targets_{};
-    /** @brief A scanned entry was not a valid path within remotePath_, nothing may be deleted. */
+    /** @brief Why a scan result was refused, nothing may be deleted then. */
     std::optional<std::string> invalidScanEntry_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};
     std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};

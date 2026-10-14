@@ -25,8 +25,8 @@ namespace SharedData
     BOOST_DESCRIBE_STRUCT(BulkDeleteEntry, (), (target, isDirectory, sizeBytes))
 
     /**
-     * @brief Single-RPC payload for deleting many remote items. Files become one aggregate delete, every directory
-     *        becomes a delete of its own that scans first.
+     * @brief Single-RPC payload for deleting many remote items as one delete operation: files are deleted as listed,
+     *        every directory is scanned first and deleted with its content.
      */
     struct BulkDeleteRequest
     {
