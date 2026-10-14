@@ -1,4 +1,5 @@
 #include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/resume_check.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
@@ -470,9 +471,11 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         else if (!belongsToSource)
         {
             Log::info(
-                "DownloadOperation: File '{}' is larger than expected, discarding and starting over.",
+                "DownloadOperation: File '{}' is not a part of this source, discarding and starting over.",
                 tempPath.generic_string()
             );
+            if (auto rewound = stream.seekInStrand(0); !rewound)
+                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else

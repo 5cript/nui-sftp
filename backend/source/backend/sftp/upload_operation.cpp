@@ -1,4 +1,5 @@
 #include <backend/sftp/upload_operation.hpp>
+#include <backend/sftp/resume_check.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <ssh/sftp_session.hpp>
@@ -449,6 +450,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
             // Do not adopt file
         }
+        else if (options_.tryContinue && !tempBelongsToSourceInStrand(tempResult->size))
+        {
+            Log::info(
+                "UploadOperation: Remote temp file '{}' is not a part of this source, starting over.", tempPath_.value()
+            );
+        }
         else if (options_.tryContinue)
         {
             Log::debug("UploadOperation: Continuing upload to existing temp file.");
@@ -505,6 +512,23 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     fileStream_ = openResult.value();
 
     return {};
+}
+
+bool UploadOperation::tempBelongsToSourceInStrand(std::uint64_t tempSize)
+{
+    // Another program's partial file or a part of an older version of the source must not be continued.
+    if (tempSize == 0)
+        return false;
+    const auto opened =
+        sftp_->openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::none);
+    if (!opened)
+        return false;
+    auto stream = opened->lock();
+    if (!stream)
+        return false;
+    const auto matches = ResumeCheck::tailsMatchInStrand(*stream, localNativePath_, tempSize);
+    stream->closeInStrand();
+    return matches.value_or(false);
 }
 
 std::expected<void, UploadOperation::Error>

@@ -117,6 +117,11 @@ class UploadOperation : public Operation
     /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
     std::expected<void, Error> finalizeInStrand();
 
+    /**
+     * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
+     */
+    bool tempBelongsToSourceInStrand(std::uint64_t tempSize);
+
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
      *

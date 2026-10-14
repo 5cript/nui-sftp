@@ -24,6 +24,7 @@ add_library(
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
+        sftp/resume_check.cpp
         sftp/scan_operation.cpp
         sftp/local_scan_operation.cpp
         sftp/bulk_transfer_operation.cpp
