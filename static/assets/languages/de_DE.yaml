@@ -1206,3 +1206,6 @@ backend:
     saveFailed: "Der Zustand konnte nicht gespeichert werden: {}"
   sync:
     staleComparison: "der Vergleich hat sich seit der Anzeige geändert, bitte erneut vergleichen"
+    scanCancelled: "Das Auflisten wurde abgebrochen."
+    localScanFailed: "Das lokale Verzeichnis konnte nicht aufgelistet werden: {}"
+    remoteScanFailed: "Das Verzeichnis auf dem Server konnte nicht aufgelistet werden: {}"

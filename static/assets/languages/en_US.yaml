@@ -1208,3 +1208,6 @@ backend:
     saveFailed: "Failed to save state to disk: {}"
   sync:
     staleComparison: "the comparison changed since they were shown, compare again"
+    scanCancelled: "The listing was cancelled."
+    localScanFailed: "The local directory could not be listed: {}"
+    remoteScanFailed: "The directory on the server could not be listed: {}"

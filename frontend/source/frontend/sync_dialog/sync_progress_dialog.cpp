@@ -161,7 +161,7 @@ void SyncProgressDialog::open(
         {
             if (*token)
                 return;
-            impl_->failureReason_ = reason;
+            impl_->failureReason_ = language->translate(reason);
             impl_->phase_ = SharedData::SyncPhase::Failed;
             impl_->onDone_ = nullptr;
             impl_->provider_.reset();

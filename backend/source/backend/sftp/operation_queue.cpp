@@ -1,5 +1,6 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <utility/error_message.hpp>
+#include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/common_parent.hpp>
 #include <paths/native.hpp>
@@ -313,7 +314,7 @@ void OperationQueue::cancelAll()
             self->syncRecordings_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
-                callback(std::unexpected(std::string{"The scan was cancelled."}));
+                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
             Log::info("All operations in the queue have been canceled.");
         }
     );
@@ -339,7 +340,7 @@ void OperationQueue::cancel(Ids::OperationId id)
             const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
             if (erasedFromRegular == 0)
                 std::erase_if(self->priorityOperations_, cancelPredicate);
-            self->failSyncScan(id, "The scan was cancelled.");
+            self->failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
         }
     );
 }
@@ -606,7 +607,14 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
 
         if (!item.result.has_value())
         {
-            failSyncScan(id, item.result.error().toString());
+            failSyncScan(
+                id,
+                Utility::localizedMessage(
+                    operation->type() == SharedData::OperationType::LocalScan ? "backend.sync.localScanFailed"
+                                                                              : "backend.sync.remoteScanFailed",
+                    item.result.error().toString()
+                )
+            );
             completeOperation(
                 makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, item.result.error())
             );
@@ -629,6 +637,39 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         }
     }
     return moreWork;
+}
+
+void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
+{
+    // Assumed in strand. The sync waits for both scans, so the other one is of no use once one failed.
+    syncScanCallbacks_.erase(id.value());
+    // Posted: the failed scan is still being taken out of the queue the sibling lies in.
+    boost::asio::post(
+        *strand_,
+        [weak = weak_from_this(), id]()
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+            const auto matches = [&id](auto& operation)
+            {
+                if (operation.first != id)
+                    return false;
+                std::ignore = operation.second->cancel(true);
+                return true;
+            };
+            if (std::erase_if(self->priorityOperations_, matches) + std::erase_if(self->operations_, matches) > 0)
+            {
+                self->completeOperation(
+                    SharedData::OperationCompleted{
+                        .reason = SharedData::OperationCompletionReason::Canceled,
+                        .operationId = id,
+                        .completionTime = std::chrono::system_clock::now(),
+                    }
+                );
+            }
+        }
+    );
 }
 
 void OperationQueue::failSyncScan(Ids::OperationId const& id, std::string const& reason)
@@ -2115,61 +2156,12 @@ void OperationQueue::addSyncScanOperation(
     );
     syncSessions_[syncSessionId.value()] = session;
 
-    // Scan completion callbacks hand the ScanNode trees into the session on its
-    // own strand, then emit onSyncScanPhaseDone to the frontend.
-    syncScanCallbacks_[remoteScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](
-            std::expected<SharedData::Sync::ScanNode, std::string> tree
-        )
-    {
-        auto self = weak.lock();
-        auto sess = weakSession.lock();
-        if (!self || !sess)
-            return;
-        if (!tree)
-        {
-            RpcHelper::callRemoteSafely(
-                *self->hub_, self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/false, tree.error()
-            );
-            return;
-        }
-        boost::asio::post(
-            sess->strand(),
-            [sess, tree = std::move(*tree)]() mutable
-            {
-                sess->setRemoteTreeInStrand(std::move(tree));
-            }
-        );
-        RpcHelper::callRemoteSafely(
-            *self->hub_, self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/false
-        );
-    };
-
-    syncScanCallbacks_[localScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](
-            std::expected<SharedData::Sync::ScanNode, std::string> tree
-        )
-    {
-        auto self = weak.lock();
-        auto sess = weakSession.lock();
-        if (!self || !sess)
-            return;
-        if (!tree)
-        {
-            RpcHelper::callRemoteSafely(
-                *self->hub_, self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/true, tree.error()
-            );
-            return;
-        }
-        boost::asio::post(
-            sess->strand(),
-            [sess, tree = std::move(*tree)]() mutable
-            {
-                sess->setLocalTreeInStrand(std::move(tree));
-            }
-        );
-        RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/true);
-    };
+    syncScanCallbacks_[remoteScanId.value()] = makeSyncScanCallback(
+        syncSessionId, session, localScanId, /*isLocal=*/false, &SyncSession::setRemoteTreeInStrand
+    );
+    syncScanCallbacks_[localScanId.value()] = makeSyncScanCallback(
+        syncSessionId, session, remoteScanId, /*isLocal=*/true, &SyncSession::setLocalTreeInStrand
+    );
 
     // Queue remote scan — build-tree mode.
     // Temp files of transfers on either side, a sync neither copies nor deletes them.

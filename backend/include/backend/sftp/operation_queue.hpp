@@ -382,8 +382,14 @@ class OperationQueue
 
     /**
      * @brief Tells the sync session waiting for the scan @p id, if any, that it failed or was cancelled.
+     * @param reason A localized message, see Utility::localizedMessage.
      */
     void failSyncScan(Ids::OperationId const& id, std::string const& reason);
+
+    /**
+     * @brief Drops the scan @p id of a sync whose other scan failed, without telling its session again.
+     */
+    void cancelSiblingScan(Ids::OperationId const& id);
 
     /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
