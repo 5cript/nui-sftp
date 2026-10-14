@@ -611,6 +611,13 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     return moreWork;
 }
 
+void OperationQueue::failSyncScan(Ids::OperationId const& id, std::string const& reason)
+{
+    auto callback = syncScanCallbacks_.extract(id.value());
+    if (!callback.empty())
+        callback.mapped()(std::unexpected(reason));
+}
+
 void OperationQueue::deliverSyncScan(Ids::OperationId const& id, Operation& operation)
 {
     const auto type = operation.type();
@@ -2007,15 +2014,24 @@ void OperationQueue::addSyncScanOperation(
     // Scan completion callbacks hand the ScanNode trees into the session on its
     // own strand, then emit onSyncScanPhaseDone to the frontend.
     syncScanCallbacks_[remoteScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](SharedData::Sync::ScanNode tree)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](
+            std::expected<SharedData::Sync::ScanNode, std::string> tree
+        )
     {
         auto self = weak.lock();
         auto sess = weakSession.lock();
         if (!self || !sess)
             return;
+        if (!tree)
+        {
+            self->hub_->callRemote(
+                self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/false, tree.error()
+            );
+            return;
+        }
         boost::asio::post(
             sess->strand(),
-            [sess, tree = std::move(tree)]() mutable
+            [sess, tree = std::move(*tree)]() mutable
             {
                 sess->setRemoteTreeInStrand(std::move(tree));
             }
@@ -2024,15 +2040,24 @@ void OperationQueue::addSyncScanOperation(
     };
 
     syncScanCallbacks_[localScanId.value()] =
-        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](SharedData::Sync::ScanNode tree)
+        [weak = weak_from_this(), syncSessionId, weakSession = std::weak_ptr{session}](
+            std::expected<SharedData::Sync::ScanNode, std::string> tree
+        )
     {
         auto self = weak.lock();
         auto sess = weakSession.lock();
         if (!self || !sess)
             return;
+        if (!tree)
+        {
+            self->hub_->callRemote(
+                self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/true, tree.error()
+            );
+            return;
+        }
         boost::asio::post(
             sess->strand(),
-            [sess, tree = std::move(tree)]() mutable
+            [sess, tree = std::move(*tree)]() mutable
             {
                 sess->setLocalTreeInStrand(std::move(tree));
             }

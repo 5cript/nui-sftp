@@ -102,6 +102,7 @@ struct OperationQueue::Implementation
     {
         std::array<Ids::OperationId, 2> scanIds{}; // [0]=remote, [1]=local
         std::function<void(bool isLocal)> onScanPhaseDone;
+        std::function<void(std::string const& reason)> onScanFailed;
         std::function<void(std::uint64_t)> onDiffProgress;
     };
     std::unordered_map<std::string, SyncSessionRouting> syncSessionRouting;
@@ -586,6 +587,23 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
                 impl_->syncScanProgressCallbacks.erase(scanId.value());
                 if (routingIt->second.onScanPhaseDone)
                     routingIt->second.onScanPhaseDone(isLocal);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onSyncScanFailed", impl_->sessionId.value()),
+            [this](std::string const& sessionIdString, bool isLocal, std::string const& reason)
+            {
+                const auto routingIt = impl_->syncSessionRouting.find(sessionIdString);
+                if (routingIt == impl_->syncSessionRouting.end())
+                    return;
+                Log::error("Sync scan of the {} side failed: {}", isLocal ? "local" : "remote", reason);
+                for (auto const& scanId : routingIt->second.scanIds)
+                    impl_->syncScanProgressCallbacks.erase(scanId.value());
+                if (routingIt->second.onScanFailed)
+                    routingIt->second.onScanFailed(reason);
             }
         )
     );
@@ -1434,6 +1452,7 @@ void OperationQueue::openSyncSession(
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
     std::function<void(bool)> onScanPhaseDone,
+    std::function<void(std::string const&)> onScanFailed,
     std::function<void(std::uint64_t)> onDiffProgress
 )
 {
@@ -1453,6 +1472,7 @@ void OperationQueue::openSyncSession(
     impl_->syncSessionRouting[syncSessionId.value()] = Implementation::SyncSessionRouting{
         .scanIds = {remoteScanId, localScanId},
         .onScanPhaseDone = std::move(onScanPhaseDone),
+        .onScanFailed = std::move(onScanFailed),
         .onDiffProgress = std::move(onDiffProgress),
     };
 
@@ -1465,15 +1485,20 @@ void OperationQueue::openSyncSession(
         respectIgnoreFiles,
         recursive,
         ignoreHidden,
-        [remoteScanId, localScanId](bool success, std::string const& info)
+        [this, syncSessionId, remoteScanId, localScanId](bool success, std::string const& info)
         {
-            if (!success)
-                Log::error(
-                    "Failed to open sync session (remoteId={}, localId={}): {}",
-                    remoteScanId.value(),
-                    localScanId.value(),
-                    info
-                );
+            if (success)
+                return;
+            Log::error(
+                "Failed to open sync session (remoteId={}, localId={}): {}",
+                remoteScanId.value(),
+                localScanId.value(),
+                info
+            );
+            // No scan runs, so neither phase would ever report back.
+            const auto routingIt = impl_->syncSessionRouting.find(syncSessionId.value());
+            if (routingIt != impl_->syncSessionRouting.end() && routingIt->second.onScanFailed)
+                routingIt->second.onScanFailed(info);
         }
     );
 }

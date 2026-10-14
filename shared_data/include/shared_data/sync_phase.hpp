@@ -12,6 +12,7 @@ namespace SharedData
         Listing,
         Comparing,
         Hashing,
-        Done
+        Done,
+        Failed
     )
 }

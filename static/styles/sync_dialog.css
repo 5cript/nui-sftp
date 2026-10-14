@@ -536,6 +536,11 @@
     font-size: 0.95rem;
 }
 
+.sync-progress-failure-reason {
+    color: var(--script-nui-components-toast-error, #d9534f);
+    overflow-wrap: anywhere;
+}
+
 .sync-progress-counters {
     display: flex;
     gap: 24px;

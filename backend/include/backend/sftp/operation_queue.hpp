@@ -367,7 +367,8 @@ class OperationQueue
     // Keyed by operationId.value(). Called when a sync-only scan completes and
     // hands off its ScanNode tree. The scan is known to be build-tree mode so
     // @ref ScanOperation::ejectScanTree() has the payload.
-    std::map<std::string, std::function<void(SharedData::Sync::ScanNode)>> syncScanCallbacks_{};
+    std::map<std::string, std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>>
+        syncScanCallbacks_{};
 
     // SyncSessions active on this channel.  Keyed by SyncSessionId.value() because
     // Ids::IdHash isn't specialized on the strongly-typed id; the existing

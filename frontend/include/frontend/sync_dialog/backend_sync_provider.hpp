@@ -55,7 +55,8 @@ class BackendSyncProvider
 
     /**
      * @brief Kicks off both scans.  @p onBothListed fires after both sides have
-     *        reported phase-done (the order between them isn't significant).
+     *        reported phase-done (the order between them isn't significant). @p onScanFailed fires instead, once,
+     *        when a scan fails or is cancelled.
      */
     void open(
         std::filesystem::path localPath,
@@ -66,6 +67,7 @@ class BackendSyncProvider
         std::function<void(SharedData::ScanProgress const&)> onLocalListing,
         std::function<void(SharedData::ScanProgress const&)> onRemoteListing,
         std::function<void()> onBothListed,
+        std::function<void(std::string const& reason)> onScanFailed,
         std::function<void(std::uint64_t compared)> onDiffProgress
     );
 

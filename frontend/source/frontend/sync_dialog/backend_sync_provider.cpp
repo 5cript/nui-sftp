@@ -24,6 +24,7 @@ void BackendSyncProvider::open(
     std::function<void(SharedData::ScanProgress const&)> onLocalListing,
     std::function<void(SharedData::ScanProgress const&)> onRemoteListing,
     std::function<void()> onBothListed,
+    std::function<void(std::string const&)> onScanFailed,
     std::function<void(std::uint64_t)> onDiffProgress
 )
 {
@@ -40,9 +41,11 @@ void BackendSyncProvider::open(
         bool local{false};
         bool remote{false};
         std::function<void()> onBothListed;
+        std::function<void(std::string const&)> onScanFailed;
     };
     auto gate = std::make_shared<PhaseGate>();
     gate->onBothListed = std::move(onBothListed);
+    gate->onScanFailed = std::move(onScanFailed);
 
     queue_->openSyncSession(
         sessionId_,
@@ -63,8 +66,16 @@ void BackendSyncProvider::open(
             {
                 auto cb = std::move(gate->onBothListed);
                 gate->onBothListed = nullptr;
+                gate->onScanFailed = nullptr;
                 cb();
             }
+        },
+        [gate](std::string const& reason)
+        {
+            // The first failure ends the listing, the other side's result is of no use any more.
+            gate->onBothListed = nullptr;
+            if (auto callback = std::exchange(gate->onScanFailed, nullptr); callback)
+                callback(reason);
         },
         std::move(onDiffProgress)
     );

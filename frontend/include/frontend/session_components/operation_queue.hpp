@@ -243,6 +243,7 @@ class OperationQueue
         std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
         std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
         std::function<void(/*isLocal=*/bool)> onScanPhaseDone,
+        std::function<void(std::string const& reason)> onScanFailed,
         std::function<void(std::uint64_t compared)> onDiffProgress
     );
 

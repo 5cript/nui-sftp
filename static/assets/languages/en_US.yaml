@@ -158,6 +158,7 @@ syncProgressDialog:
   differencesFound: "Differences found"
   hashing: "Hashing..."
   cancel: "Cancel"
+  scanFailed: "Listing failed, nothing was compared."
 reconnectDialog:
   attempt: "Attempt {}"
   retryIn: "Retrying in {} s"

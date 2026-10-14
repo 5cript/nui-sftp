@@ -216,6 +216,7 @@ syncProgressDialog:
   differencesFound: "Unterschiede gefunden"
   hashing: "Hashes werden berechnet..."
   cancel: "Abbrechen"
+  scanFailed: "Auflisten fehlgeschlagen, es wurde nichts verglichen."
 reconnectDialog:
   attempt: "Versuch {}"
   retryIn: "Neuer Versuch in {} s"
