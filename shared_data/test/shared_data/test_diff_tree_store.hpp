@@ -332,6 +332,16 @@ namespace SharedData::Sync::Test
         );
     }
 
+    TEST(DiffTreeStoreTests, DownloadPlanSkipsCaseVariantsForACaseFoldingLocalFilesystem)
+    {
+        DiffStores stores{
+            makeDir("", {}),
+            makeDir("", {makeDir("new", {makeFile("A.txt", 1, 100), makeFile("a.txt", 1, 100), makeFile("b", 1, 100)})}),
+            {.direction = Direction::Download, .localCaseInsensitive = true},
+        };
+        EXPECT_EQ(relKeys(stores.downloads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/b"}));
+    }
+
     TEST(DiffTreeStoreTests, PlanForAPartlySelectedExpandedDirectory)
     {
         DiffStores stores{
