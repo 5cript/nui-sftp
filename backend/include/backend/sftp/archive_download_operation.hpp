@@ -85,6 +85,8 @@ class ArchiveDownloadOperation : public Operation
 
         /** @brief Refuse to overwrite a pre-existing final archive. */
         bool mayOverwrite{false};
+        /** @brief Mark the archive as downloaded from the internet, see Utility::markAsDownloaded. */
+        bool markAsDownloaded{true};
 
         /** @brief Create any missing parents of @ref localArchivePath. */
         bool createMissingDirectories{false};

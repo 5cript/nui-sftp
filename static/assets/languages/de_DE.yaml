@@ -9,6 +9,8 @@ confirmDialog:
   neverShowAgain: "Nicht mehr anzeigen"
   andMore: "... und {} weitere"
 fileExplorer:
+  openRiskyHeader: "Eine Datei öffnen, die Code ausführen kann?"
+  openRiskyText: "'{}' {}. Beim Öffnen kann sie ausgeführt werden, nur tun, wenn ihrer Herkunft vertraut wird.\n\nTrotzdem öffnen?"
   invalidItemNameHeader: "Ungültiger Name"
   invalidItemName: "'{}' kann nicht als Name verwendet werden. Ein Name darf nicht leer, '.' oder '..' sein und weder '/' noch '\\' enthalten."
   renameTargetExistsHeader: "Eintrag existiert"
@@ -716,6 +718,8 @@ settings:
       reserveSpaceHelpText: "Platz auf dem Zielsystem für Downloads reservieren."
       doCleanup: "Aufräumen durchführen"
       doCleanupHelpText: "Temporäre Dateien nach dem Download entfernen."
+      markAsDownloaded: "Als heruntergeladen markieren"
+      markAsDownloadedHelpText: "Heruntergeladene Dateien als aus dem Internet stammend markieren, damit Windows (Mark of the Web) und macOS (Quarantäne) vor dem Ausführen warnen. Standardmäßig an."
       symlinkHandlingHelpText: "Wie symbolische Links während der Übertragung behandelt werden. 'AsSymlink' überträgt symbolische Links als symbolische Links (sofern vom Dateisystem unterstützt), 'FollowSymlink' folgt dem symbolischen Link und überträgt die Zieldatei oder das Zielverzeichnis, und 'SkipSymlink' überspringt die Übertragung von symbolischen Links vollständig."
       symlinkHandling: "Behandlung von symbolischen Links"
       failFast: "Schnell fehlschlagen"
@@ -1004,6 +1008,11 @@ settings:
       preventCreateDirectory: "Verzeichniserstellung verhindern"
       homeOverrideHelpText: "Wenn gesetzt, überschreibt dies den Standardpfad des Heimatverzeichnisses der Anwendung."
       homeOverride: "Heimatverzeichnis überschreiben"
+      openRiskyFilesHelpText: "Was passiert, wenn eine Datei, die Code ausführen kann (Programm, Skript, Installer oder Verknüpfung), aus dem Dateiexplorer geöffnet wird, auch vom Server geöffnete Dateien."
+      openRiskyFiles: "Öffnen von Dateien, die Code ausführen können"
+      openRiskyFilesAllow: "Immer erlauben"
+      openRiskyFilesWarn: "Vorher fragen"
+      openRiskyFilesNever: "Nie"
       temporaryDownloadsDirectoryHelpText: "Das Verzeichnis, in dem heruntergeladene Dateien temporär gespeichert werden. Standardmäßig %temp%/nui-sftp-downloads."
       temporaryDownloadsDirectory: "Temporäres Download-Verzeichnis"
     fileTrackingOptions:
@@ -1153,9 +1162,13 @@ backend:
     openFileFailed: "Datei konnte nicht geöffnet werden: {}"
     openUriUnavailable: "Die OpenURI-Schnittstelle von xdg-desktop-portal ist nicht verfügbar."
     documentPortalUnavailable: "xdg-document-portal ist nicht verfügbar, das Öffnen über Dateideskriptoren ist in diesem Flatpak nicht möglich."
+    risk:
+      program: "ist ein Programm"
+      application: "ist eine Anwendung"
+      dangerousType: "ist ein Dateityp, der Code ausführt, etwa ein Skript, ein Installer oder eine Verknüpfung"
+      refused: "'{}' wurde nicht geöffnet: Das Öffnen von Dateien, die Code ausführen können, ist in den Einstellungen abgeschaltet."
     mac:
       fileNotFound: "Datei nicht gefunden"
-      executable: "Die Datei ist ein Programm oder eine Anwendung und wird von hier nicht geöffnet"
       openFailed: "Keine Anwendung konnte '{}' öffnen"
     windows:
       outOfResources: "Nicht genügend Speicher oder Ressourcen"
@@ -1172,8 +1185,6 @@ backend:
       dllNotFound: "DLL nicht gefunden"
       unknownShellError: "Unbekannter Shell-Fehler (Code {})"
       shellExecuteExFailed: "ShellExecuteExW fehlgeschlagen: {} (Code {})"
-      blockedByPolicy: "Der Dateityp ist durch die Anlagenrichtlinie gesperrt"
-      binaryExecutable: "Die Datei ist eine ausführbare Binärdatei"
   sessionManager:
     connectFailedUnspecified: "Verbindung zum SSH-Server aus unbekanntem Grund fehlgeschlagen."
   persistence:

@@ -9,6 +9,8 @@ confirmDialog:
   neverShowAgain: "Never show again"
   andMore: "... and {} more"
 fileExplorer:
+  openRiskyHeader: "Open a file that can run code?"
+  openRiskyText: "'{}' {}. Opening it may run it, only do this if you trust where it came from.\n\nOpen it anyway?"
   invalidItemNameHeader: "Invalid Name"
   invalidItemName: "'{}' cannot be used as a name. A name may not be empty, '.' or '..', and may not contain '/' or '\\'."
   renameTargetExistsHeader: "Item Exists"
@@ -744,6 +746,8 @@ settings:
 
       doCleanup: "Do Cleanup"
       doCleanupHelpText: "Perform cleanup after failed downloads (Prevents continuation of previously failed downloads)."
+      markAsDownloaded: "Mark as Downloaded"
+      markAsDownloadedHelpText: "Mark downloaded files as coming from the internet, so Windows (Mark of the Web) and macOS (quarantine) warn before running them. On by default."
       symlinkHandlingHelpText: "How to handle symbolic links during transfers. 'AsSymlink' will transfer symlinks as symlinks (if supported by the filesystem), 'FollowSymlink' will follow the symlink and transfer the target file or directory, and 'SkipSymlink' will skip transferring symlinks entirely."
       symlinkHandling: "Symlink Handling"
       failFastHelpText: "Fail fast on errors during download operations instead of trying to continue."
@@ -1006,6 +1010,11 @@ settings:
       preventCreateDirectory: "Prevent Create Directory"
       homeOverrideHelpText: "If set, overrides the default home directory path used by the application."
       homeOverride: "Home Directory Override"
+      openRiskyFilesHelpText: "What happens when a file that can run code (a program, script, installer or shortcut) is opened from the file explorer, including files opened from the server."
+      openRiskyFiles: "Opening Files That Can Run Code"
+      openRiskyFilesAllow: "Always allow"
+      openRiskyFilesWarn: "Ask first"
+      openRiskyFilesNever: "Never"
       temporaryDownloadsDirectoryHelpText: "The directory where downloaded files are temporarily stored. Defaults to %temp%/nui-sftp-downloads."
       temporaryDownloadsDirectory: "Temporary Downloads Directory"
     fileTrackingOptions:
@@ -1155,9 +1164,13 @@ backend:
     openFileFailed: "Failed to open file: {}"
     openUriUnavailable: "xdg-desktop-portal OpenURI interface is unavailable."
     documentPortalUnavailable: "xdg-document-portal is unavailable; file-descriptor-based opening is not possible in this flatpak."
+    risk:
+      program: "is a program"
+      application: "is an application"
+      dangerousType: "is a type that runs code, like a script, an installer or a shortcut"
+      refused: "'{}' was not opened: opening files that can run code is turned off in the settings."
     mac:
       fileNotFound: "File not found"
-      executable: "The file is a program or application and is not opened from here"
       openFailed: "No application could open '{}'"
     windows:
       outOfResources: "Out of memory or resources"
@@ -1174,8 +1187,6 @@ backend:
       dllNotFound: "DLL not found"
       unknownShellError: "Unknown shell error (code {})"
       shellExecuteExFailed: "ShellExecuteExW failed: {} (code {})"
-      blockedByPolicy: "File type is blocked by attachment policy"
-      binaryExecutable: "File is a binary executable"
   sessionManager:
     connectFailedUnspecified: "Failed to connect to ssh server for unspecified reason."
   persistence:

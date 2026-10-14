@@ -7,6 +7,17 @@
 
 namespace Persistence
 {
+    /**
+     * @brief What happens when a file that can run code (a program, a script, a shortcut) is opened.
+     */
+    enum class RiskyFilePolicy
+    {
+        Allow,
+        Warn,
+        Never
+    };
+    BOOST_DESCRIBE_ENUM(RiskyFilePolicy, Allow, Warn, Never)
+
     struct LocalFilesystemOptions : public DefaultMissingMember
     {
         // by default, dont allow the user to delete files locally.
@@ -16,6 +27,8 @@ namespace Persistence
         bool preventCreateDirectory{false};
         std::optional<std::filesystem::path> homeOverride{std::nullopt};
         std::optional<std::filesystem::path> temporaryDownloadsDirectory{"%cache_home%/nui-sftp-downloads"};
+        /// Optional so configurations written before it load without a warning; unset means Warn.
+        std::optional<RiskyFilePolicy> openRiskyFiles{std::nullopt};
     };
 
     BOOST_DESCRIBE_STRUCT(
@@ -26,6 +39,7 @@ namespace Persistence
             preventCreateFile,
             preventCreateDirectory,
             homeOverride,
-            temporaryDownloadsDirectory)
+            temporaryDownloadsDirectory,
+            openRiskyFiles)
     )
 }

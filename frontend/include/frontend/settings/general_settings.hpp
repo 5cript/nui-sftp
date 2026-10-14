@@ -80,6 +80,7 @@ struct GeneralSettings
         BoolSetting<> preventCreateDirectory;
         PathSetting<true> homeOverride;
         PathSetting<true> temporaryDownloadsDirectory;
+        ComboSetting<Persistence::RiskyFilePolicy, std::string> openRiskyFiles;
     } localFilesystemOptions;
 
     struct FileTrackingOptions

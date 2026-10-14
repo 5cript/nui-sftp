@@ -1,4 +1,5 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/file_explorer/open_local_file.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>

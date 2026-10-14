@@ -184,6 +184,7 @@ namespace
                 opts.customDirectoryPermissions ? opts.customDirectoryPermissions : def.directoryPermissions,
             .futureTimeout = futureTimeout,
             .symlinkHandling = opts.symlinkHandling.value_or(def.symlinkHandling),
+            .markAsDownloaded = opts.markAsDownloaded.value_or(def.markAsDownloaded),
         };
     }
 
@@ -931,6 +932,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     opts.compression = compression;
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;
+    opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(true);
     opts.createMissingDirectories = true;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](

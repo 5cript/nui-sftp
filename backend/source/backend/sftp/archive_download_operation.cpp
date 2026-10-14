@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <utility/download_mark.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
@@ -656,6 +657,12 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
             finaliseResult.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(finaliseResult.error()));
+    }
+
+    if (options_.markAsDownloaded)
+    {
+        if (const auto marked = Utility::markAsDownloaded(tempPath_); marked)
+            Log::warn("ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", marked.message());
     }
 
     // Without permission to overwrite, the rename itself refuses an existing archive: no check-then-rename race.

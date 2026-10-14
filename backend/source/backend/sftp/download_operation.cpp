@@ -762,6 +762,14 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         );
     }
 
+    // Marked before the rename, so the final file never exists without the mark. A filesystem without streams or
+    // extended attributes, FAT for one, cannot carry it.
+    if (options_.markAsDownloaded)
+    {
+        if (const auto marked = Utility::markAsDownloaded(tempPath); marked)
+            Log::warn("DownloadOperation: Cannot mark '{}' as downloaded: {}", Paths::nativeToUtf8(tempPath), marked.message());
+    }
+
     // Without permission to overwrite, the rename itself refuses an existing file: no check-then-rename race.
     std::error_code ec{};
     if (options_.mayOverwrite)

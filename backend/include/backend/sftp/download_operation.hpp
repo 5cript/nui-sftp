@@ -44,6 +44,8 @@ class DownloadOperation : public Operation
          *         may not yet exist locally.
          */
         bool createMissingDirectories{false};
+        /** @brief Mark the file as downloaded from the internet, see Utility::markAsDownloaded. */
+        bool markAsDownloaded{true};
         /**
          * @brief When set, a local path running through a symlink or junction below this directory is refused, so
          *        a link planted inside a downloaded tree cannot redirect the download out of it.

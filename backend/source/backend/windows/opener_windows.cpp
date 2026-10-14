@@ -47,13 +47,22 @@ namespace
         }
     }
 
-    std::expected<void, std::string> checkExtensionPolicy(std::filesystem::path const& path)
-    {
-        auto const ext = path.extension().wstring();
-        if (AssocIsDangerous(ext.c_str()))
-            return std::unexpected{"backend.opener.windows.blockedByPolicy"};
-        return {};
-    }
+}
+
+std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) const
+{
+    std::error_code statusError{};
+    if (std::filesystem::is_directory(path, statusError))
+        return std::nullopt;
+    // Content based: a renamed program is still a program.
+    DWORD binaryType{};
+    if (GetBinaryTypeW(path.c_str(), &binaryType))
+        return std::string{"backend.opener.risk.program"};
+    // The shell's own list of types that run code: scripts, installers, shortcuts and the like.
+    const auto extension = path.extension().wstring();
+    if (!extension.empty() && AssocIsDangerous(extension.c_str()))
+        return std::string{"backend.opener.risk.dangerousType"};
+    return std::nullopt;
 }
 
 struct Opener::Implementation
@@ -74,17 +83,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     const auto pathStrU16 = path.native();
     const auto pathWstr = std::wstring{pathStrU16.begin(), pathStrU16.end()};
 
-    // Refuse to open binary executables (content-based, not extension-based)
-    DWORD binaryType{};
-    if (GetBinaryTypeW(pathWstr.c_str(), &binaryType))
-        return std::unexpected{"backend.opener.windows.binaryExecutable"};
-
-    // Windows attachment policy (respects system/zone policy)
-    // If I keep this, it prevents opening of folders:
-
-    // if (auto result = checkExtensionPolicy(path); !result)
-    //     return result;
-
+    // Programs, scripts and shortcuts are judged by riskOf and the user's policy before this is called.
     if (openWith)
     {
         if (!std::filesystem::exists(path) || !path.is_absolute())

@@ -177,11 +177,13 @@ RpcFilesystem::RpcFilesystem(
     Nui::Window& wnd,
     Nui::RpcHub& hub,
     Persistence::LocalFilesystemOptions options,
-    Opener& opener
+    Opener& opener,
+    std::function<Persistence::RiskyFilePolicy()> riskyFilePolicy
 )
     : RpcHelper::StrandRpc{executor, wnd, hub}
     , options_{std::move(options)}
     , opener_{&opener}
+    , riskyFilePolicy_{std::move(riskyFilePolicy)}
 {
     registerRemove();
     registerRemoveMultiple();
@@ -792,7 +794,7 @@ void RpcFilesystem::registerOpen()
 {
     on("RpcFilesystem::open")
         .perform(
-            [this](RpcHelper::RpcOnce&& reply, std::string const& filePath, bool openWith)
+            [this](RpcHelper::RpcOnce&& reply, std::string const& filePath, bool openWith, bool confirmed)
             {
                 Log::info("RpcFilesystem::open called for file: {}", filePath);
                 const auto path = localPathParameter(filePath);

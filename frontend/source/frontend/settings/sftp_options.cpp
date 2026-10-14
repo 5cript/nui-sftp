@@ -63,6 +63,11 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
             onChange,
             nulloptReset(downloadOptions.doCleanup, onChange),
         },
+        .markAsDownloaded{
+            downloadFactory_.identity({"sftpOptions", "downloadOptions", "markAsDownloaded"}),
+            onChange,
+            nulloptReset(downloadOptions.markAsDownloaded, onChange),
+        },
         .symlinkHandling{
             std::vector<Persistence::SymlinkHandling>{
                 Persistence::SymlinkHandling::AsSymlink,
@@ -208,7 +213,8 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                 .failFast = downloadOptions.failFast.value(),
             },
             .reserveSpace = downloadOptions.reserveSpace.value(),
-            .doCleanup = downloadOptions.doCleanup.value()
+            .doCleanup = downloadOptions.doCleanup.value(),
+            .markAsDownloaded = downloadOptions.markAsDownloaded.value()
         };
 #pragma clang diagnostic pop
     }
@@ -260,6 +266,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         );
         downloadOptions.reserveSpace.value(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.value(state.downloadOptions->doCleanup);
+        downloadOptions.markAsDownloaded.value(state.downloadOptions->markAsDownloaded);
         downloadOptions.symlinkHandling.value(state.downloadOptions->symlinkHandling);
         downloadOptions.failFast.value(state.downloadOptions->failFast);
     }
@@ -275,6 +282,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         downloadOptions.customDirectoryPermissions.value(std::nullopt);
         downloadOptions.reserveSpace.value(std::nullopt);
         downloadOptions.doCleanup.value(std::nullopt);
+        downloadOptions.markAsDownloaded.value(std::nullopt);
         downloadOptions.symlinkHandling.value(std::nullopt);
         downloadOptions.failFast.value(std::nullopt);
     }
@@ -334,6 +342,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         );
         downloadOptions.reserveSpace.inherit(state.downloadOptions->reserveSpace);
         downloadOptions.doCleanup.inherit(state.downloadOptions->doCleanup);
+        downloadOptions.markAsDownloaded.inherit(state.downloadOptions->markAsDownloaded);
         downloadOptions.symlinkHandling.inherit(state.downloadOptions->symlinkHandling);
         downloadOptions.failFast.inherit(state.downloadOptions->failFast);
     }
@@ -347,6 +356,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         downloadOptions.customDirectoryPermissions.inherit(std::nullopt);
         downloadOptions.reserveSpace.inherit(std::nullopt);
         downloadOptions.doCleanup.inherit(std::nullopt);
+        downloadOptions.markAsDownloaded.inherit(std::nullopt);
         downloadOptions.symlinkHandling.inherit(std::nullopt);
         downloadOptions.failFast.inherit(std::nullopt);
     }
@@ -405,6 +415,7 @@ Nui::ElementRenderer SftpOptions::render()
                 downloadOptions.customDirectoryPermissions(),
                 downloadOptions.reserveSpace(),
                 downloadOptions.doCleanup(),
+                downloadOptions.markAsDownloaded(),
                 downloadOptions.symlinkHandling(),
                 downloadOptions.failFast()
             )

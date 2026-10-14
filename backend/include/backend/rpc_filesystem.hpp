@@ -4,6 +4,8 @@
 #include <backend/opener.hpp>
 #include <persistence/state/local_filesystem_options.hpp>
 
+#include <functional>
+
 class RpcFilesystem : public RpcHelper::StrandRpc
 {
   public:
@@ -12,7 +14,8 @@ class RpcFilesystem : public RpcHelper::StrandRpc
         Nui::Window& wnd,
         Nui::RpcHub& hub,
         Persistence::LocalFilesystemOptions options,
-        Opener& opener
+        Opener& opener,
+        std::function<Persistence::RiskyFilePolicy()> riskyFilePolicy = []() { return Persistence::RiskyFilePolicy::Warn; }
     );
 
   private:
@@ -34,4 +37,6 @@ class RpcFilesystem : public RpcHelper::StrandRpc
   private:
     Persistence::LocalFilesystemOptions options_;
     Opener* opener_;
+    /** @brief Read on every open, so a changed setting applies at once. */
+    std::function<Persistence::RiskyFilePolicy()> riskyFilePolicy_;
 };

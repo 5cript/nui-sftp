@@ -8,6 +8,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
+#include <iterator>
+#include <string_view>
 #include <string>
 #include <system_error>
 
@@ -20,8 +24,7 @@ namespace
     }
 
     /**
-     * @brief Mirrors the Windows refusal of binary executables: LaunchServices would run a
-     *        Mach-O or script through Terminal and launch application bundles directly.
+     * @brief LaunchServices would run a Mach-O or script through Terminal and launch application bundles directly.
      */
     bool isExecutable(std::filesystem::path const& path, bool isDirectory)
     {
@@ -69,6 +72,23 @@ namespace
     }
 }
 
+std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) const
+{
+    std::error_code statusError{};
+    const bool isDirectory = std::filesystem::is_directory(path, statusError);
+    if (isExecutable(path, isDirectory))
+        return std::string{isDirectory ? "backend.opener.risk.application" : "backend.opener.risk.program"};
+    // Types LaunchServices runs or installs instead of showing.
+    static constexpr std::string_view runnable[] = {
+        ".command", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".scpt", ".applescript", ".jar", ".webloc",
+    };
+    auto extension = path.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char character) { return std::tolower(character); });
+    if (std::ranges::find(runnable, std::string_view{extension}) != std::end(runnable))
+        return std::string{"backend.opener.risk.dangerousType"};
+    return std::nullopt;
+}
+
 struct Opener::Implementation
 {};
 
@@ -90,9 +110,8 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     if (!path.is_absolute() || !std::filesystem::exists(path, existsError))
         return std::unexpected{std::string{"backend.opener.mac.fileNotFound"}};
 
+    // Programs, scripts and bundles are judged by riskOf and the user's policy before this is called.
     const bool isDirectory = std::filesystem::is_directory(path, existsError);
-    if (isExecutable(path, isDirectory))
-        return std::unexpected{std::string{"backend.opener.mac.executable"}};
 
     @autoreleasepool
     {
