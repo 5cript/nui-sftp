@@ -68,7 +68,7 @@ namespace
             struct passwd* result = nullptr;
             std::string name;
             if (::getpwuid_r(uid, &pwd, buffer, sizeof(buffer), &result) == 0 && result)
-                name = result->pw_name;
+                name = Paths::sanitizedUtf8(result->pw_name);
             return users.emplace(uid, std::move(name)).first->second;
         }
 
@@ -82,7 +82,7 @@ namespace
             struct group* result = nullptr;
             std::string name;
             if (::getgrgid_r(gid, &grp, buffer, sizeof(buffer), &result) == 0 && result)
-                name = result->gr_name;
+                name = Paths::sanitizedUtf8(result->gr_name);
             return groups.emplace(gid, std::move(name)).first->second;
         }
     };
@@ -144,13 +144,13 @@ namespace
         struct passwd pwd{};
         struct passwd* pwdResult = nullptr;
         if (::getpwuid_r(st.st_uid, &pwd, pwdBuf, sizeof(pwdBuf), &pwdResult) == 0 && pwdResult)
-            entry.owner = pwdResult->pw_name;
+            entry.owner = Paths::sanitizedUtf8(pwdResult->pw_name);
 
         char grpBuf[1024];
         struct group grp{};
         struct group* grpResult = nullptr;
         if (::getgrgid_r(st.st_gid, &grp, grpBuf, sizeof(grpBuf), &grpResult) == 0 && grpResult)
-            entry.group = grpResult->gr_name;
+            entry.group = Paths::sanitizedUtf8(grpResult->gr_name);
     }
 #endif
 
@@ -414,7 +414,9 @@ void RpcFilesystem::registerListFiles()
                     const auto entryPath = entry.path();
 
                     SharedData::DirectoryEntry dirEntry{};
-                    dirEntry.name = Paths::nativeToUtf8(entryPath.filename());
+                    auto name = Paths::convertNativeToUtf8(entryPath.filename());
+                    dirEntry.name = std::move(name.utf8);
+                    dirEntry.nameIsValidUtf8 = name.lossless;
                     dirEntry.type = SharedData::fileTypeFromStdFilesystemType(entry.symlink_status().type());
                     dirEntry.permissions = entry.symlink_status().permissions();
 
@@ -559,7 +561,9 @@ void RpcFilesystem::registerProperties()
                 auto const& path = *pathParameter;
 
                 SharedData::DirectoryEntry entry{};
-                entry.name = Paths::nativeToUtf8(path.filename());
+                auto name = Paths::convertNativeToUtf8(path.filename());
+                entry.name = std::move(name.utf8);
+                entry.nameIsValidUtf8 = name.lossless;
                 std::string resolvedPath{};
 
                 std::error_code symEc;

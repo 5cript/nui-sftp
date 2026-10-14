@@ -88,17 +88,30 @@ namespace SharedData
         using FileType = SharedData::FileType;
 
         /**
-         * @brief The name as listed, UTF-8. A server or a hostile local name can be anything, like "..", "x/.." or
-         *        empty, so it only becomes part of a path through Paths::PathSegment::make. Empty for the root of a
-         *        walk and for stat results.
+         * @brief The name as listed, always valid UTF-8. A server or a hostile local name can be anything, like "..",
+         *        "x/.." or empty, so it only becomes part of a path through @ref nameSegment. A listed name that was
+         *        not UTF-8 is kept for display with U+FFFD for every invalid byte and @ref nameIsValidUtf8 false.
+         *        Empty for the root of a walk and for stat results.
          */
         std::string name{};
+        /**
+         * @brief False when the listed name was not UTF-8 and @ref name only shows it: such an entry can be listed
+         *        but never named in a path, so no action can hit a different item that is called like the display
+         *        text.
+         */
+        bool nameIsValidUtf8{true};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
         std::uint64_t size{0};
         std::uint32_t uid{0};
         std::uint32_t gid{0};
+        /**
+         * @brief The owner name, valid UTF-8 (U+FFFD for every invalid byte the server sent).
+         */
         std::string owner{};
+        /**
+         * @brief The group name, valid UTF-8 (U+FFFD for every invalid byte the server sent).
+         */
         std::string group{};
         std::filesystem::perms permissions{std::filesystem::perms::unknown};
         std::uint64_t atime{0};
@@ -108,11 +121,25 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         std::string acl{};
-        // For symlinks: raw value returned by readlink (i.e. the link literal, not the resolved target) as UTF-8.
-        // nullopt when not a symlink or when unavailable. This is what the sync diff compares by.
+        /**
+         * @brief For symlinks: the link literal readlink returned (not the resolved target), valid UTF-8 with U+FFFD
+         *        for every invalid byte. nullopt when not a symlink or when unavailable. The sync diff compares by it,
+         *        a transfer of the link reads the literal itself.
+         */
         std::optional<std::string> linkTarget{};
         // For symlinks: the full entry of the symlink target (if known). nullptr means unknown.
         std::shared_ptr<DirectoryEntry> resolvedTarget{nullptr};
+
+        /**
+         * @brief The name as a path segment. Refused like Paths::PathSegment::make refuses it, and with InvalidUtf8
+         *        when the listed name was not UTF-8.
+         */
+        std::expected<Paths::PathSegment, Paths::PathError> nameSegment() const
+        {
+            if (!nameIsValidUtf8)
+                return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::InvalidUtf8, .input = name});
+            return Paths::PathSegment::make(name);
+        }
 
         bool isDirectory() const
         {
@@ -229,24 +256,7 @@ namespace SharedData
     inline std::expected<Paths::RelativePath, Paths::PathError>
     relativePath(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)
     {
-        if (!entry.parent)
-            return Paths::RelativePath{};
-        const auto parentIndex = entry.parent.value();
-        if (parentIndex >= entries.size())
-            throw std::out_of_range("Parent index is out of range");
-        return Paths::PathSegment::make(entry.name)
-            .and_then(
-                [&entries, parentIndex](Paths::PathSegment const& segment)
-                {
-                    return relativePath(entries, entries[parentIndex])
-                        .transform(
-                            [&segment](Paths::RelativePath const& parent)
-                            {
-                                return parent / segment;
-                            }
-                        );
-                }
-            );
+        return Utility::walkedRelativePath(entries, entry);
     }
 
     void to_json(nlohmann::json& j, DirectoryEntry const& entry);

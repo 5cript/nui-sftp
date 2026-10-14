@@ -133,7 +133,12 @@ namespace Utility
             if (parentIndex >= entries_.size())
                 throw std::out_of_range("Parent index is out of range");
             // Only valid segments are adopted, see moveEntries.
-            return relativePath(entries_[parentIndex]) / *Paths::PathSegment::make(nameOf(entry));
+            return entry.nameSegment().transform(
+                [this, parentIndex](Paths::PathSegment const& segment)
+                {
+                    return directoryPaths_[parentIndex] / segment;
+                }
+            );
         }
 
         /**
@@ -165,8 +170,9 @@ namespace Utility
         }
 
         /**
-         * @brief Entries whose name is not a valid path segment, like ".." or "a/b" from a server. They are never
-         *        walked or returned by @ref entries, their parent index is set so their full path can be shown.
+         * @brief Entries whose name is not a valid path segment, like ".." or "a/b" from a server or a name that was
+         *        not UTF-8. They are never walked or returned by @ref entries, their parent index is set so their
+         *        full path can be shown.
          */
         std::vector<EntryT> const& rejectedEntries() const
         {
@@ -186,7 +192,8 @@ namespace Utility
                 const auto name = nameOf(entry);
                 if (name == "." || name == "..")
                     continue;
-                if (!Paths::PathSegment::make(name).has_value())
+                auto segment = entry.nameSegment();
+                if (!segment.has_value())
                 {
                     rejectedEntries_.push_back(std::move(entry));
                     continue;

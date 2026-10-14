@@ -885,6 +885,8 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                     .mtimeNsec = pickU32("mtimeNsec"),
                     .acl = pickString("acl"),
                 };
+                if (source.hasOwnProperty("nameIsValidUtf8"))
+                    out.nameIsValidUtf8 = source["nameIsValidUtf8"].template as<bool>();
                 if (source.hasOwnProperty("linkTarget"))
                 {
                     const auto link = source["linkTarget"];
@@ -1046,6 +1048,8 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                     .mtime = pickU64("mtime"),
                     .mtimeNsec = pickU32("mtimeNsec"),
                 };
+                if (source.hasOwnProperty("nameIsValidUtf8"))
+                    entry.nameIsValidUtf8 = source["nameIsValidUtf8"].template as<bool>();
                 if (source.hasOwnProperty("linkTarget"))
                 {
                     const auto link = source["linkTarget"];
@@ -1492,7 +1496,13 @@ std::expected<Paths::LocalPath, Paths::PathError> LocalSideModel::localPathOf(Nu
 {
     if (item.isParentLink)
         return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::DotOrDotDot, .input = ".."});
-    return Paths::LocalPathSegment::make(item.name)
+    return item.nameSegment()
+        .and_then(
+            [](Paths::PathSegment const& segment)
+            {
+                return Paths::LocalPathSegment::make(segment);
+            }
+        )
         .and_then(
             [&item](Paths::LocalPathSegment const&)
             {

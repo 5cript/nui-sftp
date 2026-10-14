@@ -134,33 +134,12 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
                 if (::lstat(entry.path().c_str(), &st) == 0)
                     mtimeSecs = static_cast<std::uint64_t>(st.st_mtime);
 #endif
-            }
-            else
-            {
-                std::error_code errc{};
-                const auto ftime = entry.last_write_time(errc);
-                if (!errc)
-                {
-                    const auto sctime = std::chrono::file_clock::to_sys(ftime);
-                    mtimeSecs = static_cast<std::uint64_t>(
-                        std::chrono::duration_cast<std::chrono::seconds>(sctime.time_since_epoch()).count()
-                    );
-                }
-            }
-
-            std::optional<std::string> linkTarget{};
-            if (isSymlink)
-            {
-                std::error_code errc{};
-                const auto target = std::filesystem::read_symlink(entry.path(), errc);
-                if (!errc)
-                    linkTarget = Paths::nativeToUtf8(target);
-            }
-
-            const auto name = Paths::nativeToUtf8(entry.path().filename());
-            if (ignoreHidden_ && !name.empty() && name.front() == '.')
-                continue;
-            if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
+        }
+        else
+        {
+            std::error_code errc{};
+            const auto ftime = entry.last_write_time(errc);
+            if (!errc)
             {
                 // A name that is no segment cannot match a rule, the walker rejects it.
                 const auto segment = Paths::PathSegment::make(name);
@@ -169,16 +148,13 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
                     continue;
             }
 
-            entries.push_back(
-                SharedData::DirectoryEntry{
-                    .name = name,
-                    .type = type,
-                    .size = entry.is_regular_file() ? entry.file_size() : 0,
-                    .permissions = Utility::localPermissions(status),
-                    .mtime = mtimeSecs,
-                    .linkTarget = std::move(linkTarget),
-                }
-            );
+        std::optional<std::string> linkTarget{};
+        if (isSymlink)
+        {
+            std::error_code errc{};
+            const auto target = std::filesystem::read_symlink(entry.path(), errc);
+            if (!errc)
+                linkTarget = Paths::nativeToUtf8(target);
         }
         catch (const std::filesystem::filesystem_error& e)
         {

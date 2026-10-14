@@ -5,6 +5,7 @@
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
+#include <utility/error_message.hpp>
 #include <utility/permissions.hpp>
 
 #include <chrono>
@@ -306,7 +307,23 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
         return {};
     }
 
-    const auto target = std::filesystem::read_symlink(localNativePath_);
+    std::error_code readError{};
+    const auto target = std::filesystem::read_symlink(localNativePath_, readError);
+    if (readError)
+    {
+        Log::error(
+            "UploadOperation: Cannot read the symlink '{}': {}.",
+            options_.localPath.toUtf8(),
+            Utility::errorMessage(readError)
+        );
+        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .extraInfo = Utility::errorMessage(readError)});
+    }
+    const auto targetText = Paths::checkedNativeToUtf8(target);
+    if (!targetText)
+    {
+        Log::error("UploadOperation: The symlink '{}' points to a name that is not UTF-8.", options_.localPath.toUtf8());
+        return std::unexpected(Error{.type = ErrorType::InvalidName, .extraInfo = targetText.error().toString()});
+    }
 
     if (options_.createMissingDirectories)
     {
@@ -317,7 +334,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
     // The link is created under the temp name and renamed into place, so an existing destination is
     // never removed before its replacement exists.
     std::ignore = sftp_->removeFileInStrand(tempPath_);
-    const auto result = sftp_->createSymLinkInStrand(Paths::nativeToUtf8(target), tempPath_);
+    const auto result = sftp_->createSymLinkInStrand(*targetText, tempPath_);
     if (!result.has_value())
     {
         Log::error(

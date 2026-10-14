@@ -109,7 +109,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*sftp_, path / *Paths::PathSegment::make(name), futureTimeout_))
+        if (auto content = readRemoteFile(*sftp, path / *entry.nameSegment(), futureTimeout_))
             ignoreMatcher_.addFile(relative, *content);
     }
 
@@ -121,7 +121,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
     for (auto& entry : entries)
     {
         // A name that is no segment cannot match a rule, the walker rejects it.
-        const auto segment = Paths::PathSegment::make(entry.name);
+        const auto segment = entry.nameSegment();
         const bool isDir = entry.type == SharedData::DirectoryEntry::FileType::Directory;
         if (segment && ignoreMatcher_.isIgnored(relative / *segment, isDir))
             continue;

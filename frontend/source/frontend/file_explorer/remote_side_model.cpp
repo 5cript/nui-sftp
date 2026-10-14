@@ -286,7 +286,7 @@ std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::remotePathOf
 {
     if (item.isParentLink)
         return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::DotOrDotDot, .input = ".."});
-    return Paths::PathSegment::make(item.name)
+    return item.nameSegment()
         .and_then(
             [&item](Paths::PathSegment const&)
             {

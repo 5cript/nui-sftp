@@ -520,22 +520,46 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
         return Error{.type = ErrorType::InvalidName, .extraInfo = error.toString()};
     };
 
-    // The names from the entry up to, but not including, the root.
-    std::vector<std::string const*> names;
-    for (auto const* current = &entries_[entryIndex]; current->parent; current = &entries_[*current->parent])
+namespace Detail
+{
+    std::expected<BulkTransferOperation::EntryPaths, Operation::Error> treeEntryPaths(
+        std::vector<SharedData::DirectoryEntry> const& entries,
+        std::size_t entryIndex,
+        Paths::RemotePath const& remoteRoot,
+        Paths::LocalPath const& localRoot
+    )
     {
-        if (*current->parent >= entries_.size())
-            return std::unexpected(Error{.type = ErrorType::ImplementationError, .extraInfo = "Parent out of range"});
-        names.push_back(&current->name);
-    }
+        using ErrorType = Operation::ErrorType;
+        if (remoteRoot.empty() || localRoot.empty())
+            return std::unexpected(
+                Operation::Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots"}
+            );
+        if (entryIndex >= entries.size())
+            return std::unexpected(
+                Operation::Error{.type = ErrorType::ImplementationError, .extraInfo = "Entry out of range"}
+            );
 
-    Paths::RelativePath relative{};
-    for (auto name = names.rbegin(); name != names.rend(); ++name)
-    {
-        auto segment = Paths::PathSegment::make(**name);
-        if (!segment)
-            return std::unexpected(invalidName(segment.error()));
-        relative = relative / *segment;
+        const auto refused = [](Paths::PathError const& error)
+        {
+            if (error.reason == Paths::PathRejection::UnknownParent)
+                return Operation::Error{.type = ErrorType::ImplementationError, .extraInfo = "Parent out of range"};
+            return Operation::Error{.type = ErrorType::InvalidName, .extraInfo = error.toString()};
+        };
+        return Utility::walkedRelativePath(entries, entries[entryIndex])
+            .and_then(
+                [&](Paths::RelativePath const& relative)
+                {
+                    return localRoot.join(relative).transform(
+                        [&](Paths::LocalPath local)
+                        {
+                            return BulkTransferOperation::EntryPaths{
+                                .remote = remoteRoot / relative, .local = std::move(local)
+                            };
+                        }
+                    );
+                }
+            )
+            .transform_error(refused);
     }
 
     return common_.localPath.join(relative)

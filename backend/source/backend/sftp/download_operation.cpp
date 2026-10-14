@@ -288,7 +288,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
     }
     std::filesystem::remove(tempNativePath_, ec);
     ec.clear();
-    const auto linkContent = Paths::nativeFromUtf8(readResult.value().linkContent);
+    const auto linkContent = Paths::nativeFromUtf8(linkText);
     if (linkEntry && linkEntry->isDirectory())
         std::filesystem::create_directory_symlink(linkContent, tempNativePath_, ec);
     else

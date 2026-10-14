@@ -131,7 +131,7 @@ namespace SecureShell
                 if (linkLiteral)
                 {
                     const auto* raw = static_cast<const char*>(linkLiteral.get());
-                    entry.linkTarget = std::string{raw ? raw : ""};
+                    entry.linkTarget = Paths::sanitizedUtf8(raw ? raw : "");
                 }
 
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> targetAttrs{
