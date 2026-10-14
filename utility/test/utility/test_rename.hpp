@@ -69,6 +69,84 @@ namespace Utility::Test
         EXPECT_EQ(read(directory_.path() / "target" / "inside"), "x");
     }
 
+    TEST_F(RenameNoReplaceTests, RenameUnlessExistsRenamesToAFreeName)
+    {
+        write(directory_.path() / "a", "a");
+        ASSERT_TRUE(Detail::renameUnlessExists(directory_.path() / "a", directory_.path() / "b").has_value());
+        EXPECT_FALSE(std::filesystem::exists(directory_.path() / "a"));
+        EXPECT_EQ(read(directory_.path() / "b"), "a");
+    }
+
+    TEST_F(RenameNoReplaceTests, RenameUnlessExistsRefusesAnExistingFile)
+    {
+        write(directory_.path() / "a", "a");
+        write(directory_.path() / "b", "b");
+        const auto result = Detail::renameUnlessExists(directory_.path() / "a", directory_.path() / "b");
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error(), std::errc::file_exists);
+        EXPECT_EQ(read(directory_.path() / "a"), "a");
+        EXPECT_EQ(read(directory_.path() / "b"), "b");
+    }
+
+#ifndef _WIN32
+    TEST_F(RenameNoReplaceTests, RenameUnlessExistsRefusesADanglingLink)
+    {
+        write(directory_.path() / "a", "a");
+        std::filesystem::create_symlink(directory_.path() / "missing", directory_.path() / "b");
+        const auto result = Detail::renameUnlessExists(directory_.path() / "a", directory_.path() / "b");
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error(), std::errc::file_exists);
+        EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(directory_.path() / "b")));
+        EXPECT_EQ(read(directory_.path() / "a"), "a");
+    }
+
+    TEST_F(RenameNoReplaceTests, RenameByLinkMovesAFile)
+    {
+        write(directory_.path() / "a", "a");
+        ASSERT_TRUE(Detail::renameByLink(directory_.path() / "a", directory_.path() / "b").has_value());
+        EXPECT_FALSE(std::filesystem::exists(directory_.path() / "a"));
+        EXPECT_EQ(read(directory_.path() / "b"), "a");
+    }
+
+    TEST_F(RenameNoReplaceTests, RenameByLinkRefusesAnExistingFile)
+    {
+        write(directory_.path() / "a", "a");
+        write(directory_.path() / "b", "b");
+        const auto result = Detail::renameByLink(directory_.path() / "a", directory_.path() / "b");
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error(), std::errc::file_exists);
+        EXPECT_FALSE(Detail::isNoReplaceUnsupported(result.error()));
+        EXPECT_EQ(read(directory_.path() / "a"), "a");
+        EXPECT_EQ(read(directory_.path() / "b"), "b");
+    }
+#endif
+
+    TEST(RenameNoReplaceFallbackTests, OnlyMissingSupportFallsBack)
+    {
+        EXPECT_TRUE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::invalid_argument)));
+        EXPECT_TRUE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::function_not_supported)));
+        EXPECT_TRUE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::operation_not_supported)));
+        EXPECT_TRUE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::not_supported)));
+        EXPECT_TRUE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::operation_not_permitted)));
+        EXPECT_FALSE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::file_exists)));
+        EXPECT_FALSE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::no_such_file_or_directory)));
+        EXPECT_FALSE(Detail::isNoReplaceUnsupported(std::make_error_code(std::errc::permission_denied)));
+    }
+
+    TEST_F(RenameNoReplaceTests, MoveIntoPlaceReplacesOnlyWhenAllowed)
+    {
+        write(directory_.path() / "a", "a");
+        write(directory_.path() / "b", "b");
+        const auto refused = moveIntoPlace(directory_.path() / "a", directory_.path() / "b", false);
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error(), std::errc::file_exists);
+        EXPECT_EQ(read(directory_.path() / "b"), "b");
+
+        ASSERT_TRUE(moveIntoPlace(directory_.path() / "a", directory_.path() / "b", true).has_value());
+        EXPECT_FALSE(std::filesystem::exists(directory_.path() / "a"));
+        EXPECT_EQ(read(directory_.path() / "b"), "a");
+    }
+
     TEST(RenameTargetTests, OnlyANewNameInTheSameDirectoryIsARenameInPlace)
     {
         const std::filesystem::path old{"/data/old.txt"};
