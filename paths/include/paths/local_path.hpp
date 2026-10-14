@@ -3,7 +3,7 @@
 #include <paths/local_path_segment.hpp>
 #include <paths/relative_path.hpp>
 
-#include <cassert>
+#include <algorithm>
 #include <compare>
 #include <cstddef>
 #include <expected>
@@ -19,13 +19,104 @@
 
 namespace Paths
 {
+    namespace Detail
+    {
+        /**
+         * @brief True when @p text starts with @p prefix, ASCII letters compared without case.
+         */
+        inline bool startsWithIgnoringCase(std::string_view text, std::string_view prefix)
+        {
+            const auto folded = [](char character)
+            {
+                return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+            };
+            return text.size() >= prefix.size() &&
+                std::ranges::equal(text.substr(0, prefix.size()), prefix, {}, folded, folded);
+        }
+
+        /**
+         * @brief Removes a \\?\ prefix from @p generic, a '/' separated Windows path: "//?/C:/x" becomes "C:/x"
+         *        and "//?/UNC/server/share" becomes "//server/share". DevicePath for the device namespace "//./",
+         *        any other "//?/" path and a server named ".", "?" or "..".
+         */
+        inline std::expected<void, PathRejection> removeWin32Prefix(std::string& generic)
+        {
+            const auto isLetter = [](char character)
+            {
+                return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z');
+            };
+            if (generic.starts_with("//?/"))
+            {
+                const auto rest = std::string_view{generic}.substr(4);
+                if (startsWithIgnoringCase(rest, "unc/"))
+                    generic.erase(2, 6);
+                else if (rest.size() >= 2 && isLetter(rest[0]) && rest[1] == ':')
+                    generic.erase(0, 4);
+                else
+                    return std::unexpected(PathRejection::DevicePath);
+            }
+            if (!generic.starts_with("//"))
+                return {};
+            const auto server = std::string_view{generic}.substr(2, generic.find('/', 2) - 2);
+            if (server == "." || server == "?" || server == "..")
+                return std::unexpected(PathRejection::DevicePath);
+            return {};
+        }
+
+        /**
+         * @brief Length of the root prefix of @p generic ("/", "C:/", "C:" or "//server/share"), 0 when it is not
+         *        absolute on @p platform. Expects '/' separators and no \\?\ prefix.
+         */
+        inline std::size_t rootLengthOf(std::string_view generic, LocalPlatform platform)
+        {
+            if (platform == LocalPlatform::Posix)
+                return generic.starts_with('/') ? 1u : 0u;
+
+            const auto isLetter = [](char character)
+            {
+                return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z');
+            };
+            if (generic.size() >= 3 && isLetter(generic[0]) && generic[1] == ':' && generic[2] == '/')
+                return 3u;
+            if (generic.size() == 2 && isLetter(generic[0]) && generic[1] == ':')
+                return 2u;
+            if (generic.starts_with("//"))
+            {
+                const auto serverEnd = generic.find('/', 2);
+                if (serverEnd == std::string_view::npos || serverEnd == 2)
+                    return 0u;
+                const auto shareEnd = std::min(generic.find('/', serverEnd + 1), generic.size());
+                if (shareEnd == serverEnd + 1)
+                    return 0u;
+                return shareEnd;
+            }
+            return 0u;
+        }
+
+        /**
+         * @brief True when @p path is @p base or lies below it, both generic path text with @p base ending in '/'
+         *        only when it is a root. @p equal compares two characters.
+         */
+        template <typename EqualT>
+        bool isWithinText(std::string_view path, std::string_view base, EqualT equal)
+        {
+            if (path.size() < base.size() || !std::ranges::equal(path.substr(0, base.size()), base, equal))
+                return false;
+            return path.size() == base.size() || base.back() == '/' || path[base.size()] == '/';
+        }
+    }
+
     /**
      * @brief An absolute, normalized path on the local machine, kept as generic UTF-8 ('/' separated).
      *
      * The frontend runs in WebAssembly where std::filesystem would misread "C:/x", so the type does its own parsing
      * for both platforms. The backend converts to a native std::filesystem::path only through @ref native.
      *
+     * On Windows the drive letter is upper case, a \\?\ prefix is dropped (\\?\UNC\server\share becomes
+     * //server/share) and device paths like \\.\PhysicalDrive0 are refused.
+     *
      * A default constructed LocalPath is unset (@ref empty), every operation that touches the disk must refuse it.
+     * Joining onto an unset path gives an unset path.
      */
     class LocalPath
     {
@@ -41,51 +132,51 @@ namespace Paths
             };
             if (utf8.empty())
                 return refuse(PathRejection::Empty);
+            if (utf8.find('\0') != std::string_view::npos)
+                return refuse(PathRejection::ContainsNul);
             if (!isValidUtf8(utf8))
                 return refuse(PathRejection::InvalidUtf8);
 
             std::string generic{utf8};
             if (platform == LocalPlatform::Windows)
+            {
                 std::ranges::replace(generic, '\\', '/');
+                if (const auto removed = Detail::removeWin32Prefix(generic); !removed)
+                    return refuse(removed.error());
+            }
 
-            auto rootLength = rootLengthOf(generic, platform);
+            const auto rootLength = Detail::rootLengthOf(generic, platform);
             if (rootLength == 0)
                 return refuse(PathRejection::NotAbsolute);
 
-            LocalPath result;
-            result.platform_ = platform;
-            result.value_ = generic.substr(0, rootLength);
-            if (result.value_.back() != '/')
-                result.value_.push_back('/');
-            result.rootLength_ = result.value_.size();
-
-            std::vector<std::string_view> segments;
-            std::string_view rest{generic};
-            rest.remove_prefix(rootLength);
-            std::size_t start = 0;
-            while (start <= rest.size())
+            std::vector<std::string_view> names;
+            for (auto const name : Detail::splitAtSlashes(std::string_view{generic}.substr(rootLength)))
             {
-                const auto end = std::min(rest.find('/', start), rest.size());
-                const auto name = rest.substr(start, end - start);
-                start = end + 1;
                 if (name.empty() || name == ".")
                     continue;
                 if (name == "..")
                 {
-                    if (segments.empty())
+                    if (names.empty())
                         return refuse(PathRejection::EscapesRoot);
-                    segments.pop_back();
+                    names.pop_back();
                     continue;
                 }
-                segments.push_back(name);
+                if (const auto rejection = LocalPathSegment::rejectionOf(name, platform); rejection)
+                    return refuse(*rejection);
+                names.push_back(name);
             }
-            for (auto const name : segments)
-            {
-                auto segment = LocalPathSegment::make(name, platform);
-                if (!segment)
-                    return refuse(segment.error().reason);
-                result = result / *segment;
-            }
+
+            LocalPath result;
+            result.platform_ = platform;
+            result.value_.reserve(generic.size() + 1);
+            result.value_.append(generic, 0, rootLength);
+            if (result.value_.back() != '/')
+                result.value_.push_back('/');
+            if (platform == LocalPlatform::Windows && result.value_[0] >= 'a' && result.value_[0] <= 'z')
+                result.value_[0] = static_cast<char>(result.value_[0] - 'a' + 'A');
+            result.rootLength_ = result.value_.size();
+            for (auto const name : names)
+                Detail::appendSegment(result.value_, name);
             return result;
         }
 
@@ -109,27 +200,29 @@ namespace Paths
 
         LocalPath operator/(LocalPathSegment const& segment) const
         {
-            assert(!empty());
+            if (empty())
+                return {};
             LocalPath result{*this};
-            if (result.value_.back() != '/')
-                result.value_.push_back('/');
-            result.value_ += segment.value();
+            Detail::appendSegment(result.value_, segment.value());
             return result;
         }
 
         /**
-         * @brief Joins @p relative, every segment has to be a valid name on this path's platform.
+         * @brief Joins @p relative, every segment has to be a valid name on this path's platform. Empty when this
+         *        path is unset.
          */
         std::expected<LocalPath, PathError> join(RelativePath const& relative) const
         {
-            LocalPath result{*this};
-            for (auto const& segment : relative.segments())
+            if (empty())
+                return std::unexpected(PathError{.reason = PathRejection::Empty, .input = relative.value()});
+            for (auto const name : relative.segmentViews())
             {
-                auto local = LocalPathSegment::make(segment, platform_);
-                if (!local)
-                    return std::unexpected(local.error());
-                result = result / *local;
+                if (const auto rejection = LocalPathSegment::rejectionOf(name, platform_); rejection)
+                    return std::unexpected(PathError{.reason = *rejection, .input = std::string{name}});
             }
+            LocalPath result{*this};
+            if (!relative.empty())
+                Detail::appendSegment(result.value_, relative.value());
             return result;
         }
 
@@ -157,21 +250,39 @@ namespace Paths
         {
             if (empty() || isRoot())
                 return std::nullopt;
-            return *PathSegment::make(std::string_view{value_}.substr(value_.rfind('/') + 1));
+            return PathSegment{std::string{Detail::lastSegment(value_)}};
         }
 
         /**
-         * @brief True when this is @p base or lies below it.
+         * @brief True when this is @p base or lies below it, compared exactly.
          */
         bool isWithin(LocalPath const& base) const
         {
             if (empty() || base.empty() || platform_ != base.platform_)
                 return false;
-            if (value_ == base.value_)
-                return true;
-            if (!value_.starts_with(base.value_))
+            return Detail::isWithinText(value_, base.value_, std::ranges::equal_to{});
+        }
+
+        /**
+         * @brief @ref isWithin with ASCII letters compared without case. For checks that must not miss a path the
+         *        filesystem treats as the same, like the delete guards on Windows and macOS, which fold case.
+         */
+        bool isWithinIgnoringCase(LocalPath const& base) const
+        {
+            if (empty() || base.empty() || platform_ != base.platform_)
                 return false;
-            return base.value_.back() == '/' || value_[base.value_.size()] == '/';
+            const auto folded = [](char character)
+            {
+                return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+            };
+            return Detail::isWithinText(
+                value_,
+                base.value_,
+                [&folded](char left, char right)
+                {
+                    return folded(left) == folded(right);
+                }
+            );
         }
 
         /**
@@ -205,36 +316,6 @@ namespace Paths
         auto operator<=>(LocalPath const&) const = default;
 
       private:
-        /**
-         * @brief Length of the root prefix ("/", "C:/" or "//server/share"), 0 when not absolute.
-         */
-        static std::size_t rootLengthOf(std::string_view generic, LocalPlatform platform)
-        {
-            if (platform == LocalPlatform::Posix)
-                return generic.starts_with('/') ? 1u : 0u;
-
-            const auto isLetter = [](char character)
-            {
-                return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z');
-            };
-            if (generic.size() >= 3 && isLetter(generic[0]) && generic[1] == ':' && generic[2] == '/')
-                return 3u;
-            if (generic.size() == 2 && isLetter(generic[0]) && generic[1] == ':')
-                return 2u;
-            if (generic.starts_with("//"))
-            {
-                // UNC: //server/share is the root.
-                const auto serverEnd = generic.find('/', 2);
-                if (serverEnd == std::string_view::npos || serverEnd == 2)
-                    return 0u;
-                const auto shareEnd = std::min(generic.find('/', serverEnd + 1), generic.size());
-                if (shareEnd == serverEnd + 1)
-                    return 0u;
-                return shareEnd;
-            }
-            return 0u;
-        }
-
         std::string value_{};
         std::size_t rootLength_{0};
         LocalPlatform platform_{LocalPlatform::Posix};
