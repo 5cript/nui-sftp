@@ -14,6 +14,7 @@
 #include <utility/user_directories.hpp>
 
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <memory>
 #include <future>
@@ -442,9 +443,19 @@ namespace SecureShell
 
       private:
         /**
-         * @brief Refuses an unset path before it reaches the server.
+         * @brief Asserts the call runs in the processing thread and refuses an unset path before it reaches the
+         *        server, where an empty path would mean the start directory.
          */
-        static std::expected<void, Error> requireSet(Paths::RemotePath const& path);
+        template <typename... PathTs>
+        std::expected<void, Error> requireSetInStrand(PathTs const&... paths) const
+        {
+            assert(strand_->withinProcessingThread());
+            if ((paths.empty() || ...))
+                return std::unexpected(unsetPathError());
+            return {};
+        }
+
+        static SftpError unsetPathError();
 
         /**
          * @brief The absolute path the server canonicalizes @p path to.
