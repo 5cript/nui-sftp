@@ -184,6 +184,8 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 
     if (slots_.empty() && deferred_.empty() && cursor_ == entries_.size())
     {
+        if (const auto finished = finishInStrand(); !finished.has_value())
+            return enterErrorState<WorkStatus>(finished.error());
         emitProgress(true);
         Log::info("{}: Bulk transfer completed.", logName());
         enterState(OperationState::Completed);

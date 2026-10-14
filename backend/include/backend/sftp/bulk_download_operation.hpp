@@ -64,6 +64,7 @@ class BulkDownloadOperation : public BulkTransferOperation
     ) override;
     bool isSkippableError(Error const& error) const override;
     bool isSkippableDirectoryError(Error const& error) const override;
+    std::expected<void, Error> finishInStrand() override;
 
     bool sourceIsRemote() const noexcept override
     {
@@ -78,9 +79,14 @@ class BulkDownloadOperation : public BulkTransferOperation
   private:
     std::expected<void, Error>
     createLocalDirectory(Paths::LocalPath const& path, SharedData::DirectoryEntry const& entry);
-    std::expected<void, Error>
-    applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
+    /**
+     * @brief Remembers the permissions @p path gets once the bulk is done, so a directory without write
+     *        permission still receives its content.
+     */
+    void deferDirectoryPermissions(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
 
   private:
     DownloadOperation::DownloadOperationOptions individualOptions_;
+    /** @brief Created directories with the permissions they get at the end, parents before their children. */
+    std::vector<std::pair<std::filesystem::path, std::filesystem::perms>> deferredDirectoryPermissions_{};
 };

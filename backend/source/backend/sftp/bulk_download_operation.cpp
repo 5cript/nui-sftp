@@ -5,6 +5,8 @@
 #include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
 
+#include <ranges>
+
 namespace
 {
     BulkTransferOperation::CommonOptions toCommon(BulkDownloadOperation::BulkDownloadOperationOptions const& options)
@@ -82,7 +84,8 @@ BulkDownloadOperation::createLocalDirectory(Paths::LocalPath const& localPath, S
             }
         );
     }
-    return applyPermsToDirectory(path, entry);
+    deferDirectoryPermissions(path, entry);
+    return {};
 }
 
 std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
@@ -126,35 +129,46 @@ bool BulkDownloadOperation::isSkippableDirectoryError(Error const& error) const
     return error.type == ErrorType::LinkInLocalPath;
 }
 
-std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPermsToDirectory(
+void BulkDownloadOperation::deferDirectoryPermissions(
     std::filesystem::path const& path,
     SharedData::DirectoryEntry const& entryToInheritFrom
 )
 {
     // Unknown permissions (the scan root carries none) leave the directory as created.
-    std::optional<std::filesystem::perms> toApplyPerms{std::nullopt};
-    if (individualOptions_.inheritPermissions)
-        toApplyPerms = Utility::inheritablePermissions(entryToInheritFrom.permissions);
-    else if (individualOptions_.directoryPermissions)
-        toApplyPerms = Utility::sanitizePermissions(*individualOptions_.directoryPermissions);
+    const auto permissions = individualOptions_.inheritPermissions
+        ? Utility::inheritablePermissions(entryToInheritFrom.permissions)
+        : individualOptions_.directoryPermissions.and_then(Utility::sanitizePermissions);
+    if (permissions)
+        deferredDirectoryPermissions_.emplace_back(path, *permissions);
+}
 
-    if (!toApplyPerms)
-        return {};
-
-    std::error_code ec;
-    std::filesystem::permissions(path, *toApplyPerms, ec);
-    if (ec)
+std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::finishInStrand()
+{
+    // Children first, a parent that loses its search permission would stop them.
+    for (auto const& [path, permissions] : deferredDirectoryPermissions_ | std::views::reverse)
     {
-        Log::error(
-            "BulkDownloadOperation: Failed to set permissions on local directory: {}: {}", path.string(), ec.message()
-        );
-        return std::unexpected(
-            Error{
-                .type = ErrorType::CannotSetFilePermissions,
-                .extraInfo = fmt::format("Setting permissions on local directory: {}: {}", path.string(), ec.message())
-            }
-        );
+        std::error_code error{};
+        std::filesystem::permissions(path, permissions, error);
+        if (error)
+        {
+            Log::error(
+                "BulkDownloadOperation: Failed to set permissions on local directory: {}: {}",
+                Paths::nativeToUtf8(path),
+                Utility::errorMessage(error)
+            );
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::CannotSetFilePermissions,
+                    .extraInfo = fmt::format(
+                        "Setting permissions on local directory: {}: {}",
+                        Paths::nativeToUtf8(path),
+                        Utility::errorMessage(error)
+                    ),
+                }
+            );
+        }
     }
+    deferredDirectoryPermissions_.clear();
     return {};
 }
 

@@ -245,6 +245,14 @@ class BulkTransferOperation : public Operation
     }
 
     /**
+     * @brief Runs once every entry is done, before the bulk completes. A failure fails the bulk.
+     */
+    virtual std::expected<void, Error> finishInStrand()
+    {
+        return {};
+    }
+
+    /**
      * @brief Log prefix, e.g. "BulkDownloadOperation".
      */
     virtual std::string_view logName() const noexcept = 0;
