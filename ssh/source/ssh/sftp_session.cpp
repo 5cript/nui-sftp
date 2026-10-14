@@ -241,10 +241,11 @@ namespace SecureShell
         if (auto valid = requireSet(path); !valid)
             return std::unexpected(valid.error());
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
+            // O_EXCL: an existing file is an error, not reported as created.
             sftp_open(
                 session_,
                 path.c_str(),
-                O_CREAT,
+                O_CREAT | O_EXCL,
                 static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             ),
             [&](sftp_file_struct* file)
