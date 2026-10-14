@@ -7,6 +7,7 @@
 #include "test_fuzzy_search.hpp"
 #include "test_json_utf8.hpp"
 #include "test_keyed_diff.hpp"
+#include "test_lifetime_token.hpp"
 #include "test_localized_message.hpp"
 #include "test_move_to_front.hpp"
 #include "test_permissions.hpp"
