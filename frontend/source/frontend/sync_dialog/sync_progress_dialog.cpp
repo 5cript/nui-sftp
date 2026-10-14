@@ -59,7 +59,7 @@ struct SyncProgressDialog::Implementation
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
 
-    BackendSyncProvider* provider_{nullptr};
+    std::shared_ptr<BackendSyncProvider> provider_{};
     SharedData::Sync::DiffOptions initialOptions_{};
     std::function<void(SharedData::Sync::DiffSnapshot)> onDone_{};
 
@@ -79,7 +79,7 @@ SyncProgressDialog::SyncProgressDialog(SyncProgressDialog&&) = default;
 SyncProgressDialog& SyncProgressDialog::operator=(SyncProgressDialog&&) = default;
 
 void SyncProgressDialog::open(
-    BackendSyncProvider* provider,
+    std::shared_ptr<BackendSyncProvider> provider,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,

@@ -38,7 +38,7 @@ class SyncProgressDialog
      * @param onDone           Called exactly once on success.  Not invoked on cancel.
      */
     void open(
-        BackendSyncProvider* provider,
+        std::shared_ptr<BackendSyncProvider> provider,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
         bool respectIgnoreFiles,

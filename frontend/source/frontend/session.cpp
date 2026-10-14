@@ -86,7 +86,7 @@ struct Session::Implementation
     // Holds the active BackendSyncProvider between progress-dialog open and
     // sync-dialog close.  Destroyed (→ provider.close() → backend session
     // released) when replaced or explicitly reset.
-    std::unique_ptr<BackendSyncProvider> syncProvider_;
+    std::shared_ptr<BackendSyncProvider> syncProvider_;
     // Last local+remote paths given to startSyncFlow; used by the dialog's
     // Recompare path to re-issue the flow without asking the user again.
     std::filesystem::path lastSyncLocalPath_{};
@@ -221,19 +221,21 @@ struct Session::Implementation
 
         // Replace the old provider before opening the progress dialog so its
         // backend session (if any) is closed before the new one opens.
-        syncProvider_ = std::make_unique<BackendSyncProvider>(&operationQueue);
+        syncProvider_ = std::make_shared<BackendSyncProvider>(&operationQueue);
 
         syncProgressDialog.open(
-            syncProvider_.get(),
+            syncProvider_,
             localPath,
             remotePath,
             scan.respectIgnoreFiles,
             scan.recursive,
             scan.ignoreHidden,
             initialDiffOptions,
-            [this, localPath, remotePath, scan](SharedData::Sync::DiffSnapshot snapshot)
+            [this, provider = syncProvider_, localPath, remotePath, scan, lastSyncTime](
+                SharedData::Sync::DiffSnapshot snapshot
+            )
             {
-                syncDialog.open(syncProvider_.get(), std::move(snapshot), localPath, remotePath, scan);
+                syncDialog.open(provider, std::move(snapshot), localPath, remotePath, scan, lastSyncTime);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );

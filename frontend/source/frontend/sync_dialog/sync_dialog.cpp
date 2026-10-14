@@ -208,7 +208,8 @@ struct SyncDialog::Implementation
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
 
-    BackendSyncProvider* provider_{nullptr};
+    /** @brief Shared with the session, so a minimized dialog keeps its provider when a new flow starts. */
+    std::shared_ptr<BackendSyncProvider> provider_{};
 
     // Settings
     Nui::Observed<std::string> directionStr_{"Both"s};
@@ -1312,14 +1313,14 @@ SyncDialog::RecompareRequest SyncDialog::currentSettings() const
 }
 
 void SyncDialog::open(
-    BackendSyncProvider* provider,
+    std::shared_ptr<BackendSyncProvider> provider,
     SharedData::Sync::DiffSnapshot snapshot,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     ScanSettings scanned
 )
 {
-    impl_->provider_ = provider;
+    impl_->provider_ = std::move(provider);
     impl_->localPath_ = std::move(localPath);
     impl_->remotePath_ = std::move(remotePath);
     impl_->scanned_ = scanned;

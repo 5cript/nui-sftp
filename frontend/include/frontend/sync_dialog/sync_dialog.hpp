@@ -47,7 +47,7 @@ class SyncDialog
      * @param scanned Settings the scans of @p provider ran with.
      */
     void open(
-        BackendSyncProvider* provider,
+        std::shared_ptr<BackendSyncProvider> provider,
         SharedData::Sync::DiffSnapshot snapshot,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
