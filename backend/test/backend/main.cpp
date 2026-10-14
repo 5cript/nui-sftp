@@ -26,6 +26,7 @@
 #include "test_transfer_failures.hpp"
 #include "test_operation_queue.hpp"
 #include "test_existence_check.hpp"
+#include "test_opener_risk.hpp"
 
 #include <log/log.hpp>
 
