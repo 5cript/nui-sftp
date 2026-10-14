@@ -5,6 +5,7 @@
 #include "real_server_tests.hpp"
 
 #include <nui/utility/scope_exit.hpp>
+#include <utility/permissions.hpp>
 #include <utility/temporary_directory.hpp>
 
 #include <cstdint>
@@ -1126,6 +1127,54 @@ namespace Test
         EXPECT_EQ(mode & (std::filesystem::perms::set_uid | std::filesystem::perms::set_gid | std::filesystem::perms::sticky_bit), std::filesystem::perms::none);
         EXPECT_EQ(mode & std::filesystem::perms::others_write, std::filesystem::perms::none);
         EXPECT_TRUE(std::filesystem::exists(localRoot / "doc1.txt"));
+    }
+
+    TEST_F(BulkDownloadOperationTests, AReadOnlyDirectoryStillReceivesItsContent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        using std::filesystem::perms;
+        const auto readOnly = perms::owner_read | perms::owner_exec | perms::group_read | perms::group_exec |
+            perms::others_read | perms::others_exec;
+        std::vector<SharedData::DirectoryEntry> entries;
+        entries.push_back(SharedData::DirectoryEntry{.type = SharedData::FileType::Directory});
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .name = "Documents",
+                .type = SharedData::FileType::Directory,
+                .permissions = readOnly,
+                .parent = 0,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .name = "doc1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Document 1 content"}.size(),
+                .parent = 1,
+            }
+        );
+
+        const auto localRoot = downloadDir_.path() / "readonly";
+        auto restore = Nui::ScopeExit{[&localRoot]() noexcept {
+            std::error_code error{};
+            std::filesystem::permissions(localRoot / "Documents", perms::owner_all, error);
+        }};
+        BulkDownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test"),
+                .localPath = toLocal(localRoot),
+                .individualOptions = {.inheritPermissions = true},
+            }
+        };
+        operation.setScanResult(std::move(entries), std::string{"Document 1 content"}.size());
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(operation.getFailed().empty());
+        EXPECT_EQ(readLocalFile(localRoot / "Documents" / "doc1.txt"), "Document 1 content");
+        EXPECT_EQ(std::filesystem::status(localRoot / "Documents").permissions(), readOnly & ~Utility::processUmask());
     }
 #endif
 }
