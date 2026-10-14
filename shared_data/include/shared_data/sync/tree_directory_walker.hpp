@@ -34,7 +34,7 @@ namespace SharedData::Sync
      * No second pass is needed. Each directory's children are assigned once, sorted, before any of
      * them is queued, so the queued pointers stay valid.
      */
-    template <typename WalkErrorType, typename ScannerT, bool ScannerIncludesDotAndDotDot>
+    template <typename WalkErrorType, typename ScannerT>
     requires std::is_invocable_r_v<
         std::expected<std::vector<SharedData::DirectoryEntry>, WalkErrorType>,
         ScannerT,

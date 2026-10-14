@@ -46,6 +46,10 @@ namespace Paths
          * @brief A name longer than the 255 UTF-16 code units Windows allows.
          */
         NameTooLong,
+        /**
+         * @brief An entry of a walked tree whose parent is not one of its entries.
+         */
+        UnknownParent,
     };
 
     inline std::string_view toString(PathRejection rejection)
@@ -76,6 +80,8 @@ namespace Paths
                 return "is a device path";
             case PathRejection::NameTooLong:
                 return "has a name that is too long";
+            case PathRejection::UnknownParent:
+                return "lies below an entry that was not listed";
         }
         return "is invalid";
     }

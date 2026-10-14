@@ -1,6 +1,7 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
+#include <utility/directory_traversal.hpp>
 
 #include <algorithm>
 
@@ -278,7 +279,9 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
                     }
                 }
             );
-            slots_.push_back(Slot{.entryIndex = index, .child = std::move(child), .totalBytes = entry.size});
+            slots_.push_back(
+                Slot{.entryIndex = index, .paths = *paths, .child = std::move(child), .totalBytes = entry.size}
+            );
             continue;
         }
         Log::warn("{}: Skipping unsupported file type for entry: {}.", logName(), displayPath(index));
@@ -317,11 +320,11 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
-        Log::error("{}: Transfer failed for: {}: {}", logName(), displayPath(slot.entryIndex), error.toString());
+        Log::error("{}: Transfer failed for: {}: {}", logName(), slot.paths.remote.value(), error.toString());
         if (isSkippableError(error))
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
-            failedEntries_.emplace_back(failureSource(slot.entryIndex), error);
+            failedEntries_.emplace_back(failureSource(slot.paths), error);
             failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
             finishSlot(slot, false);
             if (common_.failFast)
@@ -406,7 +409,7 @@ void BulkTransferOperation::emitProgress(bool force)
             continue;
         update.inFlight.push_back(
             SharedData::BulkFileProgress{
-                .file = displayPath(slot.entryIndex),
+                .file = slot.paths.remote.value(),
                 .entryIndex = slot.entryIndex,
                 .bytes = slot.bytes,
                 .totalBytes = slot.totalBytes,
@@ -577,13 +580,8 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
 {
     if (prescanned())
         return prescannedPaths_[entryIndex];
-    if (common_.remotePath.empty() || common_.localPath.empty())
-        return std::unexpected(Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots"});
-
-    const auto invalidName = [](Paths::PathError const& error)
-    {
-        return Error{.type = ErrorType::InvalidName, .extraInfo = error.toString()};
-    };
+    return Detail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
+}
 
 namespace Detail
 {
@@ -626,15 +624,6 @@ namespace Detail
             )
             .transform_error(refused);
     }
-
-    return common_.localPath.join(relative)
-        .transform(
-            [this, &relative](Paths::LocalPath local)
-            {
-                return EntryPaths{.remote = common_.remotePath / relative, .local = std::move(local)};
-            }
-        )
-        .transform_error(invalidName);
 }
 
 std::string BulkTransferOperation::displayPath(std::size_t entryIndex) const
@@ -647,27 +636,21 @@ std::string BulkTransferOperation::displayPath(std::size_t entryIndex) const
 std::string BulkTransferOperation::failureSource(std::size_t entryIndex) const
 {
     if (auto paths = entryPaths(entryIndex); paths)
-        return sourceIsRemote() ? paths->remote.value() : paths->local.toUtf8();
+        return failureSource(*paths);
     return describeEntry(entryIndex);
+}
+
+std::string BulkTransferOperation::failureSource(EntryPaths const& paths) const
+{
+    return sourceIsRemote() ? paths.remote.value() : paths.local.toUtf8();
 }
 
 std::string BulkTransferOperation::describeEntry(std::size_t entryIndex) const
 {
     // The names as listed, one of them is no path segment or the entry would have paths.
-    std::vector<std::string> names;
-    for (auto const* current = &entries_[entryIndex]; current->parent && *current->parent < entries_.size();
-         current = &entries_[*current->parent])
-    {
-        names.push_back(current->name);
-    }
-    auto root = sourceIsRemote() ? common_.remotePath.value() : common_.localPath.toUtf8();
-    for (auto name = names.rbegin(); name != names.rend(); ++name)
-    {
-        if (!root.ends_with('/'))
-            root.push_back('/');
-        root += *name;
-    }
-    return root;
+    return Utility::describeWalkedEntry(
+        sourceIsRemote() ? common_.remotePath.value() : common_.localPath.toUtf8(), entries_, entries_[entryIndex]
+    );
 }
 
 void BulkTransferOperation::cancelChildrenInStrand(bool adoptCancelState)

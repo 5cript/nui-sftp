@@ -1,7 +1,11 @@
 #pragma once
 
+#include <paths/path_error.hpp>
 #include <paths/path_segment.hpp>
 #include <paths/relative_path.hpp>
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <string>
 #include <string_view>
@@ -10,6 +14,8 @@
 #include <filesystem>
 #include <expected>
 #include <functional>
+#include <ranges>
+#include <string_view>
 
 namespace Utility
 {
@@ -36,11 +42,60 @@ namespace Utility
     };
 
     /**
+     * @brief The path of @p entry below the root of its walk, following the parent indices through @p entries.
+     *        Empty for the root, which is the entry without a parent. Refused when a name on the way is no path
+     *        segment or a parent index lies outside @p entries.
+     */
+    template <typename EntryT>
+    std::expected<Paths::RelativePath, Paths::PathError>
+    walkedRelativePath(std::vector<EntryT> const& entries, EntryT const& entry)
+    {
+        std::vector<EntryT const*> ancestry;
+        for (auto const* current = &entry; current->parent; current = &entries[*current->parent])
+        {
+            if (*current->parent >= entries.size())
+                return std::unexpected(
+                    Paths::PathError{.reason = Paths::PathRejection::UnknownParent, .input = current->name}
+                );
+            ancestry.push_back(current);
+        }
+        Paths::RelativePath relative{};
+        for (auto const* ancestor : ancestry | std::views::reverse)
+        {
+            auto segment = ancestor->nameSegment();
+            if (!segment)
+                return std::unexpected(std::move(segment).error());
+            relative = relative / *segment;
+        }
+        return relative;
+    }
+
+    /**
+     * @brief @p entry of a walk for display: @p root followed by the names as listed on the way down to it, so it can
+     *        name an entry whose name is no path segment. Starts below a parent index outside @p entries.
+     */
+    template <typename EntryT>
+    std::string describeWalkedEntry(std::string_view root, std::vector<EntryT> const& entries, EntryT const& entry)
+    {
+        std::vector<std::string_view> names;
+        for (auto const* current = &entry; current->parent; current = &entries[*current->parent])
+        {
+            names.push_back(current->name);
+            if (*current->parent >= entries.size())
+                break;
+        }
+        const auto below = fmt::format("{}", fmt::join(names | std::views::reverse, "/"));
+        if (root.empty() || below.empty())
+            return root.empty() ? below : std::string{root};
+        return root.ends_with('/') ? fmt::format("{}{}", root, below) : fmt::format("{}/{}", root, below);
+    }
+
+    /**
      * @brief Walks a directory tree breadth first. The walker never sees the root path: the scanner lists the
      *        directory at a path relative to the root, and entries are named relative to their parent. The root
-     *        is entry 0 and has an empty name.
+     *        is entry 0 and has an empty name. Every "." and ".." a scanner lists is dropped.
      */
-    template <typename EntryT, typename WalkErrorType, typename ScannerT, bool ScannerIncludesDotAndDotDot>
+    template <typename EntryT, typename WalkErrorType, typename ScannerT>
     requires std::
         is_invocable_r_v<std::expected<std::vector<EntryT>, WalkErrorType>, ScannerT, Paths::RelativePath const&>
         class DeepDirectoryWalker : public BaseDirectoryWalker
@@ -53,6 +108,7 @@ namespace Utility
             , entries_{EntryT{
                   .type = EntryT::FileType::Directory,
               }}
+            , directoryPaths_(1)
         {}
 
         std::vector<EntryT> ejectEntries() &&
@@ -75,6 +131,7 @@ namespace Utility
             entries_ = {EntryT{
                 .type = EntryT::FileType::Directory,
             }};
+            directoryPaths_.assign(1, Paths::RelativePath{});
             rejectedEntries_.clear();
             currentIndex_ = 0;
             totalBytes_ = 0;
@@ -89,24 +146,16 @@ namespace Utility
         std::expected<bool, WalkErrorType> walk()
         {
             if (completed())
-                return false;
+                return true;
 
             if (entries_[currentIndex_].isDirectory())
             {
-                auto result = scanner_(relativePath(entries_[currentIndex_]));
+                auto result = scanner_(directoryPaths_[currentIndex_]);
                 if (!result)
                     return std::unexpected(std::move(result).error());
 
                 moveEntries(std::move(result).value(), currentIndex_);
                 ++currentIndex_;
-            }
-            else
-            {
-                // Log::warn(
-                //     "DeepDirectoryWalker: Encountered non-directory entry '{}' during walk at a point where a "
-                //     "directory was expected, skipping.",
-                //     relativePath(entries_[currentIndex_]).value()
-                // );
             }
 
             // Move over all non dirs
@@ -123,15 +172,18 @@ namespace Utility
         }
 
         /**
-         * @brief The path of a walked entry below the root, empty for the root.
+         * @brief The path of a walked entry below the root, empty for the root. Refused for an entry whose parent is
+         *        not among the walked entries.
          */
-        Paths::RelativePath relativePath(EntryT const& entry) const
+        std::expected<Paths::RelativePath, Paths::PathError> relativePath(EntryT const& entry) const
         {
             if (!entry.parent)
-                return {};
+                return Paths::RelativePath{};
             const auto parentIndex = entry.parent.value();
             if (parentIndex >= entries_.size())
-                throw std::out_of_range("Parent index is out of range");
+                return std::unexpected(
+                    Paths::PathError{.reason = Paths::PathRejection::UnknownParent, .input = entry.name}
+                );
             // Only valid segments are adopted, see moveEntries.
             return entry.nameSegment().transform(
                 [this, parentIndex](Paths::PathSegment const& segment)
@@ -146,22 +198,19 @@ namespace Utility
          */
         std::string describeRejected(EntryT const& entry) const
         {
-            if (!entry.parent || entry.parent.value() >= entries_.size())
-                return nameOf(entry);
-            const auto parent = relativePath(entries_[entry.parent.value()]);
-            return parent.empty() ? nameOf(entry) : parent.value() + "/" + nameOf(entry);
+            return describeWalkedEntry({}, entries_, entry);
         }
 
         std::expected<void, WalkErrorType> walkAll()
         {
-            decltype(walk()) res;
-            do
+            while (true)
             {
-                res = walk();
-                if (!res)
-                    return std::unexpected(std::move(res).error());
-            } while (!res.value());
-            return {};
+                auto result = walk();
+                if (!result)
+                    return std::unexpected(std::move(result).error());
+                if (*result)
+                    return {};
+            }
         }
 
         bool completed() const override
@@ -189,7 +238,7 @@ namespace Utility
             for (auto& entry : newEntries)
             {
                 entry.parent = parent;
-                const auto name = nameOf(entry);
+                auto const& name = entry.name;
                 if (name == "." || name == "..")
                     continue;
                 auto segment = entry.nameSegment();
@@ -198,18 +247,18 @@ namespace Utility
                     rejectedEntries_.push_back(std::move(entry));
                     continue;
                 }
+                directoryPaths_.push_back(
+                    entry.isDirectory() ? directoryPaths_[parent] / *segment : Paths::RelativePath{}
+                );
                 entries_.push_back(std::move(entry));
             }
-        }
-
-        static std::string const& nameOf(EntryT const& entry)
-        {
-            return entry.name;
         }
 
       private:
         ScannerT scanner_;
         std::vector<EntryT> entries_{};
+        /** @brief Index aligned with entries_: the path of each directory below the root, empty for the others. */
+        std::vector<Paths::RelativePath> directoryPaths_{};
         std::vector<EntryT> rejectedEntries_{};
     };
 }

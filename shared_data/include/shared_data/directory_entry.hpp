@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility/directory_traversal.hpp>
+
 #include <paths/relative_path.hpp>
 
 #include <nlohmann/json.hpp>
@@ -251,7 +253,8 @@ namespace SharedData
 
     /**
      * @brief The path of @p entry below the root of its walk, following the parent indices. Empty for the root,
-     *        which is the entry without a parent. Refused when a name on the way is no path segment.
+     *        which is the entry without a parent. Refused when a name on the way is no path segment or a parent index
+     *        lies outside @p entries.
      */
     inline std::expected<Paths::RelativePath, Paths::PathError>
     relativePath(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)

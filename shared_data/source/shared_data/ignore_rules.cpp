@@ -1,5 +1,6 @@
 #include <shared_data/ignore_rules.hpp>
 
+#include <algorithm>
 #include <cstddef>
 
 namespace SharedData
@@ -135,9 +136,8 @@ namespace SharedData
                 continue;
 
             const auto relToOriginStr = ruleSet.originDir.empty()
-                ? relPath.value()
-                : relPath.value().substr(ruleSet.originDir.value().size() + 1u);
-            const auto relToOrigin = *Paths::RelativePath::make(relToOriginStr);
+                ? std::string_view{relPath.value()}
+                : std::string_view{relPath.value()}.substr(ruleSet.originDir.value().size() + 1u);
 
             for (auto const& pattern : ruleSet.patterns)
             {
@@ -151,14 +151,13 @@ namespace SharedData
                 }
                 else
                 {
-                    for (auto const& component : relToOrigin.segments())
-                    {
-                        if (globMatch(pattern.pattern, component.view()))
+                    matched = std::ranges::any_of(
+                        Paths::Detail::splitAtSlashes(relToOriginStr),
+                        [&pattern](std::string_view component)
                         {
-                            matched = true;
-                            break;
+                            return globMatch(pattern.pattern, component);
                         }
-                    }
+                    );
                     if (!matched)
                         matched = globMatch(pattern.pattern, relToOriginStr);
                 }

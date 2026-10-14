@@ -80,14 +80,7 @@ class LocalScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(std::move(scan));
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withFlatWalkerDo(*this, walker_, std::forward<decltype(fn)>(fn));
     }
 
     /**
@@ -96,23 +89,9 @@ class LocalScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(
-                std::move(scan),
-                recursive_,
-                [](Error const& error)
-                {
-                    return error.type == ErrorType::DirectoryUnreadable;
-                },
-                /*requireLocalNames=*/false,
-                excludedSuffixes_
-            );
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withTreeWalkerDo(
+            *this, walker_, recursive_, /*requireLocalNames=*/false, excludedSuffixes_, std::forward<decltype(fn)>(fn)
+        );
     }
 
     /**
@@ -141,13 +120,7 @@ class LocalScanOperation : public Operation
         return withWalkerDo(
             [this](auto& walker)
             {
-                std::vector<std::string> paths;
-                auto root = localPath_.toUtf8();
-                if (!root.ends_with('/'))
-                    root.push_back('/');
-                for (auto const& entry : walker.rejectedEntries())
-                    paths.push_back(root + walker.describeRejected(entry));
-                return paths;
+                return ScanWalkers::rejectedPaths(walker, localPath_.toUtf8());
             }
         );
     }

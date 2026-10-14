@@ -355,24 +355,24 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
 {
     // Index 0 is the synthetic scan root (the directory itself); the caller
     // emitted its tar header already, so we start at 1 and consume the
-    // walker's flat depth-first entry list — mirrors the download op's
+    // walker's flat depth-first entry list, like the download op's
     // appendPrescannedInStrand.
     for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
         auto const& child = entries[idx];
-        auto source = SharedData::relativePath(entries, child)
-                          .and_then(
-                              [&localRoot](Paths::RelativePath const& relative)
-                              {
-                                  return localRoot.join(relative);
-                              }
-                          );
+        const auto relative = SharedData::relativePath(entries, child);
+        auto source = relative.and_then(
+            [&localRoot](Paths::RelativePath const& path)
+            {
+                return localRoot.join(path);
+            }
+        );
         if (!source)
         {
             Log::warn("ArchiveUploadOperation: skipping pre-scanned child: {}", source.error().toString());
             continue;
         }
-        const auto memberPath = archivePrefix / *SharedData::relativePath(entries, child);
+        const auto memberPath = archivePrefix / *relative;
 
         if (child.type == SharedData::FileType::Regular)
         {

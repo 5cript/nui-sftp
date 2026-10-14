@@ -225,8 +225,8 @@ class BulkTransferOperation : public Operation
     }
 
     /**
-     * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots,
-     *        so an entry whose name the local side cannot hold fails with InvalidName.
+     * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots
+     *        with @ref Detail::treeEntryPaths.
      */
     std::expected<EntryPaths, Error> entryPaths(std::size_t entryIndex) const;
 
@@ -239,6 +239,11 @@ class BulkTransferOperation : public Operation
      * @brief The source path of the entry, the key a failure is reported under.
      */
     std::string failureSource(std::size_t entryIndex) const;
+
+    /**
+     * @brief The source of @p paths, the key a failure is reported under.
+     */
+    std::string failureSource(EntryPaths const& paths) const;
 
     /**
      * @brief The entry below the source root by its names as listed, for entries without valid paths.
@@ -322,6 +327,8 @@ class BulkTransferOperation : public Operation
     struct Slot
     {
         std::size_t entryIndex;
+        /** @brief Both ends of the entry, built once when it starts. */
+        EntryPaths paths;
         std::unique_ptr<Operation> child;
         std::uint64_t bytes{0};
         std::uint64_t totalBytes{0};
@@ -392,3 +399,18 @@ class BulkTransferOperation : public Operation
     std::int64_t bulkBytesPerSecond_{0};
     std::chrono::steady_clock::time_point lastEmit_{};
 };
+
+namespace Detail
+{
+    /**
+     * @brief Both ends of the entry @p entryIndex of a scanned tree: its names on the way from the root joined below
+     *        @p remoteRoot and @p localRoot. InvalidName when a name is no path segment or the local side cannot hold
+     *        it, ImplementationError for a missing root or an index out of range.
+     */
+    std::expected<BulkTransferOperation::EntryPaths, Operation::Error> treeEntryPaths(
+        std::vector<SharedData::DirectoryEntry> const& entries,
+        std::size_t entryIndex,
+        Paths::RemotePath const& remoteRoot,
+        Paths::LocalPath const& localRoot
+    );
+}
