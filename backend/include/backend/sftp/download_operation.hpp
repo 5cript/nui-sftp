@@ -8,9 +8,11 @@
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
+#include <utility/link_safe_remove.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 class DownloadOperation : public Operation
@@ -51,6 +53,8 @@ class DownloadOperation : public Operation
          *        a link planted inside a downloaded tree cannot redirect the download out of it.
          */
         Paths::LocalPath linkFreeRoot{};
+        /** @brief Directories below @ref linkFreeRoot already found to be no links, shared by a bulk download. */
+        std::shared_ptr<Utility::VerifiedDirectories> verifiedDirectories{};
     };
 
     SecureShell::ProcessingStrand* strand() const override

@@ -423,7 +423,9 @@ DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
     std::error_code error{};
     std::optional<std::filesystem::path> link{};
     if (!options_.linkFreeRoot.empty())
-        link = Utility::firstLinkBelow(options_.linkFreeRoot.native(), path, error);
+        link = Utility::firstLinkBelow(
+            options_.linkFreeRoot.native(), path, error, options_.verifiedDirectories.get()
+        );
     else if (Utility::isLinkOrJunction(path, error))
         link = path;
     if (error)

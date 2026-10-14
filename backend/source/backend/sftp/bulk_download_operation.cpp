@@ -27,7 +27,9 @@ namespace
 BulkDownloadOperation::BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options)
     : BulkTransferOperation{sftp, toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
-{}
+{
+    individualOptions_.verifiedDirectories = std::make_shared<Utility::VerifiedDirectories>();
+}
 
 BulkDownloadOperation::~BulkDownloadOperation() = default;
 
@@ -48,7 +50,9 @@ BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPath
 {
     // create_directories follows a link planted inside the tree and would create and fill directories outside it.
     std::error_code error{};
-    const auto link = Utility::firstLinkBelow(common().localPath.native(), paths.local.native(), error);
+    const auto link = Utility::firstLinkBelow(
+        common().localPath.native(), paths.local.native(), error, individualOptions_.verifiedDirectories.get()
+    );
     if (error)
     {
         return std::unexpected(
