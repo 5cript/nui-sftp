@@ -266,6 +266,21 @@ namespace TarArchive
             return payload;
         }
 
+        /**
+         * @brief The mode field: the permission bits, or what a newly created member of this type commonly gets
+         *        when they are unknown.
+         */
+        std::uint32_t modeOf(std::filesystem::perms permissions, TypeFlag typeflag)
+        {
+            if (permissions != std::filesystem::perms::unknown)
+                return static_cast<std::uint32_t>(permissions) & 07777u;
+            if (typeflag == TypeFlag::Directory)
+                return 0755u;
+            if (typeflag == TypeFlag::SymbolicLink)
+                return 0777u;
+            return 0644u;
+        }
+
         void populateUstarHeader(
             RawRecord& record,
             std::string const& name,
@@ -279,7 +294,7 @@ namespace TarArchive
             record.fill(std::byte{0u});
             writeString(record, fieldName, name);
             writeString(record, fieldPrefix, prefix);
-            writeNumeric(record, fieldMode, static_cast<std::uint32_t>(meta.permissions) & 07777u);
+            writeNumeric(record, fieldMode, modeOf(meta.permissions, typeflag));
             writeNumeric(record, fieldUid, meta.uid);
             writeNumeric(record, fieldGid, meta.gid);
             writeNumeric(record, fieldSize, payloadSize);
