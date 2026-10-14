@@ -4,6 +4,7 @@
 
 #include <log/log.hpp>
 #include <paths/native.hpp>
+#include <utility/permissions.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -70,6 +71,17 @@ namespace
     }
 
     /**
+     * @brief The tar header of @p entry under @p path. Special bits never travel, and unknown permissions, as on
+     *        Windows, get the defaults of the tar writer.
+     */
+    TarArchive::MemberHeader memberHeaderFor(std::string path, SharedData::DirectoryEntry const& entry)
+    {
+        auto header = TarArchive::memberHeaderOf(std::move(path), entry);
+        header.permissions = Utility::sanitizePermissions(header.permissions).value_or(std::filesystem::perms::unknown);
+        return header;
+    }
+
+    /**
      * @brief The metadata of @p localPath for its tar header.
      */
     std::optional<SharedData::DirectoryEntry> localPathToEntry(std::filesystem::path const& localPath)
@@ -87,7 +99,7 @@ namespace
         }
 
         SharedData::DirectoryEntry entry{};
-        entry.permissions = status.permissions();
+        entry.permissions = Utility::localPermissions(status);
         entry.type = SharedData::fileTypeFromStdFilesystemType(status.type());
 
         if (entry.type == SharedData::FileType::Regular)
@@ -282,7 +294,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
             totalPayloadBytes_ += rootEntry->size;
             resolvedEntries_.push_back(
                 ResolvedEntry{
-                    .header = TarArchive::memberHeaderOf(archivePrefix.value(), *rootEntry),
+                    .header = memberHeaderFor(archivePrefix.value(), *rootEntry),
                     .source = localRoot,
                 }
             );
@@ -291,7 +303,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
         {
             rootEntry->size = 0u;
             resolvedEntries_.push_back(
-                ResolvedEntry{.header = TarArchive::memberHeaderOf(archivePrefix.value(), *rootEntry)}
+                ResolvedEntry{.header = memberHeaderFor(archivePrefix.value(), *rootEntry)}
             );
 
             // Directory roots are expanded exclusively from a preceding
@@ -354,14 +366,14 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
             totalPayloadBytes_ += child.size;
             resolvedEntries_.push_back(
                 ResolvedEntry{
-                    .header = TarArchive::memberHeaderOf(memberPath.value(), child),
+                    .header = memberHeaderFor(memberPath.value(), child),
                     .source = *std::move(source),
                 }
             );
         }
         else if (child.type == SharedData::FileType::Directory)
         {
-            ResolvedEntry dirEntry{.header = TarArchive::memberHeaderOf(memberPath.value(), child)};
+            ResolvedEntry dirEntry{.header = memberHeaderFor(memberPath.value(), child)};
             dirEntry.header.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
         }
