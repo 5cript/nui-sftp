@@ -514,9 +514,13 @@ void FileTrackingPanel::startWatching(
                         changedRemotePath.value()
                     );
 
+                    // Never recursive: the event does not say whether a file or a directory went, and a deleted
+                    // local file must not take a remote directory of that name with it. A deleted local directory
+                    // reports its content first, so its remote copy is empty by the time it is removed; anything
+                    // only the server has keeps it.
                     impl_->operationQueue->enqueueDelete(
                         {changedRemotePath},
-                        true,
+                        /*recursive=*/false,
                         [instanceId](std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info)
                         {
                             if (!opIds)
