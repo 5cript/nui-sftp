@@ -80,10 +80,17 @@ SyncSession::resolve(Paths::RelativePath const& relative) const
 }
 
 DiffSummary SyncSession::recomputeDiffInStrand(
-    DiffOptions const& options,
+    DiffOptions const& requestedOptions,
     std::function<void(std::uint64_t compared)> onProgress
 )
 {
+    auto options = requestedOptions;
+#if defined(_WIN32) || defined(__APPLE__)
+    // NTFS and APFS fold case by default.
+    options.localCaseInsensitive = true;
+#else
+    options.localCaseInsensitive = false;
+#endif
     uploads_.clear(options);
     downloads_.clear(options);
     deletes_.clear(options);

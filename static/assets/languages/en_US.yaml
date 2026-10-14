@@ -142,6 +142,7 @@ syncDialog:
     Excluded: "not transferable"
     InvalidName: "invalid name"
     TypeConflict: "directory against symlink"
+    CaseConflict: "names differ only in case"
   tree:
     loading: "Loading…"
     loadFailed: "Failed: {}"

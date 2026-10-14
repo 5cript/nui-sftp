@@ -2,6 +2,8 @@
 #include <shared_data/sync/enqueue_minimizer.hpp>
 
 #include <algorithm>
+#include <string>
+#include <unordered_map>
 #include <string_view>
 #include <utility>
 
@@ -222,6 +224,24 @@ namespace SharedData::Sync
             };
         };
 
+        // Downloaded onto a case folding filesystem, names that differ only in case would meet as one file.
+        std::unordered_map<std::string, int> foldedCounts;
+        const bool foldsCase = action == Action::Download && options_.localCaseInsensitive;
+        const auto folded = [](std::string name)
+        {
+            for (auto& character : name)
+            {
+                if (character >= 'A' && character <= 'Z')
+                    character = static_cast<char>(character - 'A' + 'a');
+            }
+            return name;
+        };
+        if (foldsCase)
+        {
+            for (auto const& child : directory.children)
+                ++foldedCounts[folded(child.name)];
+        }
+
         bool anyChild = false;
         for (auto const& child : directory.children)
         {
@@ -229,6 +249,8 @@ namespace SharedData::Sync
                 continue;
             // Unknown or untransferable entries are never planned, not even inside a transferred directory.
             if (child.availability != Availability::Listed)
+                continue;
+            if (foldsCase && foldedCounts[folded(child.name)] > 1)
                 continue;
             anyChild = true;
             auto childKey = joinRelKey(relKey, child.name);

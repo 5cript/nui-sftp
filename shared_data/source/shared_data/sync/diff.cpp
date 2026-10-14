@@ -1,10 +1,13 @@
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -214,6 +217,77 @@ namespace SharedData::Sync
                 sink.emitDownload(std::move(row), parentRelKey);
         }
 
+        std::string foldedCase(std::string_view name)
+        {
+            std::string folded{name};
+            for (auto& character : folded)
+            {
+                if (character >= 'A' && character <= 'Z')
+                    character = static_cast<char>(character - 'A' + 'a');
+            }
+            return folded;
+        }
+
+        /**
+         * @brief Names of one directory that would meet as one file on a case folding filesystem: a local-only and a
+         *        remote-only name that differ only in case, and remote names that differ only in case when the local
+         *        filesystem folds case. Transferring either could overwrite the other and a delete could hit both.
+         *        ASCII letters only.
+         */
+        std::unordered_set<std::string> caseConflictsOf(
+            std::vector<ScanNode> const& localChildren,
+            std::vector<ScanNode> const& remoteChildren,
+            DiffOptions const& options
+        )
+        {
+            const auto hasUpper = [](std::vector<ScanNode> const& children)
+            {
+                return std::ranges::any_of(
+                    children,
+                    [](ScanNode const& node)
+                    {
+                        return std::ranges::any_of(node.name, [](char character) { return character >= 'A' && character <= 'Z'; });
+                    }
+                );
+            };
+            // Without an upper case letter folding changes nothing, which is the common case.
+            if (!hasUpper(localChildren) && !hasUpper(remoteChildren))
+                return {};
+
+            struct Variants
+            {
+                std::vector<std::string_view> local;
+                std::vector<std::string_view> remote;
+            };
+            std::unordered_map<std::string, Variants> byFolded;
+            for (auto const& node : localChildren)
+                byFolded[foldedCase(node.name)].local.push_back(node.name);
+            for (auto const& node : remoteChildren)
+                byFolded[foldedCase(node.name)].remote.push_back(node.name);
+
+            std::unordered_set<std::string> conflicts;
+            for (auto const& [folded, variants] : byFolded)
+            {
+                const bool crossSide = std::ranges::any_of(
+                    variants.local,
+                    [&variants](std::string_view local)
+                    {
+                        return std::ranges::any_of(
+                            variants.remote, [local](std::string_view remote) { return remote != local; }
+                        );
+                    }
+                );
+                const bool remoteVariants = options.localCaseInsensitive && variants.remote.size() > 1;
+                if (!crossSide && !remoteVariants)
+                    continue;
+                for (auto const name : variants.local)
+                    conflicts.emplace(name);
+                for (auto const name : variants.remote)
+                    conflicts.emplace(name);
+            }
+            return conflicts;
+        }
+
         void mergeChildren(
             std::vector<ScanNode> const& localChildren,
             std::vector<ScanNode> const& remoteChildren,
@@ -225,6 +299,14 @@ namespace SharedData::Sync
         {
             std::size_t li = 0;
             std::size_t ri = 0;
+            const auto caseConflicts = caseConflictsOf(localChildren, remoteChildren, options);
+            const auto blockedForCase = [&](std::string const& name)
+            {
+                if (!caseConflicts.contains(name))
+                    return false;
+                sink.onBlocked(joinRel(parentRelKey, name), BlockReason::CaseConflict);
+                return true;
+            };
 
             const auto bumpAndCheckpoint = [&]() {
                 ++comparedCounter;
@@ -249,7 +331,7 @@ namespace SharedData::Sync
                 {
                     auto const& lc = localChildren[li];
                     auto const& rc = remoteChildren[ri];
-                    if (!options.ignoreHidden || !isHiddenName(lc.name))
+                    if ((!options.ignoreHidden || !isHiddenName(lc.name)) && !blockedForCase(lc.name))
                     {
                         const auto relKey = joinRel(parentRelKey, lc.name);
                         handleBothPresent(lc, rc, relKey, parentRelKey, options, sink, comparedCounter);
@@ -261,7 +343,7 @@ namespace SharedData::Sync
                 else if (takeLeft)
                 {
                     auto const& lc = localChildren[li];
-                    if (!options.ignoreHidden || !isHiddenName(lc.name))
+                    if ((!options.ignoreHidden || !isHiddenName(lc.name)) && !blockedForCase(lc.name))
                     {
                         if (auto reason = blockReasonOf(lc); reason)
                             sink.onBlocked(joinRel(parentRelKey, lc.name), *reason);
@@ -279,7 +361,7 @@ namespace SharedData::Sync
                 else if (takeRight)
                 {
                     auto const& rc = remoteChildren[ri];
-                    if (!options.ignoreHidden || !isHiddenName(rc.name))
+                    if ((!options.ignoreHidden || !isHiddenName(rc.name)) && !blockedForCase(rc.name))
                     {
                         if (auto reason = blockReasonOf(rc); reason)
                             sink.onBlocked(joinRel(parentRelKey, rc.name), *reason);

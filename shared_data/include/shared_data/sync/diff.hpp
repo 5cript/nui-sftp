@@ -32,11 +32,14 @@ namespace SharedData::Sync
         bool recursive{true};
         /// When true, entries with any path segment starting with '.' are dropped.
         bool ignoreHidden{false};
+        /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
+        /// case would land on one local file then.
+        bool localCaseInsensitive{false};
     };
     BOOST_DESCRIBE_STRUCT(
         DiffOptions,
         (),
-        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden)
+        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden, localCaseInsensitive, lastSyncTime)
     )
 
     /**
