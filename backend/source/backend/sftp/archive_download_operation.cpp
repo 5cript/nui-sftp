@@ -186,7 +186,7 @@ ArchiveDownloadOperation::workInStrand()
                 return enterErrorState<WorkStatus>(
                     {.type = ErrorType::ImplementationError, .extraInfo = "archive has no roots"}
                 );
-            if (std::filesystem::exists(localArchiveNativePath_) && !options_.mayOverwrite)
+            if (std::error_code existsError{}; std::filesystem::exists(localArchiveNativePath_, existsError) && !options_.mayOverwrite)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
 
             const auto prepareResult = prepareInStrand();
@@ -707,10 +707,16 @@ void ArchiveDownloadOperation::cleanup()
     currentStream_.reset();
     writer_.reset();
 
-    if (!tempPath_.empty() && std::filesystem::exists(tempPath_))
+    if (!tempPath_.empty())
     {
-        std::error_code removeErr{};
-        std::filesystem::remove(tempPath_, removeErr);
+        std::error_code removeError{};
+        std::filesystem::remove(tempPath_, removeError);
+        if (removeError)
+            Log::warn(
+                "ArchiveDownloadOperation: Cannot remove '{}': {}",
+                Paths::nativeToUtf8(tempPath_),
+                Utility::errorMessage(removeError)
+            );
     }
 }
 
