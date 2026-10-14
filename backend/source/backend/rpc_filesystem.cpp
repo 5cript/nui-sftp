@@ -1,6 +1,5 @@
 #include <backend/rpc_filesystem.hpp>
 #include <utility/error_message.hpp>
-#include <utility/link_safe_remove.hpp>
 #include <log/log.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <paths/native.hpp>
@@ -8,6 +7,7 @@
 #include <utility/rename.hpp>
 #include <utility/rename_target.hpp>
 #include <backend/local_delete_guard.hpp>
+#include <backend/local_removal.hpp>
 #include <backend/existence_check.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
@@ -181,7 +181,6 @@ RpcFilesystem::RpcFilesystem(
     , opener_{&opener}
     , riskyFilePolicy_{std::move(riskyFilePolicy)}
 {
-    registerRemove();
     registerRemoveMultiple();
     registerRename();
     registerListFiles();
@@ -205,7 +204,7 @@ void RpcFilesystem::registerRemoveMultiple()
             {
                 if (options_.preventDeletion)
                 {
-                    Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
+                    Log::warn("RpcFilesystem::removeSome called but deletion is prevented by configuration.");
                     return reply.error("backend.rpcFilesystem.deletionPrevented");
                 }
 
@@ -227,18 +226,18 @@ void RpcFilesystem::registerRemoveMultiple()
                         Utility::localizedMessage("backend.rpcFilesystem.removeRefused", removal.error().path)
                     );
                 }
-                if (!failures.empty())
+                if (!removal->failures.empty())
                 {
                     return reply.error(
                         Utility::localizedMessage(
                             "backend.rpcFilesystem.removeSomeFailed",
-                            failures.size(),
-                            fmt::format("{}", fmt::join(failures, "\n"))
+                            removal->failures.size(),
+                            fmt::format("{}", fmt::join(removal->failures, "\n"))
                         )
                     );
                 }
-                Log::info("Successfully removed all specified paths.");
-                return reply({{"success", true}, {"removedCount", removedCount}});
+                Log::info("RpcFilesystem::removeSome removed {} entries.", removal->removed);
+                return reply({{"success", true}, {"removedCount", removal->removed}});
             }
         );
 }
