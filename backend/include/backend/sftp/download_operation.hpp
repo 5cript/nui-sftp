@@ -145,6 +145,21 @@ class DownloadOperation : public Operation
      */
     Error sizeMismatch() const;
 
+    /**
+     * @brief Creates the temp file, or limits an existing one, to its owner until the final permissions are set.
+     */
+    std::expected<void, Error> restrictTempFile() const;
+
+    /**
+     * @brief The permissions of the finished file: inherited, configured, or those of a new file.
+     */
+    std::expected<std::filesystem::perms, Error> finalPermissionsInStrand();
+
+    /**
+     * @brief Gives @p path the modification time of the remote file. A failure is only logged.
+     */
+    void applyModificationTime(std::filesystem::path const& path) const;
+
     void cleanup();
 
   private:

@@ -772,6 +772,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
 
     stream->closeInStrand();
 
+    // The modification time goes on the temp file, so nothing can fail once the destination is replaced.
+    applyModificationTimeInStrand();
+
     const auto moved = sftp_->moveIntoPlaceInStrand(
         tempPath_,
         remotePath_,
@@ -786,40 +789,32 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
             Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
         return std::unexpected(remoteMoveError(moved.error()));
     }
-
-    // Preserve the local file's mtime on the remote file so subsequent syncs
-    // don't see the file as modified (best-effort; a failure is only a warning).
-    {
-        std::error_code errc{};
-        const auto ftime = std::filesystem::last_write_time(localNativePath_, errc);
-        if (!errc)
-        {
-            const auto sctime = std::chrono::file_clock::to_sys(ftime);
-            const auto mtimeSecs = static_cast<uint32_t>(
-                std::chrono::duration_cast<std::chrono::seconds>(sctime.time_since_epoch()).count()
-            );
-            sftp_attributes_struct attrs{};
-            attrs.flags = SSH_FILEXFER_ATTR_ACMODTIME;
-            attrs.atime = mtimeSecs;
-            attrs.mtime = mtimeSecs;
-            const auto mtimeResult = sftp_->statInStrand(remotePath_, &attrs);
-            if (!mtimeResult.has_value())
-            {
-                Log::warn(
-                    "UploadOperation: Failed to set mtime on '{}': {}.",
-                    options_.remotePath.value(),
-                    mtimeResult.error().message
-                );
-            }
-        }
-        else
-        {
-            Log::warn(
-                "UploadOperation: Could not read local mtime for '{}': {}.", options_.localPath.toUtf8(), errc.message()
-            );
-        }
-    }
     return {};
+}
+
+void UploadOperation::applyModificationTimeInStrand()
+{
+    std::error_code timeError{};
+    const auto localTime = std::filesystem::last_write_time(localNativePath_, timeError);
+    if (timeError)
+    {
+        Log::warn(
+            "UploadOperation: Could not read local mtime for '{}': {}.",
+            options_.localPath.toUtf8(),
+            Utility::errorMessage(timeError)
+        );
+        return;
+    }
+    const auto seconds = static_cast<std::uint32_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::file_clock::to_sys(localTime).time_since_epoch())
+            .count()
+    );
+    sftp_attributes_struct attributes{};
+    attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
+    attributes.atime = seconds;
+    attributes.mtime = seconds;
+    if (const auto applied = sftp_->statInStrand(tempPath_, &attributes); !applied.has_value())
+        Log::warn("UploadOperation: Failed to set mtime on '{}': {}.", tempPath_.value(), applied.error().message);
 }
 
 std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms localPerms) const

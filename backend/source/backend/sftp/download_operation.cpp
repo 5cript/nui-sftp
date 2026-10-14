@@ -494,11 +494,15 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
             );
             if (auto rewound = stream.seekInStrand(0); !rewound)
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
+            if (const auto restricted = restrictTempFile(); !restricted)
+                return restricted;
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else
         {
             Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", Paths::nativeToUtf8(tempPath));
+            if (const auto restricted = restrictTempFile(); !restricted)
+                return restricted;
             localFile_.open(tempPath, std::ios::binary | std::ios::app);
             if (!localFile_.is_open())
             {
@@ -514,6 +518,8 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
     }
     else
     {
+        if (const auto restricted = restrictTempFile(); !restricted)
+            return restricted;
         localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
     }
 
@@ -523,6 +529,20 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
 
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::restrictTempFile() const
+{
+    if (const auto restricted = Utility::restrictToOwner(tempNativePath_); !restricted)
+    {
+        Log::error(
+            "DownloadOperation: Cannot create '{}': {}",
+            Paths::nativeToUtf8(tempNativePath_),
+            Utility::errorMessage(restricted.error())
+        );
+        return std::unexpected(Error{.type = ErrorType::OpenFailure});
+    }
     return {};
 }
 
@@ -787,73 +807,61 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
             Log::warn("DownloadOperation: Cannot mark '{}' as downloaded: {}", Paths::nativeToUtf8(tempPath), marked.message());
     }
 
-    if (const auto moved = Utility::moveIntoPlace(tempPath, localNativePath_, options_.mayOverwrite); !moved)
+    // Times and permissions go on the temp file, so nothing can fail once the destination is replaced.
+    applyModificationTime(tempPath);
+    const auto permissions = finalPermissionsInStrand();
+    if (!permissions)
+        return std::unexpected(permissions.error());
+    std::error_code permissionsError{};
+    std::filesystem::permissions(tempPath, *permissions, permissionsError);
+    if (permissionsError)
     {
-        Log::error(
-            "DownloadOperation: Failed to move '{}' into place: {}",
-            options_.localPath.toUtf8(),
-            Utility::errorMessage(moved.error())
+        Log::error("DownloadOperation: Failed to set permissions: {}", Utility::errorMessage(permissionsError));
+        return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
+    }
+
+    return ComparedStateCheck::moveLocalIntoPlace(
+        tempPath, localNativePath_, options_.mayOverwrite, options_.comparedDestination
+    );
+}
+
+std::expected<std::filesystem::perms, DownloadOperation::Error> DownloadOperation::finalPermissionsInStrand()
+{
+    if (!options_.inheritPermissions)
+    {
+        return options_.filePermissions.and_then(Utility::sanitizePermissions).value_or(Utility::newFilePermissions());
+    }
+
+    auto stream = fileStream_.lock();
+    if (!stream)
+    {
+        Log::error("DownloadOperation: File stream expired.");
+        return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
+    }
+    const auto fileInfo = stream->statInStrand();
+    if (!fileInfo.has_value())
+    {
+        Log::error("DownloadOperation: Failed to stat file.");
+        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
+    }
+    // Special bits never travel and the umask applies, like for a file created locally.
+    return Utility::inheritablePermissions(fileInfo->permissions).value_or(Utility::newFilePermissions());
+}
+
+void DownloadOperation::applyModificationTime(std::filesystem::path const& path) const
+{
+    using namespace std::chrono;
+    const auto sysTime = system_clock::time_point{
+        duration_cast<system_clock::duration>(seconds{options_.entry->mtime} + nanoseconds{options_.entry->mtimeNsec})
+    };
+    std::error_code mtimeError{};
+    std::filesystem::last_write_time(path, std::chrono::file_clock::from_sys(sysTime), mtimeError);
+    if (mtimeError)
+    {
+        Log::warn(
+            "DownloadOperation: Failed to set mtime on '{}': {}.",
+            Paths::nativeToUtf8(path),
+            Utility::errorMessage(mtimeError)
         );
-        return std::unexpected(localMoveError(moved.error()));
     }
-
-    if (options_.inheritPermissions)
-    {
-        auto stream = fileStream_.lock();
-        if (!stream)
-        {
-            Log::error("DownloadOperation: File stream expired.");
-            return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
-        }
-
-        const auto fileInfo = stream->statInStrand();
-        if (!fileInfo.has_value())
-        {
-            Log::error("DownloadOperation: Failed to stat file.");
-            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
-        }
-
-        // Special bits never travel and the umask applies, like for a file created locally.
-        std::error_code permissionsError{};
-        if (const auto inherited = Utility::inheritablePermissions(fileInfo->permissions); inherited)
-            std::filesystem::permissions(localNativePath_, *inherited, permissionsError);
-        if (permissionsError)
-        {
-            Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
-            return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
-        }
-    }
-    else if (options_.filePermissions)
-    {
-        std::error_code permissionsError{};
-        if (const auto configured = Utility::sanitizePermissions(*options_.filePermissions); configured)
-            std::filesystem::permissions(localNativePath_, *configured, permissionsError);
-        if (permissionsError)
-        {
-            Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
-            return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
-        }
-    }
-    /* else keep default */
-
-    // Preserve the remote file's mtime on the downloaded local file so
-    // subsequent syncs don't see the file as modified (best-effort; a failure
-    // is only a warning).  Mirrors UploadOperation's post-transfer setstat.
-    if (options_.entry)
-    {
-        using namespace std::chrono;
-        const auto sysTime = system_clock::time_point{duration_cast<system_clock::duration>(
-            seconds{options_.entry->mtime} + nanoseconds{options_.entry->mtimeNsec}
-        )};
-        const auto fileTime = std::chrono::file_clock::from_sys(sysTime);
-        std::error_code mtimeError{};
-        std::filesystem::last_write_time(localNativePath_, fileTime, mtimeError);
-        if (mtimeError)
-        {
-            Log::warn(
-                "DownloadOperation: Failed to set mtime on '{}': {}.", options_.localPath.toUtf8(), mtimeError.message()
-            );
-        }
-    }
-    return {};
 }

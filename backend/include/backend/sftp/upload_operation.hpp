@@ -133,6 +133,11 @@ class UploadOperation : public Operation
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
+    /**
+     * @brief Gives the remote temp file the modification time of the local file. A failure is only logged.
+     */
+    void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
+
     void cleanup();
 
   private:
