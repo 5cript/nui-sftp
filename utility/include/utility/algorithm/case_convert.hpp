@@ -9,19 +9,42 @@
 namespace Utility::Algorithm
 {
     /**
-     * @brief Converts the passed string to upper case by out paramter.
+     * @brief @p character in lower case when it is an ASCII letter, unchanged otherwise. Bytes of a multibyte UTF-8
+     *        sequence are never touched and the locale plays no part.
+     */
+    constexpr char asciiToLower(char character) noexcept
+    {
+        return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+    }
+
+    /**
+     * @brief @p character in upper case when it is an ASCII letter, unchanged otherwise, see @ref asciiToLower.
+     */
+    constexpr char asciiToUpper(char character) noexcept
+    {
+        return character >= 'a' && character <= 'z' ? static_cast<char>(character - 'a' + 'A') : character;
+    }
+
+    /**
+     * @brief True for the ASCII upper case letters.
+     */
+    constexpr bool isAsciiUpper(char character) noexcept
+    {
+        return character >= 'A' && character <= 'Z';
+    }
+
+    /**
+     * @brief Converts the ASCII letters of the passed string to upper case by out paramter.
      *
      * @param input The string to convert.
      */
     inline void toUpperCaseInplace(std::string& input)
     {
-        std::transform(input.begin(), input.end(), input.begin(), [](char c) {
-            return std::toupper(c);
-        });
+        std::ranges::transform(input, input.begin(), asciiToUpper);
     }
 
     /**
-     * @brief Converts the passed string to upper case and returns it.
+     * @brief Converts the ASCII letters of the passed string to upper case and returns it.
      *
      * @param input The string to convert.
      * @return std::string The string in upper case.
@@ -29,26 +52,22 @@ namespace Utility::Algorithm
     inline std::string toUpperCase(std::string const& input)
     {
         std::string result(input.size(), '\0');
-        std::transform(input.begin(), input.end(), result.begin(), [](char c) {
-            return std::toupper(c);
-        });
+        std::ranges::transform(input, result.begin(), asciiToUpper);
         return result;
     }
 
     /**
-     * @brief Converts the passed string to lower case by out paramter.
+     * @brief Converts the ASCII letters of the passed string to lower case by out paramter.
      *
      * @param input The string to convert.
      */
     inline void toLowerCaseInplace(std::string& input)
     {
-        std::transform(input.begin(), input.end(), input.begin(), [](char c) {
-            return std::tolower(c);
-        });
+        std::ranges::transform(input, input.begin(), asciiToLower);
     }
 
     /**
-     * @brief Converts the passed string to lower case and returns it.
+     * @brief Converts the ASCII letters of the passed string to lower case and returns it.
      *
      * @param input The string to convert.
      * @return std::string The string in lower case.
@@ -56,14 +75,12 @@ namespace Utility::Algorithm
     inline std::string toLowerCase(std::string const& input)
     {
         std::string result(input.size(), '\0');
-        std::transform(input.begin(), input.end(), result.begin(), [](char c) {
-            return std::tolower(c);
-        });
+        std::ranges::transform(input, result.begin(), asciiToLower);
         return result;
     }
 
     /**
-     * @brief Case-insensitive lexicographic comparison of two strings.
+     * @brief Lexicographic comparison of two strings, ASCII letters compared without case.
      *
      * @param lhs The left-hand string.
      * @param rhs The right-hand string.
@@ -75,8 +92,8 @@ namespace Utility::Algorithm
         const auto commonLength = std::min(lhs.size(), rhs.size());
         for (std::size_t index = 0; index < commonLength; ++index)
         {
-            const auto leftChar = std::tolower(static_cast<unsigned char>(lhs[index]));
-            const auto rightChar = std::tolower(static_cast<unsigned char>(rhs[index]));
+            const auto leftChar = static_cast<unsigned char>(asciiToLower(lhs[index]));
+            const auto rightChar = static_cast<unsigned char>(asciiToLower(rhs[index]));
             if (leftChar != rightChar)
                 return leftChar < rightChar ? -1 : 1;
         }
