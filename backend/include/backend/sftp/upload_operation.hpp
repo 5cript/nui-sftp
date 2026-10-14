@@ -46,7 +46,7 @@ class UploadOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override;
 
-    UploadOperation(SecureShell::SftpSession& sftp, UploadOperationOptions options);
+    UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options);
     ~UploadOperation() override;
     UploadOperation(UploadOperation const&) = delete;
     UploadOperation(UploadOperation&&) = delete;
@@ -107,20 +107,20 @@ class UploadOperation : public Operation
     SecureShell::IFileStream::SignedSizeType commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes);
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand();
+    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
 
-    std::expected<void, Error> openOrAdoptFileInStrand();
+    std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
-    std::expected<void, Error> finalizeInStrand();
+    std::expected<void, Error> finalizeInStrand(SecureShell::SftpSession& sftp);
 
     /**
      * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
      */
-    bool tempBelongsToSourceInStrand(std::uint64_t tempSize);
+    bool tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize);
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
@@ -129,7 +129,8 @@ class UploadOperation : public Operation
      *  the parent, so deeply-nested missing paths are created in one pass.
      *  Must be called from within the processing thread.
      */
-    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir);
+    std::expected<void, Error>
+    ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
@@ -141,7 +142,7 @@ class UploadOperation : public Operation
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     UploadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */

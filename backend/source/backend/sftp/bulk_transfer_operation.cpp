@@ -6,9 +6,9 @@
 
 using namespace std::chrono_literals;
 
-BulkTransferOperation::BulkTransferOperation(SecureShell::SftpSession& sftp, CommonOptions common)
+BulkTransferOperation::BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , common_{std::move(common)}
     , budget_{std::max(1, common_.concurrency)}
 {}
@@ -29,7 +29,10 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
         return result;
     }
 
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return workInStrand();
@@ -58,13 +61,15 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     switch (state())
     {
         case (NotStarted):
-            return start();
         case (Preparing):
-            [[fallthrough]];
         case (Prepared):
-            [[fallthrough]];
         case (Running):
-            return step();
+        {
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return enterErrorState<WorkStatus>(channelClosedError());
+            return state() == NotStarted ? start(*sftp) : step(*sftp);
+        }
         case (Finalizing):
         {
             enterState(Completed);
@@ -97,7 +102,8 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::start()
+std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error>
+BulkTransferOperation::start(SecureShell::SftpSession& sftp)
 {
     if (entrySource_ == EntrySource::None)
     {
@@ -141,7 +147,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots."}
             );
         }
-        const auto result = prepareRootInStrand(root);
+        const auto result = prepareRootInStrand(sftp, root);
         if (!result.has_value())
             return enterErrorState<WorkStatus>(result.error());
         cursor_ = 1;
@@ -152,7 +158,8 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     return WorkStatus::MoreWork;
 }
 
-std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::step()
+std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error>
+BulkTransferOperation::step(SecureShell::SftpSession& sftp)
 {
     if (cursor_ > entries_.size())
     {
@@ -164,7 +171,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     }
 
     const auto slotsBefore = slots_.size();
-    if (const auto filled = fillSlots(); !filled.has_value())
+    if (const auto filled = fillSlots(sftp); !filled.has_value())
         return enterErrorState<WorkStatus>(filled.error());
     // Report newly started files before stepping them: small files finish within this very
     // step and would otherwise never be seen in flight.
@@ -196,7 +203,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     return WorkStatus::MoreWork;
 }
 
-std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlots()
+std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlots(SecureShell::SftpSession& sftp)
 {
     // Directories are created inline and each blocks the strand (a round trip or two on
     // upload), so a step creates only a few before yielding to the queue.
@@ -238,7 +245,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         {
             // Created inline while the cursor passes it, so files listed after it only start once
             // it exists. Scan order lists parents before children.
-            const auto result = createDirectoryInStrand(index, *paths);
+            const auto result = createDirectoryInStrand(sftp, index, *paths);
             if (!result.has_value())
             {
                 // Without a tree, nothing else depends on a directory entry.
@@ -639,12 +646,12 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
 
     // Each child's cancel and destructor would block on the processing thread separately;
     // hop once and do all of them there.
-    auto* processingStrand = sftp_->strand();
-    if (!slots_.empty() && processingStrand && !processingStrand->withinProcessingThread())
+    const auto sftp = openSession(sftp_);
+    if (!slots_.empty() && sftp && !sftp->strand()->withinProcessingThread())
     {
         // Only wait, never get(): a finalized strand hands back an exceptional future and this
         // runs from the destructor too.
-        auto fut = sftp_->performPromise(
+        auto fut = sftp->performPromise(
             [this, adoptCancelState]() -> bool
             {
                 cancelChildrenInStrand(adoptCancelState);
@@ -674,5 +681,5 @@ void BulkTransferOperation::pause(bool doPause)
 
 SecureShell::ProcessingStrand* BulkTransferOperation::strand() const
 {
-    return sftp_->strand();
+    return strandOf(sftp_);
 }

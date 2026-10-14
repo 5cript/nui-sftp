@@ -2,9 +2,9 @@
 
 #include <log/log.hpp>
 
-RenameOperation::RenameOperation(SecureShell::SftpSession& sftp, RenameOperationOptions options)
+RenameOperation::RenameOperation(std::weak_ptr<SecureShell::SftpSession> sftp, RenameOperationOptions options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , sourcePath_{std::move(options.sourcePath)}
     , destinationPath_{std::move(options.destinationPath)}
     , futureTimeout_{options.futureTimeout}
@@ -12,7 +12,7 @@ RenameOperation::RenameOperation(SecureShell::SftpSession& sftp, RenameOperation
 
 SecureShell::ProcessingStrand* RenameOperation::strand() const
 {
-    return sftp_->strand();
+    return strandOf(sftp_);
 }
 
 std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperation::work()
@@ -30,6 +30,9 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
         }
         case (Running):
         {
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return enterErrorState<WorkStatus>(channelClosedError());
             // A queued rename mirrors a local move and must not replace what is at the destination.
             // The task outlives this operation when the wait times out.
             auto fut = sftp->performPromise(
@@ -37,6 +40,9 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
                     source = sourcePath_,
                     destination = destinationPath_]() -> std::expected<void, SecureShell::SftpError>
                 {
+                    const auto sftp = session.lock();
+                    if (!sftp)
+                        return std::unexpected(SecureShell::SftpError{.message = "The SFTP channel was closed"});
                     return sftp->renameNoReplaceInStrand(source, destination);
                 }
             );

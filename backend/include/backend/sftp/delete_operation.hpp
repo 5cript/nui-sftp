@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 class DeleteOperation : public Operation
@@ -33,7 +34,7 @@ class DeleteOperation : public Operation
         return false;
     }
 
-    DeleteOperation(SecureShell::SftpSession& sftp, DeleteOperationOptions options);
+    DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options);
     ~DeleteOperation() override;
     DeleteOperation(DeleteOperation const&) = delete;
     DeleteOperation(DeleteOperation&&) = delete;
@@ -115,7 +116,7 @@ class DeleteOperation : public Operation
     std::expected<void, DeleteOperation::Error> removeOnce(Paths::RemotePath const& path);
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Paths::RemotePath remotePath_;
     std::function<void(std::string const&, std::uint64_t, std::uint64_t)> filesRemovedProgress_;
     std::chrono::seconds futureTimeout_;

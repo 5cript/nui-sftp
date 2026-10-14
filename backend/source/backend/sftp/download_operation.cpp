@@ -14,9 +14,9 @@
 
 using namespace std::chrono_literals;
 
-DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOperationOptions options)
+DownloadOperation::DownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DownloadOperationOptions options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , options_{std::move(options)}
     , localFile_{}
 {
@@ -41,7 +41,10 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
     // Drive one work() step from outside the strand. OperationQueue normally calls
     // workInStrand directly inside its batched umbrella, so this wrapper is only used by
     // callers that aren't already on the strand (standalone ops, tests).
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return workInStrand();
@@ -58,6 +61,10 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadOperation::workInStrand()
 {
     using enum OperationState;
+
+    const auto sftp = openSession(sftp_);
+    if (!sftp && !hasEnded())
+        return enterErrorState<WorkStatus>(channelClosedError());
 
     switch (state_)
     {
@@ -83,7 +90,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
             }
-            const auto prepareResult = prepareInStrand();
+            const auto prepareResult = prepareInStrand(*sftp);
             if (!prepareResult.has_value())
             {
                 Log::error("DownloadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
@@ -97,7 +104,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             state_ = Running;
             if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
             {
-                const auto result = handleSymlinkInStrand();
+                const auto result = handleSymlinkInStrand(*sftp);
                 if (!result.has_value())
                 {
                     Log::error("DownloadOperation: Failed to handle symlink: {}", result.error().toString());
@@ -229,10 +236,16 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 {
-    auto fut = sftp_->performPromise(
-        [this]()
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return std::unexpected(channelClosedError());
+    auto fut = sftp->performPromise(
+        [this]() -> std::expected<void, Error>
         {
-            return handleSymlinkInStrand();
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return std::unexpected(channelClosedError());
+            return handleSymlinkInStrand(*sftp);
         }
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -243,7 +256,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
     return fut.get();
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkInStrand()
+std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkInStrand(SecureShell::SftpSession& sftp)
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
@@ -251,7 +264,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
         return {};
     }
 
-    const auto readResult = readSymlinkInStrand(remotePath_);
+    const auto readResult = readSymlinkInStrand(sftp, remotePath_);
     if (!readResult.has_value())
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
@@ -317,7 +330,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
 
 std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 {
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<bool>(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return readOnceInStrand();
@@ -574,9 +590,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::restrictTempFil
 }
 
 std::expected<SecureShell::SftpSession::DeepLinkResult, DownloadOperation::Error>
-DownloadOperation::readSymlinkInStrand(Paths::RemotePath const& remoteFullPath)
+DownloadOperation::readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& remoteFullPath)
 {
-    auto deepLinkResult = sftp_->readLinkDeepInStrand(remoteFullPath);
+    auto deepLinkResult = sftp.readLinkDeepInStrand(remoteFullPath);
     if (!deepLinkResult.has_value())
     {
         Log::error(
@@ -614,10 +630,16 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         }
     }
 
-    auto fut = sftp_->performPromise(
-        [this]()
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState(channelClosedError());
+    auto fut = sftp->performPromise(
+        [this]() -> std::expected<void, Error>
         {
-            return prepareInStrand();
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return std::unexpected(channelClosedError());
+            return prepareInStrand(*sftp);
         }
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -631,7 +653,7 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     return {};
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand()
+std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
     if (remotePath_.empty() || remotePath_.isRoot())
     {
@@ -641,7 +663,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
 
     if (!options_.entry)
     {
-        const auto fileInfo = sftp_->lstatInStrand(remotePath_);
+        const auto fileInfo = sftp.lstatInStrand(remotePath_);
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
@@ -654,9 +676,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
     if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
         return {};
 
-    const auto streamOpenResult = sftp_->openFileInStrand(
-        remotePath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
-    );
+    const auto streamOpenResult =
+        sftp.openFileInStrand(remotePath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown);
     if (!streamOpenResult.has_value())
     {
         Log::error("DownloadOperation: Failed to open remote sftp file: {}.", streamOpenResult.error().message);
@@ -702,7 +723,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return std::unexpected(openResult.error());
     }
 
-    buffer_ = sftp_->bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
+    buffer_ = sftp.bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
     if (buffer_.empty())
     {
         Log::error("DownloadOperation: No transfer buffer available from pool.");
@@ -783,7 +804,10 @@ void DownloadOperation::pause(bool doPause)
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
 {
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return std::unexpected(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return finalizeInStrand();

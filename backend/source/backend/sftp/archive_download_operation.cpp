@@ -119,9 +119,9 @@ bool ArchiveDownloadOperation::isPayloadEntry(ResolvedEntry const& entry) const 
     return isRegularFile(entry.header);
 }
 
-ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sftp, Options options)
+ArchiveDownloadOperation::ArchiveDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , options_{std::move(options)}
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
@@ -150,7 +150,15 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation:
         return result;
     }
 
-    auto future = sftp_->performPromise([this]() { return workInStrand(); });
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto future = sftp->performPromise(
+        [this]()
+        {
+            return workInStrand();
+        }
+    );
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("ArchiveDownloadOperation: work umbrella timed out.");
@@ -172,6 +180,10 @@ ArchiveDownloadOperation::workInStrand()
         );
     }
 
+    const auto sftp = openSession(sftp_);
+    if (!sftp && !hasEnded())
+        return enterErrorState<WorkStatus>(channelClosedError());
+
     switch (state_)
     {
         case NotStarted:
@@ -190,7 +202,7 @@ ArchiveDownloadOperation::workInStrand()
             if (std::error_code existsError{}; std::filesystem::exists(localArchiveNativePath_, existsError) && !options_.mayOverwrite)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
 
-            const auto prepareResult = prepareInStrand();
+            const auto prepareResult = prepareInStrand(*sftp);
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -219,7 +231,7 @@ ArchiveDownloadOperation::workInStrand()
                 }
                 else
                 {
-                    const auto openResult = openNextEntryInStrand();
+                    const auto openResult = openNextEntryInStrand(*sftp);
                     if (!openResult.has_value())
                         return enterErrorState<WorkStatus>(openResult.error());
                     return WorkStatus::MoreWork;
@@ -262,7 +274,7 @@ ArchiveDownloadOperation::workInStrand()
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
     if (options_.createMissingDirectories)
     {
@@ -308,7 +320,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     }
     writer_ = TarArchive::Writer::makeFromSink(std::move(*sinkOrError));
 
-    buffer_ = sftp_->bufferProvider().lease(totalPayloadBytes_);
+    buffer_ = sftp.bufferProvider().lease(totalPayloadBytes_);
     if (buffer_.empty())
     {
         Log::error("ArchiveDownloadOperation: No transfer buffer available from pool.");
@@ -429,7 +441,7 @@ void ArchiveDownloadOperation::appendPrescannedInStrand(
     }
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInStrand(SecureShell::SftpSession& sftp)
 {
     if (!writer_)
         return std::unexpected(Error{
@@ -460,10 +472,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
         return {};
     }
 
-    const auto streamOpenResult = sftp_->openFileInStrand(
-        resolved.source,
-        SecureShell::SftpSession::OpenType::Read,
-        std::filesystem::perms::unknown
+    const auto streamOpenResult = sftp.openFileInStrand(
+        resolved.source, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
     );
     if (!streamOpenResult.has_value())
     {

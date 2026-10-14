@@ -7,8 +7,8 @@
 #include <string>
 #include <algorithm>
 
-ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options)
-    : sftp_(&sftp)
+ScanOperation::ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options)
+    : sftp_{std::move(sftp)}
     , remotePath_{std::move(options.remotePath)}
     , progressCallback_{std::move(options.progressCallback)}
     , futureTimeout_{options.futureTimeout}
@@ -62,9 +62,11 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<std::vector<SharedData::DirectoryEntry>>(channelClosedError());
     const auto path = remotePath_ / relative;
-    auto fut = sftp_->listDirectory(path);
-    fut.wait_for(futureTimeout_);
+    auto fut = sftp->listDirectory(path);
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>({.type = ErrorType::FutureTimeout});
 
@@ -226,5 +228,5 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
 
 SecureShell::ProcessingStrand* ScanOperation::strand() const
 {
-    return sftp_->strand();
+    return strandOf(sftp_);
 }

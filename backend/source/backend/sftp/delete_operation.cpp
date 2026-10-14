@@ -3,9 +3,9 @@
 
 #include <ssh/sftp_session.hpp>
 
-DeleteOperation::DeleteOperation(SecureShell::SftpSession& sftp, DeleteOperationOptions options)
+DeleteOperation::DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , remotePath_{std::move(options.remotePath)}
     , filesRemovedProgress_{std::move(options.filesRemovedProgress)}
     , futureTimeout_{options.futureTimeout}
@@ -16,7 +16,7 @@ DeleteOperation::~DeleteOperation()
 
 SecureShell::ProcessingStrand* DeleteOperation::strand() const
 {
-    return sftp_->strand();
+    return strandOf(sftp_);
 }
 
 std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperation::work()
@@ -127,7 +127,38 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::RemotePath const& path)
 {
-    auto fut = sftp_->removeAll({path});
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<void>(channelClosedError());
+    auto const& path = target.path;
+    auto fut = sftp->performPromise(
+        [weak = std::weak_ptr{sftp}, path, compared = target.compared]() -> std::expected<void, Error>
+        {
+            const auto session = weak.lock();
+            if (!session)
+                return std::unexpected(channelClosedError());
+            return ComparedStateCheck::requireUnchangedRemoteInStrand(*session, path, compared)
+                .and_then(
+                    [&]() -> std::expected<void, Error>
+                    {
+                        const auto knownType = compared ? std::optional{compared->type} : std::nullopt;
+                        // An item that is already gone, after a resume for one, counts as deleted.
+                        if (auto removed = removeOneInStrand(*session, path, knownType);
+                            !removed && removed.error().sftpError != SSH_FX_NO_SUCH_FILE)
+                        {
+                            return std::unexpected(
+                                Error{
+                                    .type = ErrorType::DeleteFailed,
+                                    .sftpError = std::move(removed).error(),
+                                    .extraInfo = path.value(),
+                                }
+                            );
+                        }
+                        return {};
+                    }
+                );
+        }
+    );
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<void>({.type = ErrorType::FutureTimeout});
 

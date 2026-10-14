@@ -810,7 +810,9 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         };
 
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
-        targetQueue.emplace_back(operationId, std::make_unique<DownloadOperation>(sftp, std::move(opts)));
+        targetQueue.emplace_back(
+            operationId, std::make_unique<DownloadOperation>(sftp.weak_from_this(), std::move(opts))
+        );
 
         Log::info("Calling OperationQueue::{}::onOperationAdded", sessionId_.value());
         RpcHelper::callRemoteSafely(
@@ -833,7 +835,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     else if (result->isDirectory())
     {
         auto bulk = std::make_unique<BulkDownloadOperation>(
-            sftp,
+            sftp.weak_from_this(),
             BulkDownloadOperation::BulkDownloadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", operationId),
                 .remotePath = remotePath,
@@ -847,7 +849,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         // The scan is part of the bulk, so cancelling or moving the card acts on both.
         bulk->scanFirst(
             std::make_unique<ScanOperation>(
-                sftp,
+                sftp.weak_from_this(),
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = remotePath,
@@ -1026,12 +1028,12 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     // Directory roots are scanned by the archive operation itself before it packs.
-    auto archive = std::make_unique<ArchiveDownloadOperation>(sftp, std::move(opts));
+    auto archive = std::make_unique<ArchiveDownloadOperation>(sftp.weak_from_this(), std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
         archive->addScanRoot(
             std::make_unique<ScanOperation>(
-                sftp,
+                sftp.weak_from_this(),
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = rootPath,
@@ -1155,7 +1157,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
     // Directory roots are scanned by the archive operation itself before it packs.
-    auto archive = std::make_unique<ArchiveUploadOperation>(sftp, std::move(opts));
+    auto archive = std::make_unique<ArchiveUploadOperation>(sftp.weak_from_this(), std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
         archive->addScanRoot(std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
@@ -1240,74 +1242,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             ++directoryCount;
             continue;
         }
-        fileUnit.entries.push_back(entry);
-        files.push_back(
-            BulkDownloadOperation::PrescannedFile{
-                .source = entry.source,
-                .destination = entry.destination,
-                .sizeBytes = entry.sizeBytes,
-                .mtime = entry.mtime,
-                .mtimeNsec = entry.mtimeNsec,
-                .mayOverwrite = entry.mayOverwrite,
-                .isDirectory = entry.isDirectory,
-            }
-        );
-    }
-
-    if (!files.empty())
-    {
-        // Dedicated operationId for the aggregate bulk-download card, reserved
-        // by the frontend separately from the per-entry ids to avoid collisions
-        // (entry-0's id would clash when entry 0 is a directory).
-        const auto bulkOpId = bulkCardId;
-        const auto remoteLabel = request.remoteRoot
-            ? *request.remoteRoot
-            : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::source);
-        const auto localLabel = request.localRoot
-            ? *request.localRoot
-            : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::destination);
-        fileUnit.remoteRoot = remoteLabel;
-        fileUnit.localRoot = localLabel;
-
-        auto downloadOpts = resolveDownloadOptions(transferOptions, resolvedTimeout);
-        // Sync plans list files of directories that do not exist locally yet.
-        downloadOpts.createMissingDirectories = true;
-
-        auto bulk = std::make_unique<BulkDownloadOperation>(
-            sftp,
-            BulkDownloadOperation::BulkDownloadOperationOptions{
-                .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkOpId),
-                .remotePath = remoteLabel,
-                .localPath = localLabel,
-                .individualOptions = std::move(downloadOpts),
-                .failFast = transferOptions.failFast.value_or(false),
-                .concurrency = bulkConcurrency_,
-            }
-        );
-        bulk->setPrescannedFileList(std::move(files));
-
-        targetQueue.emplace_back(bulkOpId, std::move(bulk));
-        RpcHelper::callRemoteSafely(
-            *hub_,
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = bulkOpId,
-                .type = SharedData::OperationType::BulkDownload,
-                .mode = request.mode,
-                .insertRefresh = request.insertRefresh,
-                .localPath = localLabel,
-                .remotePath = remoteLabel,
-            }
-        );
-    }
-
-    Log::info("Bulk download: queued one bulk card (for files) + {} directory entries", directoryCount);
-
-    // Stashed under the card id so a teardown can hand it to the resume registry.
-    if (!fileUnit.entries.empty())
-        bulkResumeStash_.insert_or_assign(bulkCardId, BulkResumeEntry{.request = std::move(fileUnit)});
-
-    return request.entries.size();
+    );
 }
 
 std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
@@ -1393,7 +1328,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         };
 
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
-        targetQueue.emplace_back(operationId, std::make_unique<UploadOperation>(sftp, std::move(opts)));
+        targetQueue.emplace_back(
+            operationId, std::make_unique<UploadOperation>(sftp.weak_from_this(), std::move(opts))
+        );
 
         RpcHelper::callRemoteSafely(
             *hub_,
@@ -1414,7 +1351,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     else if (stat.type() == std::filesystem::file_type::directory)
     {
         auto bulk = std::make_unique<BulkUploadOperation>(
-            sftp,
+            sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", operationId),
                 .remotePath = remotePath,
@@ -1517,67 +1454,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             ++directoryCount;
             continue;
         }
-        fileUnit.entries.push_back(entry);
-        files.push_back(
-            BulkUploadOperation::PrescannedFile{
-                .source = entry.source,
-                .destination = entry.destination,
-                .sizeBytes = entry.sizeBytes,
-                .mayOverwrite = entry.mayOverwrite,
-                .isDirectory = entry.isDirectory,
-            }
-        );
-    }
-
-    if (!files.empty())
-    {
-        // Separate reserved id — see addBulkDownloadOperation for rationale.
-        const auto bulkOpId = bulkCardId;
-        const auto localLabel = request.localRoot ? *request.localRoot
-                                                  : commonParentOf(files, &BulkUploadOperation::PrescannedFile::source);
-        const auto remoteLabel = request.remoteRoot
-            ? *request.remoteRoot
-            : commonParentOf(files, &BulkUploadOperation::PrescannedFile::destination);
-        fileUnit.remoteRoot = remoteLabel;
-        fileUnit.localRoot = localLabel;
-
-        auto uploadOpts = resolveUploadOptions(transferOptions, resolvedTimeout);
-        uploadOpts.createMissingDirectories = true;
-
-        auto bulk = std::make_unique<BulkUploadOperation>(
-            sftp,
-            BulkUploadOperation::BulkUploadOperationOptions{
-                .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkOpId),
-                .remotePath = remoteLabel,
-                .localPath = localLabel,
-                .individualOptions = std::move(uploadOpts),
-                .failFast = transferOptions.failFast.value_or(false),
-                .concurrency = bulkConcurrency_,
-            }
-        );
-        bulk->setPrescannedFileList(std::move(files));
-
-        targetQueue.emplace_back(bulkOpId, std::move(bulk));
-        RpcHelper::callRemoteSafely(
-            *hub_,
-            rpcName("onOperationAdded"),
-            SharedData::OperationAdded{
-                .operationId = bulkOpId,
-                .type = SharedData::OperationType::BulkUpload,
-                .mode = request.mode,
-                .insertRefresh = request.insertRefresh,
-                .localPath = localLabel,
-                .remotePath = remoteLabel,
-            }
-        );
-    }
-
-    Log::info("Bulk upload: queued one bulk card (for files) + {} directory entries", directoryCount);
-
-    if (!fileUnit.entries.empty())
-        bulkResumeStash_.insert_or_assign(bulkCardId, BulkResumeEntry{.request = std::move(fileUnit)});
-
-    return request.entries.size();
+    );
 }
 
 SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
@@ -1930,7 +1807,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     const auto isBulk = recursive && isDirectory;
 
     auto operation = std::make_unique<DeleteOperation>(
-        sftp,
+        sftp.weak_from_this(),
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress = makeDeleteProgressCallback(operationId),
             .remotePath = remotePath,
@@ -1943,7 +1820,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         // The scan is part of the delete, so cancelling or moving the card acts on both.
         operation->addScanRoot(
             std::make_unique<ScanOperation>(
-                sftp,
+                sftp.weak_from_this(),
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = remotePath,
@@ -1994,7 +1871,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
     auto operation = std::make_unique<DeleteOperation>(
-        sftp,
+        sftp.weak_from_this(),
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress = makeDeleteProgressCallback(bulkOperationId),
             .futureTimeout = resolvedTimeout,
@@ -2039,7 +1916,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
             {
                 operation->addScanRoot(
                     std::make_unique<ScanOperation>(
-                        sftp,
+                        sftp.weak_from_this(),
                         ScanOperation::ScanOperationOptions{
                             .progressCallback = scanProgressOfNextRoot(),
                             .remotePath = entry.target,
@@ -2100,7 +1977,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     // Assumed in strand
 
     auto operation = std::make_unique<RenameOperation>(
-        sftp,
+        sftp.weak_from_this(),
         RenameOperation::RenameOperationOptions{
             .sourcePath = sourcePath,
             .destinationPath = destinationPath,
@@ -2180,7 +2057,7 @@ void OperationQueue::addSyncScanOperation(
     };
 
     auto remoteScan = std::make_unique<ScanOperation>(
-        sftp,
+        sftp.weak_from_this(),
         ScanOperation::ScanOperationOptions{
             .progressCallback = makeScanProgressCallback("onScanProgress", remoteScanId),
             .remotePath = remotePath,

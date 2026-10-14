@@ -75,7 +75,7 @@ class ArchiveUploadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    ArchiveUploadOperation(SecureShell::SftpSession& sftp, Options options);
+    ArchiveUploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options);
     ~ArchiveUploadOperation() override;
     ArchiveUploadOperation(ArchiveUploadOperation const&) = delete;
     ArchiveUploadOperation& operator=(ArchiveUploadOperation const&) = delete;
@@ -118,7 +118,7 @@ class ArchiveUploadOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override
     {
-        return sftp_ ? sftp_->strand() : nullptr;
+        return strandOf(sftp_);
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
@@ -153,7 +153,7 @@ class ArchiveUploadOperation : public Operation
         Paths::LocalPath source{};
     };
 
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
     std::expected<void, Error> flattenRoots();
     /**
      * @brief Expand a preceding LocalScanOperation's flat entry vector into
@@ -170,13 +170,13 @@ class ArchiveUploadOperation : public Operation
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
     std::expected<void, Error> finaliseEntryInStrand();
-    std::expected<void, Error> finaliseArchiveInStrand();
+    std::expected<void, Error> finaliseArchiveInStrand(SecureShell::SftpSession& sftp);
     bool isPayloadEntry(ResolvedEntry const& entry) const noexcept;
 
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Options options_;
     std::vector<ResolvedEntry> resolvedEntries_{};
     std::optional<TarArchive::Writer> writer_{std::nullopt};

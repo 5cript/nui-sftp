@@ -131,9 +131,9 @@ bool ArchiveUploadOperation::isPayloadEntry(ResolvedEntry const& entry) const no
     return entry.header.type == SharedData::FileType::Regular;
 }
 
-ArchiveUploadOperation::ArchiveUploadOperation(SecureShell::SftpSession& sftp, Options options)
+ArchiveUploadOperation::ArchiveUploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , options_{std::move(options)}
 {
     remoteArchivePath_ = options_.remoteArchivePath;
@@ -156,7 +156,15 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         return result;
     }
 
-    auto future = sftp_->performPromise([this]() { return workInStrand(); });
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto future = sftp->performPromise(
+        [this]()
+        {
+            return workInStrand();
+        }
+    );
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("ArchiveUploadOperation: work umbrella timed out.");
@@ -182,6 +190,10 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         return enterErrorState<WorkStatus>(*incompleteScan_);
     }
 
+    const auto sftp = openSession(sftp_);
+    if (!sftp && !hasEnded())
+        return enterErrorState<WorkStatus>(channelClosedError());
+
     switch (state_)
     {
         case NotStarted:
@@ -198,7 +210,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
                     {.type = ErrorType::InvalidPath, .extraInfo = "archive has no source paths"}
                 );
 
-            const auto prepareResult = prepareInStrand();
+            const auto prepareResult = prepareInStrand(*sftp);
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -243,7 +255,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         }
         case Finalizing:
         {
-            const auto finaliseResult = finaliseArchiveInStrand();
+            const auto finaliseResult = finaliseArchiveInStrand(*sftp);
             if (!finaliseResult.has_value())
                 return enterErrorState<WorkStatus>(finaliseResult.error());
             state_ = Completed;
@@ -389,7 +401,7 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
     }
 }
 
-std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
+std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
     if (remoteArchivePath_.empty() || remoteArchivePath_.isRoot() || tempPath_.empty())
     {
@@ -412,12 +424,12 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
         });
 
     // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
-    if (!options_.mayOverwrite && sftp_->lstatInStrand(remoteArchivePath_).has_value())
+    if (!options_.mayOverwrite && sftp.lstatInStrand(remoteArchivePath_).has_value())
         return std::unexpected(Error{.type = ErrorType::FileExists});
 
     // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
     using OpenType = SecureShell::SftpSession::OpenType;
-    const auto openResult = sftp_->openFileInStrand(
+    const auto openResult = sftp.openFileInStrand(
         tempPath_, OpenType::Write | OpenType::Create | OpenType::Truncate, std::filesystem::perms{0644u}
     );
     if (!openResult.has_value())
@@ -461,7 +473,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
 
     writer_ = TarArchive::Writer::makeFromSink(std::move(*wrappedSink));
 
-    buffer_ = sftp_->bufferProvider().lease(totalPayloadBytes_);
+    buffer_ = sftp.bufferProvider().lease(totalPayloadBytes_);
     if (buffer_.empty())
     {
         Log::error("ArchiveUploadOperation: No transfer buffer available from pool.");
@@ -635,7 +647,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseEntryInStr
     return {};
 }
 
-std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInStrand()
+std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInStrand(SecureShell::SftpSession& sftp)
 {
     if (!writer_)
         return std::unexpected(Error{
@@ -718,10 +730,13 @@ void ArchiveUploadOperation::cleanup()
     if (tempCreated_)
     {
         tempCreated_ = false;
-        if (auto* processingStrand = sftp_->strand(); processingStrand && processingStrand->withinProcessingThread())
-            std::ignore = sftp_->removeFileInStrand(tempPath_);
+        const auto sftp = openSession(sftp_);
+        if (!sftp)
+            Log::warn("ArchiveUploadOperation: The channel is closed, '{}' stays on the server.", tempPath_.value());
+        else if (sftp->strand()->withinProcessingThread())
+            std::ignore = sftp->removeFileInStrand(tempPath_);
         else
-            std::ignore = sftp_->removeFile(tempPath_).wait_for(options_.futureTimeout);
+            std::ignore = sftp->removeFile(tempPath_).wait_for(options_.futureTimeout);
     }
 }
 

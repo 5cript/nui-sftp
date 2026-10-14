@@ -94,7 +94,7 @@ class ArchiveDownloadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    ArchiveDownloadOperation(SecureShell::SftpSession& sftp, Options options);
+    ArchiveDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options);
     ~ArchiveDownloadOperation() override;
     ArchiveDownloadOperation(ArchiveDownloadOperation const&) = delete;
     ArchiveDownloadOperation& operator=(ArchiveDownloadOperation const&) = delete;
@@ -137,7 +137,7 @@ class ArchiveDownloadOperation : public Operation
 
     SecureShell::ProcessingStrand* strand() const override
     {
-        return sftp_ ? sftp_->strand() : nullptr;
+        return strandOf(sftp_);
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
@@ -177,7 +177,7 @@ class ArchiveDownloadOperation : public Operation
         Paths::RemotePath source{};
     };
 
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
     std::expected<void, Error> flattenRootsInStrand();
     /**
      * @brief Expand a preceding ScanOperation's flat entry vector into the
@@ -192,7 +192,7 @@ class ArchiveDownloadOperation : public Operation
         Paths::RemotePath const& remoteRoot,
         Paths::RelativePath const& archivePrefix
     );
-    std::expected<void, Error> openNextEntryInStrand();
+    std::expected<void, Error> openNextEntryInStrand(SecureShell::SftpSession& sftp);
     std::expected<bool, Error> readChunkInStrand();
     std::expected<void, Error> finaliseEntryInStrand();
     std::expected<void, Error> finaliseArchiveInStrand();
@@ -201,7 +201,7 @@ class ArchiveDownloadOperation : public Operation
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Options options_;
     std::vector<ResolvedEntry> resolvedEntries_{};
     std::optional<TarArchive::Writer> writer_{std::nullopt};

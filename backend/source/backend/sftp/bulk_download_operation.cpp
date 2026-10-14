@@ -24,8 +24,11 @@ namespace
     }
 }
 
-BulkDownloadOperation::BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options)
-    : BulkTransferOperation{sftp, toCommon(options)}
+BulkDownloadOperation::BulkDownloadOperation(
+    std::weak_ptr<SecureShell::SftpSession> sftp,
+    BulkDownloadOperationOptions options
+)
+    : BulkTransferOperation{std::move(sftp), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {
     individualOptions_.verifiedDirectories = std::make_shared<Utility::VerifiedDirectories>();
@@ -39,14 +42,17 @@ SharedData::OperationType BulkDownloadOperation::type() const
 }
 
 std::expected<void, BulkDownloadOperation::Error>
-BulkDownloadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
+BulkDownloadOperation::prepareRootInStrand(SecureShell::SftpSession&, SharedData::DirectoryEntry const& root)
 {
     // Base directory of the download, everything after this will be relative to this:
     return createLocalDirectory(common().localPath, root);
 }
 
-std::expected<void, BulkDownloadOperation::Error>
-BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
+std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::createDirectoryInStrand(
+    SecureShell::SftpSession&,
+    std::size_t entryIndex,
+    EntryPaths const& paths
+)
 {
     // create_directories follows a link planted inside the tree and would create and fill directories outside it.
     std::error_code error{};

@@ -23,8 +23,11 @@ namespace
     }
 }
 
-BulkUploadOperation::BulkUploadOperation(SecureShell::SftpSession& sftp, BulkUploadOperationOptions options)
-    : BulkTransferOperation{sftp, toCommon(options)}
+BulkUploadOperation::BulkUploadOperation(
+    std::weak_ptr<SecureShell::SftpSession> sftp,
+    BulkUploadOperationOptions options
+)
+    : BulkTransferOperation{std::move(sftp), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {}
 
@@ -36,14 +39,17 @@ SharedData::OperationType BulkUploadOperation::type() const
 }
 
 std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
+BulkUploadOperation::prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root)
 {
     // Base directory of the upload, everything after this will be relative to this:
-    return createRemoteDirectoryInStrand(common().remotePath, root);
+    return createRemoteDirectoryInStrand(sftp, common().remotePath, root);
 }
 
-std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
+std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createDirectoryInStrand(
+    SecureShell::SftpSession& sftp,
+    std::size_t entryIndex,
+    EntryPaths const& paths
+)
 {
     // A scanned directory comes after its parent, a prescanned one may be the first entry below it.
     if (prescanned() && individualOptions_.createMissingDirectories)
@@ -51,7 +57,7 @@ BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths 
         if (auto parents = createMissingParentsInStrand(sftp, paths.remote); !parents)
             return parents;
     }
-    return createRemoteDirectoryInStrand(paths.remote, entries()[entryIndex]);
+    return createRemoteDirectoryInStrand(sftp, paths.remote, entries()[entryIndex]);
 }
 
 std::expected<void, BulkUploadOperation::Error>
@@ -86,11 +92,12 @@ BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemoteDirectoryInStrand(
+    SecureShell::SftpSession& sftp,
     Paths::RemotePath const& path,
     SharedData::DirectoryEntry const& entry
 )
 {
-    const auto result = sftp().createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
+    const auto result = sftp.createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
     if (!result.has_value())
     {
         Log::error("BulkUploadOperation: Failed to create remote sftp directory: {}.", result.error().message);

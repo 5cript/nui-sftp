@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <cstdint>
 
@@ -46,7 +47,7 @@ class ScanOperation : public Operation
         return false;
     }
 
-    ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options);
+    ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options);
     ~ScanOperation() override;
     ScanOperation(ScanOperation const&) = delete;
     ScanOperation(ScanOperation&&) = delete;
@@ -172,7 +173,7 @@ class ScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Paths::RemotePath remotePath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

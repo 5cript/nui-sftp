@@ -12,9 +12,9 @@
 #include <filesystem>
 #include <tuple>
 
-UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperationOptions options)
+UploadOperation::UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , fileStream_{}
     , options_{std::move(options)}
     , localFile_{}
@@ -34,9 +34,7 @@ UploadOperation::~UploadOperation()
 
 SecureShell::ProcessingStrand* UploadOperation::strand() const
 {
-    if (!sftp_)
-        return nullptr;
-    return sftp_->strand();
+    return strandOf(sftp_);
 }
 
 void UploadOperation::pause(bool doPause)
@@ -47,7 +45,10 @@ void UploadOperation::pause(bool doPause)
 
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::work()
 {
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return workInStrand();
@@ -64,6 +65,10 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
 std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperation::workInStrand()
 {
     using enum OperationState;
+
+    const auto sftp = openSession(sftp_);
+    if (!sftp && !hasEnded())
+        return enterErrorState<WorkStatus>(channelClosedError());
 
     switch (state_)
     {
@@ -124,7 +129,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileSeekFailure});
                 }
-                const auto prepareResult = prepareInStrand();
+                const auto prepareResult = prepareInStrand(*sftp);
                 if (!prepareResult.has_value())
                 {
                     Log::error("UploadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
@@ -139,7 +144,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             state_ = Running;
             if (isSymlink_ && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
             {
-                const auto result = handleSymlinkInStrand();
+                const auto result = handleSymlinkInStrand(*sftp);
                 if (!result.has_value())
                 {
                     Log::error("UploadOperation: Failed to handle symlink: {}", result.error().toString());
@@ -227,7 +232,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         case (Finalizing):
         {
             localFile_.close();
-            const auto finalizeResult = finalizeInStrand();
+            const auto finalizeResult = finalizeInStrand(*sftp);
             if (!finalizeResult.has_value())
             {
                 Log::error("UploadOperation: Failed to finalize operation: {}", finalizeResult.error().toString());
@@ -285,10 +290,16 @@ UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType byt
 
 std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
 {
-    auto fut = sftp_->performPromise(
-        [this]()
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return std::unexpected(channelClosedError());
+    auto fut = sftp->performPromise(
+        [this]() -> std::expected<void, Error>
         {
-            return handleSymlinkInStrand();
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return std::unexpected(channelClosedError());
+            return handleSymlinkInStrand(*sftp);
         }
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -299,7 +310,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
     return fut.get();
 }
 
-std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStrand()
+std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStrand(SecureShell::SftpSession& sftp)
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
@@ -327,14 +338,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(*remotePath_.parent()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(sftp, *remotePath_.parent()); !res.has_value())
             return std::unexpected(res.error());
     }
 
     // The link is created under the temp name and renamed into place, so an existing destination is
     // never removed before its replacement exists.
-    std::ignore = sftp_->removeFileInStrand(tempPath_);
-    const auto result = sftp_->createSymLinkInStrand(*targetText, tempPath_);
+    std::ignore = sftp.removeFileInStrand(tempPath_);
+    const auto result = sftp.createSymLinkInStrand(*targetText, tempPath_);
     if (!result.has_value())
     {
         Log::error(
@@ -343,7 +354,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
-    const auto moved = sftp_->moveIntoPlaceInStrand(
+    const auto moved = sftp.moveIntoPlaceInStrand(
         tempPath_,
         remotePath_,
         options_.mayOverwrite,
@@ -352,7 +363,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
     );
     if (!moved.has_value())
     {
-        std::ignore = sftp_->removeFileInStrand(tempPath_);
+        std::ignore = sftp.removeFileInStrand(tempPath_);
         Log::error(
             "UploadOperation: Failed to move symlink to '{}': {}.", options_.remotePath.value(), moved.error().message
         );
@@ -363,7 +374,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 
 std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
 {
-    auto fut = sftp_->performPromise(
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<bool>(channelClosedError());
+    auto fut = sftp->performPromise(
         [this]()
         {
             return writeOnceInStrand();
@@ -424,9 +438,9 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
     return leftToUpload_ > 0;
 }
 
-std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInStrand()
+std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInStrand(SecureShell::SftpSession& sftp)
 {
-    const auto result = sftp_->lstatInStrand(remotePath_);
+    const auto result = sftp.lstatInStrand(remotePath_);
     if (!result.has_value())
     {
         const auto err = result.error();
@@ -449,7 +463,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
-    const auto tempResult = sftp_->lstatInStrand(tempPath_);
+    const auto tempResult = sftp.lstatInStrand(tempPath_);
 
     // Permissions of what is uploaded: the target of a followed symlink, not the link.
     std::error_code statusError{};
@@ -464,7 +478,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
             // Do not adopt file
         }
-        else if (options_.tryContinue && !tempBelongsToSourceInStrand(tempResult->size))
+        else if (options_.tryContinue && !tempBelongsToSourceInStrand(sftp, tempResult->size))
         {
             Log::info(
                 "UploadOperation: Remote temp file '{}' is not a part of this source, starting over.", tempPath_.value()
@@ -474,7 +488,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         {
             Log::debug("UploadOperation: Continuing upload to existing temp file.");
 
-            const auto openResult = sftp_->openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Write, perms);
+            const auto openResult = sftp.openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Write, perms);
             if (!openResult.has_value())
             {
                 Log::error("Failed to open remote sftp file for continue: {}", openResult.error().message);
@@ -505,13 +519,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(*tempPath_.parent()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(sftp, *tempPath_.parent()); !res.has_value())
             return std::unexpected(res.error());
     }
 
     // Open temp file part regularly, freshly:
     Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath_.value());
-    const auto openResult = sftp_->openFileInStrand(
+    const auto openResult = sftp.openFileInStrand(
         tempPath_,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
             SecureShell::SftpSession::OpenType::Truncate,
@@ -528,13 +542,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     return {};
 }
 
-bool UploadOperation::tempBelongsToSourceInStrand(std::uint64_t tempSize)
+bool UploadOperation::tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize)
 {
     // Another program's partial file or a part of an older version of the source must not be continued.
     if (tempSize == 0)
         return false;
     const auto opened =
-        sftp_->openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::none);
+        sftp.openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::none);
     if (!opened)
         return false;
     auto stream = opened->lock();
@@ -546,12 +560,12 @@ bool UploadOperation::tempBelongsToSourceInStrand(std::uint64_t tempSize)
 }
 
 std::expected<void, UploadOperation::Error>
-UploadOperation::ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir)
+UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir)
 {
     if (dir.isRoot())
         return {};
 
-    const auto statResult = sftp_->lstatInStrand(dir);
+    const auto statResult = sftp.lstatInStrand(dir);
     if (statResult.has_value())
     {
         if (statResult->type == SharedData::FileType::Directory)
@@ -572,7 +586,7 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& di
     if (statResult.error().sftpError != SSH_FX_NO_SUCH_FILE)
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = statResult.error()});
 
-    if (auto parent = ensureRemoteDirectoryExistsInStrand(dir.parent().value_or(Paths::RemotePath::root()));
+    if (auto parent = ensureRemoteDirectoryExistsInStrand(sftp, dir.parent().value_or(Paths::RemotePath::root()));
         !parent.has_value())
         return parent;
 
@@ -580,7 +594,7 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& di
         std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
         std::filesystem::perms::others_read | std::filesystem::perms::others_exec
     );
-    const auto mkdirResult = sftp_->createDirectoryIfItDoesntExistInStrand(dir, dirPerms);
+    const auto mkdirResult = sftp.createDirectoryIfItDoesntExistInStrand(dir, dirPerms);
     if (!mkdirResult.has_value())
     {
         Log::error(
@@ -650,10 +664,16 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return enterErrorState({.type = ErrorType::FileSeekFailure});
     }
 
-    auto umbrellaFut = sftp_->performPromise(
-        [this]()
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState(channelClosedError());
+    auto umbrellaFut = sftp->performPromise(
+        [this]() -> std::expected<void, Error>
         {
-            return prepareInStrand();
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return std::unexpected(channelClosedError());
+            return prepareInStrand(*sftp);
         }
     );
     if (umbrellaFut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -675,9 +695,9 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     return {};
 }
 
-std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
+std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
-    if (auto result = openOrAdoptFileInStrand(); !result.has_value())
+    if (auto result = openOrAdoptFileInStrand(sftp); !result.has_value())
         return std::unexpected(result.error());
 
     auto stream = fileStream_.lock();
@@ -687,7 +707,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand()
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
-    buffer_ = sftp_->bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
+    buffer_ = sftp.bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
     if (buffer_.empty())
     {
         Log::error("UploadOperation: No transfer buffer available from pool.");
@@ -741,10 +761,16 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
 
     localFile_.close();
 
-    auto fut = sftp_->performPromise(
-        [this]()
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return std::unexpected(channelClosedError());
+    auto fut = sftp->performPromise(
+        [this]() -> std::expected<void, Error>
         {
-            return finalizeInStrand();
+            const auto sftp = openSession(sftp_);
+            if (!sftp)
+                return std::unexpected(channelClosedError());
+            return finalizeInStrand(*sftp);
         }
     );
     // finalize has more work than a single call (stat + maybe removeFile + rename + setstat),
@@ -764,7 +790,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
     return {};
 }
 
-std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
+std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(SecureShell::SftpSession& sftp)
 {
     auto stream = fileStream_.lock();
     if (!stream)
@@ -790,9 +816,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
     stream->closeInStrand();
 
     // The modification time goes on the temp file, so nothing can fail once the destination is replaced.
-    applyModificationTimeInStrand();
+    applyModificationTimeInStrand(sftp);
 
-    const auto moved = sftp_->moveIntoPlaceInStrand(
+    const auto moved = sftp.moveIntoPlaceInStrand(
         tempPath_,
         remotePath_,
         options_.mayOverwrite,
@@ -802,14 +828,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
     if (!moved.has_value())
     {
         Log::error("UploadOperation: Failed to move '{}' into place: {}", options_.remotePath.value(), moved.error().message);
-        if (auto removed = sftp_->removeFileInStrand(tempPath_); !removed.has_value())
+        if (auto removed = sftp.removeFileInStrand(tempPath_); !removed.has_value())
             Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
         return std::unexpected(remoteMoveError(moved.error()));
     }
     return {};
 }
 
-void UploadOperation::applyModificationTimeInStrand()
+void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sftp)
 {
     std::error_code timeError{};
     const auto localTime = std::filesystem::last_write_time(localNativePath_, timeError);
@@ -830,7 +856,7 @@ void UploadOperation::applyModificationTimeInStrand()
     attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
     attributes.atime = seconds;
     attributes.mtime = seconds;
-    if (const auto applied = sftp_->statInStrand(tempPath_, &attributes); !applied.has_value())
+    if (const auto applied = sftp.statInStrand(tempPath_, &attributes); !applied.has_value())
         Log::warn("UploadOperation: Failed to set mtime on '{}': {}.", tempPath_.value(), applied.error().message);
 }
 

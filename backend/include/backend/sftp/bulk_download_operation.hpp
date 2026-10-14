@@ -28,7 +28,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::chrono::milliseconds progressEmitInterval{100};
     };
 
-    BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options);
+    BulkDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, BulkDownloadOperationOptions options);
     ~BulkDownloadOperation() override;
     BulkDownloadOperation(BulkDownloadOperation const&) = delete;
     BulkDownloadOperation(BulkDownloadOperation&&) = delete;
@@ -57,8 +57,10 @@ class BulkDownloadOperation : public BulkTransferOperation
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 
   protected:
-    std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) override;
+    std::expected<void, Error>
+    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;
+    std::expected<void, Error>
+    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) override;
     std::unique_ptr<Operation> makeChild(
         std::size_t entryIndex,
         EntryPaths const& paths,

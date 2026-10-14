@@ -61,10 +61,10 @@ class DownloadOperation : public Operation
     {
         if (auto stream = fileStream_.lock(); stream)
             return stream->strand();
-        return sftp_ ? sftp_->strand() : nullptr;
+        return strandOf(sftp_);
     }
 
-    DownloadOperation(SecureShell::SftpSession& sftp, DownloadOperationOptions options);
+    DownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DownloadOperationOptions options);
     ~DownloadOperation() override;
     DownloadOperation(DownloadOperation const&) = delete;
     DownloadOperation(DownloadOperation&&) = delete;
@@ -126,12 +126,12 @@ class DownloadOperation : public Operation
     std::expected<bool, Error> readOnceInStrand();
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand();
+    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
 
     bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 
     /// Runs the remote-heavy portion of prepare() under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
@@ -142,7 +142,7 @@ class DownloadOperation : public Operation
     std::expected<void, Error> refuseLinkedPath(std::filesystem::path const& path) const;
 
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
+    readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& remoteFullPath);
 
     /**
      * @brief The error of a file that ended before its listed size arrived.
@@ -167,7 +167,7 @@ class DownloadOperation : public Operation
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     DownloadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */

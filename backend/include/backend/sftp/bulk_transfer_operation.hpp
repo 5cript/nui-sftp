@@ -172,7 +172,7 @@ class BulkTransferOperation : public Operation
     }
 
   protected:
-    BulkTransferOperation(SecureShell::SftpSession& sftp, CommonOptions common);
+    BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common);
 
     /**
      * @brief Flat-list mode: every entry is a file or a directory created without content, @p paths holds both of
@@ -215,9 +215,12 @@ class BulkTransferOperation : public Operation
         return entries_;
     }
 
-    SecureShell::SftpSession& sftp() const noexcept
+    /**
+     * @brief The session the children are given, held weakly like the bulk's own.
+     */
+    std::weak_ptr<SecureShell::SftpSession> const& sftp() const noexcept
     {
-        return *sftp_;
+        return sftp_;
     }
 
     CommonOptions const& common() const noexcept
@@ -228,12 +231,14 @@ class BulkTransferOperation : public Operation
     /**
      * @brief Tree mode only: creates the bulk's root directory from entries()[0].
      */
-    virtual std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) = 0;
+    virtual std::expected<void, Error>
+    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) = 0;
 
     /**
      * @brief Creates the directory described by the entry at @p entryIndex.
      */
-    virtual std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) = 0;
+    virtual std::expected<void, Error>
+    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) = 0;
 
     /**
      * @brief Builds the child transfer for the file at @p entryIndex.
@@ -288,9 +293,9 @@ class BulkTransferOperation : public Operation
         bool finished{false};
     };
 
-    std::expected<WorkStatus, Error> start();
-    std::expected<WorkStatus, Error> step();
-    std::expected<void, Error> fillSlots();
+    std::expected<WorkStatus, Error> start(SecureShell::SftpSession& sftp);
+    std::expected<WorkStatus, Error> step(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> fillSlots(SecureShell::SftpSession& sftp);
     std::expected<void, Error> stepSlots();
     void finishSlot(Slot& slot);
     void cancelChildrenInStrand(bool adoptCancelState);
@@ -320,7 +325,7 @@ class BulkTransferOperation : public Operation
         Flat,
     };
 
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     CommonOptions common_;
     std::unique_ptr<ScanPhaseDriver> scanPhase_{};
     EntrySource entrySource_{EntrySource::None};
