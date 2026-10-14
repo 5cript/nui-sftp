@@ -40,6 +40,8 @@ class BulkUploadOperation : public BulkTransferOperation
         Paths::RemotePath destination;
         std::uint64_t sizeBytes;
         bool mayOverwrite{false};
+        /** @brief A directory created without its content, its missing parents below the bulk's root with it. */
+        bool isDirectory{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 
@@ -65,6 +67,9 @@ class BulkUploadOperation : public BulkTransferOperation
 
   private:
     std::filesystem::perms determinePerms(SharedData::DirectoryEntry const& entry) const;
+    /**
+     * @brief Creates the missing directories between the bulk's remote root and @p path, not @p path itself.
+     */
     std::expected<void, Error>
     createRemoteDirectoryInStrand(Paths::RemotePath const& path, SharedData::DirectoryEntry const& entry);
 

@@ -1,6 +1,7 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
+#include <paths/common_parent.hpp>
 #include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
@@ -22,6 +23,9 @@
 #include <algorithm>
 #include <iterator>
 #include <optional>
+#include <span>
+#include <unordered_set>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -36,6 +40,19 @@ namespace
         if (path.empty())
             return std::nullopt;
         return path;
+    }
+
+    /**
+     * @brief The closest directory holding the path @p member of every file of a prescanned bulk.
+     */
+    template <typename FileT, typename PathT>
+    PathT commonParentOf(std::vector<FileT> const& files, PathT FileT::* member)
+    {
+        std::vector<PathT> paths;
+        paths.reserve(files.size());
+        std::ranges::transform(files, std::back_inserter(paths), member);
+        auto parent = Paths::commonParentOf(std::span<PathT const>{paths});
+        return parent ? *std::move(parent) : PathT{};
     }
 
     OperationQueue::OperationCompleted makeCompletedOperation(
@@ -1155,19 +1172,10 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    std::vector<BulkDownloadOperation::PrescannedFile> files;
-    files.reserve(request.entries.size());
-    std::size_t directoryCount = 0;
-    // Each directory resumes as its own unit under its own id, so the card's backup holds only the files.
-    SharedData::BulkDownloadRequest fileUnit{
-        .allowOverwrite = request.allowOverwrite,
-        .insertRefresh = request.insertRefresh,
-        .mode = request.mode,
-    };
-    for (std::size_t idx = 0; idx < request.entries.size(); ++idx)
-    {
-        auto const& entry = request.entries[idx];
-        if (entry.isDirectory)
+    return splitBulkRequest(
+        std::move(request),
+        bulkCardId,
+        [&](std::size_t index, SharedData::BulkDownloadEntry const& entry, SharedData::BulkDownloadRequest const& unit)
         {
             const auto result = addDownloadOperation(
                 sftp,
@@ -1205,6 +1213,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 .mtime = entry.mtime,
                 .mtimeNsec = entry.mtimeNsec,
                 .mayOverwrite = entry.mayOverwrite,
+                .isDirectory = entry.isDirectory,
             }
         );
     }
@@ -1213,13 +1222,16 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     {
         // Dedicated operationId for the aggregate bulk-download card, reserved
         // by the frontend separately from the per-entry ids to avoid collisions
-        // (entry-0's id would clash when entry 0 is a directory). The first
-        // file entry drives the UI's "localPath"/"remotePath" labels for the
-        // card — arbitrary pick; per-file paths show up in progress events.
+        // (entry-0's id would clash when entry 0 is a directory).
         const auto bulkOpId = bulkCardId;
-        // The card's labels, a file directly below the root labels with the root itself.
-        const auto remoteLabel = files.front().source.parent().value_or(Paths::RemotePath::root());
-        const auto localLabel = files.front().destination.parent().value_or(files.front().destination);
+        const auto remoteLabel = request.remoteRoot
+            ? *request.remoteRoot
+            : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::source);
+        const auto localLabel = request.localRoot
+            ? *request.localRoot
+            : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::destination);
+        fileUnit.remoteRoot = remoteLabel;
+        fileUnit.localRoot = localLabel;
 
         auto downloadOpts = resolveDownloadOptions(transferOptions, resolvedTimeout);
         // Sync plans list files of directories that do not exist locally yet.
@@ -1437,19 +1449,10 @@ std::size_t OperationQueue::addBulkUploadOperation(
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    std::vector<BulkUploadOperation::PrescannedFile> files;
-    files.reserve(request.entries.size());
-    std::size_t directoryCount = 0;
-    // Each directory resumes as its own unit under its own id, so the card's backup holds only the files.
-    SharedData::BulkUploadRequest fileUnit{
-        .allowOverwrite = request.allowOverwrite,
-        .insertRefresh = request.insertRefresh,
-        .mode = request.mode,
-    };
-    for (std::size_t idx = 0; idx < request.entries.size(); ++idx)
-    {
-        auto const& entry = request.entries[idx];
-        if (entry.isDirectory)
+    return splitBulkRequest(
+        std::move(request),
+        bulkCardId,
+        [&](std::size_t index, SharedData::BulkUploadEntry const& entry, SharedData::BulkUploadRequest const& unit)
         {
             const auto result = addUploadOperation(
                 sftp,
@@ -1485,6 +1488,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 .destination = entry.destination,
                 .sizeBytes = entry.sizeBytes,
                 .mayOverwrite = entry.mayOverwrite,
+                .isDirectory = entry.isDirectory,
             }
         );
     }
@@ -1493,8 +1497,13 @@ std::size_t OperationQueue::addBulkUploadOperation(
     {
         // Separate reserved id — see addBulkDownloadOperation for rationale.
         const auto bulkOpId = bulkCardId;
-        const auto localLabel = files.front().source.parent().value_or(files.front().source);
-        const auto remoteLabel = files.front().destination.parent().value_or(Paths::RemotePath::root());
+        const auto localLabel = request.localRoot ? *request.localRoot
+                                                  : commonParentOf(files, &BulkUploadOperation::PrescannedFile::source);
+        const auto remoteLabel = request.remoteRoot
+            ? *request.remoteRoot
+            : commonParentOf(files, &BulkUploadOperation::PrescannedFile::destination);
+        fileUnit.remoteRoot = remoteLabel;
+        fileUnit.localRoot = localLabel;
 
         auto uploadOpts = resolveUploadOptions(transferOptions, resolvedTimeout);
         uploadOpts.createMissingDirectories = true;
@@ -1535,35 +1544,6 @@ std::size_t OperationQueue::addBulkUploadOperation(
     return request.entries.size();
 }
 
-namespace
-{
-    /**
-     * @brief Creates @p directory and its missing parents below @p root, which has to exist.
-     */
-    bool createRemoteDirectoryBelow(
-        SecureShell::SftpSession& sftp,
-        Paths::RemotePath const& root,
-        Paths::RemotePath const& directory,
-        std::chrono::seconds timeout
-    )
-    {
-        std::vector<Paths::RemotePath> chain;
-        for (auto current = std::optional{directory}; current && *current != root && current->isWithin(root);
-             current = current->parent())
-            chain.push_back(*current);
-        for (auto iter = chain.rbegin(); iter != chain.rend(); ++iter)
-        {
-            auto created = sftp.createDirectoryIfItDoesntExist(*iter);
-            if (created.wait_for(timeout) != std::future_status::ready || !created.get().has_value())
-            {
-                Log::error("Sync: could not create remote directory '{}'.", iter->value());
-                return false;
-            }
-        }
-        return true;
-    }
-}
-
 SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     SecureShell::SftpSession& sftp,
     SyncSession const& session,
@@ -1573,11 +1553,18 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
 {
     // Assumed in strand
     using SharedData::Sync::Action;
-    const auto timeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     SharedData::Sync::SyncExecutionResult result{.failed = std::move(plan.refused)};
 
-    SharedData::BulkUploadRequest uploads{.allowOverwrite = true, .mode = request.mode};
-    SharedData::BulkDownloadRequest downloads{.allowOverwrite = true, .mode = request.mode};
+    SharedData::BulkUploadRequest uploads{
+        .mode = request.mode,
+        .localRoot = session.localRoot(),
+        .remoteRoot = session.remoteRoot(),
+    };
+    SharedData::BulkDownloadRequest downloads{
+        .mode = request.mode,
+        .localRoot = session.localRoot(),
+        .remoteRoot = session.remoteRoot(),
+    };
     SharedData::BulkDeleteRequest remoteDeletes{.mode = request.mode, .listedContentOnly = true};
     std::vector<Paths::LocalPath> localDeletes;
     const auto localHomes = localHomeDirectories();
@@ -1617,37 +1604,28 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
         {
             case Action::Upload:
             {
-                if (entry.isDirectory)
-                {
-                    auto& target = createRemoteDirectoryBelow(sftp, session.remoteRoot(), paths.remote, timeout)
-                        ? result.createdDirectories
-                        : result.failed;
-                    target.push_back(std::move(entry.relKey));
-                    break;
-                }
                 result.uploadSources.push_back(paths.local.toUtf8());
                 uploads.entries.push_back({
                     .source = std::move(paths.local),
                     .destination = std::move(paths.remote),
                     .sizeBytes = entry.sizeBytes,
+                    .isDirectory = entry.isDirectory,
+                    .withoutContent = entry.isDirectory,
+                    .mayOverwrite = planned.compared.exists,
+                    .comparedDestination = comparedDestination,
                 });
                 result.uploads.push_back(std::move(entry.relKey));
                 break;
             }
             case Action::Download:
             {
-                if (entry.isDirectory)
-                {
-                    std::error_code error{};
-                    std::filesystem::create_directories(paths.local.native(), error);
-                    (error ? result.failed : result.createdDirectories).push_back(std::move(entry.relKey));
-                    break;
-                }
                 result.downloadSources.push_back(paths.remote.value());
                 downloads.entries.push_back({
                     .source = std::move(paths.remote),
                     .destination = std::move(paths.local),
                     .sizeBytes = entry.sizeBytes,
+                    .isDirectory = entry.isDirectory,
+                    .withoutContent = entry.isDirectory,
                     .mtime = entry.mtime,
                     .mtimeNsec = entry.mtimeNsec,
                 });
@@ -1738,12 +1716,11 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     }
 
     Log::info(
-        "Sync: queued {} uploads, {} downloads, {} remote and {} local deletes, created {} directories, {} failed",
+        "Sync: queued {} uploads, {} downloads, {} remote and {} local deletes, {} failed",
         result.uploads.size(),
         result.downloads.size(),
         result.remoteDeletes.size(),
         result.localDeletes.size(),
-        result.createdDirectories.size(),
         result.failed.size()
     );
     return result;

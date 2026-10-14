@@ -4,6 +4,9 @@
 #include <log/log.hpp>
 #include <utility/permissions.hpp>
 
+#include <ranges>
+#include <vector>
+
 namespace
 {
     BulkTransferOperation::CommonOptions toCommon(BulkUploadOperation::BulkUploadOperationOptions const& options)
@@ -42,7 +45,44 @@ BulkUploadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
 std::expected<void, BulkUploadOperation::Error>
 BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
 {
+    // A scanned directory comes after its parent, a prescanned one may be the first entry below it.
+    if (prescanned() && individualOptions_.createMissingDirectories)
+    {
+        if (auto parents = createMissingParentsInStrand(sftp, paths.remote); !parents)
+            return parents;
+    }
     return createRemoteDirectoryInStrand(paths.remote, entries()[entryIndex]);
+}
+
+std::expected<void, BulkUploadOperation::Error>
+BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
+{
+    auto const& root = common().remotePath;
+    std::vector<Paths::RemotePath> missing;
+    for (auto parent = path.parent(); parent && *parent != root && parent->isWithin(root); parent = parent->parent())
+    {
+        const auto stat = sftp.lstatInStrand(*parent);
+        if (stat)
+            break;
+        if (stat.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        {
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::SftpError,
+                    .sftpError = stat.error(),
+                    .extraInfo = fmt::format("Inspecting remote directory: {}", parent->value())
+                }
+            );
+        }
+        missing.push_back(*parent);
+    }
+    const SharedData::DirectoryEntry directory{.type = SharedData::FileType::Directory};
+    for (auto const& parent : missing | std::views::reverse)
+    {
+        if (auto created = createRemoteDirectoryInStrand(sftp, parent, directory); !created)
+            return created;
+    }
+    return {};
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemoteDirectoryInStrand(
@@ -139,9 +179,9 @@ void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> file
         // Flat entries carry their name only, the paths come from the prescanned paths.
         if (const auto name = file.source.filename(); name)
             entry.name = name->value();
-        entry.type = SharedData::FileType::Regular;
-        entry.size = file.sizeBytes;
-        totalBytes += file.sizeBytes;
+        entry.type = file.isDirectory ? SharedData::FileType::Directory : SharedData::FileType::Regular;
+        entry.size = file.isDirectory ? 0u : file.sizeBytes;
+        totalBytes += entry.size;
         entries.push_back(std::move(entry));
         paths.push_back(
             EntryPaths{

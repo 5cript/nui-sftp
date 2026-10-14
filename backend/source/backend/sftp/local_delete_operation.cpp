@@ -1,4 +1,5 @@
 #include <backend/sftp/local_delete_operation.hpp>
+#include <paths/common_parent.hpp>
 #include <paths/native.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>

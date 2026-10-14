@@ -160,7 +160,8 @@ class BulkTransferOperation : public Operation
     BulkTransferOperation(SecureShell::SftpSession& sftp, CommonOptions common);
 
     /**
-     * @brief Flat-list mode: every entry is a file, @p paths holds both of its ends (index aligned).
+     * @brief Flat-list mode: every entry is a file or a directory created without content, @p paths holds both of
+     *        its ends (index aligned). A directory that cannot be created fails only its own entry.
      */
     void setPrescannedEntries(
         std::vector<SharedData::DirectoryEntry> entries,

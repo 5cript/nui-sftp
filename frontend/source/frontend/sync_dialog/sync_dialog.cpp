@@ -583,21 +583,6 @@ struct SyncDialog::Implementation
         return entry;
     }
 
-    /** @brief Observer of @p relKey plus those of the loaded file rows below it, so a directory
-     *         entry paints the rows it covers.
-     */
-    std::vector<ProgressObserver> progressCovering(DiffSection section, std::string const& relKey)
-    {
-        std::vector<ProgressObserver> observers{progressFor(section, relKey)};
-        const auto prefix = relKey + "/";
-        for (auto const& [key, observer] : progressMapFor(section))
-        {
-            if (key.starts_with(prefix))
-                observers.push_back(observer);
-        }
-        return observers;
-    }
-
     ScriptNuiComponents::Tree::ChildrenLoader makeChildrenLoader(DiffSection section)
     {
         return [this, section](
@@ -1137,14 +1122,6 @@ struct SyncDialog::Implementation
                             part.indexBySource.emplace(sources[index], index);
                     }
                 };
-                const auto setCovering = [this, section](std::vector<std::string> const& rows, double value)
-                {
-                    for (auto const& row : rows)
-                    {
-                        for (auto const& observer : progressCovering(section, row))
-                            *observer = value;
-                    }
-                };
                 // The backend lists every failed entry, the rows below a failed directory are not all failed.
                 const auto setRows = [this, section](std::vector<std::string> const& rows, double value)
                 {
@@ -1171,7 +1148,6 @@ struct SyncDialog::Implementation
                     else
                         part->map();
                 }
-                setCovering(result.createdDirectories, 1.1);
                 setRows(result.failed, -1.0);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },

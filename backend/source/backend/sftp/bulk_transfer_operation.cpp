@@ -241,7 +241,8 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
             const auto result = createDirectoryInStrand(index, *paths);
             if (!result.has_value())
             {
-                if (!isSkippableDirectoryError(result.error()))
+                // Without a tree, nothing else depends on a directory entry.
+                if (!prescanned() && !isSkippableDirectoryError(result.error()))
                     return std::unexpected(result.error());
                 Log::warn("{}: Skipping directory '{}': {}", logName(), displayPath(index), result.error().toString());
                 failedEntries_.emplace_back(failureSource(index), result.error());

@@ -51,6 +51,8 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         bool mayOverwrite{false};
+        /** @brief A directory created without its content, with the link check of every local directory. */
+        bool isDirectory{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 

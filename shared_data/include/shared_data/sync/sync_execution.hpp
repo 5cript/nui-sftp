@@ -54,8 +54,6 @@ namespace SharedData::Sync
         std::vector<std::string> remoteDeleteSources{};
         std::vector<std::string> localDeletes{};
         std::vector<std::string> localDeleteSources{};
-        /** @brief Directories without content, created right away. */
-        std::vector<std::string> createdDirectories{};
         /** @brief Rows that were refused or failed right away, nothing was queued for them. */
         std::vector<std::string> failed{};
     };
@@ -70,7 +68,6 @@ namespace SharedData::Sync
          remoteDeleteSources,
          localDeletes,
          localDeleteSources,
-         createdDirectories,
          failed)
     )
 

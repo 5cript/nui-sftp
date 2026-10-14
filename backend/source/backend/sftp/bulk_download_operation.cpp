@@ -200,11 +200,11 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         // Flat entries carry their name only, the paths come from the prescanned paths.
         if (const auto name = file.source.filename(); name)
             entry.name = name->value();
-        entry.type = SharedData::FileType::Regular;
-        entry.size = file.sizeBytes;
+        entry.type = file.isDirectory ? SharedData::FileType::Directory : SharedData::FileType::Regular;
+        entry.size = file.isDirectory ? 0u : file.sizeBytes;
         entry.mtime = file.mtime;
         entry.mtimeNsec = file.mtimeNsec;
-        totalBytes += file.sizeBytes;
+        totalBytes += entry.size;
         entries.push_back(std::move(entry));
         paths.push_back(
             EntryPaths{
