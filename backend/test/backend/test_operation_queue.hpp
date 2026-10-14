@@ -932,10 +932,10 @@ namespace Test
         const auto file = localDirectory_.path() / "survivor.txt";
         std::ofstream{file} << "survivor";
         const auto root = Paths::LocalPath::make(std::filesystem::path{file}.root_path()).value();
-        const auto home = localHomeDirectory();
-        ASSERT_TRUE(home.has_value());
+        const auto homes = localHomeDirectories();
+        ASSERT_FALSE(homes.empty());
 
-        for (auto const& target : {root, *home})
+        for (auto const& target : {root, homes.front()})
         {
             const auto result = runOnStrand([&]() {
                 return queue->addLocalDeleteOperation(
