@@ -83,6 +83,9 @@ add_executable(${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} PUBLIC core-target)
 
 if (WIN32)
+    # A GUI program: a console program lives in a console window and exits with it, closing that window or a crash
+    # of Windows Terminal ended the app silently. --console attaches to the console it was started from.
+    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/icon.cmake")
     file(TO_CMAKE_PATH "${NUI_SFTP_ICO}" NUI_SFTP_ICO_FORWARD)
     configure_file(
