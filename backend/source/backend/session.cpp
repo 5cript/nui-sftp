@@ -1477,7 +1477,11 @@ void Session::registerRpcSftpOpenSyncSession()
                         localPath = *std::move(localRoot),
                         respectIgnoreFiles,
                         recursive,
-                        ignoreHidden](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        ignoreHidden](
+                        RpcHelper::RpcOnce&& reply,
+                        Session& self,
+                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                    )
                     {
                         auto self = weak.lock();
                         if (!self)

@@ -141,6 +141,14 @@ class BulkTransferOperation : public Operation
      */
     std::vector<std::pair<std::string, Error>> getFailed() const;
 
+    /**
+     * @brief The entries that were skipped by their index, and why.
+     */
+    std::vector<SharedData::IndexedFailure> const& indexedFailures() const noexcept
+    {
+        return indexedFailures_;
+    }
+
     std::size_t inFlightCount() const noexcept
     {
         return slots_.size();

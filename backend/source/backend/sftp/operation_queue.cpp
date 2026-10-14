@@ -87,44 +87,11 @@ namespace
                 },
                 [reason, operationId, error](LocalScanOperation const& op)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .localPath = unlessEmpty(op.localPath()),
-                        .error = error,
-                    };
-                },
-                [reason, operationId, error](BulkDownloadOperation const& op)
-                {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .error = error,
-                        .failedEntries = op.getFailed(),
-                    };
+                    completed.remotePath = unlessEmpty(scan.remotePath());
                 },
                 [reason, operationId, error](UploadOperation const& op)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .localPath = unlessEmpty(op.localPath()),
-                        .remotePath = unlessEmpty(op.remotePath()),
-                        .error = error,
-                    };
-                },
-                [reason, operationId, error](BulkUploadOperation const& op)
-                {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .error = error,
-                        .failedEntries = op.getFailed(),
-                    };
+                    completed.localPath = unlessEmpty(scan.localPath());
                 },
                 [reason, operationId, error](DeleteOperation const& op)
                 {
@@ -317,6 +284,7 @@ void OperationQueue::cancelAll()
 
             self->operations_.clear();
             self->priorityOperations_.clear();
+            self->syncRecordings_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(std::string{"The scan was cancelled."}));
@@ -456,6 +424,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             // a backup for reconnect adoption.
             self->bulkResumeStash_.erase(operationCompleted.operationId);
 
+            self->recordSyncCompletion(operationCompleted);
             if (self->completionObserver_)
                 self->completionObserver_(operationCompleted);
             RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onOperationCompleted"), operationCompleted);
@@ -1598,12 +1567,26 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
         result.failed.push_back(std::move(entry.relKey));
     };
 
-    for (auto& [entry, paths] : plan.entries)
+    auto const& pairKey = session.baselineKey();
+    auto const& baselines = session.baselines();
+    const auto makeRecording = [&]()
     {
+        return SyncRecording{.pairKey = pairKey.value_or(std::string{}), .store = baselines};
+    };
+    auto uploadRecording = makeRecording();
+    auto downloadRecording = makeRecording();
+    auto remoteDeleteRecording = makeRecording();
+    auto localDeleteRecording = makeRecording();
+
+    for (auto& planned : plan.entries)
+    {
+        auto& entry = planned.entry;
+        auto& paths = planned.paths;
         switch (entry.action)
         {
             case Action::Upload:
             {
+                uploadRecording.entries.emplace_back(entry.relKey, std::move(planned.record));
                 result.uploadSources.push_back(paths.local.toUtf8());
                 uploads.entries.push_back({
                     .source = std::move(paths.local),
@@ -1619,6 +1602,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             }
             case Action::Download:
             {
+                downloadRecording.entries.emplace_back(entry.relKey, std::move(planned.record));
                 result.downloadSources.push_back(paths.remote.value());
                 downloads.entries.push_back({
                     .source = std::move(paths.remote),
@@ -1644,8 +1628,14 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                     refuse(entry, refusedRemoteDirectories, "remotely", allowed.error().toString());
                     break;
                 }
+                remoteDeleteRecording.entries.emplace_back(entry.relKey, std::nullopt);
+                remoteDeleteRecording.sources.push_back(paths.remote.value());
                 result.remoteDeleteSources.push_back(paths.remote.value());
-                remoteDeletes.entries.push_back({.target = std::move(paths.remote), .isDirectory = entry.isDirectory});
+                remoteDeletes.entries.push_back({
+                    .target = std::move(paths.remote),
+                    .isDirectory = entry.isDirectory,
+                    .compared = std::move(planned.compared),
+                });
                 result.remoteDeletes.push_back(std::move(entry.relKey));
                 break;
             }
@@ -1661,6 +1651,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                     refuse(entry, refusedLocalDirectories, "locally", allowed.error());
                     break;
                 }
+                localDeleteRecording.entries.emplace_back(entry.relKey, std::nullopt);
+                localDeleteRecording.sources.push_back(paths.local.toUtf8());
                 result.localDeleteSources.push_back(paths.local.toUtf8());
                 localDeletes.push_back(std::move(paths.local));
                 result.localDeletes.push_back(std::move(entry.relKey));
@@ -1715,6 +1707,27 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
         result.localDeleteSources.clear();
     }
 
+    if (pairKey && baselines)
+    {
+        baselines->update(
+            *pairKey,
+            [&plan](SharedData::Sync::SyncBaseline& baseline)
+            {
+                for (auto& [relKey, record] : plan.agreement.records)
+                    baseline.records.insert_or_assign(relKey, std::move(record));
+            }
+        );
+        const auto keep = [this](Ids::OperationId const& operationId, bool queued, SyncRecording recording)
+        {
+            if (queued && !recording.entries.empty())
+                syncRecordings_.insert_or_assign(operationId.value(), std::move(recording));
+        };
+        keep(request.uploadId, !result.uploads.empty(), std::move(uploadRecording));
+        keep(request.downloadId, !result.downloads.empty(), std::move(downloadRecording));
+        keep(request.remoteDeleteId, !result.remoteDeletes.empty(), std::move(remoteDeleteRecording));
+        keep(request.localDeleteId, !result.localDeletes.empty(), std::move(localDeleteRecording));
+    }
+
     Log::info(
         "Sync: queued {} uploads, {} downloads, {} remote and {} local deletes, {} failed",
         result.uploads.size(),
@@ -1731,7 +1744,8 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     std::vector<Paths::LocalPath> targets,
     bool recursive,
     bool insertRefresh,
-    SharedData::OperationMode mode
+    SharedData::OperationMode mode,
+    std::vector<SharedData::ComparedState> comparedStates
 )
 {
     // Assumed in strand
@@ -2094,16 +2108,22 @@ void OperationQueue::addSyncScanOperation(
     Paths::LocalPath const& localPath,
     bool respectIgnoreFiles,
     bool recursive,
-    bool ignoreHidden
+    bool ignoreHidden,
+    std::optional<std::string> const& sessionName
 )
 {
     // Create (or replace) the SyncSession.  A fresh id from the frontend is the
     // norm; re-opening over an existing id is handled as "discard previous state".
+    const bool keepsBaseline = sessionName && !sessionName->empty() && syncBaselines_;
     auto session = std::make_shared<SyncSession>(
         SyncSession::Options{
             .sessionId = syncSessionId,
             .localRoot = localPath,
             .remoteRoot = remotePath,
+            .baselineKey = keepsBaseline
+                ? std::optional{SyncBaselineStore::pairKey(*sessionName, localPath, remotePath)}
+                : std::nullopt,
+            .baselines = keepsBaseline ? syncBaselines_ : nullptr,
         },
         executor_
     );
@@ -2222,6 +2242,63 @@ void OperationQueue::addSyncScanOperation(
             .type = SharedData::OperationType::LocalScan,
             .mode = SharedData::OperationMode::PriorityQueued,
             .localPath = localPath,
+        }
+    );
+}
+
+void OperationQueue::setSyncBaselineStore(std::shared_ptr<SyncBaselineStore const> store)
+{
+    syncBaselines_ = std::move(store);
+}
+
+void OperationQueue::recordSyncCompletion(OperationCompleted const& completed)
+{
+    auto found = syncRecordings_.extract(completed.operationId.value());
+    if (found.empty() || completed.reason != SharedData::OperationCompletionReason::Completed)
+        return;
+    auto& recording = found.mapped();
+
+    std::vector<bool> failed(recording.entries.size(), false);
+    for (const auto index : completed.failedEntryIndices)
+    {
+        if (index < failed.size())
+            failed[index] = true;
+    }
+    if (!recording.sources.empty() && !completed.failedEntries.empty())
+    {
+        std::unordered_set<std::string> failedSources;
+        for (auto const& [source, error] : completed.failedEntries)
+            failedSources.insert(source);
+        for (std::size_t index = 0; index < recording.sources.size() && index < failed.size(); ++index)
+            failed[index] = failed[index] || failedSources.contains(recording.sources[index]);
+    }
+
+    recording.store->update(
+        recording.pairKey,
+        [&recording, &failed](SharedData::Sync::SyncBaseline& baseline)
+        {
+            const SharedData::Sync::SyncRecord directory{
+                .local = {.type = SharedData::FileType::Directory},
+                .remote = {.type = SharedData::FileType::Directory},
+            };
+            for (std::size_t index = 0; index < recording.entries.size(); ++index)
+            {
+                if (failed[index])
+                    continue;
+                auto const& [relKey, record] = recording.entries[index];
+                if (!record)
+                {
+                    baseline.records.erase(relKey);
+                    continue;
+                }
+                baseline.records.insert_or_assign(relKey, *record);
+                // The transfer created or found every directory above it on both sides.
+                for (
+                    auto slash = relKey.rfind('/'); slash != std::string::npos && slash > 0;
+                    slash = relKey.rfind('/', slash - 1)
+                )
+                    baseline.records.insert_or_assign(relKey.substr(0, slash), directory);
+            }
         }
     );
 }

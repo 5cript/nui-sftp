@@ -184,7 +184,8 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     };
 
     /**
-     * @brief @ref buildEnqueuePlanInStrand with every entry resolved below the session roots.
+     * @brief The plan of a sparse selection (an entry in @p selectedRelKeys selects it and everything below it, see
+     *        @ref SharedData::Sync::DiffTreeStore::buildPlan) with every entry resolved below the session roots.
      *        Precondition: running on @ref strand().
      */
     ResolvedPlan resolvePlanInStrand(

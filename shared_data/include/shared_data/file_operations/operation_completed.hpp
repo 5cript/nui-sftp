@@ -10,8 +10,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <optional>
 #include <chrono>
+#include <cstdint>
+#include <optional>
+#include <vector>
 
 namespace SharedData
 {
@@ -27,10 +29,12 @@ namespace SharedData
         std::optional<OperationError> error{std::nullopt};
         /** @brief The skipped entries of a bulk by their source path, a remote path for downloads. */
         std::vector<std::pair<std::string, OperationError>> failedEntries{};
+        /** @brief The skipped entries of a prescanned bulk up- or download by their index. */
+        std::vector<IndexedFailure> indexedFailures{};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationCompleted,
         (),
-        (reason, operationId, completionTime, localPath, remotePath, error, failedEntries)
+        (reason, operationId, completionTime, localPath, remotePath, error, failedEntries, indexedFailures)
     )
 }

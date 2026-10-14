@@ -244,9 +244,10 @@ class OperationQueue
     );
 
     /**
-     * @brief Queues a resolved sync plan under the operation ids of @p request: files of each direction as one
-     *        bulk transfer, remote and local deletes as one operation each. Directories without content are created
-     *        right away. Every path comes from @p plan, which resolved them below the sync roots.
+     * @brief Queues a resolved sync plan under the operation ids of @p request: files and directories without
+     *        content of each direction as one bulk transfer below the sync roots, remote deletes as one operation
+     *        and local deletes as one operation of @p localDeleteQueue, held while this queue is paused. Every path
+     *        comes from @p plan, which resolved them below the sync roots.
      */
     SharedData::Sync::SyncExecutionResult executeSyncPlan(
         SecureShell::SftpSession& sftp,
@@ -288,19 +289,16 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
-    /** @brief Queues a remote scan and a local scan as priority operations for sync comparison.
-     *         When each scan completes the results are sent to the frontend via onSyncScanResult.
+    /**
+     * @brief Opens a @ref SyncSession and kicks off both scans as priority operations. The scans build
+     *        ScanNode trees directly and feed them into the session on completion.
+     *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
      *
      * @param sftp          SFTP session to use for the remote scan.
      * @param remoteScanId  Pre-assigned operation ID for the remote scan.
      * @param localScanId   Pre-assigned operation ID for the local scan.
      * @param remotePath    Remote directory root to scan.
      * @param localPath     Local directory root to scan.
-     */
-    /**
-     * @brief Opens a @ref SyncSession and kicks off both scans. The scans build
-     *        ScanNode trees directly and feed them into the session on completion.
-     *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
      */
     void addSyncScanOperation(
         SecureShell::SftpSession& sftp,
@@ -385,6 +383,19 @@ class OperationQueue
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
      */
     void deliverSyncScan(Ids::OperationId const& id, Operation& operation);
+
+    /**
+     * @brief The callback of the scan of one side of a sync: hands the tree to @p session through @p setTree on the
+     *        session's strand and tells the frontend the side is done, or cancels the other scan @p siblingScanId and
+     *        reports the failure.
+     */
+    auto makeSyncScanCallback(
+        Ids::SyncSessionId syncSessionId,
+        std::weak_ptr<SyncSession> session,
+        Ids::OperationId siblingScanId,
+        bool isLocal,
+        void (SyncSession::*setTree)(SharedData::Sync::ScanNode)
+    ) -> std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>;
 
   private:
     Persistence::SftpOptions sftpOpts_{};
