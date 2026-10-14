@@ -4,6 +4,7 @@
 #include <backend/sftp/download_operation.hpp>
 #include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
+#include <utility/permissions.hpp>
 #include "real_server_tests.hpp"
 
 #include <expected>
@@ -112,6 +113,79 @@ namespace Test
         blocked.wait();
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/moved.txt"), "Fake file content");
     }
+
+#ifndef _WIN32
+    TEST_F(TransferFailureTests, DownloadGetsItsPermissionsAndTimeBeforeItIsMovedIntoPlace)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/private.txt"}, {"content", "private"}, {"mode", 0640}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        struct Case
+        {
+            bool inheritPermissions;
+            std::optional<std::filesystem::perms> filePermissions;
+            std::filesystem::perms expected;
+        };
+        using std::filesystem::perms;
+        const std::vector<Case> cases{
+            {false, std::nullopt, Utility::newFilePermissions()},
+            {true, std::nullopt, (perms::owner_read | perms::owner_write | perms::group_read) & ~Utility::processUmask()},
+            {false, perms::owner_read | perms::owner_write, perms::owner_read | perms::owner_write},
+        };
+        for (std::size_t index = 0; index < cases.size(); ++index)
+        {
+            auto const& testCase = cases[index];
+            const auto localPath = localDirectory_.path() / fmt::format("private_{}.txt", index);
+            SharedData::DirectoryEntry entry{};
+            entry.name = "private.txt";
+            entry.type = SharedData::FileType::Regular;
+            entry.size = 7u;
+            entry.mtime = 1700000000u;
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/private.txt"),
+                    .localPath = toLocal(localPath),
+                    .inheritPermissions = testCase.inheritPermissions,
+                    .filePermissions = testCase.filePermissions,
+                    .entry = entry,
+                    .markAsDownloaded = false,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), "private");
+            EXPECT_EQ(std::filesystem::status(localPath).permissions(), testCase.expected) << "case " << index;
+            const auto modified = std::chrono::file_clock::to_sys(std::filesystem::last_write_time(localPath));
+            EXPECT_EQ(std::chrono::duration_cast<std::chrono::seconds>(modified.time_since_epoch()).count(), 1700000000);
+        }
+    }
+
+    TEST_F(TransferFailureTests, DownloadTempFileIsOnlyReadableByItsOwner)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = localDirectory_.path() / "large.txt";
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/large.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
+        ASSERT_TRUE(operation.prepare().has_value());
+        EXPECT_EQ(
+            std::filesystem::status(localPath.generic_string() + ".filepart").permissions(),
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+        );
+    }
+#endif
 
     TEST_F(TransferFailureTests, AsyncDownloadReadFailureKeepsExistingFile)
     {
@@ -521,6 +595,7 @@ namespace Test
             const auto result = runToEnd(operation);
             ASSERT_FALSE(result.has_value());
             EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content");
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>");
         }
     }
 

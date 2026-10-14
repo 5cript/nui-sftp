@@ -974,7 +974,7 @@ cli.on('createFile', (command) => {
     const content = command.size !== undefined
         ? Buffer.alloc(Number(command.size), command.fill ?? 'x')
         : (command.content ?? '');
-    parent.insert(file(name, content));
+    parent.insert(file(name, content, command.mode === undefined ? undefined : { mode: Number(command.mode) }));
 });
 cli.on('createDirectory', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
