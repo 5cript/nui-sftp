@@ -226,8 +226,9 @@ cmake --build build/clang_debug --target \
   nui-sftp-shared-data-test nui-sftp-ssh-test \
   nui-sftp-tar-archive-test nui-sftp-command-store-test
 
-# Run the whole suite.
-ctest --test-dir build/clang_debug --output-on-failure
+# Run the whole suite. Tests run in parallel; the timeout makes a hang fail
+# after two minutes instead of blocking the run.
+ctest --test-dir build/clang_debug --output-on-failure --timeout 120 -j$(nproc)
 
 # Or run an individual binary.
 ./build/clang_debug/test/nui-sftp-utility-test
@@ -328,7 +329,7 @@ update both workflows if it changes the build surface.
 1. Fork the repository and create a feature branch from `main`.
 2. Keep commits focused; prefer small, reviewable changes over large rewrites.
 3. Run a debug build with tests enabled locally and make sure `ctest
-   --output-on-failure` passes from `build/clang_debug`.
+   --output-on-failure --timeout 120 -j$(nproc)` passes from `build/clang_debug`.
 4. Format any C++ changes with clang-format.
 5. Open the PR against `main`. Describe the user-visible behaviour, the
    motivation, and anything reviewers should pay particular attention to.
@@ -377,7 +378,7 @@ needed.
             "type": "shell",
             "dependsOn": "build_debug",
             "command": "ctest",
-            "args": ["--test-dir", "build/clang_debug", "--output-on-failure"],
+            "args": ["--test-dir", "build/clang_debug", "--output-on-failure", "--timeout", "120", "-j", "8"],
             "group": "test"
         }
     ]
