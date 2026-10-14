@@ -169,6 +169,16 @@ class Operation
     }
 
     /**
+     * @brief Waits until every task queued on @p strand so far has run, so none of them outlives the operation that
+     *        queued it. Returns at once on the processing thread itself and on a finalized strand.
+     */
+    static void waitForStrandTasks(SecureShell::ProcessingStrand* strand)
+    {
+        if (strand && !strand->withinProcessingThread())
+            strand->pushPromiseTask([]() {}).wait();
+    }
+
+    /**
      * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
      *        destination exists and may not be replaced.
      */

@@ -28,13 +28,7 @@ DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOpe
 DownloadOperation::~DownloadOperation()
 {
     std::ignore = cancel(false);
-
-    if (auto stream = fileStream_.lock(); stream && !stream->strand()->withinProcessingThread())
-    {
-        // Wait for all tasks of the operation to finish. Skipped on the processing thread itself,
-        // where the wait could never be satisfied.
-        stream->strand()->pushPromiseTask([]() {}).get();
-    }
+    waitForStrandTasks(strand());
 }
 
 std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadOperation::work()

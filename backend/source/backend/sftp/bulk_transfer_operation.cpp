@@ -16,6 +16,7 @@ BulkTransferOperation::BulkTransferOperation(SecureShell::SftpSession& sftp, Com
 BulkTransferOperation::~BulkTransferOperation()
 {
     std::ignore = cancel(false);
+    waitForStrandTasks(strand());
 }
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::work()

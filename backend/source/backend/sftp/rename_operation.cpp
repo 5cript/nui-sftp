@@ -31,10 +31,13 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
         case (Running):
         {
             // A queued rename mirrors a local move and must not replace what is at the destination.
-            auto fut = sftp_->performPromise(
-                [this]()
+            // The task outlives this operation when the wait times out.
+            auto fut = sftp->performPromise(
+                [session = sftp_,
+                    source = sourcePath_,
+                    destination = destinationPath_]() -> std::expected<void, SecureShell::SftpError>
                 {
-                    return sftp_->renameNoReplaceInStrand(sourcePath_, destinationPath_);
+                    return sftp->renameNoReplaceInStrand(source, destination);
                 }
             );
             if (fut.wait_for(futureTimeout_) != std::future_status::ready)

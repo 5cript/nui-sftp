@@ -28,10 +28,7 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
 UploadOperation::~UploadOperation()
 {
     std::ignore = cancel(false);
-    // Wait for in-flight strand tasks unless we already run on the processing thread, where
-    // waiting would deadlock (tasks only get queued, never executed inline).
-    if (auto* stra = strand(); stra && !stra->withinProcessingThread())
-        stra->pushPromiseTask([]() {}).get();
+    waitForStrandTasks(strand());
 }
 
 SecureShell::ProcessingStrand* UploadOperation::strand() const

@@ -130,8 +130,7 @@ ArchiveUploadOperation::ArchiveUploadOperation(SecureShell::SftpSession& sftp, O
 ArchiveUploadOperation::~ArchiveUploadOperation()
 {
     std::ignore = cancel(false);
-    if (auto stream = remoteStream_.lock(); stream)
-        stream->strand()->pushPromiseTask([]() {}).get();
+    waitForStrandTasks(strand());
 }
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::work()

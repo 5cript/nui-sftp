@@ -136,11 +136,7 @@ ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sft
 ArchiveDownloadOperation::~ArchiveDownloadOperation()
 {
     std::ignore = cancel(false);
-
-    if (auto stream = currentStream_.lock(); stream)
-    {
-        stream->strand()->pushPromiseTask([]() {}).get();
-    }
+    waitForStrandTasks(strand());
 }
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation::work()
