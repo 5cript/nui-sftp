@@ -7,7 +7,9 @@
 
 #include <utility/format_bytes.hpp>
 
-class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperation>
+class DisplayedTransferOperation
+    : public OperationCard<DisplayedTransferOperation>
+    , public ScanningCard
 {
   public:
     DisplayedTransferOperation(
@@ -30,6 +32,7 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
               std::move(doDeletionCountdown),
               std::move(onCompleteAction)
           }
+        , ScanningCard{scanning}
         , progressBar_{{
               .height = std::string{progressHeight},
               .min = 0,
@@ -39,7 +42,6 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
           }}
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
-        , scanPhase_{scanning}
     {}
 
     Nui::ElementRenderer body() const override
@@ -105,12 +107,6 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         // clang-format on
     }
 
-    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
-    {
-        scanPhase_.setProgress(scannedBytes, scannedEntries);
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
     void setProgress(SharedData::TransferProgress progress)
     {
         scanPhase_.end();
@@ -161,5 +157,4 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
     bool allowOverwrite_{false};
     /** @brief Unset for an archive download. */
     Paths::RemotePath remotePath_;
-    ScanPhaseStatus scanPhase_;
 };

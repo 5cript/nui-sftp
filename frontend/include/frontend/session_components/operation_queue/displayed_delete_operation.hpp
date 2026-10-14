@@ -6,7 +6,9 @@
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <utility/language.hpp>
 
-struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
+struct DisplayedDeleteOperation
+    : public OperationCard<DisplayedDeleteOperation>
+    , public ScanningCard
 {
   public:
     DisplayedDeleteOperation(
@@ -28,10 +30,10 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
               std::move(doDeletionCountdown),
               std::move(onCompleteAction)
           }
+        , ScanningCard{scanning}
         , displayPath_{std::move(displayPath)}
         , target_{std::move(target)}
         , recursive_{scanning}
-        , scanPhase_{scanning}
         , progressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -51,12 +53,6 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
         OperationCard::state(newState);
         if (isCompletedState())
             progressBar_.setZeroAsComplete();
-    }
-
-    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
-    {
-        scanPhase_.setProgress(scannedBytes, scannedEntries);
-        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     void setProgress(SharedData::BulkDeleteProgress const& progress)
@@ -123,9 +119,9 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
                 span{
                     class_ = "opq-status-text"
                 }(
-                    observe(filesDeleted_, totalFiles_, scanPhase_.scanning, scanPhase_.totalScanned),
+                    observe(filesDeleted_, totalFiles_, state_, scanPhase_.scanning, scanPhase_.totalScanned),
                     [this](){
-                        if (scanPhase_.scanning.value())
+                        if (scanPhase_.scanning.value() && !isCompletedState())
                             return scanPhase_.text();
                         return fmt::format("{}/{}", filesDeleted_.value(), totalFiles_.value());
                     }
@@ -145,6 +141,5 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     Paths::RemotePath target_;
     /** @brief The delete scanned a directory, so it removes content and resumes doing the same. */
     bool recursive_{false};
-    ScanPhaseStatus scanPhase_;
     Components::ProgressBar progressBar_;
 };
