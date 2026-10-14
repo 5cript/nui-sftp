@@ -63,6 +63,26 @@ namespace TarArchive::Test
         EXPECT_EQ(parsed->uName, "alice");
     }
 
+    TEST(TarHeader, UnknownPermissionsGetTheModeOfANewMember)
+    {
+        const auto modeOf = [](SharedData::FileType type)
+        {
+            TarArchive::MemberHeader entry{};
+            entry.path = "member";
+            entry.type = type;
+            if (type == SharedData::FileType::Symlink)
+                entry.linkTarget = "target";
+            const auto built = buildRecords(entry);
+            EXPECT_TRUE(built.has_value());
+            const auto parsed = parseRecord(built->records.back());
+            EXPECT_TRUE(parsed.has_value());
+            return static_cast<std::uint32_t>(parsed->permissions);
+        };
+        EXPECT_EQ(modeOf(SharedData::FileType::Regular), 0644u);
+        EXPECT_EQ(modeOf(SharedData::FileType::Directory), 0755u);
+        EXPECT_EQ(modeOf(SharedData::FileType::Symlink), 0777u);
+    }
+
     TEST(TarHeader, BuildRecordsForDirectoryHasTrailingSlashAndNoSize)
     {
         TarArchive::MemberHeader entry{};
