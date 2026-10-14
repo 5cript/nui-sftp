@@ -109,6 +109,12 @@ class UploadOperation : public Operation
     std::expected<void, Error> handleSymlink();
     std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
 
+    /**
+     * @brief Checks the local source and opens it, or for a link that is not followed only notes it is one: a
+     *        regular file or a link, no other type, that exists.
+     */
+    std::expected<void, Error> openLocalSource();
+
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
