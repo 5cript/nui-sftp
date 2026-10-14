@@ -218,6 +218,91 @@ namespace Test
         }
     }
 
+    TEST_F(TransferFailureTests, ReservedDownloadOfFileShorterThanListedKeepsExistingFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        for (const bool bigFileOptimized : {false, true})
+        {
+            const auto localPath = localDirectory_.path() / fmt::format("reserved_{}.txt", bigFileOptimized);
+            writeLocalFile(localPath, "original content");
+
+            SharedData::DirectoryEntry entry{};
+            entry.name = "large.txt";
+            entry.type = SharedData::FileType::Regular;
+            entry.size = 70000u;
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/large.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    .reserveSpace = true,
+                    .bigFileOptimized = bigFileOptimized,
+                    .entry = entry,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << "bigFileOptimized: " << bigFileOptimized;
+            if (!bigFileOptimized)
+                EXPECT_EQ(result.error().type, Operation::ErrorType::SizeMismatch) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), "original content") << "bigFileOptimized: " << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, ReservedDownloadResumesFromPartialFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        for (const bool bigFileOptimized : {false, true})
+        {
+            const auto localPath = localDirectory_.path() / fmt::format("resumed_{}.txt", bigFileOptimized);
+            writeLocalFile(localPath.generic_string() + ".filepart", alphabet(65536).substr(0, 20000));
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/large.txt"),
+                    .localPath = toLocal(localPath),
+                    .reserveSpace = true,
+                    .tryContinue = true,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), alphabet(65536)) << "bigFileOptimized: " << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, ReservedCompletePartialFileIsFinalized)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = localDirectory_.path() / "file1.txt";
+        writeLocalFile(localPath.generic_string() + ".filepart", "Fake file content");
+
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+                .reserveSpace = true,
+                .tryContinue = true,
+            }
+        };
+
+        const auto result = runToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
     TEST_F(TransferFailureTests, AsyncDownloadResumesFromPartialFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
