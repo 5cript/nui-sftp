@@ -723,24 +723,15 @@ void RpcFilesystem::registerWriteFile()
             [](RpcHelper::RpcOnce&& reply, std::string const& filePath, std::string const& content)
             {
                 Log::info("RpcFilesystem::writeFile called for file: {}", filePath);
-
-                std::error_code ec;
-                std::ofstream fileStream(filePath, std::ios_base::binary);
-                if (!fileStream)
-                {
-                    Log::error("Failed to open file '{}' for writing: {}", filePath, ec.message());
-                    return reply.error(ec.message());
-                }
-
-                fileStream.write(content.data(), static_cast<std::streamsize>(content.size()));
-                if (!fileStream)
-                {
-                    Log::error("Failed to write to file '{}': {}", filePath, ec.message());
-                    return reply.error(ec.message());
-                }
-
-                Log::info("Successfully wrote to file '{}'", filePath);
-                return reply({{"success", true}});
+                writeFileAndReply(std::move(reply), filePath, content, /*replace=*/true);
+            }
+        );
+    on("RpcFilesystem::writeNewFile")
+        .perform(
+            [](RpcHelper::RpcOnce&& reply, std::string const& filePath, std::string const& content)
+            {
+                Log::info("RpcFilesystem::writeNewFile called for file: {}", filePath);
+                writeFileAndReply(std::move(reply), filePath, content, /*replace=*/false);
             }
         );
 }

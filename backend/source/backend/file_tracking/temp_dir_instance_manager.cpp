@@ -309,7 +309,7 @@ namespace FileTracking
                 reply({
                     {"success", true},
                     {"instanceId", inst->instanceId()},
-                    {"instanceDir", inst->instanceDir().string()},
+                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                 });
             }
         );
@@ -372,7 +372,7 @@ namespace FileTracking
                 {
                     arr.push_back({
                         {"instanceId", instId},
-                        {"instanceDir", inst->instanceDir().string()},
+                        {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                     });
                 }
                 reply({{"success", true}, {"instances", std::move(arr)}});
@@ -392,7 +392,7 @@ namespace FileTracking
                 reply({
                     {"success", true},
                     {"instanceId", instanceId},
-                    {"instanceDir", inst->instanceDir().string()},
+                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                 });
             }
         );

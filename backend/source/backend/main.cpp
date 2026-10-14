@@ -195,7 +195,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
 
 Main::Main(ProgramOptions options, ForkPool* forkPool)
     : shuttingDown_{false}
-    , programDir_{boost::dll::program_location().parent_path().string()}
+    , programDir_{boost::dll::program_location().parent_path().native()}
     , stateHolder_{programDir_}
     , loggerSetup_{stateHolder_}
     , window_{
@@ -313,7 +313,17 @@ void Main::registerRpc()
             }
 
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
-                window_.getExecutor(), window_, hub_, holder.stateCache().localFilesystemOptions, *opener_
+                window_.getExecutor(),
+                window_,
+                hub_,
+                holder.stateCache().localFilesystemOptions,
+                *opener_,
+                [this]()
+                {
+                    return stateHolder_.stateCache().localFilesystemOptions.openRiskyFiles.value_or(
+                        Persistence::RiskyFilePolicy::Warn
+                    );
+                }
             );
 
             hub_.markRpcAsInitialized();
@@ -433,6 +443,18 @@ void Main::startChildSignalTimer()
 
 int main(int const argc, char const* const* argv)
 {
+#ifdef _WIN32
+    // A GUI program has no console; help and --console write to the one it was started from.
+    for (int index = 1; index < argc; ++index)
+    {
+        const std::string_view argument{argv[index]};
+        if (argument == "--help" || argument == "--console")
+        {
+            attachParentConsole();
+            break;
+        }
+    }
+#endif
     auto options = parseProgramOptions(argc, argv);
     if (!options)
         return 0;
