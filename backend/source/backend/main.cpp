@@ -38,6 +38,10 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <algorithm>
+#include <iterator>
+#include <ranges>
+#include <span>
 #include <unordered_map>
 #include <cstdlib>
 
@@ -452,15 +456,16 @@ int main(int const argc, char const* const* argv)
     static_cast<void>(Utility::processUmask());
 #ifdef _WIN32
     // A GUI program has no console; help and --console write to the one it was started from.
-    for (int index = 1; index < argc; ++index)
-    {
-        const std::string_view argument{argv[index]};
-        if (argument == "--help" || argument == "--console")
-        {
-            attachParentConsole();
-            break;
-        }
-    }
+    const auto arguments = std::span{argv, static_cast<std::size_t>(argc)} | std::views::drop(1);
+    const auto console = std::ranges::any_of(
+                             arguments,
+                             [](std::string_view argument)
+                             {
+                                 return argument == "--help" || argument == "--console";
+                             }
+                         )
+        ? attachParentConsole()
+        : ConsoleAttachment{};
 #endif
     auto options = parseProgramOptions(argc, argv);
     if (!options)
