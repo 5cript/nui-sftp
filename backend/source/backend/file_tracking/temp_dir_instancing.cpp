@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <backend/rpc_helper.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
 #include <backend/file_tracking/change_filter.hpp>
@@ -111,7 +112,7 @@ namespace FileTracking
                 strand_,
                 [hub = hub_, name = eventName_, pld = std::move(payload)]() mutable
                 {
-                    hub->callRemote(name, pld);
+                    RpcHelper::callRemoteSafely(*hub, name, pld);
                 }
             );
         }

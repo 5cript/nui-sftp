@@ -1,4 +1,5 @@
 #include <backend/session_manager.hpp>
+#include <backend/rpc_helper.hpp>
 #include <log/log.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -193,7 +194,9 @@ void SessionManager::addSession(
                         {
                             try
                             {
-                                hub_->callRemote(fmt::format("Session::{}::onDisconnect", sessionId.value()));
+                                RpcHelper::callRemoteSafely(
+                                    *hub_, fmt::format("Session::{}::onDisconnect", sessionId.value())
+                                );
                             }
                             catch (const std::exception& e)
                             {

@@ -1,4 +1,5 @@
 #include <backend/main.hpp>
+#include <backend/rpc_helper.hpp>
 
 #ifdef _WIN32
 #    include <backend/windows/main_windows.hpp>
@@ -378,7 +379,8 @@ void Main::registerInitialWarningGetter()
                 false;
 #endif
 
-            hub_.callRemote(
+            RpcHelper::callRemoteSafely(
+                hub_,
                 responseId,
                 nlohmann::json{
                     {"warnings", initialPersistenceLoadWarnings_},
@@ -395,7 +397,8 @@ void Main::registerVersionGetter()
         "Main::getVersion",
         [this](std::string responseId)
         {
-            hub_.callRemote(
+            RpcHelper::callRemoteSafely(
+                hub_,
                 responseId,
                 nlohmann::json{
                     {"version", VERSION},

@@ -1,4 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
@@ -249,7 +250,8 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::ScanProgress{
                         .operationId = operationId,
@@ -280,7 +282,7 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(name, progress);
+                RpcHelper::callRemoteSafely(*self->hub_, name, progress);
             }
         );
     };
@@ -345,7 +347,8 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             // on this to apply or discard the user's intended reorder.
             auto emitResolution = [&self, &operationId](std::size_t resolvedIndex, bool applied)
             {
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     self->rpcName("onOperationsReordered"),
                     SharedData::OperationsReordered{
                         .operationId = operationId,
@@ -437,7 +440,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
 
             if (self->completionObserver_)
                 self->completionObserver_(operationCompleted);
-            self->hub_->callRemote(self->rpcName("onOperationCompleted"), std::move(operationCompleted));
+            RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onOperationCompleted"), operationCompleted);
         }
     );
 }
@@ -737,7 +740,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    self->hub_->callRemote(
+                    RpcHelper::callRemoteSafely(
+                        *self->hub_,
                         name,
                         SharedData::TransferProgress{
                             .operationId = operationId,
@@ -755,7 +759,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         targetQueue.emplace_back(operationId, std::make_unique<DownloadOperation>(sftp, std::move(opts)));
 
         Log::info("Calling OperationQueue::{}::onOperationAdded", sessionId_.value());
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
@@ -800,7 +805,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
         targetQueue.emplace_back(operationId, std::move(bulk));
 
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
@@ -948,7 +954,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::TransferProgress{
                         .operationId = operationId,
@@ -989,7 +996,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         totalPayloadBytes,
         directoryRootPaths.size()
     );
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
@@ -1075,7 +1083,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::TransferProgress{
                         .operationId = operationId,
@@ -1110,7 +1119,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         estimatedTotalBytes,
         directoryRootPaths.size()
     );
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
@@ -1228,7 +1238,8 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         bulk->setPrescannedFileList(std::move(files));
 
         targetQueue.emplace_back(bulkOpId, std::move(bulk));
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = bulkOpId,
@@ -1317,7 +1328,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    self->hub_->callRemote(
+                    RpcHelper::callRemoteSafely(
+                        *self->hub_,
                         name,
                         SharedData::TransferProgress{
                             .operationId = operationId,
@@ -1334,7 +1346,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
         targetQueue.emplace_back(operationId, std::make_unique<UploadOperation>(sftp, std::move(opts)));
 
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
@@ -1373,7 +1386,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
         targetQueue.emplace_back(operationId, std::move(bulk));
 
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = operationId,
@@ -1498,7 +1512,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
         bulk->setPrescannedFileList(std::move(files));
 
         targetQueue.emplace_back(bulkOpId, std::move(bulk));
-        hub_->callRemote(
+        RpcHelper::callRemoteSafely(
+            *hub_,
             rpcName("onOperationAdded"),
             SharedData::OperationAdded{
                 .operationId = bulkOpId,
@@ -1757,7 +1772,8 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::BulkDeleteProgress{
                         .operationId = operationId,
@@ -1771,7 +1787,8 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
         })
     );
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
@@ -1844,7 +1861,8 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::BulkDeleteProgress{
                         .operationId = operationId,
@@ -1876,7 +1894,8 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 
     targetQueue.emplace_back(operationId, std::move(operation));
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
@@ -1924,7 +1943,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
                 auto self = weak.lock();
                 if (!self)
                     return;
-                self->hub_->callRemote(
+                RpcHelper::callRemoteSafely(
+                    *self->hub_,
                     name,
                     SharedData::BulkDeleteProgress{
                         .operationId = bulkOperationId,
@@ -1987,7 +2007,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     operation->setTargets(std::move(fileTargets));
     targetQueue.emplace_back(bulkOperationId, std::move(operation));
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = bulkOperationId,
@@ -2031,7 +2052,8 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
     targetQueue.emplace_back(operationId, std::move(operation));
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = operationId,
@@ -2082,8 +2104,8 @@ void OperationQueue::addSyncScanOperation(
             return;
         if (!tree)
         {
-            self->hub_->callRemote(
-                self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/false, tree.error()
+            RpcHelper::callRemoteSafely(
+                *self->hub_, self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/false, tree.error()
             );
             return;
         }
@@ -2094,7 +2116,9 @@ void OperationQueue::addSyncScanOperation(
                 sess->setRemoteTreeInStrand(std::move(tree));
             }
         );
-        self->hub_->callRemote(self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/false);
+        RpcHelper::callRemoteSafely(
+            *self->hub_, self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/false
+        );
     };
 
     syncScanCallbacks_[localScanId.value()] =
@@ -2108,8 +2132,8 @@ void OperationQueue::addSyncScanOperation(
             return;
         if (!tree)
         {
-            self->hub_->callRemote(
-                self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/true, tree.error()
+            RpcHelper::callRemoteSafely(
+                *self->hub_, self->rpcName("onSyncScanFailed"), syncSessionId, /*isLocal=*/true, tree.error()
             );
             return;
         }
@@ -2120,7 +2144,7 @@ void OperationQueue::addSyncScanOperation(
                 sess->setLocalTreeInStrand(std::move(tree));
             }
         );
-        self->hub_->callRemote(self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/true);
+        RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onSyncScanPhaseDone"), syncSessionId, /*isLocal=*/true);
     };
 
     // Queue remote scan — build-tree mode.
@@ -2149,7 +2173,8 @@ void OperationQueue::addSyncScanOperation(
     );
     priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = remoteScanId,
@@ -2171,7 +2196,8 @@ void OperationQueue::addSyncScanOperation(
     });
     priorityOperations_.emplace_back(localScanId, std::move(localScan));
 
-    hub_->callRemote(
+    RpcHelper::callRemoteSafely(
+        *hub_,
         rpcName("onOperationAdded"),
         SharedData::OperationAdded{
             .operationId = localScanId,

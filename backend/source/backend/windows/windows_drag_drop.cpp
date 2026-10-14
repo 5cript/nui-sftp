@@ -1,5 +1,6 @@
 
 #include <backend/windows/windows_drag_drop.hpp>
+#include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/windows/cotask_mem_string.hpp>
 #include <backend/dropped_entry.hpp>
@@ -141,7 +142,7 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                     if (messageJson.contains("subdir"))
                         reply["subdir"] = messageJson["subdir"];
 
-                    hub.callRemote("SessionArea::onFilesDropped", reply);
+                    RpcHelper::callRemoteSafely(hub, "SessionArea::onFilesDropped", reply);
                 }
                 catch (std::exception const& exc)
                 {

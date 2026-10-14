@@ -1,4 +1,5 @@
 #include <backend/session.hpp>
+#include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/existence_check.hpp>
 
@@ -1548,7 +1549,8 @@ void Session::registerRpcSftpRecomputeSyncDiff()
                                     {
                                         // Matches the OperationQueue::rpcName scheme
                                         // the frontend OperationQueue listens on.
-                                        parent->hub_->callRemote(
+                                        RpcHelper::callRemoteSafely(
+                                            *parent->hub_,
                                             fmt::format("OperationQueue::{}::onSyncDiffProgress", parent->id_.value()),
                                             syncSessionId,
                                             std::to_string(compared)
