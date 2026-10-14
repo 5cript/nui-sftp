@@ -60,14 +60,15 @@ class DeleteOperation : public Operation
     void setTargets(std::vector<Paths::RemotePath> targets);
 
     /**
-     * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first.
-     */
-    void scanFirst(std::unique_ptr<ScanOperation> scan);
-
-    /**
-     * @brief Like @ref scanFirst for one more directory, so one operation deletes several directories.
+     * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first. One operation can
+     *        take several roots. A root whose scan fails is a failed entry and the other roots are still deleted.
      */
     void addScanRoot(std::unique_ptr<ScanOperation> scan);
+
+    /**
+     * @brief Counts @p target as an item that could not be deleted, like one refused before it was queued.
+     */
+    void addFailedTarget(Paths::RemotePath const& target, Error error);
 
     bool scanning() const noexcept
     {
@@ -120,6 +121,8 @@ class DeleteOperation : public Operation
     std::chrono::seconds futureTimeout_;
     std::size_t deletedThusFar_{0};
     std::size_t totalToDelete_{0};
+    /** @brief Targets whose removal failed, the operation fails when that is all of them and nothing else. */
+    std::size_t removalFailures_{0};
     /** @brief Deleted from the back, so a scanned directory goes after its content. */
     std::vector<Paths::RemotePath> targets_{};
     /** @brief Why a scan result was refused, nothing may be deleted then. */

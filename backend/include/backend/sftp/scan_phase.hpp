@@ -39,8 +39,17 @@ class ScanPhase : public ScanPhaseDriver
      */
     using DeliverFunction = std::function<void(ScanT& scan)>;
 
-    explicit ScanPhase(DeliverFunction deliver)
+    /**
+     * @brief Receives a scan that failed, the phase then goes on with the next root.
+     */
+    using FailFunction = std::function<void(ScanT& scan, Operation::Error const& error)>;
+
+    /**
+     * @param onFailed Without it, a failed scan ends the phase with its error.
+     */
+    explicit ScanPhase(DeliverFunction deliver, FailFunction onFailed = {})
         : deliver_{std::move(deliver)}
+        , onFailed_{std::move(onFailed)}
     {}
 
     void addRoot(std::unique_ptr<ScanT> scan)
@@ -56,11 +65,15 @@ class ScanPhase : public ScanPhaseDriver
         auto& current = *scans_.front();
         auto result = current.work();
         if (!result.has_value())
-            return std::unexpected(std::move(result).error());
-        if (result.value() != Operation::WorkStatus::Complete)
+        {
+            if (!onFailed_)
+                return std::unexpected(std::move(result).error());
+            onFailed_(current, result.error());
+        }
+        else if (result.value() != Operation::WorkStatus::Complete)
             return Operation::WorkStatus::MoreWork;
-
-        deliver_(current);
+        else
+            deliver_(current);
         scans_.pop_front();
         return scans_.empty() ? Operation::WorkStatus::Complete : Operation::WorkStatus::MoreWork;
     }
@@ -73,6 +86,7 @@ class ScanPhase : public ScanPhaseDriver
 
   private:
     DeliverFunction deliver_;
+    FailFunction onFailed_;
     std::deque<std::unique_ptr<ScanT>> scans_{};
 };
 

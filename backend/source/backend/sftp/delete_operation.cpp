@@ -86,7 +86,7 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                     return WorkStatus::MoreWork;
             }
             // Nothing deleted at all is a failure, some items left behind a partial success.
-            if (totalToDelete_ > 0 && failedEntries_.size() == totalToDelete_)
+            if (!failedEntries_.empty() && removalFailures_ == totalToDelete_)
                 return enterErrorState<WorkStatus>(failedEntries_.back().second);
             state_ = Completed;
             return WorkStatus::Complete;
@@ -136,6 +136,7 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::R
     if (const auto result = fut.get(); !result.has_value() && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
     {
         Log::error("DeleteOperation: Failed to delete '{}': {}", path.value(), result.error().toString());
+        ++removalFailures_;
         failedEntries_.emplace_back(
             path.value(), Error{.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.value()}
         );
@@ -200,11 +201,6 @@ void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
     totalToDelete_ = targets_.size();
 }
 
-void DeleteOperation::scanFirst(std::unique_ptr<ScanOperation> scan)
-{
-    addScanRoot(std::move(scan));
-}
-
 void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
 {
     if (!scanPhase_)
@@ -213,10 +209,28 @@ void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
             [this](ScanOperation& finished)
             {
                 appendScanResult(finished.remotePath(), finished.ejectEntries());
+            },
+            [this](ScanOperation& failed, Error const& error)
+            {
+                Log::error(
+                    "DeleteOperation: Scan of '{}' failed, nothing of it is deleted: {}",
+                    failed.remotePath().value(),
+                    error.toString()
+                );
+                // The other roots are still deleted, the failure alone does not mean the scans are incomplete.
+                scanDelivered_ = true;
+                addFailedTarget(failed.remotePath(), error);
             }
         );
     }
     scanPhase_->addRoot(std::move(scan));
+}
+
+void DeleteOperation::addFailedTarget(Paths::RemotePath const& target, Error error)
+{
+    if (!error.extraInfo)
+        error.extraInfo = target.value();
+    failedEntries_.emplace_back(target.value(), std::move(error));
 }
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::cancel(bool adoptCancelState)

@@ -5,6 +5,7 @@
 #include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
+#include <backend/sftp/sequential_scan_progress.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
@@ -21,6 +22,8 @@
 #include <utility/overloaded.hpp>
 
 #include <algorithm>
+#include <array>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <span>
@@ -245,6 +248,29 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
                         .totalScanned = totalScanned,
                     }
                 );
+            }
+        );
+    };
+}
+
+auto OperationQueue::makeDeleteProgressCallback(Ids::OperationId operationId)
+    -> std::function<void(std::string const&, std::uint64_t, std::uint64_t)>
+{
+    return [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
+               std::string const& path, std::uint64_t itemsDeleted, std::uint64_t totalItems
+           )
+    {
+        auto self = weak.lock();
+        if (!self)
+            return;
+        RpcHelper::callRemoteSafely(
+            *self->hub_,
+            name,
+            SharedData::BulkDeleteProgress{
+                .operationId = operationId,
+                .currentFile = path,
+                .filesDeleted = itemsDeleted,
+                .totalFiles = totalItems,
             }
         );
     };
@@ -1764,25 +1790,7 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     targetQueue.emplace_back(
         operationId,
         std::make_unique<LocalDeleteOperation>(LocalDeleteOperation::LocalDeleteOperationOptions{
-            .itemsRemovedProgress =
-                [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
-                    std::string const& path, std::uint64_t itemsDeleted, std::uint64_t totalItems
-                )
-            {
-                auto self = weak.lock();
-                if (!self)
-                    return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::BulkDeleteProgress{
-                        .operationId = operationId,
-                        .currentFile = path,
-                        .filesDeleted = itemsDeleted,
-                        .totalFiles = totalItems,
-                    }
-                );
-            },
+            .itemsRemovedProgress = makeDeleteProgressCallback(operationId),
             .scanProgress =
                 [progress = makeScanProgressCallback("onScanProgress", operationId)](
                     std::uint64_t bytes, std::uint64_t entries
@@ -1883,25 +1891,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     auto operation = std::make_unique<DeleteOperation>(
         sftp,
         DeleteOperation::DeleteOperationOptions{
-            .filesRemovedProgress =
-                [weak = weak_from_this(), operationId, name = rpcName("onDeleteProgress")](
-                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles
-                )
-            {
-                auto self = weak.lock();
-                if (!self)
-                    return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::BulkDeleteProgress{
-                        .operationId = operationId,
-                        .currentFile = path,
-                        .filesDeleted = filesDeleted,
-                        .totalFiles = totalFiles,
-                    }
-                );
-            },
+            .filesRemovedProgress = makeDeleteProgressCallback(operationId),
             .remotePath = remotePath,
             .futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout),
             .recursive = isBulk,
@@ -1910,7 +1900,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     if (isBulk)
     {
         // The scan is part of the delete, so cancelling or moving the card acts on both.
-        operation->scanFirst(
+        operation->addScanRoot(
             std::make_unique<ScanOperation>(
                 sftp,
                 ScanOperation::ScanOperationOptions{
@@ -1965,25 +1955,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     auto operation = std::make_unique<DeleteOperation>(
         sftp,
         DeleteOperation::DeleteOperationOptions{
-            .filesRemovedProgress =
-                [weak = weak_from_this(), bulkOperationId, name = rpcName("onDeleteProgress")](
-                    auto const& path, std::uint64_t filesDeleted, std::uint64_t totalFiles
-                )
-            {
-                auto self = weak.lock();
-                if (!self)
-                    return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::BulkDeleteProgress{
-                        .operationId = bulkOperationId,
-                        .currentFile = path,
-                        .filesDeleted = filesDeleted,
-                        .totalFiles = totalFiles,
-                    }
-                );
-            },
+            .filesRemovedProgress = makeDeleteProgressCallback(bulkOperationId),
             .futureTimeout = resolvedTimeout,
             .recursive = true,
         }
@@ -1991,11 +1963,24 @@ std::size_t OperationQueue::addBulkDeleteOperation(
 
     std::vector<Paths::RemotePath> fileTargets;
     std::size_t scannedDirectories = 0;
+    std::size_t failedTargets = 0;
+    const auto failTarget = [&](Paths::RemotePath const& target, Operation::Error error)
+    {
+        operation->addFailedTarget(target, std::move(error));
+        ++failedTargets;
+    };
+    // The roots are scanned one after another, their counts add up on the card.
+    const auto scanProgressOfNextRoot =
+        Detail::sequentialScanProgress(makeScanProgressCallback("onScanProgress", bulkOperationId));
     for (auto const& entry : request.entries)
     {
         if (auto allowed = guard.check(entry.target); !allowed)
         {
             Log::error("Bulk delete: refusing to delete: {}", allowed.error().toString());
+            failTarget(
+                entry.target,
+                Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = allowed.error().toString()}
+            );
             continue;
         }
         if (entry.isDirectory && !request.listedContentOnly)
@@ -2005,6 +1990,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
             if (statFuture.wait_for(resolvedTimeout) != std::future_status::ready)
             {
                 Log::error("Bulk delete: lstat timed out for '{}'", entry.target.value());
+                failTarget(entry.target, Operation::Error{.type = Operation::ErrorType::FutureTimeout});
                 continue;
             }
             const auto information = statFuture.get();
@@ -2014,7 +2000,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
                     std::make_unique<ScanOperation>(
                         sftp,
                         ScanOperation::ScanOperationOptions{
-                            .progressCallback = makeScanProgressCallback("onScanProgress", bulkOperationId),
+                            .progressCallback = scanProgressOfNextRoot(),
                             .remotePath = entry.target,
                             .futureTimeout = resolvedTimeout,
                         }
@@ -2030,6 +2016,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     const auto queued = fileTargets.size() + scannedDirectories;
     if (queued == 0)
         return 0;
+    if (failedTargets > 0)
+        Log::warn("Bulk delete: {} items were refused, they are reported as failed", failedTargets);
 
     // Parent of the first item, so the card can read "Deleting items in <dir>" before any progress arrives.
     const auto commonParent = request.entries.front().target.parent().value_or(Paths::RemotePath::root());

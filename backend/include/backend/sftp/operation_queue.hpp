@@ -371,6 +371,12 @@ class OperationQueue
 
     auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId) -> BulkProgressCallback;
 
+    /**
+     * @brief Sends the delete progress of @p operationId (current item, items handled, items in all) to the frontend.
+     */
+    auto makeDeleteProgressCallback(Ids::OperationId operationId)
+        -> std::function<void(std::string const&, std::uint64_t, std::uint64_t)>;
+
   private:
     bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
 
