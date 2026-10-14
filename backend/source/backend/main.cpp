@@ -316,9 +316,11 @@ void Main::registerRpc()
                     },
                     *opener_
                 );
+                sshSessionManager_->preventLocalDeletion(true);
                 return;
             }
 
+            sshSessionManager_->preventLocalDeletion(holder.stateCache().localFilesystemOptions.preventDeletion);
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
                 window_.getExecutor(),
                 window_,

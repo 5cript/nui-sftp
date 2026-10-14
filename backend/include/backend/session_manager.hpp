@@ -14,6 +14,7 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/strand.hpp>
 
+#include <atomic>
 #include <memory>
 #include <map>
 #include <functional>
@@ -38,6 +39,11 @@ class SessionManager
     SessionManager& operator=(SessionManager&&) = delete;
 
     void registerRpc();
+
+    /**
+     * @brief Whether the sessions refuse local deletes, as the local filesystem options say. Refused until set.
+     */
+    void preventLocalDeletion(bool prevent);
 
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
@@ -113,6 +119,8 @@ class SessionManager
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
     std::unordered_map<Ids::SessionId, std::shared_ptr<Session>, Ids::IdHash> sessions_{};
+    /** @brief Read by the local operation queue on each local delete the explorer asks for. */
+    std::shared_ptr<std::atomic_bool> localDeletionPrevented_{std::make_shared<std::atomic_bool>(true)};
 
     std::map<int, PasswordProvider*> passwordProviders_{};
     std::mutex passwordRequestMutex_{};

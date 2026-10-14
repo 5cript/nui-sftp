@@ -2,6 +2,7 @@
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
+#include <utility/localized_message.hpp>
 #include <backend/existence_check.hpp>
 
 #include <paths/paths.hpp>
@@ -85,17 +86,26 @@ Session::Session(
     Nui::Window& wnd,
     Nui::RpcHub& hub,
     Persistence::SftpOptions const& sftpOptions,
-    BulkResumeRegistry* bulkResumeRegistry
+    BulkResumeRegistry* bulkResumeRegistry,
+    std::shared_ptr<LocalOperationQueue> localOperationQueue
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
     , session_{std::move(session)}
-    , operationQueue_{std::make_shared<
-          OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency))}
+    , operationQueue_{std::make_shared<OperationQueue>(
+          executor_,
+          strand_,
+          wnd,
+          hub,
+          sftpOptions,
+          id_,
+          sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency)
+      )}
     , bulkResumeRegistry_{bulkResumeRegistry}
     , remoteTempFileSuffix_{Persistence::effectiveTempFileSuffix(
           sftpOptions.uploadOptions ? sftpOptions.uploadOptions->tempFileSuffix : std::nullopt
       )}
+    , localOperationQueue_{std::move(localOperationQueue)}
 {}
 
 Session::~Session()
@@ -137,6 +147,7 @@ void Session::start()
             self->registerRpcSftpAddBulkDownloadOperation();
             self->registerRpcSftpAddBulkUploadOperation();
             self->registerRpcSftpAddBulkDeleteOperation();
+            self->registerRpcAddLocalDeleteOperation();
             self->registerRpcSftpExistsBatch();
             self->registerRpcSftpOpenSyncSession();
             self->registerRpcSftpRecomputeSyncDiff();
@@ -190,6 +201,7 @@ void Session::stop()
             // registry TTL) handle cleanup if no resume occurs.
             if (self->bulkResumeRegistry_)
                 self->operationQueue_->dumpBulkResumes(*self->bulkResumeRegistry_);
+            self->localOperationQueue_->release(self->id_);
             self->operationQueue_->cancelAll();
             self->operationQueue_.reset();
 
@@ -1871,6 +1883,27 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                         return enqueuedReply(queue.addBulkDeleteOperation(guard, channel, request, operationId));
                     }
                 );
+            }
+        );
+}
+
+void Session::registerRpcAddLocalDeleteOperation()
+{
+    on(fmt::format("Session::{}::addLocalDelete", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& operationIdString, std::vector<std::string> const& paths
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply.error("Session no longer exists");
+                const auto added = self->localOperationQueue_->addExplorerDelete(
+                    Ids::makeOperationId(operationIdString), paths, self->id_, self->operationQueue_->paused()
+                );
+                if (!added)
+                    return reply.error(added.error());
+                reply(SharedData::success());
             }
         );
 }

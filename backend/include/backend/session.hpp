@@ -36,7 +36,8 @@ class Session
         Nui::Window& wnd,
         Nui::RpcHub& hub,
         Persistence::SftpOptions const& sftpOptions,
-        BulkResumeRegistry* bulkResumeRegistry
+        BulkResumeRegistry* bulkResumeRegistry,
+        std::shared_ptr<LocalOperationQueue> localOperationQueue
     );
 
     Session(const Session&) = delete;
@@ -205,6 +206,13 @@ class Session
     void registerRpcSftpAddBulkDownloadOperation();
     void registerRpcSftpAddBulkUploadOperation();
     void registerRpcSftpAddBulkDeleteOperation();
+
+    /**
+     * @brief Handles "Session::{id}::addLocalDelete" (operation id, local paths): queues the recursive delete of the
+     *        local items in the local operation queue, held while the queue of this session is paused, see
+     *        LocalOperationQueue::addExplorerDelete.
+     */
+    void registerRpcAddLocalDeleteOperation();
     void registerRpcSftpExistsBatch();
     void registerRpcSftpOpenSyncSession();
     void registerRpcSftpRecomputeSyncDiff();
@@ -299,4 +307,6 @@ class Session
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
     /** @brief The temp file suffix of uploads, which names where a replaced item is kept during a rename. */
     std::string remoteTempFileSuffix_;
+    /** @brief Runs the local deletes of this session, which go on when it ends. */
+    std::shared_ptr<LocalOperationQueue> localOperationQueue_;
 };

@@ -1722,7 +1722,15 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
         result.remoteDeletes.clear();
         result.remoteDeleteSources.clear();
     }
-    if (!localDeletes.empty() && !addLocalDeleteOperation(request.localDeleteId, std::move(localDeletes), request.mode))
+    if (!localDeletes.empty() &&
+        !localDeleteQueue.addDelete({
+            .operationId = request.localDeleteId,
+            .targets = std::move(localDeletes),
+            .mode = request.mode,
+            .owner = sessionId_,
+            .held = paused_,
+            .comparedStates = std::move(localDeletesCompared),
+        }))
     {
         std::ranges::move(result.localDeletes, std::back_inserter(result.failed));
         result.localDeletes.clear();
@@ -1744,6 +1752,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
 std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     Ids::OperationId operationId,
     std::vector<Paths::LocalPath> targets,
+    bool recursive,
+    bool insertRefresh,
     SharedData::OperationMode mode
 )
 {
@@ -1760,7 +1770,7 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
         }
     }
 
-    const auto commonParent = targets.front().parent().value_or(targets.front());
+    auto parent = LocalDeleteOperation::commonParentOf(targets);
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
     targetQueue.emplace_back(
         operationId,
@@ -1784,7 +1794,15 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
                     }
                 );
             },
+            .scanProgress =
+                [progress = makeScanProgressCallback("onScanProgress", operationId)](
+                    std::uint64_t bytes, std::uint64_t entries
+                )
+            {
+                progress(bytes, entries, entries);
+            },
             .targets = std::move(targets),
+            .recursive = recursive,
         })
     );
 
@@ -1795,10 +1813,32 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
             .operationId = operationId,
             .type = SharedData::OperationType::LocalDelete,
             .mode = mode,
-            .localPath = commonParent,
+            .insertRefresh = insertRefresh,
+            .localPath = std::move(parent),
+            .scanPhase = recursive,
         }
     );
     return {};
+}
+
+void OperationQueue::cancelLocalDeletes()
+{
+    // Assumed in strand
+    for (auto* queue : {&priorityOperations_, &operations_})
+    {
+        std::erase_if(
+            *queue,
+            [this](auto& entry)
+            {
+                auto& [id, operation] = entry;
+                if (operation->type() != SharedData::OperationType::LocalDelete)
+                    return false;
+                std::ignore = operation->cancel(true);
+                completeOperation(makeCompletedOperation(CompletionReason::Canceled, id, *operation));
+                return true;
+            }
+        );
+    }
 }
 
 RemoteDeleteGuard OperationQueue::remoteDeleteGuard(SecureShell::SftpSession& sftp)

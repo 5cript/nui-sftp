@@ -107,6 +107,11 @@ SessionManager::SessionManager(
     , stateHolder_{&stateHolder}
 {}
 
+void SessionManager::preventLocalDeletion(bool prevent)
+{
+    localDeletionPrevented_->store(prevent);
+}
+
 SessionManager::~SessionManager()
 {
     for (auto& [id, session] : sessions_)
@@ -224,7 +229,8 @@ void SessionManager::addSession(
                     *wnd_,
                     *hub_,
                     sessionOptions.sftpOptions.value(),
-                    &bulkResumeRegistry_
+                    &bulkResumeRegistry_,
+                    localOperationQueue_
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)
