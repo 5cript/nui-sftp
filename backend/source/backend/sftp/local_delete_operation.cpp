@@ -19,14 +19,6 @@ std::expected<LocalDeleteOperation::WorkStatus, LocalDeleteOperation::Error> Loc
         case Preparing:
         case Prepared:
         {
-            for (auto const& target : options_.targets)
-            {
-                if (target.empty() || target.isRoot())
-                {
-                    Log::error("LocalDeleteOperation: Refusing to delete '{}'.", target.toUtf8());
-                    return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath, .extraInfo = target.toUtf8()});
-                }
-            }
             state_ = Running;
             [[fallthrough]];
         }

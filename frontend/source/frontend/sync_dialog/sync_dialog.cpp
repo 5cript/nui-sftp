@@ -1145,6 +1145,12 @@ struct SyncDialog::Implementation
                             *observer = value;
                     }
                 };
+                // The backend lists every failed entry, the rows below a failed directory are not all failed.
+                const auto setRows = [this, section](std::vector<std::string> const& rows, double value)
+                {
+                    for (auto const& row : rows)
+                        *progressFor(section, row) = value;
+                };
 
                 mapBulk(*uploads, result.uploads, result.uploadSources);
                 mapBulk(*downloads, result.downloads, result.downloadSources);
@@ -1166,7 +1172,7 @@ struct SyncDialog::Implementation
                         part->map();
                 }
                 setCovering(result.createdDirectories, 1.1);
-                setCovering(result.failed, -1.0);
+                setRows(result.failed, -1.0);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             },
             [this, request](std::string const& message)

@@ -1568,6 +1568,33 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     auto remoteGuard = remoteDeleteGuard(sftp);
     remoteGuard.trustScannedBelow(session.remoteRoot());
 
+    // The plan lists a directory before its content, so a refused directory refuses every entry below it.
+    std::vector<std::string> refusedRemoteDirectories;
+    std::vector<std::string> refusedLocalDirectories;
+    const auto isBelowAny = [](std::vector<std::string> const& directories, std::string const& relKey)
+    {
+        return std::ranges::any_of(
+            directories,
+            [&relKey](std::string const& directory)
+            {
+                return relKey.size() > directory.size() && relKey.starts_with(directory) &&
+                    relKey[directory.size()] == '/';
+            }
+        );
+    };
+    const auto refuse = [&result](
+                            SharedData::Sync::EnqueuePlanEntry& entry,
+                            std::vector<std::string>& refusedDirectories,
+                            std::string_view side,
+                            std::string const& reason
+                        )
+    {
+        Log::error("Sync: refusing to delete {} '{}' and what is below it: {}", side, entry.relKey, reason);
+        if (entry.isDirectory)
+            refusedDirectories.push_back(entry.relKey);
+        result.failed.push_back(std::move(entry.relKey));
+    };
+
     for (auto& [entry, paths] : plan.entries)
     {
         switch (entry.action)
@@ -1618,6 +1645,11 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                     result.failed.push_back(std::move(entry.relKey));
                     break;
                 }
+                if (auto allowed = remoteGuard.check(paths.remote); !allowed)
+                {
+                    refuse(entry, refusedRemoteDirectories, "remotely", allowed.error().toString());
+                    break;
+                }
                 result.remoteDeleteSources.push_back(paths.remote.value());
                 remoteDeletes.entries.push_back({.target = std::move(paths.remote), .isDirectory = entry.isDirectory});
                 result.remoteDeletes.push_back(std::move(entry.relKey));
@@ -1627,8 +1659,12 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             {
                 if (isBelowAny(refusedLocalDirectories, entry.relKey))
                 {
-                    Log::error("Sync: refusing to delete locally: {}", allowed.error());
                     result.failed.push_back(std::move(entry.relKey));
+                    break;
+                }
+                if (auto allowed = refuseProtectedLocalDelete(paths.local, localHomes); !allowed)
+                {
+                    refuse(entry, refusedLocalDirectories, "locally", allowed.error());
                     break;
                 }
                 result.localDeleteSources.push_back(paths.local.toUtf8());
