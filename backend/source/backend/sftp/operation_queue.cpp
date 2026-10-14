@@ -86,12 +86,15 @@ namespace
                         .failedEntries = op.getFailed(),
                     };
                 },
-                [reason, operationId, error](UploadOperation const&)
+                [reason, operationId, error](UploadOperation const& op)
                 {
                     return OperationQueue::OperationCompleted{
                         .reason = reason,
                         .operationId = operationId,
                         .completionTime = std::chrono::system_clock::now(),
+                        .localPath = unlessEmpty(op.localPath()),
+                        .remotePath = unlessEmpty(op.remotePath()),
+                        .error = error,
                     };
                 },
                 [reason, operationId, error](BulkUploadOperation const& op)
