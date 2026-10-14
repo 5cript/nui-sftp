@@ -34,6 +34,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
     , buildTree_{options.buildTree}
+    , excludedSuffixes_{std::move(options.excludedSuffixes)}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;

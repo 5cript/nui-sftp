@@ -2073,6 +2073,16 @@ void OperationQueue::addSyncScanOperation(
     };
 
     // Queue remote scan — build-tree mode.
+    // Temp files of transfers on either side, a sync neither copies nor deletes them.
+    std::vector<std::string> temporarySuffixes{
+        Persistence::effectiveTempFileSuffix(
+            sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
+        ),
+        Persistence::effectiveTempFileSuffix(
+            sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix
+        ),
+    };
+
     auto remoteScan = std::make_unique<ScanOperation>(
         sftp,
         ScanOperation::ScanOperationOptions{
@@ -2083,6 +2093,7 @@ void OperationQueue::addSyncScanOperation(
             .recursive = recursive,
             .ignoreHidden = ignoreHidden,
             .buildTree = true,
+            .excludedSuffixes = temporarySuffixes,
         }
     );
     priorityOperations_.emplace_back(remoteScanId, std::move(remoteScan));
@@ -2105,6 +2116,7 @@ void OperationQueue::addSyncScanOperation(
         .recursive = recursive,
         .ignoreHidden = ignoreHidden,
         .buildTree = true,
+        .excludedSuffixes = std::move(temporarySuffixes),
     });
     priorityOperations_.emplace_back(localScanId, std::move(localScan));
 

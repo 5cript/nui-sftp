@@ -16,6 +16,7 @@ ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOption
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
     , buildTree_{options.buildTree}
+    , excludedSuffixes_{std::move(options.excludedSuffixes)}
 {}
 
 ScanOperation::~ScanOperation() = default;

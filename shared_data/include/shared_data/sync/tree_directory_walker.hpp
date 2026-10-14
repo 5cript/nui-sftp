@@ -12,6 +12,7 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -50,6 +51,8 @@ namespace SharedData::Sync
          *        other error ends the walk.
          * @param requireLocalNames Names must be creatable on the local filesystem, set for remote trees whose
          *        entries may be downloaded. Others are kept as @ref Availability::InvalidName.
+         * @param excludedSuffixes Names ending in one of these, the temp files of transfers, are kept as
+         *        @ref Availability::Excluded so a sync neither copies nor deletes them.
          */
         template <typename ForwardingScannerT = ScannerT>
         requires std::is_same_v<std::decay_t<ForwardingScannerT>, ScannerT>
@@ -63,6 +66,7 @@ namespace SharedData::Sync
             : scanner_{std::forward<ForwardingScannerT>(scanner)}
             , recursive_{recursive}
             , requireLocalNames_{requireLocalNames}
+            , excludedSuffixes_{std::move(excludedSuffixes)}
             , isUnreadable_{std::move(isUnreadable)}
         {
             root_.type = SharedData::FileType::Directory;
@@ -267,6 +271,7 @@ namespace SharedData::Sync
         ScannerT scanner_;
         bool recursive_{true};
         bool requireLocalNames_{false};
+        std::vector<std::string> excludedSuffixes_{};
         std::function<bool(WalkErrorType const&)> isUnreadable_{};
         ScanNode root_{};
         std::deque<QueuedDir> queue_{};

@@ -32,6 +32,8 @@ class LocalScanOperation : public Operation
         /// When true, the operation builds a sorted @ref SharedData::Sync::ScanNode tree
         /// instead of a flat entry vector.
         bool buildTree{false};
+        /** @brief Tree mode only: names ending in one of these, the temp files of transfers, stay excluded. */
+        std::vector<std::string> excludedSuffixes{};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -200,6 +202,7 @@ class LocalScanOperation : public Operation
     bool recursive_;
     bool ignoreHidden_;
     bool buildTree_;
+    std::vector<std::string> excludedSuffixes_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;

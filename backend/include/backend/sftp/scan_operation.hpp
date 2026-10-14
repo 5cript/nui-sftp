@@ -32,6 +32,8 @@ class ScanOperation : public Operation
         /// instead of a flat entry vector.  Only one shape is active at a time; use
         /// @ref ejectScanTree() in that case and @ref ejectEntries() otherwise.
         bool buildTree{false};
+        /** @brief Tree mode only: names ending in one of these, the temp files of transfers, stay excluded. */
+        std::vector<std::string> excludedSuffixes{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -179,6 +181,7 @@ class ScanOperation : public Operation
     bool recursive_;
     bool ignoreHidden_;
     bool buildTree_;
+    std::vector<std::string> excludedSuffixes_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;
