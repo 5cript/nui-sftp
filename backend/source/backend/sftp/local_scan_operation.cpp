@@ -1,5 +1,6 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include <utility/link_safe_remove.hpp>
+#include <utility/permissions.hpp>
 #include <log/log.hpp>
 #include <paths/native.hpp>
 
