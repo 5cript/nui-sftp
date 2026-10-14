@@ -675,7 +675,7 @@ const server = new Server({
                     return sftpStream.status(reqid, STATUS_CODE.OP_UNSUPPORTED);
                 });
 
-                sftpStream.on('MKDIR', (reqid, path) => {
+                sftpStream.on('MKDIR', (reqid, path, attrs) => {
                     path = resolveFileName(path);
 
                     logMessage('MKDIR', path);
@@ -693,7 +693,9 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
-                    parent.insert(directory({ name: pathUtil.basename(path) }));
+                    // Like mkdir(2): the requested mode, 0755 when none was sent.
+                    const mode = attrs && attrs.mode !== undefined ? attrs.mode : undefined;
+                    parent.insert(directory({ name: pathUtil.basename(path), stat: { mode } }));
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
                 });

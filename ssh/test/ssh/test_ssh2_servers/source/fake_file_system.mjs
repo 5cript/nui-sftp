@@ -75,7 +75,7 @@ const directory = ({ name, stat }, children) => {
         stat: {
             ...defaultStat,
             ...defined(stat),
-            mode: 0o755 | S_IFDIR
+            mode: (stat && stat.mode !== undefined ? stat.mode & 0o7777 : 0o755) | S_IFDIR
         },
         children: children || [],
         insert: function (entry) {

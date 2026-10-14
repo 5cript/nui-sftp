@@ -282,6 +282,36 @@ namespace Test
         EXPECT_EQ(doc1->contents, "Document 1 content");
     }
 
+    TEST_F(ArchiveDownloadOperationTests, EntryShorterThanScannedFailsTheArchive)
+    {
+        // A file that shrank after the scan must fail the archive instead of being zero padded.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const std::filesystem::path rootPath = "/home/test/Documents";
+        auto scan = runScan(*sftp, rootPath);
+        for (auto& entry : scan.entries)
+        {
+            if (entry.name == "doc1.txt")
+                entry.size += 100;
+        }
+
+        const auto archivePath = archiveDir_.path() / "short.tar";
+        ArchiveDownloadOperation operation{
+            *sftp,
+            {
+                .roots = {makeDirectoryEntry(rootPath.generic_string())},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+            }
+        };
+        operation.setScanResultForRoot(remote(rootPath.generic_string()), std::move(scan.entries), scan.totalBytes + 100);
+        const auto result = runToCompletion(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::SizeMismatch);
+        EXPECT_FALSE(std::filesystem::exists(archivePath));
+    }
+
     TEST_F(ArchiveDownloadOperationTests, DirectoryRootWithoutPrescanErrors)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
