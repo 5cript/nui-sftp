@@ -131,6 +131,14 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
             progressBar_.setZeroAsComplete();
     }
 
+    /**
+     * @brief Whether the transfer may replace its destination, so a resume asks for no more.
+     */
+    void allowOverwrite(bool allow)
+    {
+        allowOverwrite_ = allow;
+    }
+
     std::optional<ResumableOp> resumableDescriptor() const override
     {
         if (isCompletedState())

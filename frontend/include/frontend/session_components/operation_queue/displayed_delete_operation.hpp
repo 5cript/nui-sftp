@@ -30,6 +30,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
           }
         , displayPath_{std::move(displayPath)}
         , target_{std::move(target)}
+        , recursive_{scanning}
         , scanPhase_{scanning}
         , progressBar_({
               .height = std::string{progressHeight},
@@ -142,6 +143,8 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
     std::string displayPath_;
     /** @brief The remote item a single delete removes, unset for local and bulk deletes. */
     Paths::RemotePath target_;
+    /** @brief The delete scanned a directory, so it removes content and resumes doing the same. */
+    bool recursive_{false};
     ScanPhaseStatus scanPhase_;
     Components::ProgressBar progressBar_;
 };

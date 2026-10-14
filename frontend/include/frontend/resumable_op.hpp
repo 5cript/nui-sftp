@@ -15,6 +15,8 @@ namespace Resumable
     {
         Paths::RemotePath source{};
         Paths::LocalPath destination{};
+        /** @brief What the interrupted transfer was allowed, a resume must not replace more. */
+        bool allowOverwrite{false};
     };
 
     struct Upload

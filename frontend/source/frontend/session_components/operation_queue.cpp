@@ -670,7 +670,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedTransferOperation>(
+            auto card = std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Download,
                 *impl_->confirmDialog,
@@ -684,6 +684,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean,
                 localRefresh
             );
+            card->allowOverwrite(added.allowOverwrite.value_or(false));
+            return card;
         }
         else if (added.type == SharedData::OperationType::Upload)
         {
@@ -695,7 +697,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedTransferOperation>(
+            auto card = std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Upload,
                 *impl_->confirmDialog,
@@ -709,6 +711,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean,
                 remoteRefresh
             );
+            card->allowOverwrite(added.allowOverwrite.value_or(false));
+            return card;
         }
         else if (added.type == SharedData::OperationType::Scan)
         {

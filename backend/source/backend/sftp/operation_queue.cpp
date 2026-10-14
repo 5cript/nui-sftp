@@ -761,6 +761,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .totalBytes = result->size,
                 .localPath = localPath,
                 .remotePath = remotePath,
+                .allowOverwrite = allowOverwrite,
             }
         );
 
@@ -1337,6 +1338,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .insertRefresh = insertRefresh,
                 .localPath = localPath,
                 .remotePath = remotePath,
+                .allowOverwrite = allowOverwrite,
             }
         );
 

@@ -26,6 +26,8 @@ namespace SharedData
         std::optional<Paths::RemotePath> destination{};
         /** @brief The operation scans before it starts its own work. */
         std::optional<bool> scanPhase{};
+        /** @brief Single transfers: whether the destination may be replaced, a resume asks for the same. */
+        std::optional<bool> allowOverwrite{};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationAdded,
