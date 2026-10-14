@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <paths/native.hpp>
 #include <backend/process/environment.hpp>
 #include <utility/localized_message.hpp>
 
@@ -419,7 +420,7 @@ std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) con
         return std::string{"backend.opener.risk.program"};
     // Types a desktop starts as programs instead of showing them.
     static constexpr std::string_view runnable[] = {".desktop", ".appimage", ".run", ".jar"};
-    auto extension = path.extension().string();
+    auto extension = Paths::nativeToUtf8(path.extension());
     std::ranges::transform(extension, extension.begin(), [](unsigned char character) { return std::tolower(character); });
     if (std::ranges::find(runnable, std::string_view{extension}) != std::end(runnable))
         return std::string{"backend.opener.risk.dangerousType"};
@@ -428,7 +429,12 @@ std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) con
 
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)
 {
-    Log::info("Opener: openFile path='{}' openWith={} parentWindow='{}'", path.string(), openWith, impl_->parentWindow);
+    Log::info(
+        "Opener: openFile path='{}' openWith={} parentWindow='{}'",
+        Paths::nativeToUtf8(path),
+        openWith,
+        impl_->parentWindow
+    );
 
     if (!impl_->connection)
     {
@@ -439,7 +445,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     Utility::FdGuard fd{::open(path.c_str(), O_RDONLY)};
     if (!fd.valid())
     {
-        Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
+        Log::error("Opener: failed to open fd for '{}': {}", Paths::nativeToUtf8(path), std::strerror(errno));
         return std::unexpected{Utility::localizedMessage("backend.opener.openFileFailed", std::strerror(errno))};
     }
 
@@ -496,8 +502,7 @@ SharedData::OpenerCapabilities Opener::capabilities() const
 
 std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
 {
-    Log::info(
-        "Opener: openInFileManager path='{}' parentWindow='{}'", path.string(), impl_->parentWindow);
+    Log::info("Opener: openInFileManager path='{}' parentWindow='{}'", Paths::nativeToUtf8(path), impl_->parentWindow);
 
     if (!impl_->connection)
     {
@@ -512,7 +517,11 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
     {
         auto result = launchDefaultForPath(path);
         if (!result)
-            Log::error("Opener: g_app_info_launch_default_for_uri failed for '{}': {}", path.string(), result.error());
+            Log::error(
+                "Opener: g_app_info_launch_default_for_uri failed for '{}': {}",
+                Paths::nativeToUtf8(path),
+                result.error()
+            );
         return result;
     }
 
@@ -522,7 +531,7 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
     Utility::FdGuard fd{::open(path.c_str(), O_RDONLY)};
     if (!fd.valid())
     {
-        Log::error("Opener: failed to open fd for '{}': {}", path.string(), std::strerror(errno));
+        Log::error("Opener: failed to open fd for '{}': {}", Paths::nativeToUtf8(path), std::strerror(errno));
         return std::unexpected{Utility::localizedMessage("backend.opener.openFileFailed", std::strerror(errno))};
     }
 

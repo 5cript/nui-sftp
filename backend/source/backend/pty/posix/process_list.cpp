@@ -93,7 +93,7 @@ namespace PTY
                  iterator.increment(iterationError))
             {
                 auto const& entry = *iterator;
-                const auto id = entry.path().filename().string();
+                const auto id = entry.path().filename().native();
                 if (id.empty() ||
                     !std::all_of(
                         id.begin(),
@@ -110,7 +110,7 @@ namespace PTY
                 // Unreadable entries (other users' processes) fail here and are skipped.
                 std::error_code linkError;
                 const auto target = std::filesystem::read_symlink(entry.path() / "fd" / "0", linkError);
-                if (linkError || target.string() != terminalName)
+                if (linkError || target.native() != terminalName)
                     continue;
 
                 std::ifstream cmdlineFile{entry.path() / "cmdline"};

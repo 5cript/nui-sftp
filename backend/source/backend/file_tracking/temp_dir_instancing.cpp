@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
@@ -37,7 +38,9 @@ namespace FileTracking
             std::error_code err;
             std::filesystem::create_directories(dir, err);
             if (err)
-                throw std::runtime_error{"Failed to create instance directory: " + err.message()};
+                throw std::runtime_error{
+                    fmt::format("Failed to create instance directory: {}", Utility::errorMessage(err))
+                };
             return dir;
         }
 
@@ -265,7 +268,11 @@ namespace FileTracking
         std::error_code err;
         Utility::removeAllNoFollow(impl_->instanceDir, err);
         if (err)
-            Log::warn("cleanupNow: failed to remove '{}': {}", impl_->instanceDir.string(), err.message());
+            Log::warn(
+                "cleanupNow: failed to remove '{}': {}",
+                Paths::nativeToUtf8(impl_->instanceDir),
+                Utility::errorMessage(err)
+            );
 
         impl_->valid = false;
     }
@@ -306,7 +313,9 @@ namespace FileTracking
         }
         catch (std::exception const& exc)
         {
-            Log::error("writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, exc.what());
+            Log::error(
+                "writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, Utility::errorMessage(exc)
+            );
         }
     }
 }

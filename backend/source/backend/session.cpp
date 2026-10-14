@@ -1,4 +1,5 @@
 #include <backend/session.hpp>
+#include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/existence_check.hpp>
@@ -52,20 +53,7 @@ namespace
      * @brief A JSON request from the frontend, or the message to reply with when it does not parse. Paths are
      *        validated while parsing.
      */
-    template <typename RequestT>
-    std::expected<RequestT, std::string> parseRequest(nlohmann::json const& json, std::string_view what)
-    {
-        try
-        {
-            return json.get<RequestT>();
-        }
-        catch (std::exception const& exception)
-        {
-            return std::unexpected(fmt::format("Invalid {}: {}", what, exception.what()));
-        }
-    }
-
-    std::expected<std::vector<Paths::RemotePath>, std::string> parseRemotePaths(std::vector<std::string> const& paths)
+    nlohmann::json enqueuedReply(std::size_t enqueued)
     {
         std::vector<Paths::RemotePath> result;
         result.reserve(paths.size());
@@ -996,18 +984,12 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                // An invalid remote path fails the parse.
-                std::vector<SharedData::ArchiveDownloadRoot> roots;
-                try
-                {
-                    roots = nlohmann::json::parse(rootsJson).get<std::vector<SharedData::ArchiveDownloadRoot>>();
-                }
-                catch (std::exception const& exc)
-                {
-                    Log::error("addArchiveDownload: failed to parse roots JSON: {}", exc.what());
-                    return reply({{"error", std::string{"Invalid roots payload: "} + exc.what()}});
-                }
-                auto archivePath = parseLocalPath(localArchivePath);
+                auto roots = RpcHelper::parseRequest<std::vector<SharedData::ArchiveDownloadRoot>>(
+                    nlohmann::json::parse(rootsJson, nullptr, false), "archive roots"
+                );
+                if (!roots)
+                    return reply.error(roots.error());
+                auto archivePath = RpcHelper::parseLocalPath(localArchivePath);
                 if (!archivePath)
                     return reply.error(archivePath.error());
 
@@ -1631,15 +1613,11 @@ void Session::registerRpcSftpExecuteSyncSelection()
                 if (!self || !self->operationQueue_)
                     return reply.error("Session no longer exists");
 
-                SharedData::Sync::SyncExecutionRequest request{};
-                try
-                {
-                    request = requestJson.get<SharedData::Sync::SyncExecutionRequest>();
-                }
-                catch (std::exception const& exception)
-                {
-                    return reply.error(fmt::format("Invalid sync request: {}", exception.what()));
-                }
+                auto parsed =
+                    RpcHelper::parseRequest<SharedData::Sync::SyncExecutionRequest>(requestJson, "sync request");
+                if (!parsed)
+                    return reply.error(parsed.error());
+                auto request = *std::move(parsed);
 
                 auto session = self->operationQueue_->syncSession(request.syncSessionId);
                 if (!session)
@@ -1875,16 +1853,9 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                 if (!self)
                     return reply({{"error", "Session no longer exists"}});
 
-                // Parsed here, so an invalid target is answered with an error instead of no reply at all.
-                SharedData::BulkDeleteRequest request{};
-                try
-                {
-                    request = requestJson.get<SharedData::BulkDeleteRequest>();
-                }
-                catch (std::exception const& exception)
-                {
-                    return reply.error(fmt::format("Invalid bulk delete: {}", exception.what()));
-                }
+                auto request = RpcHelper::parseRequest<SharedData::BulkDeleteRequest>(requestJson, "bulk delete");
+                if (!request)
+                    return reply.error(request.error());
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),

@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_download_operation.hpp>
+#include <utility/error_message.hpp>
 #include <paths/native.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
@@ -50,10 +51,14 @@ BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPath
     const auto link = Utility::firstLinkBelow(common().localPath.native(), paths.local.native(), error);
     if (error)
     {
-        return std::unexpected(Error{
-            .type = ErrorType::FileStatFailed,
-            .extraInfo = fmt::format("Inspecting local directory: {}: {}", paths.local.toUtf8(), error.message())
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::FileStatFailed,
+                .extraInfo = fmt::format(
+                    "Inspecting local directory: {}: {}", paths.local.toUtf8(), Utility::errorMessage(error)
+                )
+            }
+        );
     }
     if (link)
     {
@@ -76,11 +81,17 @@ BulkDownloadOperation::createLocalDirectory(Paths::LocalPath const& localPath, S
     std::filesystem::create_directories(path, ec);
     if (ec)
     {
-        Log::error("BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message());
+        Log::error(
+            "BulkDownloadOperation: Failed to create local directory: {}: {}",
+            Paths::nativeToUtf8(path),
+            Utility::errorMessage(ec)
+        );
         return std::unexpected(
             Error{
                 .type = ErrorType::CannotCreateDirectory,
-                .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())
+                .extraInfo = fmt::format(
+                    "Creating local directory: {}: {}", Paths::nativeToUtf8(path), Utility::errorMessage(ec)
+                )
             }
         );
     }

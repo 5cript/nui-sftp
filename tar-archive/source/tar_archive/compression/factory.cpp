@@ -2,6 +2,7 @@
 
 #include <tar_archive/compression.hpp>
 #include <tar_archive/error.hpp>
+#include <paths/native.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,7 +28,7 @@ namespace TarArchive
 
         std::string lowercaseExtension(std::filesystem::path const& path)
         {
-            return toLower(path.extension().string());
+            return toLower(Paths::nativeToUtf8(path.extension()));
         }
 
         struct MagicSignature

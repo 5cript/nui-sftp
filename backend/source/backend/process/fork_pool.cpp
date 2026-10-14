@@ -1,4 +1,5 @@
 #include <backend/process/fork_pool.hpp>
+#include <utility/error_message.hpp>
 
 #include <backend/process/json_process_io.hpp>
 #include <backend/pty/posix/process_list.hpp>
@@ -249,8 +250,10 @@ namespace
             }
             catch (std::exception const& exc)
             {
-                spdlog::error("[worker] command exception: cmd='{}' id='{}' what='{}'", cmd, procId, exc.what());
-                sendJson({{"id", procId}, {"type", "error"}, {"message", exc.what()}});
+                spdlog::error(
+                    "[worker] command exception: cmd='{}' id='{}' what='{}'", cmd, procId, Utility::errorMessage(exc)
+                );
+                sendJson({{"id", procId}, {"type", "error"}, {"message", Utility::errorMessage(exc)}});
             }
         }
 
@@ -584,9 +587,7 @@ namespace
             auto logPath = Nui::resolvePath("%state_home2%/nui-sftp/logs/worker.log");
             std::error_code mkdirEc;
             std::filesystem::create_directories(logPath.parent_path(), mkdirEc);
-            return std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                logPath.string(), 2 * 1024 * 1024, 3, true
-            );
+            return std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath.native(), 2 * 1024 * 1024, 3, true);
         }
         catch (std::exception const&)
         {

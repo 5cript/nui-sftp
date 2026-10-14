@@ -1,4 +1,5 @@
 #include <backend/session_manager.hpp>
+#include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <log/log.hpp>
 
@@ -203,7 +204,9 @@ void SessionManager::addSession(
                                 // There should never anything throw here, but lets log just in case and dont let an
                                 // exception escape out of this lambda.
                                 Log::error(
-                                    "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), e.what()
+                                    "Failed to call Session::{}::onDisconnect: {}.",
+                                    sessionId.value(),
+                                    Utility::errorMessage(e)
                                 );
                             }
                         }
@@ -328,8 +331,8 @@ void SessionManager::registerRpcSessionDisconnect()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error disconnecting to ssh server: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error disconnecting to ssh server: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );
@@ -379,8 +382,8 @@ void SessionManager::registerRpcAdoptBulkResume()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error in adoptBulkResume: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error in adoptBulkResume: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );
@@ -404,8 +407,8 @@ void SessionManager::registerRpcDiscardBulkResume()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error in discardBulkResume: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error in discardBulkResume: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );

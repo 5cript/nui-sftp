@@ -15,6 +15,7 @@
 
 #include <backend/inspector_environment.hpp>
 #include <paths/local_path_segment.hpp>
+#include <paths/native.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <constants/persistence.hpp>
@@ -140,7 +141,7 @@ namespace
                 // Check if file exists and return 404 if not
                 if (!std::filesystem::exists(file))
                 {
-                    Log::error("File not found: '{}'", file.string());
+                    Log::error("File not found: '{}'", Paths::nativeToUtf8(file));
                     return CustomSchemeResponse{
                         .statusCode = 404,
                         .reasonPhrase = "Not Found",
@@ -150,11 +151,11 @@ namespace
                                 // Do not forget to allow CORS
                                 {"Access-Control-Allow-Origin"s, "*"s},
                             },
-                        .body = "Not Found: "s + file.string(),
+                        .body = fmt::format("Not Found: {}", Paths::nativeToUtf8(file)),
                     };
                 }
 
-                Log::debug("Serving file: '{}'", file.string());
+                Log::debug("Serving file: '{}'", Paths::nativeToUtf8(file));
 
                 // Stream the file body via bodyFile — avoids loading the whole file into memory
                 // (matters for large assets like DWARF blobs). Empty files yield a 204.
@@ -165,7 +166,7 @@ namespace
                 // Roar's MIME table has no entry for .wasm; emit application/wasm explicitly so that
                 // WebAssembly.instantiateStreaming() accepts the response and compiles the module as
                 // bytes arrive (otherwise the browser falls back to buffering the full binary first).
-                const auto ext = file.extension().string();
+                const auto ext = Paths::nativeToUtf8(file.extension());
                 const auto mime = (ext == ".wasm")
                     ? std::string{"application/wasm"}
                     : Roar::extensionToMime(ext).value_or("application/octet-stream");

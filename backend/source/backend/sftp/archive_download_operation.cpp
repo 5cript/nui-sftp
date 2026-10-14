@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <utility/error_message.hpp>
 #include <utility/download_mark.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
@@ -271,8 +272,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
         {
             Log::error(
                 "ArchiveDownloadOperation: cannot create parents of '{}': {}",
-                tempPath_.generic_string(),
-                mkErr.message()
+                Paths::nativeToUtf8(tempPath_),
+                Utility::errorMessage(mkErr)
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
@@ -291,7 +292,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     // Opening for writing follows a symlink planted at the temp path, out of the target directory.
     if (std::error_code linkError{}; std::filesystem::is_symlink(std::filesystem::symlink_status(tempPath_, linkError)))
     {
-        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", tempPath_.generic_string());
+        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", Paths::nativeToUtf8(tempPath_));
         return std::unexpected(Error{.type = ErrorType::OpenFailure, .extraInfo = "The temporary file path is a symlink"});
     }
 
@@ -658,7 +659,9 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
     if (options_.markAsDownloaded)
     {
         if (const auto marked = Utility::markAsDownloaded(tempPath_); marked)
-            Log::warn("ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", marked.message());
+            Log::warn(
+                "ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", Utility::errorMessage(marked)
+            );
     }
 
     if (const auto moved = Utility::moveIntoPlace(tempPath_, localArchiveNativePath_, options_.mayOverwrite); !moved)

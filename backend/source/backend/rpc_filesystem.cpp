@@ -1,4 +1,5 @@
 #include <backend/rpc_filesystem.hpp>
+#include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <log/log.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -196,66 +197,6 @@ RpcFilesystem::RpcFilesystem(
     registerOpenerCapabilities();
 }
 
-void RpcFilesystem::registerRemove()
-{
-    on("RpcFilesystem::remove")
-        .perform(
-            [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
-            {
-                if (options_.preventDeletion)
-                {
-                    Log::warn("RpcFilesystem::remove called but deletion is prevented by configuration.");
-                    return reply.error("backend.rpcFilesystem.deletionPrevented");
-                }
-
-                Log::info("RpcFilesystem::remove called with parameters: {}", parameters.dump(4));
-
-                if (!RpcHelper::ParameterVerifyView{reply, "RpcFilesystem::remove", parameters}.hasValueDeep("path"))
-                {
-                    Log::error("RpcFilesystem::remove missing required parameter 'path'.");
-                    return reply.error("Missing required parameter 'path'.");
-                }
-
-                const bool recursive = parameters.value("recursive", false);
-                const auto pathUtf8 = parameters["path"].get<std::string>();
-                const auto target = localDeleteTarget(pathUtf8, localHomeDirectories());
-                if (!target)
-                {
-                    Log::error("RpcFilesystem::remove refused: {}", target.error());
-                    return reply.error(Utility::localizedMessage("backend.rpcFilesystem.removeRefused", pathUtf8));
-                }
-                const auto path = target->native();
-
-                if (!recursive)
-                {
-                    std::error_code ec;
-                    if (std::filesystem::remove(path, ec))
-                    {
-                        Log::info("Successfully removed file: {}", pathUtf8);
-                        return reply({{"success", true}});
-                    }
-
-                    Log::error("Failed to remove file: {}: {}", pathUtf8, ec.message());
-                    return reply.error(ec.message());
-                }
-
-                std::error_code ec;
-                const auto filesRemoved = Utility::removeAllNoFollow(path, ec);
-                if (ec)
-                {
-                    Log::error("Failed to recursively remove path: {}: {}", pathUtf8, ec.message());
-                    return reply.error(ec.message());
-                }
-                Log::info(
-                    "Successfully recursively removed path: {} ({} files/directories removed)",
-                    pathUtf8,
-                    filesRemoved
-                );
-                return reply({{"success", true}, {"removedCount", filesRemoved}});
-            }
-        );
-}
-
 void RpcFilesystem::registerRemoveMultiple()
 {
     on("RpcFilesystem::removeSome")
@@ -281,24 +222,10 @@ void RpcFilesystem::registerRemoveMultiple()
                 const auto removal = removeLocalItems(pathsUtf8, localHomeDirectories());
                 if (!removal)
                 {
-                    const auto path = target.native();
-                    const auto& pathUtf8 = target.toUtf8();
-                    std::error_code ec;
-                    if (recursive)
-                    {
-                        removedCount += Utility::removeAllNoFollow(path, ec);
-                    }
-                    else
-                    {
-                        if (std::filesystem::remove(path, ec))
-                            ++removedCount;
-                    }
-
-                    if (ec)
-                    {
-                        Log::error("Failed to remove path '{}': {}", pathUtf8, ec.message());
-                        failures.push_back(fmt::format("{}: {}", pathUtf8, ec.message()));
-                    }
+                    Log::error("RpcFilesystem::removeSome refused: {}", removal.error().reason);
+                    return reply.error(
+                        Utility::localizedMessage("backend.rpcFilesystem.removeRefused", removal.error().path)
+                    );
                 }
                 if (!failures.empty())
                 {
@@ -401,9 +328,11 @@ void RpcFilesystem::registerListFiles()
                 if (ec)
                 {
                     Log::error(
-                        "Failed to list files in directory '{}': {}", Paths::nativeToUtf8(directoryPath), ec.message()
+                        "Failed to list files in directory '{}': {}",
+                        Paths::nativeToUtf8(directoryPath),
+                        Utility::errorMessage(ec)
                     );
-                    return reply.error(ec.message());
+                    return reply.error(Utility::errorMessage(ec));
                 }
 
 #ifndef _WIN32
@@ -484,8 +413,8 @@ void RpcFilesystem::registerCreateFile()
                 std::ofstream fileStream(filePath, std::ios_base::noreplace | std::ios_base::binary);
                 if (!fileStream)
                 {
-                    Log::error("Failed to create file '{}': {}", filePathUtf8, ec.message());
-                    return reply.error(ec.message());
+                    Log::error("Failed to create file '{}': {}", filePathUtf8, Utility::errorMessage(ec));
+                    return reply.error(Utility::errorMessage(ec));
                 }
 
                 Log::info("Successfully created file '{}'", filePathUtf8);
@@ -527,8 +456,8 @@ void RpcFilesystem::registerCreateDirectory()
                 std::filesystem::create_directory(directoryPath, ec);
                 if (ec)
                 {
-                    Log::error("Failed to create directory '{}': {}", directoryPathUtf8, ec.message());
-                    return reply.error(ec.message());
+                    Log::error("Failed to create directory '{}': {}", directoryPathUtf8, Utility::errorMessage(ec));
+                    return reply.error(Utility::errorMessage(ec));
                 }
 
                 Log::info("Successfully created directory '{}'", directoryPathUtf8);
@@ -570,8 +499,12 @@ void RpcFilesystem::registerProperties()
                 const auto symStatus = std::filesystem::symlink_status(path, symEc);
                 if (symEc)
                 {
-                    Log::error("Failed to get properties for path '{}': {}", Paths::nativeToUtf8(path), symEc.message());
-                    return reply.error(symEc.message());
+                    Log::error(
+                        "Failed to get properties for path '{}': {}",
+                        Paths::nativeToUtf8(path),
+                        Utility::errorMessage(symEc)
+                    );
+                    return reply.error(Utility::errorMessage(symEc));
                 }
                 entry.type = SharedData::fileTypeFromStdFilesystemType(symStatus.type());
                 entry.permissions = symStatus.permissions();
@@ -679,8 +612,8 @@ void RpcFilesystem::registerDoesExist()
                 const auto status = std::filesystem::exists(*path, ec);
                 if (ec)
                 {
-                    Log::error("Failed to get properties for path '{}': {}", pathUtf8, ec.message());
-                    return reply.error(ec.message());
+                    Log::error("Failed to get properties for path '{}': {}", pathUtf8, Utility::errorMessage(ec));
+                    return reply.error(Utility::errorMessage(ec));
                 }
 
                 Log::info("Successfully retrieved existence for path '{}'", pathUtf8);

@@ -1,8 +1,10 @@
 #include <backend/process/boost_process.hpp>
 
 #include <backend/process/environment.hpp>
+#include <paths/utf8.hpp>
 
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -13,6 +15,20 @@ namespace
 {
     constexpr std::string_view originalValuePrefix = "NUI_SFTP_APPIMAGE_ORIGINAL_";
     constexpr std::string_view unsetMarkerPrefix = "NUI_SFTP_APPIMAGE_UNSET_";
+
+    /**
+     * @brief The text of an environment key or value as UTF-8, converted from the wide text on Windows.
+     */
+    template <typename ViewT>
+    std::string utf8Of(ViewT const& view)
+    {
+        const auto native = view.native();
+#ifdef _WIN32
+        return Paths::wideToUtf8(std::wstring_view{native.data(), native.size()});
+#else
+        return std::string{native.data(), native.size()};
+#endif
+    }
 }
 
 Environment::Environment(
@@ -38,17 +54,7 @@ void Environment::loadFromCurrent()
     for (auto iter = currentEnv.begin(); iter != currentEnv.end(); ++iter)
     {
         auto deref = *iter;
-        environment_.emplace(
-            [&]() {
-                if (deref.key().size() > 0)
-                    return deref.key().string();
-                return std::string{};
-            }(),
-            [&]() {
-                if (deref.value().size() > 0)
-                    return deref.value().string();
-                return std::string{};
-            }());
+        environment_.emplace(utf8Of(deref.key()), utf8Of(deref.value()));
     }
     restoreHostEnvironment();
 }

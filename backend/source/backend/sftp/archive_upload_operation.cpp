@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_upload_operation.hpp>
+#include <utility/error_message.hpp>
 
 #include <tar_archive/error.hpp>
 
@@ -92,8 +93,8 @@ namespace
         {
             Log::warn(
                 "ArchiveUploadOperation: cannot stat '{}': {}",
-                localPath.generic_string(),
-                statErr.message()
+                Paths::nativeToUtf8(localPath),
+                Utility::errorMessage(statErr)
             );
             return std::nullopt;
         }

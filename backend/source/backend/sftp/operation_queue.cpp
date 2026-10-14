@@ -1,4 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
@@ -1284,7 +1285,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
     if (ec)
     {
-        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), ec.message());
+        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(ec));
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
     }
 
@@ -1295,7 +1296,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         stat = std::filesystem::status(localNativePath, ec);
         if (ec)
         {
-            Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), ec.message());
+            Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(ec));
             return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
         }
     }

@@ -1,4 +1,5 @@
 #include <backend/local_delete_guard.hpp>
+#include <utility/error_message.hpp>
 #include <log/log.hpp>
 
 #include <fmt/format.h>

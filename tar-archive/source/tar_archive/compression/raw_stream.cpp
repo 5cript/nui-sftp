@@ -2,6 +2,9 @@
 
 #include <tar_archive/compression.hpp>
 #include <tar_archive/error.hpp>
+#include <paths/native.hpp>
+
+#include <fmt/format.h>
 
 #include <cerrno>
 #include <cstring>
@@ -15,9 +18,7 @@ namespace TarArchive::Detail
         std::ofstream output{path, std::ios::binary | std::ios::trunc};
         if (!output.is_open())
             return std::unexpected(makeError(
-                TarErrorCode::IoError,
-                "could not open '" + path.string() + "' for writing",
-                errno
+                TarErrorCode::IoError, fmt::format("could not open '{}' for writing", Paths::nativeToUtf8(path)), errno
             ));
         return output;
     }
@@ -26,14 +27,12 @@ namespace TarArchive::Detail
     {
         if (!std::filesystem::exists(path))
             return std::unexpected(makeError(
-                TarErrorCode::FileNotFound, "archive does not exist: " + path.string()
+                TarErrorCode::FileNotFound, fmt::format("archive does not exist: {}", Paths::nativeToUtf8(path))
             ));
         std::ifstream input{path, std::ios::binary};
         if (!input.is_open())
             return std::unexpected(makeError(
-                TarErrorCode::IoError,
-                "could not open '" + path.string() + "' for reading",
-                errno
+                TarErrorCode::IoError, fmt::format("could not open '{}' for reading", Paths::nativeToUtf8(path)), errno
             ));
         return input;
     }

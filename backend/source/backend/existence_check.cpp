@@ -1,4 +1,5 @@
 #include <backend/existence_check.hpp>
+#include <utility/error_message.hpp>
 #include <paths/paths.hpp>
 
 #include <fmt/format.h>
@@ -26,7 +27,7 @@ std::expected<std::vector<bool>, std::string> localPathsExist(std::vector<std::s
             continue;
         }
         if (ec)
-            return std::unexpected(fmt::format("'{}': {}", pathUtf8, ec.message()));
+            return std::unexpected(fmt::format("'{}': {}", path.toUtf8(), Utility::errorMessage(ec)));
         results.push_back(true);
     }
     return results;

@@ -1,4 +1,5 @@
 #include <backend/sftp/local_scan_operation.hpp>
+#include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
 #include <log/log.hpp>
@@ -158,10 +159,11 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
         }
         catch (const std::filesystem::filesystem_error& e)
         {
-            Log::error("LocalScanOperation: Filesystem error while scanning '{}': {}", path.generic_string(), e.what());
-            return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-                {.type = ErrorType::FilesystemError, .extraInfo = e.what()}
-            );
+            // A name that is no segment cannot match a rule, the walker rejects it.
+            const auto segment = Paths::PathSegment::make(name);
+            if (segment &&
+                ignoreMatcher_.isIgnored(relative / *segment, type == SharedData::DirectoryEntry::FileType::Directory))
+                continue;
         }
     }
     return {std::move(entries)};
@@ -179,7 +181,9 @@ LocalScanOperation::listingFailed(
         errorCode == std::errc::permission_denied || errorCode == std::errc::no_such_file_or_directory;
     if (belowRoot && deniedOrVanished)
     {
-        Log::warn("LocalScanOperation: Cannot list '{}': {}", path.generic_string(), errorCode.message());
+        Log::warn(
+            "LocalScanOperation: Cannot list '{}': {}", Paths::nativeToUtf8(path), Utility::errorMessage(errorCode)
+        );
         if (!buildTree_)
         {
             // Left out of the entries, the consumer reports it instead of transferring an empty directory.
@@ -189,13 +193,15 @@ LocalScanOperation::listingFailed(
         return std::unexpected(
             Error{
                 .type = ErrorType::DirectoryUnreadable,
-                .extraInfo = fmt::format("{}: {}", path.generic_string(), errorCode.message()),
+                .extraInfo = fmt::format("{}: {}", Paths::nativeToUtf8(path), Utility::errorMessage(errorCode)),
             }
         );
     }
-    Log::error("LocalScanOperation: Failed to list '{}': {}", path.generic_string(), errorCode.message());
+    Log::error(
+        "LocalScanOperation: Failed to list '{}': {}", Paths::nativeToUtf8(path), Utility::errorMessage(errorCode)
+    );
     return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-        {.type = ErrorType::FilesystemError, .extraInfo = errorCode.message()}
+        {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(errorCode)}
     );
 }
 

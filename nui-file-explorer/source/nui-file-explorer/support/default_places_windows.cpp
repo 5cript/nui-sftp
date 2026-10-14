@@ -1,4 +1,5 @@
 #include <nui-file-explorer/support/default_places.hpp>
+#include <paths/native.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -9,6 +10,7 @@
 #include <shlobj.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace NuiFileExplorer
@@ -18,13 +20,11 @@ namespace NuiFileExplorer
         std::string resolveKnownFolder(KNOWNFOLDERID const& folderId)
         {
             PWSTR path = nullptr;
-            if (SUCCEEDED(SHGetKnownFolderPath(folderId, KF_FLAG_DEFAULT, nullptr, &path)))
-            {
-                std::wstring wide{path};
-                CoTaskMemFree(path);
-                return std::filesystem::path{wide}.generic_string();
-            }
-            return {};
+            const auto result = SHGetKnownFolderPath(folderId, KF_FLAG_DEFAULT, nullptr, &path);
+            const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned{path, &CoTaskMemFree};
+            if (FAILED(result) || !owned)
+                return {};
+            return Paths::nativeToUtf8(std::filesystem::path{owned.get()});
         }
 
         struct FolderDef

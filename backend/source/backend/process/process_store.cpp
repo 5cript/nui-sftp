@@ -1,4 +1,5 @@
 #include <backend/process/process_store.hpp>
+#include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 
 #include <backend/process/boost_process.hpp>

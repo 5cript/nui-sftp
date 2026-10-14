@@ -1,4 +1,5 @@
 #include <backend/sftp/download_operation.hpp>
+#include <utility/error_message.hpp>
 #include <backend/sftp/resume_check.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
@@ -271,7 +272,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
             Log::error(
                 "DownloadOperation: Failed to create parent dirs for symlink '{}': {}.",
                 options_.localPath.toUtf8(),
-                ec.message()
+                Utility::errorMessage(ec)
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
@@ -427,7 +428,9 @@ DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
         link = path;
     if (error)
     {
-        Log::error("DownloadOperation: Cannot inspect '{}': {}.", Paths::nativeToUtf8(path), error.message());
+        Log::error(
+            "DownloadOperation: Cannot inspect '{}': {}.", Paths::nativeToUtf8(path), Utility::errorMessage(error)
+        );
         return std::unexpected(Error{.type = ErrorType::FileStatFailed, .extraInfo = Paths::nativeToUtf8(path)});
     }
     if (link)
@@ -461,7 +464,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
             Log::error(
                 "DownloadOperation: Failed to create parent directories for '{}': {}.",
                 Paths::nativeToUtf8(tempPath),
-                mkErr.message()
+                Utility::errorMessage(mkErr)
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
@@ -825,7 +828,11 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     if (options_.markAsDownloaded)
     {
         if (const auto marked = Utility::markAsDownloaded(tempPath); marked)
-            Log::warn("DownloadOperation: Cannot mark '{}' as downloaded: {}", Paths::nativeToUtf8(tempPath), marked.message());
+            Log::warn(
+                "DownloadOperation: Cannot mark '{}' as downloaded: {}",
+                Paths::nativeToUtf8(tempPath),
+                Utility::errorMessage(marked)
+            );
     }
 
     // Times and permissions go on the temp file, so nothing can fail once the destination is replaced.

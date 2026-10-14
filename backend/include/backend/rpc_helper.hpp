@@ -300,7 +300,7 @@ namespace RpcHelper
             }
             catch (const std::exception& e)
             {
-                (*rpcOnce)({{"error", e.what()}});
+                (*rpcOnce)({{"error", Utility::errorMessage(e)}});
             }
         };
     }
@@ -418,7 +418,7 @@ namespace RpcHelper
                 [func = std::forward<decltype(func)>(func)](auto const& ec)
                 {
                     if (ec)
-                        Log::info("Timer canceled in within_strand_do_delayed: {}", ec.message());
+                        Log::info("Timer canceled in within_strand_do_delayed: {}", Utility::errorMessage(ec));
 
                     // Run func anyway, if its because of a shutdown, it will stop early.
                     func();
