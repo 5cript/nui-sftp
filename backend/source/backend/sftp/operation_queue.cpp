@@ -2060,8 +2060,8 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     if (failedTargets > 0)
         Log::warn("Bulk delete: {} items were refused, they are reported as failed", failedTargets);
 
-    // Parent of the first item, so the card can read "Deleting items in <dir>" before any progress arrives.
-    const auto commonParent = request.entries.front().target.parent().value_or(Paths::RemotePath::root());
+    // The card reads "Deleting items in <dir>" before any progress arrives.
+    const auto commonParent = commonParentOf(request.entries, &SharedData::BulkDeleteEntry::target);
     const auto fileCount = fileTargets.size();
     operation->setTargets(std::move(fileTargets));
     targetQueue.emplace_back(bulkOperationId, std::move(operation));

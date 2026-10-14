@@ -160,16 +160,6 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
         std::string const& parentRelKey
     );
 
-    /**
-     * @brief Computes the enqueue plan from a SPARSE selection set: an entry X in
-     *        @p selectedRelKeys means "X and every descendant is selected".  See
-     *        @ref SharedData::Sync::DiffTreeStore::buildPlan.  Precondition: running on @ref strand().
-     */
-    std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
-        SharedData::Sync::DiffSection section,
-        std::unordered_set<std::string> const& selectedRelKeys
-    ) const;
-
     struct ResolvedPlanEntry
     {
         SharedData::Sync::EnqueuePlanEntry entry;
@@ -194,6 +184,10 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     ) const;
 
   private:
+    std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
+        SharedData::Sync::DiffSection section,
+        std::unordered_set<std::string> const& selectedRelKeys
+    ) const;
     SharedData::Sync::DiffTreeStore& storeFor(SharedData::Sync::DiffSection section);
     SharedData::Sync::DiffTreeStore const& storeFor(SharedData::Sync::DiffSection section) const;
     SharedData::Sync::ScanTrees scanTrees() const;

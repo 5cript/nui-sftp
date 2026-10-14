@@ -1617,8 +1617,7 @@ void Session::registerRpcSftpLoadSyncDiffChildren()
 
 void Session::registerRpcSftpExecuteSyncSelection()
 {
-    // The backend plans the selection and resolves every row below its own sync roots, so no absolute path
-    // round-trips through the frontend.
+    // Plans the selection and resolves every row below the sync roots of the session.
     on(fmt::format("Session::{}::sftp::executeSyncSelection", id_.value()))
         .perform(
             [weak = weak_from_this()](

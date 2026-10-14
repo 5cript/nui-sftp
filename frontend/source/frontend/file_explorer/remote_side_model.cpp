@@ -514,10 +514,8 @@ void RemoteSideModel::enqueueDeletes(
     std::vector<Paths::RemotePath> filesAndEmptyDirs
 )
 {
-    // Combine into a single bulk-delete request.  File / empty-dir entries
-    // become one bulk-delete card; non-empty directories become individual
-    // Scan+Delete pairs (their isDirectory=true triggers the recursive flow
-    // backend-side).  One RPC for the whole user action.
+    // One bulk-delete request and card for the whole user action. Non-empty directories are scanned and deleted
+    // with their content by the backend (isDirectory), files and empty directories are deleted as they are.
     std::vector<SharedData::BulkDeleteEntry> entries;
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
     for (auto& path : filesAndEmptyDirs)
