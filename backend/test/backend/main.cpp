@@ -28,6 +28,7 @@
 #include "test_operation_queue.hpp"
 #include "test_existence_check.hpp"
 #include "test_opener_risk.hpp"
+#include "test_rpc_helper.hpp"
 
 #include <log/log.hpp>
 
