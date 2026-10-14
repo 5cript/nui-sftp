@@ -2,6 +2,7 @@
 
 #include <backend/sftp/archive_upload_operation.hpp>
 #include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include "real_server_tests.hpp"
 
@@ -81,6 +82,36 @@ namespace Test
       protected:
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
     };
+
+    TEST_F(TransferFailureTests, RenameThatTimedOutRunsAfterTheOperationIsGone)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        std::promise<void> release{};
+        auto blocked = sftp->performPromise(
+            [released = release.get_future().share()]()
+            {
+                released.wait();
+            }
+        );
+        {
+            RenameOperation operation{
+                sftp,
+                {
+                    .sourcePath = remote("/home/test/file1.txt"),
+                    .destinationPath = remote("/home/test/moved.txt"),
+                    .futureTimeout = std::chrono::seconds{1},
+                }
+            };
+            const auto result = operation.work();
+            ASSERT_FALSE(result.has_value());
+            EXPECT_EQ(result.error().type, Operation::ErrorType::FutureTimeout);
+        }
+        release.set_value();
+        blocked.wait();
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/moved.txt"), "Fake file content");
+    }
 
     TEST_F(TransferFailureTests, AsyncDownloadReadFailureKeepsExistingFile)
     {
