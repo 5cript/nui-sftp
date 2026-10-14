@@ -17,6 +17,7 @@
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <constants/persistence.hpp>
+#include <utility/permissions.hpp>
 #include <utility/resources.hpp>
 #include <version.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
@@ -443,6 +444,8 @@ void Main::startChildSignalTimer()
 
 int main(int const argc, char const* const* argv)
 {
+    // Reading the umask changes it for a moment on macOS, so it is read before any thread creates files.
+    static_cast<void>(Utility::processUmask());
 #ifdef _WIN32
     // A GUI program has no console; help and --console write to the one it was started from.
     for (int index = 1; index < argc; ++index)

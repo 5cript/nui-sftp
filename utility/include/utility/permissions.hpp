@@ -17,7 +17,8 @@ namespace Utility
     std::optional<std::filesystem::perms> sanitizePermissions(std::filesystem::perms permissions);
 
     /**
-     * @brief The file mode creation mask of this process, empty where there is none.
+     * @brief The file mode creation mask of this process, empty where there is none. Read once; outside Linux
+     *        reading it sets it for a moment, so the first call has to happen before other threads create files.
      */
     std::filesystem::perms processUmask();
 
