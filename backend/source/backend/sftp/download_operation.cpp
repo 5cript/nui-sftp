@@ -256,6 +256,13 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
 
+    // An existing link at the leaf makes creating the new one fail, only the directories above it matter.
+    if (!options_.linkFreeRoot.empty())
+    {
+        if (const auto refused = refuseLinkedPath(localNativePath_.parent_path()); !refused)
+            return refused;
+    }
+
     std::error_code ec{};
     if (options_.createMissingDirectories)
     {
@@ -379,10 +386,41 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
 }
 
 std::expected<void, DownloadOperation::Error>
+DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
+{
+    std::error_code error{};
+    std::optional<std::filesystem::path> link{};
+    if (!options_.linkFreeRoot.empty())
+        link = Utility::firstLinkBelow(options_.linkFreeRoot.native(), path, error);
+    else if (Utility::isLinkOrJunction(path, error))
+        link = path;
+    if (error)
+    {
+        Log::error("DownloadOperation: Cannot inspect '{}': {}.", Paths::nativeToUtf8(path), error.message());
+        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .extraInfo = Paths::nativeToUtf8(path)});
+    }
+    if (link)
+    {
+        Log::error("DownloadOperation: '{}' runs through the link '{}'.", Paths::nativeToUtf8(path), Paths::nativeToUtf8(*link));
+        return std::unexpected(
+            Error{
+                .type = ErrorType::LinkInLocalPath,
+                .extraInfo = fmt::format("The local path runs through a link: {}", Paths::nativeToUtf8(*link))
+            }
+        );
+    }
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error>
 DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
     auto tempPath = localNativePath_;
     tempPath += options_.tempFileSuffix;
+
+    // Opening for writing follows a link planted at the temp path or above it, out of the target directory.
+    if (const auto refused = refuseLinkedPath(tempPath); !refused)
+        return refused;
 
     if (options_.createMissingDirectories)
     {

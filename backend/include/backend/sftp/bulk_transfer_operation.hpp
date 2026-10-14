@@ -236,6 +236,15 @@ class BulkTransferOperation : public Operation
     virtual bool isSkippableError(Error const& error) const = 0;
 
     /**
+     * @brief Whether a directory that could not be created may be recorded and skipped instead of failing the bulk.
+     *        Its descendants then fail on their own.
+     */
+    virtual bool isSkippableDirectoryError(Error const&) const
+    {
+        return false;
+    }
+
+    /**
      * @brief Log prefix, e.g. "BulkDownloadOperation".
      */
     virtual std::string_view logName() const noexcept = 0;

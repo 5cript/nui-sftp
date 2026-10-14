@@ -2,6 +2,7 @@
 #include <paths/native.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
+#include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
 
 namespace
@@ -42,6 +43,24 @@ BulkDownloadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& roo
 std::expected<void, BulkDownloadOperation::Error>
 BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
 {
+    // create_directories follows a link planted inside the tree and would create and fill directories outside it.
+    std::error_code error{};
+    const auto link = Utility::firstLinkBelow(common().localPath.native(), paths.local.native(), error);
+    if (error)
+    {
+        return std::unexpected(Error{
+            .type = ErrorType::FileStatFailed,
+            .extraInfo = fmt::format("Inspecting local directory: {}: {}", paths.local.toUtf8(), error.message())
+        });
+    }
+    if (link)
+    {
+        Log::error("BulkDownloadOperation: '{}' runs through the link '{}'.", paths.local.toUtf8(), Paths::nativeToUtf8(*link));
+        return std::unexpected(Error{
+            .type = ErrorType::LinkInLocalPath,
+            .extraInfo = fmt::format("The local path runs through a link: {}", Paths::nativeToUtf8(*link))
+        });
+    }
     return createLocalDirectory(paths.local, entries()[entryIndex]);
 }
 
@@ -83,6 +102,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
         onProgress(current, max);
     };
     downloadOptions.entry = entry;
+    downloadOptions.linkFreeRoot = common().localPath;
 
     return std::make_unique<DownloadOperation>(sftp(), std::move(downloadOptions));
 }
@@ -91,11 +111,17 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
 {
     // Missing or unreadable single files, and local files that cannot be written, do not compromise
     // the rest of the bulk.
-    if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory)
+    if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory ||
+        error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists)
         return true;
     return error.sftpError &&
         (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
             error.sftpError->sftpError == SSH_FX_FAILURE);
+}
+
+bool BulkDownloadOperation::isSkippableDirectoryError(Error const& error) const
+{
+    return error.type == ErrorType::LinkInLocalPath;
 }
 
 std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPermsToDirectory(

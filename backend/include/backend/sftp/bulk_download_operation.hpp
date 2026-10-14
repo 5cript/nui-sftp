@@ -62,6 +62,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::function<void(std::uint64_t, std::uint64_t)> onProgress
     ) override;
     bool isSkippableError(Error const& error) const override;
+    bool isSkippableDirectoryError(Error const& error) const override;
 
     bool sourceIsRemote() const noexcept override
     {

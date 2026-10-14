@@ -237,7 +237,13 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
             // it exists. Scan order lists parents before children.
             const auto result = createDirectoryInStrand(index, *paths);
             if (!result.has_value())
-                return std::unexpected(result.error());
+            {
+                if (!isSkippableDirectoryError(result.error()))
+                    return std::unexpected(result.error());
+                Log::warn("{}: Skipping directory '{}': {}", logName(), displayPath(index), result.error().toString());
+                failedEntries_.emplace_back(failureSource(index), result.error());
+                failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+            }
             ++completedEntries_;
             ++directoriesCreated;
             continue;

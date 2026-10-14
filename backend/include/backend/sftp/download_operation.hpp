@@ -44,6 +44,11 @@ class DownloadOperation : public Operation
          *         may not yet exist locally.
          */
         bool createMissingDirectories{false};
+        /**
+         * @brief When set, a local path running through a symlink or junction below this directory is refused, so
+         *        a link planted inside a downloaded tree cannot redirect the download out of it.
+         */
+        Paths::LocalPath linkFreeRoot{};
     };
 
     SecureShell::ProcessingStrand* strand() const override
@@ -123,6 +128,12 @@ class DownloadOperation : public Operation
     std::expected<void, Error> prepareInStrand();
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
+
+    /**
+     * @brief Refuses @p path when it runs through a symlink or junction, below the link free root when one is set,
+     *        otherwise only at @p path itself.
+     */
+    std::expected<void, Error> refuseLinkedPath(std::filesystem::path const& path) const;
 
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
     readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
