@@ -2,6 +2,7 @@
 
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_walkers.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
 #include <shared_data/sync/scan_node.hpp>
