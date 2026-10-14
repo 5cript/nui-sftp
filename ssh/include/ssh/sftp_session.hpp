@@ -351,6 +351,19 @@ namespace SecureShell
         std::expected<Paths::RemotePath, Error> homeDirectoryInStrand();
 
         /**
+         * @brief The directory the server starts the user in, resolved by the server (realpath of "." on OpenSSH),
+         *        without any fallback: an error when the server does not answer with an absolute path. Must be
+         *        called from within the processing thread.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalHomeDirectoryInStrand();
+
+        /**
+         * @brief The server's canonical form of the existing @p path, with every symlink resolved (realpath on
+         *        OpenSSH). Must be called from within the processing thread.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalPathInStrand(Paths::RemotePath const& path);
+
+        /**
          * @brief Reads the XDG user directories from <home>/.config/user-dirs.dirs. A missing file yields no
          * directories instead of an error.
          *
@@ -432,6 +445,11 @@ namespace SecureShell
          * @brief Refuses an unset path before it reaches the server.
          */
         static std::expected<void, Error> requireSet(Paths::RemotePath const& path);
+
+        /**
+         * @brief The absolute path the server canonicalizes @p path to.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
 
         static SftpError alreadyExists(Paths::RemotePath const& destination);
 

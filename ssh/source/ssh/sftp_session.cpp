@@ -746,17 +746,45 @@ namespace SecureShell
         );
     }
 
-    std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::homeDirectoryInStrand()
+    std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::canonicalizeInStrand(char const* path)
     {
         assert(strand_->withinProcessingThread());
         const std::unique_ptr<char, decltype(&ssh_string_free_char)> canonical{
-            sftp_canonicalize_path(session_, "."), ssh_string_free_char
+            sftp_canonicalize_path(session_, path), ssh_string_free_char
         };
-        if (canonical != nullptr && canonical.get()[0] == '/')
-        {
-            if (auto home = Paths::RemotePath::make(canonical.get()); home)
-                return *std::move(home);
-        }
+        if (canonical == nullptr)
+            return std::unexpected(lastError());
+        return Paths::RemotePath::make(canonical.get())
+            .transform_error(
+                [](Paths::PathError const& error)
+                {
+                    return Error{
+                        .message = fmt::format("The server canonicalized to {}", error.toString()),
+                        .sftpError = SSH_FX_FAILURE,
+                        .wrapperError = WrapperErrors::InvalidPath,
+                    };
+                }
+            );
+    }
+
+    std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::canonicalHomeDirectoryInStrand()
+    {
+        return canonicalizeInStrand(".");
+    }
+
+    std::expected<Paths::RemotePath, SftpSession::Error>
+    SftpSession::canonicalPathInStrand(Paths::RemotePath const& path)
+    {
+        if (auto valid = requireSetInStrand(path); !valid)
+            return std::unexpected(valid.error());
+        return canonicalizeInStrand(path.c_str());
+    }
+
+    std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::homeDirectoryInStrand()
+    {
+        assert(strand_->withinProcessingThread());
+        if (auto home = canonicalHomeDirectoryInStrand(); home)
+            return home;
 
         char* rawUser = nullptr;
         const auto optionResult = ssh_options_get(session_->session, SSH_OPTIONS_USER, &rawUser);
