@@ -1140,6 +1140,7 @@ backend:
     targetExists: "An item with this name already exists."
     invalidName: "The new name must be a plain name in the same directory."
   rpcFilesystem:
+    fileExists: "'{}' already exists and was not replaced."
     deletionPrevented: "File deletion is prevented by configuration."
     renamePrevented: "File renaming is prevented by configuration."
     createFilePrevented: "File creation is prevented by configuration."

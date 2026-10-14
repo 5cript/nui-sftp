@@ -1138,6 +1138,7 @@ backend:
     targetExists: "Ein Eintrag mit diesem Namen existiert bereits."
     invalidName: "Der neue Name muss ein einfacher Name im selben Verzeichnis sein."
   rpcFilesystem:
+    fileExists: "'{}' existiert bereits und wurde nicht ersetzt."
     deletionPrevented: "Das Löschen von Dateien ist durch die Konfiguration verhindert."
     renamePrevented: "Das Umbenennen von Dateien ist durch die Konfiguration verhindert."
     createFilePrevented: "Das Erstellen von Dateien ist durch die Konfiguration verhindert."

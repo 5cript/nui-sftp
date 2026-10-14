@@ -728,6 +728,46 @@ void RpcFilesystem::registerDoesExistBatch()
         );
 }
 
+namespace
+{
+    /**
+     * @brief Writes @p content to the UTF-8 path @p filePath and replies. Without @p replace an existing file is
+     *        left alone and the reply's error is backend.rpcFilesystem.fileExists.
+     */
+    void writeFileAndReply(
+        RpcHelper::RpcOnce&& reply,
+        std::string const& filePath,
+        std::string const& content,
+        bool replace
+    )
+    {
+        // The path is UTF-8, the narrow ofstream constructor reads the ANSI code page on Windows.
+        const auto path = localPathParameter(filePath);
+        if (!path)
+            return reply.error(path.error());
+
+        const auto mode = replace ? std::ios_base::binary : std::ios_base::binary | std::ios_base::noreplace;
+        std::ofstream fileStream(*path, mode);
+        if (!fileStream)
+        {
+            if (std::error_code statusError{}; !replace && std::filesystem::exists(std::filesystem::symlink_status(*path, statusError)))
+                return reply.error(Utility::localizedMessage("backend.rpcFilesystem.fileExists", filePath));
+            Log::error("Failed to open file '{}' for writing.", filePath);
+            return reply.error(fmt::format("Cannot open '{}' for writing", filePath));
+        }
+
+        fileStream.write(content.data(), static_cast<std::streamsize>(content.size()));
+        if (!fileStream)
+        {
+            Log::error("Failed to write to file '{}'.", filePath);
+            return reply.error(fmt::format("Cannot write '{}'", filePath));
+        }
+
+        Log::info("Successfully wrote to file '{}'", filePath);
+        return reply({{"success", true}});
+    }
+}
+
 void RpcFilesystem::registerWriteFile()
 {
     on("RpcFilesystem::writeFile")
