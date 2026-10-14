@@ -9,6 +9,7 @@
 #include <backend/local_delete_guard.hpp>
 #include <backend/local_removal.hpp>
 #include <backend/existence_check.hpp>
+#include <backend/rpc_path_parameters.hpp>
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
@@ -34,19 +35,12 @@ namespace
      */
     std::expected<std::filesystem::path, std::string> localPathParameter(std::string const& utf8)
     {
-        return Paths::LocalPath::fromUtf8(utf8)
-            .transform(
-                [](Paths::LocalPath const& path)
-                {
-                    return path.native();
-                }
-            )
-            .transform_error(
-                [](Paths::PathError const& error)
-                {
-                    return error.toString();
-                }
-            );
+        return RpcHelper::parseLocalPath(utf8).transform(
+            [](Paths::LocalPath const& path)
+            {
+                return path.native();
+            }
+        );
     }
 
 #ifndef _WIN32
@@ -623,10 +617,7 @@ void RpcFilesystem::registerDoesExist()
 
 void RpcFilesystem::registerDoesExistBatch()
 {
-    // Batched form of RpcFilesystem::exists.  Lets the frontend ask about a
-    // whole transfer's worth of destination paths in a single round-trip
-    // instead of N — eliminating the per-file network latency that made
-    // multi-file drag/drop downloads feel slow.
+    // Whether each of N local paths exists, in one RPC.
     on("RpcFilesystem::existsBatch")
         .perform(
             [](RpcHelper::RpcOnce&& reply, std::vector<std::string> const& paths)

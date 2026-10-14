@@ -20,6 +20,7 @@
 #include <exception>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 // TODO: split and document this file!
 namespace RpcHelper
@@ -166,11 +167,38 @@ namespace RpcHelper
             , hub_{&hub}
             , responseId_{responseId}
         {}
-        RpcOnce(RpcOnce&&) = default;
-        RpcOnce& operator=(RpcOnce&&) = default;
+        /**
+         * @brief Takes over the reply of @p other, which counts as answered from then on, so a reply through it is
+         *        dropped with a warning instead of going out under an empty id.
+         */
+        RpcOnce(RpcOnce&& other) noexcept
+            : wnd_{other.wnd_}
+            , hub_{other.hub_}
+            , responseId_{std::move(other.responseId_)}
+            , called_{std::exchange(other.called_, true)}
+        {}
+        RpcOnce& operator=(RpcOnce&& other) noexcept
+        {
+            if (this != &other)
+            {
+                wnd_ = other.wnd_;
+                hub_ = other.hub_;
+                responseId_ = std::move(other.responseId_);
+                called_ = std::exchange(other.called_, true);
+            }
+            return *this;
+        }
         RpcOnce(RpcOnce const&) = delete;
         RpcOnce& operator=(RpcOnce const&) = delete;
         ~RpcOnce() = default;
+
+        /**
+         * @brief The reply was sent, or handed to another RpcOnce.
+         */
+        bool answered() const noexcept
+        {
+            return called_;
+        }
 
         void operator()(nlohmann::json&& json) const
         {

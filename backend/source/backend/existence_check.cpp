@@ -1,4 +1,5 @@
 #include <backend/existence_check.hpp>
+#include <backend/rpc_path_parameters.hpp>
 #include <shared_data/sync/case_fold.hpp>
 #include <utility/error_message.hpp>
 #include <paths/paths.hpp>
@@ -14,15 +15,15 @@
 
 std::expected<std::vector<bool>, std::string> localPathsExist(std::vector<std::string> const& paths)
 {
+    const auto localPaths = RpcHelper::parseLocalPaths(paths);
+    if (!localPaths)
+        return std::unexpected(localPaths.error());
     std::vector<bool> results;
-    results.reserve(paths.size());
-    for (auto const& pathUtf8 : paths)
+    results.reserve(localPaths->size());
+    for (auto const& path : *localPaths)
     {
-        const auto path = Paths::LocalPath::fromUtf8(pathUtf8);
-        if (!path)
-            return std::unexpected(path.error().toString());
         std::error_code ec;
-        const auto status = std::filesystem::symlink_status(path->native(), ec);
+        const auto status = std::filesystem::symlink_status(path.native(), ec);
         if (status.type() == std::filesystem::file_type::not_found)
         {
             results.push_back(false);
@@ -144,12 +145,14 @@ std::expected<std::vector<bool>, std::string> remotePathsExist(
     std::chrono::milliseconds timeout
 )
 {
-    std::vector<Paths::RemotePath> remotePaths;
-    remotePaths.reserve(paths.size());
+    const auto parsed = RpcHelper::parseRemotePaths(paths);
+    if (!parsed)
+        return std::unexpected(parsed.error());
+    auto const& remotePaths = *parsed;
     // Parents in the order they first appear, with the indices of their queried children.
     std::vector<std::pair<Paths::RemotePath, std::vector<std::size_t>>> byParent;
     std::unordered_map<std::string, std::size_t> parentIndex;
-    for (auto const& path : paths)
+    for (std::size_t index = 0; index < remotePaths.size(); ++index)
     {
         const auto parent = remotePaths[index].parent();
         if (!parent)
