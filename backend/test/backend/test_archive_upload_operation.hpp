@@ -5,6 +5,7 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include "real_server_tests.hpp"
 #include "archive_test_helpers.hpp"
+#include <paths/native.hpp>
 
 #include <tar_archive/compression.hpp>
 
@@ -190,6 +191,36 @@ namespace Test
         ASSERT_EQ(entries.size(), 1u);
         EXPECT_EQ(entries[0].path, "alpha.txt");
         EXPECT_EQ(entries[0].contents, "alpha payload");
+    }
+
+    TEST_F(ArchiveUploadOperationTests, NonAsciiNamesRoundTrip)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto source = srcDir_.path() / Paths::nativeFromUtf8("Grüße");
+        std::filesystem::create_directories(source);
+        std::ofstream{source / Paths::nativeFromUtf8("東京.txt"), std::ios::binary} << "tokyo";
+        auto scan = runLocalScan(source);
+
+        const std::filesystem::path remoteArchive = "/home/test/nonascii.tar";
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(source)},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+        operation.setScanResultForRoot(toLocal(source), std::move(scan.entries), scan.totalBytes);
+        ASSERT_TRUE(runToCompletion(operation).has_value());
+
+        const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "nonascii.tar");
+        const auto entries = recoverArchiveEntries(pulled);
+        const auto* file = findEntry(entries, "Grüße/東京.txt");
+        ASSERT_NE(file, nullptr);
+        EXPECT_EQ(file->contents, "tokyo");
     }
 
     TEST_F(ArchiveUploadOperationTests, SingleFileGzipRoundTrip)

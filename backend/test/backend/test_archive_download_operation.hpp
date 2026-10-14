@@ -4,6 +4,7 @@
 #include <backend/sftp/scan_operation.hpp>
 #include "real_server_tests.hpp"
 #include "archive_test_helpers.hpp"
+#include <paths/native.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 #include <utility/temporary_directory.hpp>
@@ -162,6 +163,31 @@ namespace Test
         EXPECT_EQ(entries[0].path, "file1.txt");
         EXPECT_EQ(entries[0].type, SharedData::FileType::Regular);
         EXPECT_EQ(entries[0].contents, "Fake file content");
+    }
+
+    TEST_F(ArchiveDownloadOperationTests, NonAsciiNamesRoundTrip)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/Größe.txt"}, {"content", "size"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto archivePath = archiveDir_.path() / Paths::nativeFromUtf8("Ärger.tar");
+        ArchiveDownloadOperation operation{
+            sftp,
+            {
+                .roots = {makeFileEntry("/home/test/Größe.txt", 4u)},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+            }
+        };
+        auto result = runToCompletion(operation);
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, ArchiveDownloadOperation::WorkStatus::Complete);
+
+        const auto entries = recoverArchiveEntries(archivePath);
+        ASSERT_EQ(entries.size(), 1u);
+        EXPECT_EQ(entries[0].path, "Größe.txt");
+        EXPECT_EQ(entries[0].contents, "size");
     }
 
     TEST_F(ArchiveDownloadOperationTests, SingleFileGzipRoundTrip)

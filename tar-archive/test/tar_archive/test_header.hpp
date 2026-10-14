@@ -2,12 +2,14 @@
 
 #include <tar_archive/header.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <paths/utf8.hpp>
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <span>
 #include <string>
 
 namespace TarArchive::Test
@@ -167,6 +169,65 @@ namespace TarArchive::Test
         EXPECT_EQ(fileTypeFromTypeFlag(TypeFlag::CharacterSpecial), FileType::CharDevice);
         EXPECT_EQ(fileTypeFromTypeFlag(TypeFlag::BlockSpecial), FileType::BlockDevice);
         EXPECT_EQ(fileTypeFromTypeFlag(TypeFlag::FifoSpecial), FileType::Fifo);
+    }
+
+    TEST(TarHeader, NonAsciiNamesGetPaxRecords)
+    {
+        const std::string name = "Grüße/東京.txt";
+        const auto built = buildRecords(makeRegularEntry(name, 4u));
+        ASSERT_TRUE(built.has_value()) << built.error().toString();
+        ASSERT_EQ(built->records.size(), 3u);
+
+        const auto paxHeader = parseRecord(built->records[0]);
+        ASSERT_TRUE(paxHeader.has_value());
+        EXPECT_EQ(paxHeader->typeflag, TypeFlag::ExtendedHeader);
+        const auto overrides = parsePaxPayload(
+            std::span<std::byte const>{built->records[1]}.first(static_cast<std::size_t>(paxHeader->size))
+        );
+        ASSERT_TRUE(overrides.has_value()) << overrides.error().toString();
+        EXPECT_EQ(overrides->path, name);
+
+        const auto main = parseRecord(built->records[2]);
+        ASSERT_TRUE(main.has_value());
+        EXPECT_EQ(main->fullName(), name);
+    }
+
+    TEST(TarHeader, NonAsciiLinkTargetsGetPaxRecords)
+    {
+        TarArchive::MemberHeader entry{};
+        entry.path = "link";
+        entry.type = SharedData::FileType::Symlink;
+        entry.linkTarget = "Ärger.txt";
+        entry.permissions = static_cast<std::filesystem::perms>(0777u);
+
+        const auto built = buildRecords(entry);
+        ASSERT_TRUE(built.has_value());
+        ASSERT_EQ(built->records.size(), 3u);
+        const auto paxHeader = parseRecord(built->records[0]);
+        ASSERT_TRUE(paxHeader.has_value());
+        const auto overrides = parsePaxPayload(
+            std::span<std::byte const>{built->records[1]}.first(static_cast<std::size_t>(paxHeader->size))
+        );
+        ASSERT_TRUE(overrides.has_value());
+        EXPECT_EQ(overrides->linkPath, "Ärger.txt");
+        EXPECT_FALSE(overrides->path.has_value());
+    }
+
+    TEST(TarHeader, TruncatedUstarNamesEndAtACodePointBoundary)
+    {
+        std::string name;
+        for (int index = 0; index < 120; ++index)
+            name += "ü";
+        const auto built = buildRecords(makeRegularEntry(name, 1u));
+        ASSERT_TRUE(built.has_value());
+        const auto main = parseRecord(built->records.back());
+        ASSERT_TRUE(main.has_value());
+        EXPECT_EQ(main->fullName().size(), 100u);
+        EXPECT_TRUE(Paths::isValidUtf8(main->fullName()));
+
+        const auto paxHeader = parseRecord(built->records.front());
+        ASSERT_TRUE(paxHeader.has_value());
+        EXPECT_TRUE(Paths::isValidUtf8(paxHeader->fullName()));
     }
 
     TEST(TarHeader, LargeSizeTriggersPaxExtendedHeader)
