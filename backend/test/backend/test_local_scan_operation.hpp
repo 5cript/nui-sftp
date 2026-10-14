@@ -395,6 +395,28 @@ namespace Test
         EXPECT_EQ(subdir.subtreeByteTotal, std::string_view{"nested content"}.size() + std::string_view{"leaf"}.size());
     }
 
+    TEST_F(LocalScanOperationTests, BuildTreeExcludesTransferTempFiles)
+    {
+        std::ofstream{scanRoot_.path() / "big.iso.filepart"} << "partial";
+        std::ofstream{scanRoot_.path() / ".filepart"} << "a name, not a temp file";
+
+        LocalScanOperation operation{{
+            .localPath = toLocal(scanRoot_.path()),
+            .recursive = true,
+            .buildTree = true,
+            .excludedSuffixes = {".filepart"},
+        }};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* temp = SharedData::Sync::findScanNode(tree, "big.iso.filepart");
+        ASSERT_NE(temp, nullptr);
+        EXPECT_EQ(temp->availability, SharedData::Sync::Availability::Excluded);
+        auto const* bare = SharedData::Sync::findScanNode(tree, ".filepart");
+        ASSERT_NE(bare, nullptr);
+        EXPECT_EQ(bare->availability, SharedData::Sync::Availability::Listed);
+    }
+
     TEST_F(LocalScanOperationTests, NonRecursiveBuildTreeMarksSubdirectoriesUnknown)
     {
         LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = false, .buildTree = true}};
