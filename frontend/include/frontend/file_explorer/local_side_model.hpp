@@ -153,6 +153,16 @@ class LocalSideModel
 
     void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
+    /**
+     * @brief Deletes @p targets through the backend at once, each item by itself, and refreshes the listing.
+     */
+    void deleteFilesDirectly(std::vector<Paths::LocalPath> const& targets);
+
+    /**
+     * @brief Shows why deleting local items failed.
+     */
+    void showDeleteFailed(std::string const& reason);
+
   private:
     /**
      *  @brief Ask the backend once which external-open operations the platform can perform

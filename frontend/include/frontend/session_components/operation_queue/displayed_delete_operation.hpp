@@ -78,7 +78,7 @@ struct DisplayedDeleteOperation : public OperationCard<DisplayedDeleteOperation>
 
     std::optional<ResumableOp> resumableDescriptor() const override
     {
-        // A local delete runs in this process and needs no connection to be redone.
+        // A local delete runs in the local operation queue, which a reconnect does not touch.
         if (isCompletedState() || type_ == SharedData::OperationType::LocalDelete)
             return std::nullopt;
         // A bulk delete is re-issued by the backend from its own backup.

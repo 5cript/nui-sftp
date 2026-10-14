@@ -23,8 +23,11 @@
 #include <nui/frontend/utility/val_conversion.hpp>
 #include <nui/rpc.hpp>
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -490,25 +493,41 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         return;
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    bool anyDirectory = false;
-    for (const auto& item : items)
-    {
-        listItems.push_back({item.name, item.fullPath.generic_string()});
-        anyDirectory = anyDirectory || item.type == NuiFileExplorer::Item::Type::Directory;
-    }
+    listItems.reserve(items.size());
+    std::ranges::transform(
+        items,
+        std::back_inserter(listItems),
+        [](NuiFileExplorer::Item const& item)
+        {
+            return ConfirmDialog::OpenOptions::ListElement{
+                .text = item.name, .description = item.fullPath.generic_string()
+            };
+        }
+    );
+    const bool anyDirectory = std::ranges::any_of(
+        items,
+        [](NuiFileExplorer::Item const& item)
+        {
+            return item.type == NuiFileExplorer::Item::Type::Directory;
+        }
+    );
     // Local directories go with their content in one step, unlike remote ones there is no second question.
-    auto text = language->get("localSideModel", "deleteSelectedConfirm");
-    if (anyDirectory)
-        text += "\n" + language->get("localSideModel", "deleteDirectoriesWithContent");
+    auto text = anyDirectory ? fmt::format(
+                                   "{}\n{}",
+                                   language->get("localSideModel", "deleteSelectedConfirm"),
+                                   language->get("localSideModel", "deleteDirectoriesWithContent")
+                               )
+                             : language->get("localSideModel", "deleteSelectedConfirm");
 
-    confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-            .headerText = language->get("localSideModel", "deleteLocalItemsQuestion"),
-            .text = std::move(text),
-            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::No,
-            .listItems = listItems,
-            .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+        .headerText = language->get("localSideModel", "deleteLocalItemsQuestion"),
+        .text = std::move(text),
+        .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+        .focusButton = ConfirmDialog::Button::No,
+        .listItems = std::move(listItems),
+        .onClose = lifetime_.guarded(
+            [this, items, anyDirectory](std::optional<ConfirmDialog::Button> button)
             {
                 if (!button || *button != ConfirmDialog::Button::Yes)
                 {
@@ -516,59 +535,87 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                     return;
                 }
 
-                Nui::val args = Nui::val::object();
-                args.set("paths", Nui::val::array());
-                args.set("recursive", true);
-
+                std::vector<Paths::LocalPath> targets;
+                targets.reserve(items.size());
                 for (const auto& item : items)
                 {
                     auto path = localPathOf(item);
                     if (!path)
                         return showPathRefused(language->get("localSideModel", "deleteFilesFailedTitle"), path.error());
-                    args["paths"].call<void>("push", path->toUtf8());
+                    targets.push_back(*std::move(path));
                 }
 
-                Nui::RpcClient::callWithBackChannel(
-                    "RpcFilesystem::removeSome",
-                    [this](Nui::val val)
-                    {
-                        if (!val.hasOwnProperty("success"))
+                // Deleting a directory can take long, so it runs in the local operation queue with a card of its own.
+                if (!anyDirectory)
+                    return deleteFilesDirectly(targets);
+                if (!operationQueue_)
+                {
+                    Log::warn("Cannot queue the delete of local items: no operation queue is set");
+                    return showDeleteFailed(language->get("operationQueue", "unknownError"));
+                }
+                operationQueue_->enqueueLocalDelete(
+                    targets,
+                    lifetime_.guarded(
+                        [this](std::optional<std::string> const& error)
                         {
-                            Log::error("Invalid response from RpcFilesystem::remove");
-                            confirmDialog_->open({
-                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                .headerText = language->get("localSideModel", "deleteFilesFailedTitle"),
-                                .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                                .buttons = ConfirmDialog::Button::Ok,
-                            });
-                            return;
+                            if (!error)
+                                return;
+                            const auto reason = language->translate(*error);
+                            Log::error("Failed to queue the delete of local items: {}", reason);
+                            showDeleteFailed(reason);
                         }
-
-                        const auto success = val["success"].as<bool>();
-                        if (!success)
-                        {
-                            const auto error = language->translate(val["error"].as<std::string>());
-                            Log::error("Failed to delete files: {}", error);
-                            confirmDialog_->open({
-                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                .headerText = language->get("localSideModel", "deleteFilesFailedTitle"),
-                                .text = error,
-                                .buttons = ConfirmDialog::Button::Ok,
-                            });
-                            // The other items may be gone, the listing has to show it.
-                            navigateTo(currentPath_.value());
-                            return;
-                        }
-
-                        Log::info("Files deleted successfully");
-                        // Refresh list:
-                        navigateTo(currentPath_.value());
-                    },
-                    args
+                    )
                 );
-            }}
+            }
+        ),
+    });
+}
+
+void LocalSideModel::deleteFilesDirectly(std::vector<Paths::LocalPath> const& targets)
+{
+    Nui::val args = Nui::val::object();
+    args.set("paths", Nui::val::array());
+    for (auto const& target : targets)
+        args["paths"].call<void>("push", target.toUtf8());
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::removeSome",
+        lifetime_.guarded(
+            [this](Nui::val val)
+            {
+                const auto error = [&val]() -> std::optional<std::string>
+                {
+                    if (!val.hasOwnProperty("success"))
+                        return language->get("localSideModel", "invalidResponseFromBackend");
+                    if (val["success"].as<bool>())
+                        return std::nullopt;
+                    return language->translate(val["error"].as<std::string>());
+                }();
+                if (error)
+                {
+                    Log::error("Failed to delete local items: {}", *error);
+                    showDeleteFailed(*error);
+                }
+                else
+                    Log::info("Local items deleted");
+                // The listing shows what is gone, also after a failure that kept some items.
+                navigateTo(currentPath_.value());
+            }
+        ),
+        args
     );
 }
+
+void LocalSideModel::showDeleteFailed(std::string const& reason)
+{
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("localSideModel", "deleteFilesFailedTitle"),
+        .text = reason,
+        .buttons = ConfirmDialog::Button::Ok,
+    });
+}
+
 void LocalSideModel::onTransfer(
     std::vector<NuiFileExplorer::Item> const& items,
     std::optional<std::string> const& subDir

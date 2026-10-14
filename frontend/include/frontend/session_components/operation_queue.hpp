@@ -187,6 +187,22 @@ class OperationQueue
         std::function<void(Ids::OperationId const& bulkOpId)> onEnqueued = {}
     );
 
+    /**
+     * @brief Queues the delete of local items with their content in the backend's local operation queue, as one
+     *        operation whose card shows here and refreshes the local listing when it ends. Needs no connection; with
+     *        one the delete waits while this queue is paused. @p onAck gets the error when the backend refused it,
+     *        nothing when it was queued.
+     */
+    void enqueueLocalDelete(
+        std::vector<Paths::LocalPath> const& targets,
+        std::function<void(std::optional<std::string> const& error)> onAck
+    );
+
+    /**
+     * @brief The queue belongs to a connected session and can take operations.
+     */
+    bool isActive() const;
+
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
     /** @brief Register a callback that receives the source paths of the entries a bulk operation
      *         could not transfer.  Runs on completion, before the completion callback, because the

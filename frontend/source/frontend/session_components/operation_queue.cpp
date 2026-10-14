@@ -38,6 +38,7 @@
 #include <chrono>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <string_view>
 #include <unordered_map>
@@ -802,7 +803,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                std::function<void()>{}
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
@@ -1082,6 +1084,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
         }
         case SharedData::OperationType::Delete:
         case SharedData::OperationType::BulkDelete:
+        case SharedData::OperationType::LocalDelete:
         {
             if (auto* card = operation->getCardSpecifically<DisplayedDeleteOperation>(); card)
                 card->setScanProgress(progress.totalBytes, progress.totalScanned);
@@ -1361,6 +1364,42 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     }
 
     Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::enqueueLocalDelete(
+    std::vector<Paths::LocalPath> const& targets,
+    std::function<void(std::optional<std::string> const& error)> onAck
+)
+{
+    std::vector<std::string> paths;
+    paths.reserve(targets.size());
+    std::ranges::transform(targets, std::back_inserter(paths), &Paths::LocalPath::toUtf8);
+    Log::info("Frontend Operation Queue local delete: {} items", paths.size());
+
+    const auto operationId = Ids::generateOperationId();
+    LocalOperationRouter::instance().host(operationId, *this);
+    // With a connection the delete is held while the queue of the connection is paused.
+    const auto rpcName = isActive() ? fmt::format("Session::{}::addLocalDelete", impl_->sessionId.value())
+                                    : std::string{"LocalOperationQueue::addDelete"};
+    Nui::RpcClient::callWithBackChannel(
+        rpcName,
+        [onAck = std::move(onAck), operationId](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (!result)
+            {
+                LocalOperationRouter::instance().forget(operationId);
+                return onAck(result.error);
+            }
+            onAck(std::nullopt);
+        },
+        operationId.value(),
+        paths
+    );
+}
+
+bool OperationQueue::isActive() const
+{
+    return impl_->sessionId.isValid();
 }
 
 void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback)
