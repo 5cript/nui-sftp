@@ -95,6 +95,18 @@ namespace SharedData::Sync
             std::vector<EnqueuePlanEntry>& plan
         ) const;
 
+        /**
+         * @brief A directory delete as what the scan listed below it, the directory before its content. Deleted
+         *        last first and directories only once empty, so unlisted content (unreadable, excluded, hidden or
+         *        ignored) keeps its directories.
+         */
+        void appendDeletePlan(
+            ScanNode const& directory,
+            std::string const& relKey,
+            Action action,
+            std::vector<EnqueuePlanEntry>& plan
+        ) const;
+
         DiffOptions options_{};
         std::unordered_map<std::string, DiffTreeNode> nodes_{};
         std::unordered_map<std::string, std::vector<std::string>> children_{};

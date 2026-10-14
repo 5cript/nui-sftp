@@ -112,6 +112,7 @@ namespace
                         .completionTime = std::chrono::system_clock::now(),
                         .remotePath = unlessEmpty(op.remotePath()),
                         .error = error,
+                        .failedEntries = op.getFailed(),
                     };
                 },
                 [reason, operationId, error](LocalDeleteOperation const& op)

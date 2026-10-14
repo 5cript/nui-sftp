@@ -242,6 +242,46 @@ namespace SharedData::Sync
             plan.push_back(makeEntry(directory, relKey));
     }
 
+    void DiffTreeStore::appendDeletePlan(
+        ScanNode const& directory,
+        std::string const& relKey,
+        Action action,
+        std::vector<EnqueuePlanEntry>& plan
+    ) const
+    {
+        plan.push_back(
+            EnqueuePlanEntry{
+                .relKey = relKey,
+                .action = action,
+                .mtime = directory.mtime,
+                .mtimeNsec = directory.mtimeNsec,
+                .isDirectory = true,
+            }
+        );
+        for (auto const& child : directory.children)
+        {
+            if (options_.ignoreHidden && isHiddenName(child.name))
+                continue;
+            if (child.availability != Availability::Listed)
+                continue;
+            auto childKey = joinRelKey(relKey, child.name);
+            if (child.type == FileType::Directory)
+            {
+                appendDeletePlan(child, childKey, action, plan);
+                continue;
+            }
+            plan.push_back(
+                EnqueuePlanEntry{
+                    .relKey = std::move(childKey),
+                    .action = action,
+                    .sizeBytes = child.size,
+                    .mtime = child.mtime,
+                    .mtimeNsec = child.mtimeNsec,
+                }
+            );
+        }
+    }
+
     std::vector<EnqueuePlanEntry>
     DiffTreeStore::buildPlan(std::unordered_set<std::string> const& selectedRelKeys, ScanTrees const& trees) const
     {
@@ -266,9 +306,12 @@ namespace SharedData::Sync
             auto const* scan = sourceRoot ? findScanNode(*sourceRoot, node.relKey) : nullptr;
             const bool isDelete = node.action == Action::DeleteLocal || node.action == Action::DeleteRemote;
 
-            if (scan && node.isDirectory && !isDelete && options_.recursive && scan->type == FileType::Directory)
+            if (scan && node.isDirectory && options_.recursive && scan->type == FileType::Directory)
             {
-                appendSubtreePlan(*scan, node.relKey, node.action, trees, plan);
+                if (isDelete)
+                    appendDeletePlan(*scan, node.relKey, node.action, plan);
+                else
+                    appendSubtreePlan(*scan, node.relKey, node.action, trees, plan);
                 continue;
             }
 

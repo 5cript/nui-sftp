@@ -100,6 +100,14 @@ class DeleteOperation : public Operation
 
     std::expected<void, DeleteOperation::Error> cancel(bool adoptCancelState) override;
 
+    /**
+     * @brief Items that could not be deleted, with why. The rest was still deleted.
+     */
+    std::vector<std::pair<std::string, Error>> const& getFailed() const noexcept
+    {
+        return failedEntries_;
+    }
+
   private:
     std::expected<void, DeleteOperation::Error> removeOnce(Paths::RemotePath const& path);
 
@@ -114,6 +122,7 @@ class DeleteOperation : public Operation
     std::vector<Paths::RemotePath> targets_{};
     /** @brief A scanned entry was not a valid path within remotePath_, nothing may be deleted. */
     std::optional<std::string> invalidScanEntry_{};
+    std::vector<std::pair<std::string, Error>> failedEntries_{};
     std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
     bool scanDelivered_{false};
     bool recursive_{false};

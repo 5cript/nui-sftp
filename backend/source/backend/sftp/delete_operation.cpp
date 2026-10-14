@@ -77,10 +77,13 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
         }
         case (Running):
         {
-            if (deletedThusFar_ == totalToDelete_)
+            if (deletedThusFar_ < totalToDelete_)
             {
-                state_ = Completed;
-                return WorkStatus::Complete;
+                auto removeResult = removeOnce(targets_[totalToDelete_ - deletedThusFar_ - 1]);
+                if (!removeResult.has_value())
+                    return std::unexpected(removeResult.error());
+                if (deletedThusFar_ < totalToDelete_)
+                    return WorkStatus::MoreWork;
             }
             // Nothing deleted at all is a failure, some items left behind a partial success.
             if (totalToDelete_ > 0 && failedEntries_.size() == totalToDelete_)
@@ -136,6 +139,7 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::R
         failedEntries_.emplace_back(
             path.value(), Error{.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.value()}
         );
+    }
 
     ++deletedThusFar_;
     if (filesRemovedProgress_)
