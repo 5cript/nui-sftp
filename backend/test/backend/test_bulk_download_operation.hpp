@@ -8,6 +8,7 @@
 #include <utility/temporary_directory.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -335,6 +336,57 @@ namespace Test
             ),
             1
         );
+    }
+
+    TEST_F(BulkDownloadOperationTests, NeverWritesThroughALinkInsideTheLocalTree)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto outside = downloadDir_.path() / "outside";
+        const auto localRoot = downloadDir_.path() / "linked";
+        std::filesystem::create_directories(outside);
+        std::filesystem::create_directories(localRoot);
+#ifdef _WIN32
+        const auto command =
+            "cmd /c mklink /J \"" + (localRoot / "Documents").string() + "\" \"" + outside.string() + "\" >nul";
+        ASSERT_EQ(std::system(command.c_str()), 0);
+#else
+        std::filesystem::create_directory_symlink(outside, localRoot / "Documents");
+#endif
+
+        std::vector<SharedData::DirectoryEntry> entries;
+        entries.push_back(SharedData::DirectoryEntry{.type = SharedData::FileType::Directory});
+        entries.push_back(
+            SharedData::DirectoryEntry{.name = "Documents", .type = SharedData::FileType::Directory, .parent = 0}
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .name = "doc1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Document 1 content"}.size(),
+                .parent = 1,
+            }
+        );
+        entries.push_back(
+            SharedData::DirectoryEntry{
+                .name = "file1.txt",
+                .type = SharedData::FileType::Regular,
+                .size = std::string{"Fake file content"}.size(),
+                .parent = 0,
+            }
+        );
+
+        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        operation.setScanResult(std::move(entries), 0);
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(std::filesystem::is_empty(outside)) << "nothing may be written through the link";
+        EXPECT_EQ(readLocalFile(localRoot / "file1.txt"), "Fake file content");
+        const auto failed = operation.getFailed();
+        ASSERT_EQ(failed.size(), 2u);
+        for (auto const& [source, error] : failed)
+            EXPECT_EQ(error.type, SharedData::OperationErrorType::LinkInLocalPath) << source;
     }
 
     TEST_F(BulkDownloadOperationTests, FailFastAbortsWholeOperationOnRecoverableError)
