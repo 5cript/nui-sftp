@@ -330,6 +330,11 @@ const server = new Server({
                             return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                         }
                     } else {
+                        // Like a real server: CREAT with EXCL refuses anything that exists.
+                        if ((flags & OPEN_MODE.CREAT) && (flags & OPEN_MODE.EXCL)) {
+                            logMessage('Exists, EXCL given');
+                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        }
                         if (result.type !== 'file') {
                             logMessage('Not a file');
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);

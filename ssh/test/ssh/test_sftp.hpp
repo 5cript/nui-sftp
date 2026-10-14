@@ -159,6 +159,22 @@ namespace SecureShell::Test
         EXPECT_NE(it, listResult.value().end());
     }
 
+    TEST_F(SftpTests, CreatingAnExistingFileFailsAndKeepsIt)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->createFile(remote("/home/test/file1.txt"));
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        EXPECT_FALSE(fut.get().has_value());
+
+        auto statFut = sftp->stat(remote("/home/test/file1.txt"));
+        ASSERT_EQ(statFut.wait_for(1s), std::future_status::ready);
+        const auto information = statFut.get();
+        ASSERT_TRUE(information.has_value());
+        EXPECT_EQ(information->size, std::string{"Fake file content"}.size());
+    }
+
     TEST_F(SftpTests, CreatingFileInNonExistantDirectoryMayFail)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
