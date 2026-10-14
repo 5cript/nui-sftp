@@ -15,6 +15,8 @@
 #include <string_view>
 #include <vector>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class BulkUploadOperationTests : public RealServerTests
@@ -97,7 +99,7 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory uploadSrc_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory uploadSrc_{temporaryRoot, true};
     };
 
     TEST_F(BulkUploadOperationTests, CanCreateBulkUploadOperation)

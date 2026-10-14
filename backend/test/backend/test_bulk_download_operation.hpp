@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class BulkDownloadOperationTests : public RealServerTests
@@ -71,7 +73,7 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory downloadDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory downloadDir_{temporaryRoot, true};
     };
 
     TEST_F(BulkDownloadOperationTests, CanCreateBulkDownloadOperation)

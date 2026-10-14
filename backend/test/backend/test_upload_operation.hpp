@@ -5,6 +5,8 @@
 
 #include <nui/utility/scope_exit.hpp>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class UploadOperationTests : public RealServerTests
@@ -16,7 +18,7 @@ namespace Test
         {
             RealServerTests::SetUp();
 
-            std::ofstream testFile{programDirectory / "temp" / "testfile.txt", std::ios_base::binary};
+            std::ofstream testFile{temporaryRoot / "testfile.txt", std::ios_base::binary};
             testFile << testFileContent;
         }
     };
@@ -369,7 +371,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        std::ofstream emptyFile{programDirectory / "temp" / "emptyfile.txt", std::ios_base::binary};
+        std::ofstream emptyFile{temporaryRoot / "emptyfile.txt", std::ios_base::binary};
         emptyFile.close();
 
         UploadOperation operation{
@@ -548,7 +550,7 @@ namespace Test
         // File larger than the internal buffer (16384 bytes) to exercise multi-chunk upload
         const std::string largeContent(30000, 'x');
         {
-            std::ofstream largeFile{programDirectory / "temp" / "largefile.txt", std::ios_base::binary};
+            std::ofstream largeFile{temporaryRoot / "largefile.txt", std::ios_base::binary};
             largeFile << largeContent;
         }
 
@@ -625,12 +627,12 @@ namespace Test
     TEST_F(UploadOperationTests, UploadLocalSymlinkToRegularFileCreatesRemoteSymlink)
     {
         // Set up: a local symlink to a regular file.
-        const auto targetFile = programDirectory / "temp" / "sym_target_file.txt";
+        const auto targetFile = temporaryRoot / "sym_target_file.txt";
         {
             std::ofstream f{targetFile, std::ios::binary};
             f << "target content";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_to_file", targetFile);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_to_file", targetFile);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -660,14 +662,14 @@ namespace Test
     {
         // A symlink pointing at a directory must be recreated as a single remote link;
         // the directory contents must NOT be recursively uploaded into it.
-        const auto targetDir = programDirectory / "temp" / "sym_target_dir";
+        const auto targetDir = temporaryRoot / "sym_target_dir";
         std::error_code ec;
         std::filesystem::create_directory(targetDir, ec);
         {
             std::ofstream f{targetDir / "inside.txt", std::ios::binary};
             f << "should not appear on remote";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_to_dir", targetDir);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_to_dir", targetDir);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -697,7 +699,7 @@ namespace Test
         // without trying to open/stat the target. This is the scenario that caused the
         // "Path exists and is not a directory" and FileStatFailed errors before.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "dangling_upload",
+            temporaryRoot / "dangling_upload",
             "/nowhere/this/should/not/exist.txt"
         );
 
@@ -725,12 +727,12 @@ namespace Test
 
     TEST_F(UploadOperationTests, UploadSymlinkWithSkipSymlinkDoesNotCreateRemoteEntry)
     {
-        const auto targetFile = programDirectory / "temp" / "sym_skip_target.txt";
+        const auto targetFile = temporaryRoot / "sym_skip_target.txt";
         {
             std::ofstream f{targetFile, std::ios::binary};
             f << "content";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_skip", targetFile);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_skip", targetFile);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -777,8 +779,8 @@ namespace Test
 
         // Now overwrite with a symlink.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_overwrite_link",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_overwrite_link",
+            temporaryRoot / "testfile.txt"
         );
         UploadOperation symOp{
             *sftp,
@@ -805,8 +807,8 @@ namespace Test
         // For symlinks, prepare() must not open a .filepart file on the remote — that path
         // is only for regular-file uploads.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_prepare_check",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_prepare_check",
+            temporaryRoot / "testfile.txt"
         );
 
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -949,8 +951,8 @@ namespace Test
     {
         // Symlink path must honour the flag too: createSymLink fails without the parent.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_for_missing_dirs",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_for_missing_dirs",
+            temporaryRoot / "testfile.txt"
         );
 
         CREATE_SERVER_AND_JOINER(sftpServer);

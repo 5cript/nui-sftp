@@ -13,6 +13,7 @@
 #include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -20,7 +21,7 @@ namespace TarArchive::Test
     {
         std::filesystem::path roundTripDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_roundtrip";
+            const auto directory = temporaryRoot / "tar_archive_roundtrip";
             std::filesystem::create_directories(directory);
             return directory;
         }

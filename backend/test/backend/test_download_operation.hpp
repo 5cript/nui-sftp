@@ -8,6 +8,8 @@
 #include <fstream>
 #include <string>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class DownloadOperationTests : public RealServerTests
@@ -26,7 +28,7 @@ namespace Test
 
       protected:
         // Isolated subdirectory per test run so downloaded files do not collide across tests.
-        Utility::TemporaryDirectory downloadDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory downloadDir_{temporaryRoot, true};
     };
 
     TEST_F(DownloadOperationTests, CanCreateServer)

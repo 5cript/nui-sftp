@@ -1,3 +1,4 @@
+#include <utility/process_temporary_directory.hpp>
 #include "test_command_template.hpp"
 #include "test_directory_traversal.hpp"
 #include "test_echo_suppressor.hpp"
@@ -18,10 +19,15 @@
 #include <filesystem>
 
 std::filesystem::path programDirectory;
+/** @brief The temporary directory of this process alone, so tests running in parallel share no files. */
+std::filesystem::path temporaryRoot;
 
 int main(int argc, char** argv)
 {
     programDirectory = std::filesystem::path{argv[0]}.parent_path();
+
+    const Utility::ProcessTemporaryDirectory processTemporary{programDirectory / "temp"};
+    temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

@@ -1,3 +1,4 @@
+#include <utility/process_temporary_directory.hpp>
 #include <command-store/command_store.hpp>
 #include <utility/temporary_directory.hpp>
 
@@ -19,6 +20,8 @@
 #include <vector>
 
 std::filesystem::path programDirectory;
+/** @brief The temporary directory of this process alone, so tests running in parallel share no files. */
+std::filesystem::path temporaryRoot;
 
 namespace
 {
@@ -225,7 +228,7 @@ namespace
 
       protected:
         boost::asio::io_context context_{};
-        Utility::TemporaryDirectory temporaryDirectory_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory temporaryDirectory_{temporaryRoot, true};
         std::optional<Store> store_{};
     };
 
@@ -814,6 +817,9 @@ namespace
 int main(int argc, char** argv)
 {
     programDirectory = std::filesystem::path{argv[0]}.parent_path();
+
+    const Utility::ProcessTemporaryDirectory processTemporary{programDirectory / "temp"};
+    temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

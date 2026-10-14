@@ -23,6 +23,7 @@ using namespace FileTracking;
 using namespace std::chrono_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -41,7 +42,7 @@ namespace Test
     inline fs::path makeTestTempRoot(std::string const& tag = "base")
     {
         auto suffix = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-        auto root = programDirectory / "temp" / ("nui_sftp_ft_" + tag + "_" + suffix);
+        auto root = temporaryRoot / ("nui_sftp_ft_" + tag + "_" + suffix);
         fs::create_directories(root);
         return root;
     }

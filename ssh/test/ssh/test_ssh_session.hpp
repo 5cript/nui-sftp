@@ -10,6 +10,7 @@
 #include <filesystem>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -24,7 +25,7 @@ namespace SecureShell::Test
             {
                 std::filesystem::rename(
                     isolateDirectory_.path() / "log.txt",
-                    programDirectory / "temp" /
+                    temporaryRoot /
                         ("log_"s + ::testing::UnitTest::GetInstance()->current_test_info()->test_case_name() + "_"s +
                             ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".txt")
                 );
@@ -266,7 +267,7 @@ namespace SecureShell::Test
                     processThread.join();
             }};
 
-        const auto missingKey = programDirectory / "temp" / "missing_key";
+        const auto missingKey = temporaryRoot / "missing_key";
         auto options = getSessionOptions(result->port);
         options.users.front().sshKeyPrivate = missingKey;
         options.sshOptions->usePasswordAuth = false;

@@ -17,6 +17,7 @@
 #include <chrono>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
@@ -181,7 +182,7 @@ namespace SecureShell::Test
             );
         }
 
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, true};
         boost::asio::thread_pool pool_{1};
         nlohmann::json defaultPackageJson_ = nlohmann::json({
             {"name", "test"},

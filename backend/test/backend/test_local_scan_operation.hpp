@@ -16,6 +16,8 @@
 #include <string_view>
 #include <vector>
 
+extern std::filesystem::path temporaryRoot;
+
 #ifndef _WIN32
 #    include <sys/stat.h>
 #    include <unistd.h>
@@ -85,7 +87,7 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory scanRoot_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory scanRoot_{temporaryRoot, true};
     };
 
     TEST_F(LocalScanOperationTests, CanCreateLocalScanOperation)

@@ -1,3 +1,4 @@
+#include <utility/process_temporary_directory.hpp>
 #include "nui_env.hpp"
 
 #include "test_download_operation.hpp"
@@ -33,6 +34,8 @@
 #include <filesystem>
 
 std::filesystem::path programDirectory;
+/** @brief The temporary directory of this process alone, so tests running in parallel share no files. */
+std::filesystem::path temporaryRoot;
 
 int main(int argc, char** argv)
 {
@@ -42,6 +45,9 @@ int main(int argc, char** argv)
     // instanceDir with the passed path when it isn't absolute, so a relative
     // instanceDir (from a relative programDirectory) doubles the path.
     programDirectory = std::filesystem::weakly_canonical(std::filesystem::path{argv[0]}.parent_path());
+
+    const Utility::ProcessTemporaryDirectory processTemporary{programDirectory / "temp"};
+    temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
     ::testing::AddGlobalTestEnvironment(new Test::NuiEnvGuard{});

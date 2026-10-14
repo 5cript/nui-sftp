@@ -13,6 +13,7 @@
 using namespace std::string_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Utility::Test
 {
@@ -95,7 +96,7 @@ namespace Utility::Test
         }
 
       protected:
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, true};
         std::unique_ptr<BaseDirectoryWalker> walker_;
         std::function<std::expected<std::vector<SharedData::DirectoryEntry>, std::string>(std::filesystem::path const&)>
             scanner_;

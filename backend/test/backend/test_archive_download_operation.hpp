@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <fstream>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class ArchiveDownloadOperationTests : public RealServerTests
@@ -22,7 +24,7 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory archiveDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory archiveDir_{temporaryRoot, true};
 
         /**
          * @brief Drive an ArchiveDownloadOperation to completion or until it errors.

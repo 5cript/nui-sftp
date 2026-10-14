@@ -17,6 +17,8 @@
 #include <string>
 #include <string_view>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class ArchiveUploadOperationTests : public RealServerTests
@@ -34,8 +36,8 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory srcDir_{programDirectory / "temp", true};
-        Utility::TemporaryDirectory pulledDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory srcDir_{temporaryRoot, true};
+        Utility::TemporaryDirectory pulledDir_{temporaryRoot, true};
 
         static void writeFile(std::filesystem::path const& path, std::string_view contents)
         {
@@ -328,7 +330,7 @@ namespace Test
         // Create a second directory tree distinct from srcDir_.  The scan is
         // keyed on that path; the archive asks to pack srcDir_ instead, so
         // the real root is still missing its scan and must error.
-        Utility::TemporaryDirectory otherDir{programDirectory / "temp", true};
+        Utility::TemporaryDirectory otherDir{temporaryRoot, true};
         writeFile(otherDir.path() / "unrelated.txt", "unrelated");
         auto otherScan = runLocalScan(otherDir.path());
 
@@ -354,8 +356,8 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        Utility::TemporaryDirectory firstDir{programDirectory / "temp", true};
-        Utility::TemporaryDirectory secondDir{programDirectory / "temp", true};
+        Utility::TemporaryDirectory firstDir{temporaryRoot, true};
+        Utility::TemporaryDirectory secondDir{temporaryRoot, true};
         writeFile(firstDir.path() / "one.txt", "one payload");
         writeFile(secondDir.path() / "two.txt", "two payload");
 

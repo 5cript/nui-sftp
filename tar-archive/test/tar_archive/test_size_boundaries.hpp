@@ -13,6 +13,7 @@
 #include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -20,7 +21,7 @@ namespace TarArchive::Test
     {
         std::filesystem::path sizeBoundaryDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_sizes";
+            const auto directory = temporaryRoot / "tar_archive_sizes";
             std::filesystem::create_directories(directory);
             return directory;
         }

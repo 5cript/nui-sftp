@@ -15,6 +15,7 @@ using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 /**
  * @brief A remote path from a test literal, which is known to be valid.
@@ -60,7 +61,7 @@ class RealServerTests : public ::testing::Test
   protected:
     void SetUp() override
     {
-        std::ofstream privateKeyFile{programDirectory / "temp" / "key.private", std::ios_base::binary};
+        std::ofstream privateKeyFile{temporaryRoot / "key.private", std::ios_base::binary};
         privateKeyFile.write(privateKey, std::strlen(privateKey));
     }
 
@@ -139,7 +140,7 @@ class RealServerTests : public ::testing::Test
     }
 
   protected:
-    Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", false};
+    Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, false};
     boost::asio::thread_pool pool_{1};
     nlohmann::json defaultPackageJson_ = nlohmann::json({
         {"name", "test"},

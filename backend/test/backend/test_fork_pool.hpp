@@ -23,6 +23,7 @@
 #    include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -34,7 +35,7 @@ namespace Test
             // The worker logs below %state_home2%, keep that inside the build directory.
             if (auto const* previous = std::getenv("XDG_STATE_HOME"))
                 previousStateHome_ = previous;
-            ::setenv("XDG_STATE_HOME", (programDirectory / "temp" / "fork_pool_state").c_str(), 1);
+            ::setenv("XDG_STATE_HOME", (temporaryRoot / "fork_pool_state").c_str(), 1);
 
             ioThread_ = std::thread{[this]()
                 {
