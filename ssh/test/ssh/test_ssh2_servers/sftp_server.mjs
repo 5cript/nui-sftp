@@ -244,6 +244,31 @@ const advertiseExtensions = (sftpStream) => {
     };
 };
 
+// Resolves every symlink on the way like realpath, undefined when a component does not exist.
+const canonicalize = (path, depth = 0) => {
+    if (depth > 40)
+        return undefined;
+    const parts = path.split('/').filter(part => part.length > 0 && part !== '.');
+    let current = '/';
+    for (let index = 0; index < parts.length; ++index) {
+        if (parts[index] === '..') {
+            current = pathUtil.posix.dirname(current);
+            continue;
+        }
+        const candidate = pathUtil.posix.join(current, parts[index]);
+        const entry = fakeFilesystem.find(candidate);
+        if (entry === undefined)
+            return undefined;
+        if (entry.type === 'symlink') {
+            const target = entry.target.startsWith('/') ? entry.target : pathUtil.posix.join(current, entry.target);
+            const rest = parts.slice(index + 1).join('/');
+            return canonicalize(rest.length > 0 ? `${target}/${rest}` : target, depth + 1);
+        }
+        current = candidate;
+    }
+    return current;
+};
+
 const resolveFileName = (path) => {
     if (path === '.') {
         return defaultPath;
@@ -481,19 +506,18 @@ const server = new Server({
                         return sftpStream.name(reqid, [{ filename, longname: filename, attrs: {} }]);
                     }
 
-                    path = resolveFileName(path);
-
-                    const result = fakeFilesystem.find(path);
+                    path = canonicalize(resolveFileName(path));
+                    const result = path === undefined ? undefined : fakeFilesystem.find(path);
 
                     if (result === undefined) {
                         logMessage(`Path not found: ${path}`);
                         return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                     }
 
-                    logMessage('REALPATH', result.path(), result);
+                    logMessage('REALPATH', path, result);
 
                     const name = [{
-                        filename: result.path(),
+                        filename: path,
                         longname: makeLongName(result),
                         attrs: result.stat
                     }];
