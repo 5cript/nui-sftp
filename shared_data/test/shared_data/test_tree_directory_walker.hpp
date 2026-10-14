@@ -156,6 +156,23 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(tree->children[0].children[0].children[0].children[0].name, "deep.txt");
     }
 
+    TEST(TreeDirectoryWalkerTests, NamesThatWereNotUtf8AreInvalidAndNeverEntered)
+    {
+        FakeFilesystem filesystem;
+        filesystem.directories["/root"].push_back(
+            DirectoryEntry{.name = "Fran\xEF\xBF\xBDois", .nameIsValidUtf8 = false, .type = FileType::Directory}
+        );
+        filesystem.directories["/root"].push_back(
+            DirectoryEntry{.name = "x\xEF\xBF\xBD", .nameIsValidUtf8 = false, .type = FileType::Regular, .size = 3}
+        );
+        const auto tree = walkFake(filesystem);
+        ASSERT_TRUE(tree.has_value()) << tree.error();
+        ASSERT_EQ(tree->children.size(), 2u);
+        for (auto const& child : tree->children)
+            EXPECT_EQ(child.availability, Availability::InvalidName) << child.name;
+        EXPECT_EQ(filesystem.listed, (std::vector<std::string>{"/root"}));
+    }
+
     TEST(TreeDirectoryWalkerTests, ScannerErrorsAbortTheWalk)
     {
         FakeFilesystem filesystem;

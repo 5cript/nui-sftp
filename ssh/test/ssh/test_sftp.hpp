@@ -908,6 +908,42 @@ namespace SecureShell::Test
         EXPECT_NE(iter, listResult->end());
     }
 
+    TEST_F(SftpTests, ListedNamesThatAreNotUtf8AreShownButNeverNamed)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test"}, {"nameHex", "61ff62"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto listFut = sftp->listDirectory(remote("/home/test"));
+        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        const auto listResult = listFut.get();
+        ASSERT_TRUE(listResult.has_value());
+        const auto iter = std::find_if(listResult->begin(), listResult->end(), [](auto const& entry) {
+            return entry.name == "a\xEF\xBF\xBD"
+                                 "b";
+        });
+        ASSERT_NE(iter, listResult->end());
+        EXPECT_FALSE(iter->nameIsValidUtf8);
+        const auto segment = iter->nameSegment();
+        ASSERT_FALSE(segment.has_value());
+        EXPECT_EQ(segment.error().reason, Paths::PathRejection::InvalidUtf8);
+
+        const nlohmann::json listing = *listResult;
+        const auto dumped = listing.dump();
+        const auto parsed = nlohmann::json::parse(dumped).get<std::vector<SharedData::DirectoryEntry>>();
+        const auto parsedIter = std::find_if(parsed.begin(), parsed.end(), [](auto const& entry) {
+            return !entry.nameIsValidUtf8;
+        });
+        ASSERT_NE(parsedIter, parsed.end());
+        EXPECT_EQ(parsedIter->name, iter->name);
+        EXPECT_EQ(
+            std::count_if(parsed.begin(), parsed.end(), [](auto const& entry) {
+                return entry.nameIsValidUtf8;
+            }),
+            static_cast<std::ptrdiff_t>(parsed.size() - 1u)
+        );
+    }
+
     TEST_F(SftpTests, MockServerPosixRenameExtensionOverwrites)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

@@ -600,7 +600,8 @@ const server = new Server({
                             return {
                                 filename: child.name,
                                 longname: makeLongName(child),
-                                attrs: child.stat
+                                attrs: child.stat,
+                                rawName: child.rawName
                             };
                         });
                     }
@@ -610,7 +611,7 @@ const server = new Server({
                         logMessage(`Sending ${entries.length} entries`);
                         logMessage(entries);
                         logMessage(`Remaining entries: ${handle.remainingReadDirEntries.length}`);
-                        sftpStream.name(reqid, entries);
+                        sendNames(sftpStream, reqid, entries);
                         return;
                     }
 
@@ -980,14 +981,45 @@ cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });
 // Inserts an entry under a raw name that may be invalid as a path segment, like '..' or 'a/b'.
+/**
+ * ssh2 writes names as UTF-8 strings, so a name whose bytes are no UTF-8 is listed under its ASCII placeholder of the
+ * same length and its bytes are put into the NAME packet in place of the placeholder.
+ */
+function sendNames(sftpStream, reqid, entries) {
+    const rawEntries = entries.filter((entry) => entry.rawName !== undefined);
+    if (rawEntries.length === 0)
+        return sftpStream.name(reqid, entries);
+    const protocol = sftpStream._protocol;
+    const chunks = [];
+    sftpStream._protocol = { channelData: (_id, data) => chunks.push(Buffer.from(data)) };
+    try {
+        sftpStream.name(reqid, entries);
+    } finally {
+        sftpStream._protocol = protocol;
+    }
+    const packet = Buffer.concat(chunks);
+    for (const entry of rawEntries) {
+        const at = packet.indexOf(Buffer.from(entry.filename, 'latin1'));
+        if (at >= 0)
+            entry.rawName.copy(packet, at);
+    }
+    protocol.channelData(sftpStream.outgoing.id, packet);
+}
+
 cli.on('rawName', (command) => {
     const parent = fakeFilesystem.find(command.directory);
     if (parent === undefined || parent.type !== 'directory')
         return;
-    if (command.type === 'directory')
-        parent.insert(directory({ name: command.name }, []));
-    else
-        parent.insert(file(command.name, command.content ?? ''));
+    // nameHex gives bytes that need not be UTF-8, they are listed through a placeholder of the same length.
+    const rawName = command.nameHex === undefined ? undefined : Buffer.from(command.nameHex, 'hex');
+    const name = rawName === undefined
+        ? command.name
+        : Array.from({ length: rawName.length }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
+    const node = command.type === 'directory'
+        ? directory({ name }, [])
+        : file(name, command.content ?? '');
+    node.rawName = rawName;
+    parent.insert(node);
 });
 cli.on('createFile', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
