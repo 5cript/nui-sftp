@@ -66,96 +66,64 @@ namespace
         std::optional<Operation::Error> error = std::nullopt
     )
     {
-        return operation.visit(
+        OperationQueue::OperationCompleted completed{
+            .reason = reason,
+            .operationId = std::move(operationId),
+            .completionTime = std::chrono::system_clock::now(),
+            .error = std::move(error),
+        };
+        const auto transferPaths = [&completed](auto const& transfer)
+        {
+            completed.localPath = unlessEmpty(transfer.localPath());
+            completed.remotePath = unlessEmpty(transfer.remotePath());
+        };
+        const auto bulkFailures = [&completed](BulkTransferOperation const& bulk)
+        {
+            completed.failedEntries = bulk.getFailed();
+            completed.indexedFailures = bulk.indexedFailures();
+        };
+        operation.visit(
             Utility::overloaded(
-                [reason, operationId, error](DownloadOperation const& op)
+                [&](DownloadOperation const& download)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .localPath = unlessEmpty(op.localPath()),
-                        .remotePath = unlessEmpty(op.remotePath()),
-                        .error = error,
-                    };
+                    transferPaths(download);
                 },
-                [reason, operationId, error](ScanOperation const& op)
+                [&](UploadOperation const& upload)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .remotePath = unlessEmpty(op.remotePath()),
-                        .error = error,
-                    };
+                    transferPaths(upload);
                 },
-                [reason, operationId, error](LocalScanOperation const& op)
+                [&](ScanOperation const& scan)
                 {
                     completed.remotePath = unlessEmpty(scan.remotePath());
                 },
-                [reason, operationId, error](UploadOperation const& op)
+                [&](LocalScanOperation const& scan)
                 {
                     completed.localPath = unlessEmpty(scan.localPath());
                 },
-                [reason, operationId, error](DeleteOperation const& op)
+                [&](BulkDownloadOperation const& bulk)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .remotePath = unlessEmpty(op.remotePath()),
-                        .error = error,
-                        .failedEntries = op.getFailed(),
-                    };
+                    bulkFailures(bulk);
                 },
-                [reason, operationId, error](LocalDeleteOperation const& op)
+                [&](BulkUploadOperation const& bulk)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .error = error,
-                        .failedEntries = op.getFailed(),
-                    };
+                    bulkFailures(bulk);
                 },
-                [reason, operationId, error](RenameOperation const& op)
+                [&](DeleteOperation const& deletion)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .remotePath = unlessEmpty(op.destinationPath()),
-                        .error = error,
-                    };
+                    completed.remotePath = unlessEmpty(deletion.remotePath());
+                    completed.failedEntries = deletion.getFailed();
                 },
-                [reason, operationId, error](ArchiveDownloadOperation const&)
+                [](LocalDeleteOperation const&) {},
+                [&](RenameOperation const& rename)
                 {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .error = error,
-                    };
+                    completed.remotePath = unlessEmpty(rename.destinationPath());
                 },
-                [reason, operationId, error](ArchiveUploadOperation const&)
-                {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                        .error = error,
-                    };
-                },
-                [reason, operationId](std::nullopt_t)
-                {
-                    return OperationQueue::OperationCompleted{
-                        .reason = reason,
-                        .operationId = operationId,
-                        .completionTime = std::chrono::system_clock::now(),
-                    };
-                }
+                [](ArchiveDownloadOperation const&) {},
+                [](ArchiveUploadOperation const&) {},
+                [](std::nullopt_t) {}
             )
         );
+        return completed;
     }
 
     /**
@@ -2322,6 +2290,44 @@ void OperationQueue::addSyncScanOperation(
             .localPath = localPath,
         }
     );
+}
+
+auto OperationQueue::makeSyncScanCallback(
+    Ids::SyncSessionId syncSessionId,
+    std::weak_ptr<SyncSession> session,
+    Ids::OperationId siblingScanId,
+    bool isLocal,
+    void (SyncSession::*setTree)(SharedData::Sync::ScanNode)
+) -> std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>
+{
+    return [weak = weak_from_this(),
+               syncSessionId = std::move(syncSessionId),
+               session = std::move(session),
+               siblingScanId = std::move(siblingScanId),
+               isLocal,
+               setTree](std::expected<SharedData::Sync::ScanNode, std::string> tree)
+    {
+        auto self = weak.lock();
+        auto locked = session.lock();
+        if (!self || !locked)
+            return;
+        if (!tree)
+        {
+            self->cancelSiblingScan(siblingScanId);
+            RpcHelper::callRemoteSafely(
+                *self->hub_, self->rpcName("onSyncScanFailed"), syncSessionId, isLocal, tree.error()
+            );
+            return;
+        }
+        boost::asio::post(
+            locked->strand(),
+            [locked, setTree, tree = std::move(*tree)]() mutable
+            {
+                ((*locked).*setTree)(std::move(tree));
+            }
+        );
+        RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onSyncScanPhaseDone"), syncSessionId, isLocal);
+    };
 }
 
 void OperationQueue::setSyncBaselineStore(std::shared_ptr<SyncBaselineStore const> store)

@@ -327,7 +327,8 @@ class OperationQueue
     void paused(bool pause);
 
     /**
-     * @brief Observes every completion right before it is sent to the frontend. Used by tests.
+     * @brief Test hook: @p observer sees every completion right before it is sent to the frontend. The application
+     *        never sets one.
      */
     void setCompletionObserver(std::function<void(OperationCompleted const&)> observer);
 
