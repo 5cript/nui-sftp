@@ -58,14 +58,53 @@ namespace Paths::Test
                  {"nul.txt", PathRejection::ReservedDeviceName},
                  {"Lpt9", PathRejection::ReservedDeviceName},
                  {"com1.tar.gz", PathRejection::ReservedDeviceName},
+                 {"COM0", PathRejection::ReservedDeviceName},
+                 {"lpt0.txt", PathRejection::ReservedDeviceName},
+                 {"COM\xC2\xB9", PathRejection::ReservedDeviceName},
+                 {"lpt\xC2\xB3.log", PathRejection::ReservedDeviceName},
+                 {"CONIN$", PathRejection::ReservedDeviceName},
+                 {"conout$.txt", PathRejection::ReservedDeviceName},
+                 {"CON .txt", PathRejection::ReservedDeviceName},
+                 {"nul  .tar.gz", PathRejection::ReservedDeviceName},
              })
         {
             const auto segment = LocalPathSegment::make(name, LocalPlatform::Windows);
             ASSERT_FALSE(segment.has_value()) << name;
             EXPECT_EQ(segment.error().reason, reason) << name;
         }
-        for (auto const* name : {"console", "com10", "lpt", "a.b", "nul_"})
+        for (auto const* name : {"console", "com10", "lpt", "a.b", "nul_", "COM\xC2\xB4", "conin", " CON"})
             EXPECT_TRUE(LocalPathSegment::make(name, LocalPlatform::Windows).has_value()) << name;
+    }
+
+    TEST(LocalPathSegmentTests, WindowsLimitsNamesTo255Utf16Units)
+    {
+        EXPECT_TRUE(LocalPathSegment::make(std::string(255, 'a'), LocalPlatform::Windows).has_value());
+        EXPECT_EQ(
+            LocalPathSegment::make(std::string(256, 'a'), LocalPlatform::Windows).error().reason,
+            PathRejection::NameTooLong
+        );
+
+        // A code point above U+FFFF takes two UTF-16 units, so 128 of them are 256 units.
+        const auto rockets = [](std::size_t count)
+        {
+            std::string name;
+            for (std::size_t index = 0; index < count; ++index)
+                name += "\xF0\x9F\x9A\x80";
+            return name;
+        };
+        EXPECT_TRUE(LocalPathSegment::make(rockets(127), LocalPlatform::Windows).has_value());
+        EXPECT_EQ(
+            LocalPathSegment::make(rockets(128), LocalPlatform::Windows).error().reason, PathRejection::NameTooLong
+        );
+        EXPECT_TRUE(LocalPathSegment::make(rockets(128), LocalPlatform::Posix).has_value());
+    }
+
+    TEST(LocalPathSegmentTests, RejectionOfAppliesTheSegmentRulesFirst)
+    {
+        EXPECT_EQ(LocalPathSegment::rejectionOf("..", LocalPlatform::Windows), PathRejection::DotOrDotDot);
+        EXPECT_EQ(LocalPathSegment::rejectionOf("a/b", LocalPlatform::Posix), PathRejection::ContainsSeparator);
+        EXPECT_EQ(LocalPathSegment::rejectionOf("a:b", LocalPlatform::Windows), PathRejection::ReservedCharacter);
+        EXPECT_FALSE(LocalPathSegment::rejectionOf("a:b", LocalPlatform::Posix).has_value());
     }
 
     TEST(Utf8Tests, AcceptsOnlyWellFormedSequences)
