@@ -1042,28 +1042,164 @@ namespace SecureShell::Test
         }
     }
 
+    namespace
+    {
+        std::expected<void, SftpError> renameReplace(SftpSession& sftp)
+        {
+            auto future = sftp.performPromise(
+                [&sftp]()
+                {
+                    return sftp.renameReplaceInStrand(
+                        remote("/home/test/source.txt"), remote("/home/test/target.txt"), ".aside"
+                    );
+                }
+            );
+            if (future.wait_for(3s) != std::future_status::ready)
+                return std::unexpected(SftpError{.message = "timeout"});
+            return future.get();
+        }
+
+        std::expected<void, SftpError> renameNoReplace(
+            SftpSession& sftp,
+            std::string_view destination,
+            std::optional<SharedData::FileType> sourceType = std::nullopt
+        )
+        {
+            auto future = sftp.performPromise(
+                [&sftp, destination, sourceType]()
+                {
+                    return sftp.renameNoReplaceInStrand(remote("/home/test/source.txt"), remote(destination), sourceType);
+                }
+            );
+            if (future.wait_for(3s) != std::future_status::ready)
+                return std::unexpected(SftpError{.message = "timeout"});
+            return future.get();
+        }
+    }
+
     TEST_F(SftpTests, FailedRenameReplaceRestoresTheDestination)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
         ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
-        // Moving the destination aside succeeds, the rename into place fails.
+        // Moving the destination aside succeeds, the rename into place fails, moving it back succeeds.
+        ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 1}, {"count", 1}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        EXPECT_FALSE(renameReplace(*sftp).has_value());
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
+        EXPECT_FALSE(remoteExists(*sftp, "/home/test/target.txt.aside"));
+        EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+    }
+
+    TEST_F(SftpTests, FailedRollbackNamesWhereTheDestinationIsKept)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
         ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 1}}));
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        auto future = sftp->performPromise(
-            [&sftp]()
-            {
-                return sftp->renameReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"), ".aside");
-            }
-        );
-        ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
-        EXPECT_FALSE(future.get().has_value());
+        const auto result = renameReplace(*sftp);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_NE(result.error().message.find("/home/test/target.txt.aside"), std::string::npos) << result.error().message;
         ASSERT_TRUE(serverStartResult->command("failRenames", {{"enabled", false}}));
-        // The restore is a rename as well and ran while renames failed, so the original sits aside: never lost.
-        const bool restored = readRemote(*sftp, "/home/test/target.txt") == "target";
-        const bool keptAside = readRemote(*sftp, "/home/test/target.txt.aside") == "target";
-        EXPECT_TRUE(restored || keptAside);
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt.aside"), "target");
         EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+    }
+
+    TEST_F(SftpTests, RenameReplaceRemovesALeftoverAside)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt.aside"}, {"content", "old"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ASSERT_TRUE(renameReplace(*sftp).has_value());
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "source");
+        EXPECT_FALSE(remoteExists(*sftp, "/home/test/target.txt.aside"));
+        EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
+    }
+
+    TEST_F(SftpTests, RenameReplacePutsBackADestinationThatOnlyExistsAside)
+    {
+        for (const bool failInPlace : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(Sftp);
+            ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+            ASSERT_TRUE(
+                serverStartResult->command("createFile", {{"path", "/home/test/target.txt.aside"}, {"content", "target"}})
+            );
+            // Putting it back and moving it aside again succeed, the rename into place fails.
+            if (failInPlace)
+                ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 2}, {"count", 1}}));
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+            const auto result = renameReplace(*sftp);
+            EXPECT_EQ(result.has_value(), !failInPlace);
+            EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), failInPlace ? "target" : "source");
+            EXPECT_FALSE(remoteExists(*sftp, "/home/test/target.txt.aside")) << "failInPlace: " << failInPlace;
+        }
+    }
+
+    TEST_F(SftpTests, RenameNoReplaceRenamesWhenTheServerRefusesHardlinks)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+        ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "hardlink@openssh.com"}}));
+        ASSERT_TRUE(serverStartResult->command("failHardlinks", nlohmann::json::object()));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto refused = renameNoReplace(*sftp, "/home/test/target.txt", SharedData::FileType::Regular);
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
+
+        ASSERT_TRUE(renameNoReplace(*sftp, "/home/test/moved.txt", SharedData::FileType::Regular).has_value());
+        EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
+        EXPECT_EQ(readRemote(*sftp, "/home/test/moved.txt"), "source");
+    }
+
+    TEST_F(SftpTests, RenameNoReplaceSucceedsWhenTheLinkedSourceCannotBeRemoved)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "hardlink@openssh.com"}}));
+        ASSERT_TRUE(serverStartResult->command("failRemoves", nlohmann::json::object()));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ASSERT_TRUE(renameNoReplace(*sftp, "/home/test/moved.txt").has_value());
+        EXPECT_EQ(readRemote(*sftp, "/home/test/moved.txt"), "source");
+    }
+
+    TEST_F(SftpTests, MoveIntoPlaceReplacesOnlyWhenAllowed)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto move = [&sftp](bool replace)
+        {
+            auto future = sftp->performPromise(
+                [&sftp, replace]()
+                {
+                    return sftp->moveIntoPlaceInStrand(
+                        remote("/home/test/source.txt"), remote("/home/test/target.txt"), replace, ".aside"
+                    );
+                }
+            );
+            return future.get();
+        };
+        const auto refused = move(false);
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
+
+        ASSERT_TRUE(move(true).has_value());
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "source");
+        EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
     }
 }

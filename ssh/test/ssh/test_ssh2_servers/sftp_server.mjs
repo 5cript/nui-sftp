@@ -169,6 +169,10 @@ const faults = {
     failRenames: false,
     // Renames that still succeed before failRenames applies, null for none.
     renamesBeforeFailure: null,
+    // Renames that fail before renames succeed again, null for all.
+    renamesFailing: null,
+    failHardlinks: false,
+    failRemoves: false,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
     bytesRead: 0,
@@ -184,6 +188,11 @@ const renameFails = () => {
     if (faults.renamesBeforeFailure !== null && faults.renamesBeforeFailure > 0) {
         --faults.renamesBeforeFailure;
         return false;
+    }
+    if (faults.renamesFailing !== null) {
+        if (faults.renamesFailing === 0)
+            return false;
+        --faults.renamesFailing;
     }
     return true;
 };
@@ -598,6 +607,10 @@ const server = new Server({
                         logMessage('Cannot remove directories');
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
+                    if (faults.failRemoves) {
+                        logMessage('Fault: failing REMOVE');
+                        return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                    }
 
                     result.parent.removeChild(result.name);
 
@@ -663,6 +676,10 @@ const server = new Server({
                     }
 
                     if (name === 'hardlink@openssh.com') {
+                        if (faults.failHardlinks) {
+                            logMessage('Fault: failing hardlink');
+                            return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                        }
                         if (newResult !== undefined || oldResult.type !== 'file')
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                         const parent = fakeFilesystem.find(pathUtil.dirname(newPath));
@@ -919,6 +936,14 @@ cli.on('dropAfterBytes', (command) => {
 cli.on('failRenames', (command) => {
     faults.failRenames = command.enabled !== false;
     faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
+    faults.renamesFailing = command.count === undefined ? null : Number(command.count);
+});
+// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks.
+cli.on('failHardlinks', (command) => {
+    faults.failHardlinks = command.enabled !== false;
+});
+cli.on('failRemoves', (command) => {
+    faults.failRemoves = command.enabled !== false;
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);
@@ -955,7 +980,8 @@ cli.on('createDirectory', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
     if (parent === undefined || parent.type !== 'directory')
         return;
-    parent.insert(directory({ name: pathUtil.posix.basename(command.path) }, []));
+    const stat = command.mode === undefined ? undefined : { mode: Number(command.mode) };
+    parent.insert(directory({ name: pathUtil.posix.basename(command.path), stat }, []));
 });
 cli.on('createSymlink', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
