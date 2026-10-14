@@ -9,6 +9,8 @@
 #include <nui/utility/move_detector.hpp>
 
 #include <filesystem>
+#include <cstdint>
+#include <optional>
 #include <functional>
 #include <memory>
 
@@ -45,14 +47,21 @@ class SyncDialog
      *                  served lazily from @p provider).
      * @param remotePath Remote scan root.
      * @param scanned Settings the scans of @p provider ran with.
+     * @param lastSyncTime When this pair was last synchronized, every recompute compares against it.
      */
     void open(
         std::shared_ptr<BackendSyncProvider> provider,
         SharedData::Sync::DiffSnapshot snapshot,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
-        ScanSettings scanned
+        ScanSettings scanned,
+        std::optional<std::uint64_t> lastSyncTime
     );
+
+    /**
+     * @brief Called when the user synchronized the whole selection, so the session can record the sync.
+     */
+    void setOnSynchronized(std::function<void()> callback);
 
     /**
      * @brief Scan + diff settings snapshot handed to the Recompare callback.

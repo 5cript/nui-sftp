@@ -145,6 +145,8 @@ syncDialog:
     InvalidName: "invalid name"
     TypeConflict: "directory against symlink"
     CaseConflict: "names differ only in case"
+    ChangedOnBothSides: "changed on both sides since the last sync"
+    ChangedOnDestination: "changed on the side it would replace or delete since the last sync"
   tree:
     loading: "Loading…"
     loadFailed: "Failed: {}"

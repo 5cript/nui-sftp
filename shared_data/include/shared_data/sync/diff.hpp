@@ -8,6 +8,7 @@
 #include <utility/enum_string_convert.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -35,6 +36,9 @@ namespace SharedData::Sync
         /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
         /// case would land on one local file then.
         bool localCaseInsensitive{false};
+        /// When this pair was last synchronized (seconds since the epoch); a side whose modification time is later
+        /// changed since. Unset for the first sync, newest wins then.
+        std::optional<std::uint64_t> lastSyncTime{};
     };
     BOOST_DESCRIBE_STRUCT(
         DiffOptions,

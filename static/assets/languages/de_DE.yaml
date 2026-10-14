@@ -205,6 +205,8 @@ syncDialog:
     InvalidName: "ungültiger Name"
     TypeConflict: "Verzeichnis gegen symbolischen Link"
     CaseConflict: "Namen unterscheiden sich nur in der Groß- und Kleinschreibung"
+    ChangedOnBothSides: "seit der letzten Synchronisation auf beiden Seiten geändert"
+    ChangedOnDestination: "seit der letzten Synchronisation auf der Seite geändert, die ersetzt oder gelöscht würde"
   tree:
     loading: "Lädt…"
     loadFailed: "Fehlgeschlagen: {}"

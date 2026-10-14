@@ -279,6 +279,9 @@ struct SyncDialog::Implementation
     ConfirmDialog* confirmDialog_;
     OperationQueue* operationQueue_;
     std::function<void(SyncDialog::RecompareRequest)> onRecompareRequested_{};
+    std::function<void()> onSynchronized_{};
+    /** @brief When the shown pair was last synchronized, part of every diff. */
+    std::optional<std::uint64_t> lastSyncTime_{};
 
     explicit Implementation(ConfirmDialog* confirmDialog, OperationQueue* operationQueue)
         : confirmDialog_{confirmDialog}
@@ -775,6 +778,7 @@ struct SyncDialog::Implementation
             .actionDelete = actionDelete_.value(),
             .recursive = recursive_.value(),
             .ignoreHidden = ignoreHidden_.value(),
+            .lastSyncTime = lastSyncTime_,
         };
     }
 
@@ -1314,6 +1318,11 @@ SyncDialog::~SyncDialog()
 SyncDialog::SyncDialog(SyncDialog&&) = default;
 SyncDialog& SyncDialog::operator=(SyncDialog&&) = default;
 
+void SyncDialog::setOnSynchronized(std::function<void()> callback)
+{
+    impl_->onSynchronized_ = std::move(callback);
+}
+
 void SyncDialog::setOnRecompareRequested(std::function<void(RecompareRequest)> callback)
 {
     impl_->onRecompareRequested_ = std::move(callback);
@@ -1329,10 +1338,12 @@ void SyncDialog::open(
     SharedData::Sync::DiffSnapshot snapshot,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
-    ScanSettings scanned
+    ScanSettings scanned,
+    std::optional<std::uint64_t> lastSyncTime
 )
 {
     impl_->provider_ = std::move(provider);
+    impl_->lastSyncTime_ = lastSyncTime;
     impl_->localPath_ = std::move(localPath);
     impl_->remotePath_ = std::move(remotePath);
     impl_->scanned_ = scanned;
@@ -1789,8 +1800,11 @@ Nui::ElementRenderer SyncDialog::operator()()
                                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
                                     .focusButton = deletes ? std::optional{ConfirmDialog::Button::No} : std::nullopt,
                                     .onClose = [this](std::optional<ConfirmDialog::Button> btn) {
-                                        if (btn == ConfirmDialog::Button::Yes)
-                                            impl_->enqueueOperations();
+                                        if (btn != ConfirmDialog::Button::Yes)
+                                            return;
+                                        impl_->enqueueOperations();
+                                        if (impl_->onSynchronized_)
+                                            impl_->onSynchronized_();
                                     }
                                 });
                             }

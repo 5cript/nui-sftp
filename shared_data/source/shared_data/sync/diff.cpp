@@ -166,6 +166,26 @@ namespace SharedData::Sync
             return BlockReason::Excluded;
         }
 
+        /**
+         * @brief The latest modification time in @p node and everything listed below it.
+         */
+        std::uint64_t newestModification(ScanNode const& node)
+        {
+            auto newest = node.mtime;
+            for (auto const& child : node.children)
+                newest = std::max(newest, newestModification(child));
+            return newest;
+        }
+
+        /**
+         * @brief A delete must not remove what appeared or changed on that side since the last sync, nobody has
+         *        seen it on the other side.
+         */
+        bool changedSinceLastSync(ScanNode const& node, DiffOptions const& options)
+        {
+            return options.lastSyncTime && newestModification(node) > *options.lastSyncTime;
+        }
+
         void handleBothPresent(
             ScanNode const& localChild,
             ScanNode const& remoteChild,
@@ -206,6 +226,25 @@ namespace SharedData::Sync
 
             if (!entriesDiffer(localChild, remoteChild))
                 return;
+
+            // With a known last sync, the side changed since then is the one that holds new data.
+            if (options.lastSyncTime)
+            {
+                const bool localChanged = localChild.mtime > *options.lastSyncTime;
+                const bool remoteChanged = remoteChild.mtime > *options.lastSyncTime;
+                const bool destinationChanged = (options.direction == Direction::Upload && remoteChanged) ||
+                    (options.direction == Direction::Download && localChanged);
+                if (options.direction == Direction::Both && localChanged && remoteChanged)
+                {
+                    sink.onBlocked(relKey, BlockReason::ChangedOnBothSides);
+                    return;
+                }
+                if (destinationChanged)
+                {
+                    sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
+                    return;
+                }
+            }
 
             const auto action = chooseTwoSidedAction(localChild, remoteChild, options);
             if (!action)
@@ -350,6 +389,9 @@ namespace SharedData::Sync
                         else if (auto action = chooseLocalOnlyAction(lc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, lc.name);
+                            if (*action == Action::DeleteLocal && changedSinceLastSync(lc, options))
+                                sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
+                            else
                             emitOneSided(
                                 makeOneSidedRow(lc, relKey, *action, true), *action, parentRelKey, options, sink
                             );
@@ -368,6 +410,9 @@ namespace SharedData::Sync
                         else if (auto action = chooseRemoteOnlyAction(rc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, rc.name);
+                            if (*action == Action::DeleteRemote && changedSinceLastSync(rc, options))
+                                sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
+                            else
                             emitOneSided(
                                 makeOneSidedRow(rc, relKey, *action, false), *action, parentRelKey, options, sink
                             );
