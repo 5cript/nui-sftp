@@ -59,7 +59,7 @@ namespace Test
         static ScanBundle runScan(SecureShell::SftpSession& sftp, std::filesystem::path const& path)
         {
             ScanOperation scan{
-                sftp,
+                sftp.weak_from_this(),
                 ScanOperation::ScanOperationOptions{.remotePath = remote(path.generic_string())},
             };
             while (true)
@@ -83,7 +83,7 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        ArchiveDownloadOperation operation{*sftp, {}};
+        ArchiveDownloadOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::ArchiveDownload);
     }
 
@@ -93,11 +93,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = {},
-            }};
+            }
+        };
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::InvalidPath);
@@ -109,7 +110,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry("/")},
                 .localArchivePath = toLocal(archiveDir_.path() / "root.tar"),
@@ -128,7 +129,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {},
                 .localArchivePath = toLocal(archiveDir_.path() / "empty.tar"),
@@ -146,7 +147,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "one.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -197,7 +198,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "one.tar.gz";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -220,7 +221,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "one.tar.bz2";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -240,7 +241,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "one.tar.zst";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -260,7 +261,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "pair.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots =
                     {
@@ -289,7 +290,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "documents.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry(rootPath.generic_string())},
                 .localArchivePath = toLocal(archivePath),
@@ -324,7 +325,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "short.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry(rootPath.generic_string())},
                 .localArchivePath = toLocal(archivePath),
@@ -345,7 +346,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "missing_scan.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry("/home/test/Documents")},
                 .localArchivePath = toLocal(archivePath),
@@ -371,7 +372,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "wrong_key.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry("/home/test/Documents")},
                 .localArchivePath = toLocal(archivePath),
@@ -396,7 +397,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "two_roots.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots =
                     {
@@ -431,7 +432,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "mixed_roots.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots =
                     {
@@ -471,7 +472,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "var_tree.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeDirectoryEntry("/var")},
                 .localArchivePath = toLocal(archivePath),
@@ -497,7 +498,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "large.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/large.txt", 65536u)},
                 .localArchivePath = toLocal(archivePath),
@@ -519,7 +520,7 @@ namespace Test
 
         const auto archivePath = archiveDir_.path() / "tmp_check.tar";
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -544,7 +545,7 @@ namespace Test
         }
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -568,7 +569,7 @@ namespace Test
         }
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),
@@ -589,7 +590,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archiveDir_.path() / "finished.tar"),
@@ -612,7 +613,7 @@ namespace Test
         std::uint64_t lastMax{0u};
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .progressCallback =
                     [&](std::uint64_t, std::uint64_t max, std::uint64_t current, std::make_signed_t<std::size_t>)
@@ -640,7 +641,7 @@ namespace Test
         ASSERT_FALSE(std::filesystem::exists(archivePath.parent_path()));
 
         ArchiveDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = toLocal(archivePath),

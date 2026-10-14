@@ -43,7 +43,9 @@ namespace Test
         ScanBundle
         runScan(SecureShell::SftpSession& sftp, std::filesystem::path const& remotePath, bool recursive = true)
         {
-            ScanOperation scan{sftp, {.remotePath = remote(remotePath.generic_string()), .recursive = recursive}};
+            ScanOperation scan{
+                sftp.weak_from_this(), {.remotePath = remote(remotePath.generic_string()), .recursive = recursive}
+            };
             for (int iteration = 0; iteration < 500; ++iteration)
             {
                 auto workResult = scan.work();
@@ -82,14 +84,14 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        BulkDownloadOperation operation{*sftp, {}};
+        BulkDownloadOperation operation{sftp, {}};
     }
 
     TEST_F(BulkDownloadOperationTests, BulkDownloadOperationTypeIsBulkDownload)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        BulkDownloadOperation operation{*sftp, {}};
+        BulkDownloadOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::BulkDownload);
     }
 
@@ -97,7 +99,7 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        BulkDownloadOperation operation{*sftp, {}};
+        BulkDownloadOperation operation{sftp, {}};
         EXPECT_FALSE(operation.isBarrier());
     }
 
@@ -106,7 +108,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(downloadDir_.path() / "empty")}};
+        BulkDownloadOperation operation{sftp, {.localPath = toLocal(downloadDir_.path() / "empty")}};
         // A scanned tree always holds its root, an empty one means the scan never delivered.
         operation.setScanResult({}, 0);
 
@@ -120,7 +122,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        BulkDownloadOperation operation{*sftp, {}};
+        BulkDownloadOperation operation{sftp, {}};
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
         EXPECT_EQ(workResult.error().type, SharedData::OperationErrorType::ImplementationError);
@@ -135,7 +137,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test/file1.txt"), .localPath = toLocal(downloadDir_.path() / "bad")}
+            sftp, {.remotePath = remote("/home/test/file1.txt"), .localPath = toLocal(downloadDir_.path() / "bad")}
         };
 
         std::vector<SharedData::DirectoryEntry> entries;
@@ -164,7 +166,7 @@ namespace Test
         const auto localRoot = downloadDir_.path() / "Documents";
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(localRoot)}
+            sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(localRoot)}
         };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
@@ -189,7 +191,7 @@ namespace Test
         ASSERT_FALSE(std::filesystem::exists(localRoot));
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(localRoot)}
+            sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(localRoot)}
         };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
@@ -229,7 +231,7 @@ namespace Test
             }
         );
 
-        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
         operation.setScanResult(std::move(entries), std::string{"Document 1 content"}.size());
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -272,7 +274,7 @@ namespace Test
         );
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = false}
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = false}
         };
         operation.setScanResult(std::move(entries), 0);
 
@@ -293,7 +295,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         const auto localRoot = downloadDir_.path() / "rootless";
-        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.localPath = toLocal(localRoot)}};
         auto scan = runScan(*sftp, "/home/test/Documents");
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
@@ -323,7 +325,7 @@ namespace Test
             }
         );
 
-        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
         operation.setScanResult(std::move(entries), 0);
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
 
@@ -378,7 +380,7 @@ namespace Test
             }
         );
 
-        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
         operation.setScanResult(std::move(entries), 0);
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
 
@@ -421,7 +423,7 @@ namespace Test
         );
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = true}
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = true}
         };
         operation.setScanResult(std::move(entries), 0);
 
@@ -472,7 +474,7 @@ namespace Test
             }
         );
 
-        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
         operation.setScanResult(std::move(entries), 0);
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -501,7 +503,7 @@ namespace Test
             }
         );
 
-        BulkDownloadOperation operation{*sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot)}};
         operation.setScanResult(std::move(entries), 0);
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -519,7 +521,7 @@ namespace Test
 
         int callbackInvocations = 0;
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .overallProgressCallback =
                     [&callbackInvocations](SharedData::BulkProgress const&)
@@ -544,7 +546,7 @@ namespace Test
         auto scan = runScan(*sftp, "/home/test/Documents");
 
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(downloadDir_.path() / "completed")}
         };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
@@ -562,7 +564,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test/file1.txt"), .localPath = toLocal(downloadDir_.path() / "failed")}
+            sftp, {.remotePath = remote("/home/test/file1.txt"), .localPath = toLocal(downloadDir_.path() / "failed")}
         };
 
         std::vector<SharedData::DirectoryEntry> entries;
@@ -606,7 +608,7 @@ namespace Test
             .sizeBytes = std::string{"Document 2 content"}.size(),
         });
 
-        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.localPath = toLocal(localRoot)}};
         operation.setPrescannedFileList(std::move(files));
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -642,7 +644,7 @@ namespace Test
             .mayOverwrite = true,
         });
 
-        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.localPath = toLocal(localRoot)}};
         operation.setPrescannedFileList(std::move(files));
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
 
@@ -684,7 +686,7 @@ namespace Test
             .mtimeNsec = 0,
         });
 
-        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot)}};
+        BulkDownloadOperation operation{sftp, {.localPath = toLocal(localRoot)}};
         operation.setPrescannedFileList(std::move(files));
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -720,7 +722,7 @@ namespace Test
 
         BulkDownloadOperation::BulkDownloadOperationOptions options{.localPath = toLocal(localRoot)};
         options.individualOptions.createMissingDirectories = true;
-        BulkDownloadOperation operation{*sftp, std::move(options)};
+        BulkDownloadOperation operation{sftp, std::move(options)};
         operation.setPrescannedFileList(std::move(files));
 
         ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -758,7 +760,7 @@ namespace Test
             std::filesystem::remove(localRoot / "doc2.txt");
             BulkDownloadOperation::BulkDownloadOperationOptions options{.localPath = toLocal(localRoot)};
             options.individualOptions.createMissingDirectories = createMissing;
-            BulkDownloadOperation operation{*sftp, std::move(options)};
+            BulkDownloadOperation operation{sftp, std::move(options)};
             operation.setPrescannedFileList(files);
 
             ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -775,7 +777,7 @@ namespace Test
         auto scan = runScan(*sftp, "/home/test/Documents");
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(downloadDir_.path() / "cancel")}
+            sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(downloadDir_.path() / "cancel")}
         };
         operation.setScanResult(std::move(scan.entries), scan.totalBytes);
 
@@ -817,7 +819,7 @@ namespace Test
                 .sizeBytes = std::string{"Fake file content"}.size(),
             });
 
-            BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot), .concurrency = concurrency}};
+            BulkDownloadOperation operation{sftp, {.localPath = toLocal(localRoot), .concurrency = concurrency}};
             operation.setPrescannedFileList(std::move(files));
 
             ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
@@ -879,7 +881,7 @@ namespace Test
         );
 
         BulkDownloadOperation operation{
-            *sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .concurrency = 3}
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .concurrency = 3}
         };
         operation.setScanResult(std::move(entries), 0);
 
@@ -923,7 +925,7 @@ namespace Test
         );
 
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = false, .concurrency = 2}
         };
         operation.setScanResult(std::move(entries), 0);
@@ -969,7 +971,7 @@ namespace Test
         );
 
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {.remotePath = remote("/home/test"), .localPath = toLocal(localRoot), .failFast = true, .concurrency = 2}
         };
         operation.setScanResult(std::move(entries), 0);
@@ -1027,7 +1029,7 @@ namespace Test
         bool monotonic = true;
         SharedData::BulkProgress last{};
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .overallProgressCallback =
                     [&](SharedData::BulkProgress const& update)
@@ -1078,7 +1080,7 @@ namespace Test
 
         std::size_t maxInFlight = 0;
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .overallProgressCallback =
                     [&maxInFlight](SharedData::BulkProgress const& update)
@@ -1112,7 +1114,7 @@ namespace Test
         // The scan root carries no permissions, applying "unknown" used to chmod it to 07777.
         const auto localRoot = downloadDir_.path() / "inherited";
         BulkDownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/Documents"),
                 .localPath = toLocal(localRoot),

@@ -41,14 +41,14 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        DownloadOperation operation{*sftp, {}};
+        DownloadOperation operation{sftp, {}};
     }
 
     TEST_F(DownloadOperationTests, DownloadOperationTypeIsDownload)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        DownloadOperation operation{*sftp, {}};
+        DownloadOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::Download);
     }
 
@@ -60,7 +60,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -82,7 +82,7 @@ namespace Test
         for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
         {
             DownloadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remotePath,
                     .localPath = toLocal(localPath),
@@ -103,7 +103,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -148,7 +148,7 @@ namespace Test
         entry.mtimeNsec = expectedMtimeNsec;
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -185,7 +185,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -217,7 +217,7 @@ namespace Test
         }
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -240,7 +240,7 @@ namespace Test
         // First download
         {
             DownloadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -262,7 +262,7 @@ namespace Test
         // Second download with overwrite enabled
         {
             DownloadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -292,7 +292,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/does_not_exist.txt"),
                 .localPath = toLocal(downloadDir_.path() / "does_not_exist.txt"),
@@ -310,7 +310,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = {},
@@ -328,7 +328,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(downloadDir_.path() / "file1.txt"),
@@ -357,7 +357,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/does_not_exist.txt"),
                 .localPath = toLocal(downloadDir_.path() / "does_not_exist.txt"),
@@ -380,7 +380,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -404,7 +404,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -435,7 +435,7 @@ namespace Test
         }
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -473,7 +473,7 @@ namespace Test
         }
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -511,7 +511,7 @@ namespace Test
         }
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -542,7 +542,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "large.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -563,6 +563,52 @@ namespace Test
 
         ASSERT_TRUE(std::filesystem::exists(localPath));
         EXPECT_EQ(std::filesystem::file_size(localPath), 65536u);
+    }
+
+    TEST_F(DownloadOperationTests, ADownloadWhoseChannelClosesFailsWithChannelClosed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "large.txt";
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/large.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
+        const auto firstStep = operation.work();
+        ASSERT_TRUE(firstStep.has_value()) << firstStep.error().toString();
+        ASSERT_EQ(*firstStep, DownloadOperation::WorkStatus::MoreWork);
+
+        sftp->close();
+        const auto afterClose = operation.work();
+        ASSERT_FALSE(afterClose.has_value());
+        EXPECT_EQ(afterClose.error().type, Operation::ErrorType::ChannelClosed);
+        EXPECT_EQ(operation.state(), Operation::OperationState::Failed);
+        EXPECT_FALSE(std::filesystem::exists(localPath));
+    }
+
+    TEST_F(DownloadOperationTests, ADownloadOfAGoneSessionFailsWithChannelClosed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(downloadDir_.path() / "file1.txt"),
+            }
+        };
+        sftp->close();
+        sftp.reset();
+
+        EXPECT_EQ(operation.strand(), nullptr);
+        const auto result = operation.workInStrand();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Operation::ErrorType::ChannelClosed);
     }
 
     // ---- Symlink handling --------------------------------------------------
@@ -601,7 +647,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "link_to_file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_file1.txt"),
                 .localPath = toLocal(localPath),
@@ -661,7 +707,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "link_to_documents";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_documents"),
                 .localPath = toLocal(localPath),
@@ -683,7 +729,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "skipped_link";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_file1.txt"),
                 .localPath = toLocal(localPath),
@@ -716,7 +762,7 @@ namespace Test
         ASSERT_FALSE(std::filesystem::exists(localPath.parent_path()));
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -738,7 +784,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "a" / "b" / "c" / "d" / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -763,7 +809,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "nonexistent" / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -789,7 +835,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -809,7 +855,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "nested" / "deep" / "link_to_file1.txt";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_file1.txt"),
                 .localPath = toLocal(localPath),
@@ -832,7 +878,7 @@ namespace Test
         const auto localPath = downloadDir_.path() / "dangling_link";
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/dangling_link"),
                 .localPath = toLocal(localPath),

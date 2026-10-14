@@ -782,6 +782,54 @@ namespace Test
         EXPECT_EQ(finished.front().error->type, SharedData::OperationErrorType::FileExists);
     }
 
+    TEST_F(OperationQueueTests, QueuedOperationsOfAClosedChannelFailWithChannelClosed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto download = Ids::generateOperationId();
+        const auto rename = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp,
+                    download,
+                    toLocal(localDirectory_.path() / "large.txt"),
+                    remote("/home/test/large.txt"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addRenameOperation(
+                    *sftp, rename, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                );
+            }
+        ).has_value());
+
+        sftp->close();
+        sftp.reset();
+        setPaused(false);
+        workUntilCompletions(2);
+
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 2u);
+        for (auto const& completed : finished)
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Failed) << completed.operationId.value();
+            ASSERT_TRUE(completed.error.has_value()) << completed.operationId.value();
+            EXPECT_EQ(completed.error->type, SharedData::OperationErrorType::ChannelClosed);
+        }
+        EXPECT_FALSE(std::filesystem::exists(localDirectory_.path() / "large.txt"));
+    }
+
     TEST_F(OperationQueueTests, BulkDeleteGoesOnPastARootItCannotScan)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -1504,11 +1552,12 @@ namespace Test
         for (auto& entries : hostileScans)
         {
             DeleteOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/Documents"),
                     .recursive = true,
-                }};
+                }
+            };
             operation.setScanResult(std::move(entries), 0);
 
             const auto result = operation.work();

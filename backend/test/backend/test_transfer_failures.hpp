@@ -197,7 +197,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -222,7 +222,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -247,7 +247,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -276,7 +276,7 @@ namespace Test
             entry.size = 70000u;
 
             DownloadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/large.txt"),
                     .localPath = toLocal(localPath),
@@ -386,7 +386,7 @@ namespace Test
         writeLocalFile(localPath.generic_string() + ".filepart", alphabet(65536).substr(0, 20000));
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -409,7 +409,7 @@ namespace Test
         writeLocalFile(localPath.generic_string() + ".filepart", "Fake file content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -429,7 +429,7 @@ namespace Test
 
         const auto localPath = localDirectory_.path() / "followed.txt";
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_file1.txt"),
                 .localPath = toLocal(localPath),
@@ -453,7 +453,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(65536));
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -477,7 +477,7 @@ namespace Test
         writeLocalFile(localPath, "new content");
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -503,7 +503,7 @@ namespace Test
         writeLocalFile(localPath, content);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/resumed.txt"),
                 .localPath = toLocal(localPath),
@@ -529,7 +529,7 @@ namespace Test
         std::filesystem::create_symlink(outside, localPath.generic_string() + ".filepart");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -555,7 +555,7 @@ namespace Test
             writeLocalFile(localPath, "new content");
 
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -584,7 +584,7 @@ namespace Test
             writeLocalFile(localPath, "new content");
 
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -610,7 +610,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(4096));
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),
@@ -636,7 +636,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(4096));
 
         ArchiveUploadOperation refused{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),
@@ -649,7 +649,7 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar"), "old archive");
 
         ArchiveUploadOperation replacing{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),
