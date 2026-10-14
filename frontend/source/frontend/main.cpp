@@ -3,6 +3,7 @@
 #include <frontend/theme_controller.hpp>
 #include <utility/language.hpp>
 #include <persistence/state_holder.hpp>
+#include <paths/local_path_segment.hpp>
 #include <log/log.hpp>
 
 #include <nui/core.hpp>
@@ -38,6 +39,92 @@ namespace
     }
 }
 
+void loadState()
+{
+    persistence->load(
+        [](std::optional<std::string> const&, Persistence::StateHolder&, Persistence::LoadWarnings const&)
+        {
+            Log::info("State loaded, setting up frontend.");
+            frontendEvents = std::make_unique<FrontendEvents>();
+            frontendEvents->onLanguageChanged.value() = persistence->stateCache().localizationOptions.languageCode;
+            frontendEvents->selectedTheme.value() = persistence->stateCache().uiOptions.theme;
+            frontendEvents->darkLightMode.value() = persistence->stateCache().uiOptions.darkLightMode;
+
+            themeController = std::make_unique<ThemeController>(*frontendEvents);
+
+            persistence->loadLanguageFiles(
+                [](std::optional<nlohmann::json> lang)
+                {
+                    Log::info("Language file loaded, continuing setup.");
+                    try
+                    {
+                        language = std::make_unique<LanguageProvider>(
+                            frontendEvents.get(),
+                            lang.value_or(
+                                []()
+                                {
+                                    auto res = nlohmann::json::object();
+                                    res["en_US"] = nlohmann::json::object();
+                                    return res;
+                                }()
+                            )
+                        );
+
+                        Log::info("Language file loaded.");
+                        Log::info("Creating main page.");
+                        mainPage =
+                            std::make_unique<MainPage>(persistence.get(), frontendEvents.get(), *themeController);
+
+                        Log::info("Creating DOM.");
+                        dom = std::make_unique<Nui::Dom::Dom>();
+
+                        Log::info("Rendering main page into DOM.");
+                        dom->setBody(Nui::Elements::body{}(mainPage->render()));
+
+                        Log::info("Calling setup completion function");
+                        mainPage->onSetupComplete();
+
+                        Log::debug("Dumping nui_rpc.backend and nui_rpc.frontend for debugging:");
+                        auto nuiRpc = Nui::val::global("nui_rpc");
+                        if (!nuiRpc.isUndefined() && nuiRpc.hasOwnProperty("backend"))
+                        {
+                            Log::debug("nui_rpc.backend:");
+                            printKeys(nuiRpc["backend"]);
+                            Log::debug("nui_rpc.frontend:");
+                            printKeys(nuiRpc["frontend"]);
+                        }
+                    }
+                    catch (std::exception const& exc)
+                    {
+                        Log::error("Failed to continue setup after loading language file: {}", exc.what());
+                    }
+                }
+            );
+        }
+    );
+}
+
+/**
+ * @brief Takes the platform of the backend for local paths, then runs @p then. Local paths follow the rules of the
+ *        machine the backend runs on, not WebAssembly's, so nothing may read one before.
+ */
+void withLocalPlatform(void (*then)())
+{
+    Nui::RpcClient::callWithBackChannel(
+        "Main::getVersion",
+        [then](Nui::val response)
+        {
+            if (response.hasOwnProperty("localPlatform"))
+            {
+                Paths::defaultLocalPlatform() = response["localPlatform"].as<std::string>() == "windows"
+                    ? Paths::LocalPlatform::Windows
+                    : Paths::LocalPlatform::Posix;
+            }
+            then();
+        }
+    );
+}
+
 bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
 {
     static int counter = 0;
@@ -58,67 +145,7 @@ bool tryLoad(std::shared_ptr<Nui::TimerHandle> const& setupWait)
             Log::info("terminalUtility available.");
 
         persistence = std::make_unique<Persistence::StateHolder>();
-        persistence->load(
-            [](std::optional<std::string> const&, Persistence::StateHolder&, Persistence::LoadWarnings const&)
-            {
-                Log::info("State loaded, setting up frontend.");
-                frontendEvents = std::make_unique<FrontendEvents>();
-                frontendEvents->onLanguageChanged.value() = persistence->stateCache().localizationOptions.languageCode;
-                frontendEvents->selectedTheme.value() = persistence->stateCache().uiOptions.theme;
-                frontendEvents->darkLightMode.value() = persistence->stateCache().uiOptions.darkLightMode;
-
-                themeController = std::make_unique<ThemeController>(*frontendEvents);
-
-                persistence->loadLanguageFiles(
-                    [](std::optional<nlohmann::json> lang)
-                    {
-                        Log::info("Language file loaded, continuing setup.");
-                        try
-                        {
-                            language = std::make_unique<LanguageProvider>(
-                                frontendEvents.get(),
-                                lang.value_or(
-                                    []()
-                                    {
-                                        auto res = nlohmann::json::object();
-                                        res["en_US"] = nlohmann::json::object();
-                                        return res;
-                                    }()
-                                )
-                            );
-
-                            Log::info("Language file loaded.");
-                            Log::info("Creating main page.");
-                            mainPage =
-                                std::make_unique<MainPage>(persistence.get(), frontendEvents.get(), *themeController);
-
-                            Log::info("Creating DOM.");
-                            dom = std::make_unique<Nui::Dom::Dom>();
-
-                            Log::info("Rendering main page into DOM.");
-                            dom->setBody(Nui::Elements::body{}(mainPage->render()));
-
-                            Log::info("Calling setup completion function");
-                            mainPage->onSetupComplete();
-
-                            Log::debug("Dumping nui_rpc.backend and nui_rpc.frontend for debugging:");
-                            auto nuiRpc = Nui::val::global("nui_rpc");
-                            if (!nuiRpc.isUndefined() && nuiRpc.hasOwnProperty("backend"))
-                            {
-                                Log::debug("nui_rpc.backend:");
-                                printKeys(nuiRpc["backend"]);
-                                Log::debug("nui_rpc.frontend:");
-                                printKeys(nuiRpc["frontend"]);
-                            }
-                        }
-                        catch (std::exception const& exc)
-                        {
-                            Log::error("Failed to continue setup after loading language file: {}", exc.what());
-                        }
-                    }
-                );
-            }
-        );
+        withLocalPlatform(&loadState);
     }
     else
         Log::info("Waiting for terminalUtility to be available.");

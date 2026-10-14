@@ -19,7 +19,6 @@
 #include <frontend/notification_center.hpp>
 #include <frontend/notification_log.hpp>
 #include <frontend/persistence_load_warnings.hpp>
-#include <paths/local_path_segment.hpp>
 #include <log/log.hpp>
 
 #include <nui/frontend/api/timer.hpp>
@@ -133,13 +132,6 @@ void MainPage::onSetupComplete()
         "Main::getVersion",
         [this](Nui::val response)
         {
-            // Local paths are parsed by the rules of the machine the backend runs on, not WebAssembly's.
-            if (response.hasOwnProperty("localPlatform"))
-            {
-                Paths::defaultLocalPlatform() = response["localPlatform"].as<std::string>() == "windows"
-                    ? Paths::LocalPlatform::Windows
-                    : Paths::LocalPlatform::Posix;
-            }
             impl_->events->appVersion = AppVersion{
                 .version = response["version"].as<std::string>(),
                 .gitTag = response["gitTag"].as<std::string>(),
