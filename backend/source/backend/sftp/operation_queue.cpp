@@ -2164,14 +2164,19 @@ void OperationQueue::addSyncScanOperation(
     );
 
     // Queue remote scan — build-tree mode.
-    // Temp files of transfers on either side, a sync neither copies nor deletes them.
+    // Temp files of transfers on either side and the asides of replaced destinations, a sync neither copies nor
+    // deletes them.
+    const auto uploadSuffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
+    );
+    const auto downloadSuffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix
+    );
     std::vector<std::string> temporarySuffixes{
-        Persistence::effectiveTempFileSuffix(
-            sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
-        ),
-        Persistence::effectiveTempFileSuffix(
-            sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix
-        ),
+        uploadSuffix,
+        downloadSuffix,
+        Persistence::asideFileSuffix(uploadSuffix),
+        Persistence::asideFileSuffix(downloadSuffix),
     };
 
     auto remoteScan = std::make_unique<ScanOperation>(
