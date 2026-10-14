@@ -70,7 +70,7 @@ namespace SecureShell
     }
 
     std::expected<std::vector<FileInformation>, SftpSession::Error>
-    SftpSession::listDirectoryInStrand(Paths::RemotePath const& path)
+    SftpSession::listDirectoryInStrand(Paths::RemotePath const& path, bool resolveLinks)
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
@@ -117,7 +117,7 @@ namespace SecureShell
 
         for (auto& entry : entries)
         {
-            if (entry.type == SharedData::FileType::Symlink)
+            if (resolveLinks && entry.type == SharedData::FileType::Symlink)
             {
                 // A name that is no valid segment, like "x/..", must not become a path to look up.
                 const auto name = entry.nameSegment();
@@ -147,12 +147,12 @@ namespace SecureShell
     }
 
     std::future<std::expected<std::vector<FileInformation>, SftpSession::Error>>
-    SftpSession::listDirectory(Paths::RemotePath const& path)
+    SftpSession::listDirectory(Paths::RemotePath const& path, bool resolveLinks)
     {
         return performPromise(
-            [this, path]()
+            [this, path, resolveLinks]()
             {
-                return listDirectoryInStrand(path);
+                return listDirectoryInStrand(path, resolveLinks);
             }
         );
     }

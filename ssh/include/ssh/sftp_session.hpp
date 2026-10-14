@@ -72,18 +72,22 @@ namespace SecureShell
          * @brief Lists the contents of a directory.
          *
          * @param path
+         * @param resolveLinks Reads the literal and the target of every symlink, two more round trips each. Without
+         *        it a symlink is listed as the link itself only.
          * @return std::future<std::expected<std::vector<FileInformation>, Error>>
          */
         std::future<std::expected<std::vector<FileInformation>, Error>>
-        listDirectory(Paths::RemotePath const& path);
+        listDirectory(Paths::RemotePath const& path, bool resolveLinks = true);
 
         /**
          * @brief In-strand variant of listDirectory. Must be called from within the processing thread.
          *
          * @param path
+         * @param resolveLinks See @ref listDirectory.
          * @return std::expected<std::vector<FileInformation>, Error>
          */
-        std::expected<std::vector<FileInformation>, Error> listDirectoryInStrand(Paths::RemotePath const& path);
+        std::expected<std::vector<FileInformation>, Error>
+        listDirectoryInStrand(Paths::RemotePath const& path, bool resolveLinks = true);
 
         /**
          * @brief Create a directory.
