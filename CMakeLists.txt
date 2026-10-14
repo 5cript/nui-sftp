@@ -205,6 +205,10 @@ else()
         add_subdirectory(shared_data/benchmark/shared_data)
         add_subdirectory(tar-archive/test/tar_archive)
         add_subdirectory(command-store/test/command-store)
+        add_test(
+            NAME NarrowPathConversions
+            COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}" -P "${CMAKE_SOURCE_DIR}/_cmake/check_narrow_path_text.cmake"
+        )
     endif()
 
     if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)
