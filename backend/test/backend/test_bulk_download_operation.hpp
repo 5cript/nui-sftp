@@ -617,6 +617,41 @@ namespace Test
         EXPECT_TRUE(operation.getFailed().empty());
     }
 
+    TEST_F(BulkDownloadOperationTests, PrescannedFilesReplaceOnlyApprovedDestinations)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localRoot = downloadDir_.path() / "approval";
+        std::filesystem::create_directories(localRoot);
+        // doc1.txt appeared after the existence check, doc2.txt existed and the user agreed to replace it.
+        std::ofstream{localRoot / "doc1.txt"} << "appeared";
+        std::ofstream{localRoot / "doc2.txt"} << "approved";
+
+        std::vector<BulkDownloadOperation::PrescannedFile> files;
+        files.push_back({
+            .source = remote("/home/test/Documents/doc1.txt"),
+            .destination = toLocal(localRoot / "doc1.txt"),
+            .sizeBytes = std::string{"Document 1 content"}.size(),
+        });
+        files.push_back({
+            .source = remote("/home/test/Documents/doc2.txt"),
+            .destination = toLocal(localRoot / "doc2.txt"),
+            .sizeBytes = std::string{"Document 2 content"}.size(),
+            .mayOverwrite = true,
+        });
+
+        BulkDownloadOperation operation{*sftp, {.localPath = toLocal(localRoot)}};
+        operation.setPrescannedFileList(std::move(files));
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+
+        EXPECT_EQ(readLocalFile(localRoot / "doc1.txt"), "appeared");
+        EXPECT_EQ(readLocalFile(localRoot / "doc2.txt"), "Document 2 content");
+        const auto failed = operation.getFailed();
+        ASSERT_EQ(failed.size(), 1u);
+        EXPECT_EQ(failed.front().second.type, SharedData::OperationErrorType::FileExists);
+    }
+
     TEST_F(BulkDownloadOperationTests, SetPrescannedFileListPreservesMtimeOnDownloadedFiles)
     {
         // Regression: BulkDownloadEntry → PrescannedFile → DirectoryEntry must
