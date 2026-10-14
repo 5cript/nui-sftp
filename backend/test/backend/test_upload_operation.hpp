@@ -366,6 +366,83 @@ namespace Test
         }
     }
 
+    TEST_F(UploadOperationTests, PartialFileOfAnotherSourceIsNotContinued)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // First upload, but only part of it
+        {
+            auto openFut = sftp->openFile(
+                remote("/home/test/testfile.txt.filepart"),
+                SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+            ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
+            auto openResult = openFut.get();
+            ASSERT_TRUE(openResult.has_value());
+            auto fileWeak = std::move(openResult).value();
+            auto file = fileWeak.lock();
+            ASSERT_TRUE(file);
+
+            // Same length as a real part, but not the source's bytes: a leftover of another program or version.
+            std::string partialContent(testFileContent.size() / 2, '#');
+            auto writeFut = file->write(partialContent);
+            ASSERT_EQ(writeFut.wait_for(5s), std::future_status::ready);
+            (void)writeFut.get();
+            file->close();
+        }
+
+        // Second upload continuing the partial file
+        {
+            UploadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                    .tryContinue = true,
+                }
+            };
+
+            UploadOperation::WorkStatus workStatus;
+            for (int workTimes = 0; workTimes < 100; ++workTimes)
+            {
+                auto workResult = operation.work();
+                ASSERT_TRUE(workResult.has_value());
+                workStatus = workResult.value();
+                if (workStatus == UploadOperation::WorkStatus::Complete)
+                    break;
+            }
+            ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+            auto closeResult = operation.cancel(false);
+            ASSERT_TRUE(closeResult.has_value());
+        }
+
+        // Verify final file content
+        {
+            auto readFut = sftp->openFile(
+                remote("/home/test/testfile.txt"),
+                SecureShell::SftpSession::OpenType::Read,
+                std::filesystem::perms::owner_read);
+            ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
+            auto readResult = readFut.get();
+
+            ASSERT_TRUE(readResult.has_value());
+            auto fileWeak = std::move(readResult).value();
+            auto file = fileWeak.lock();
+            ASSERT_TRUE(file);
+
+            std::string data(testFileContent.size() + 100, '\0');
+            auto readAllFut = file->readSome(data.data(), data.size());
+            ASSERT_EQ(readAllFut.wait_for(5s), std::future_status::ready);
+            auto readAllResult = readAllFut.get();
+            ASSERT_TRUE(readAllResult.has_value());
+            data.resize(readAllResult.value());
+
+            EXPECT_EQ(data, testFileContent);
+        }
+    }
+
     TEST_F(UploadOperationTests, EmptyFileUploadSucceeds)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

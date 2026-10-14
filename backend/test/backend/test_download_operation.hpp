@@ -458,6 +458,44 @@ namespace Test
         EXPECT_EQ(readLocalFile(localPath), "Fake file content");
     }
 
+    TEST_F(DownloadOperationTests, PartialFileOfAnotherSourceIsNotContinued)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        const auto filepartPath = localPath.generic_string() + ".filepart";
+
+        // 8 bytes that are not the start of "Fake file content": a leftover of another program or version.
+        {
+            std::ofstream partial{filepartPath, std::ios::binary};
+            partial << "Wrong fi";
+        }
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+                .tryContinue = true,
+            }
+        };
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
     TEST_F(DownloadOperationTests, PartialFileLargerThanRemoteStartsFresh)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
