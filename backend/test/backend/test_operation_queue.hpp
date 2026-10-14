@@ -1576,6 +1576,66 @@ namespace Test
         );
     }
 
+    TEST_F(OperationQueueTests, SyncScansExcludeTempFilesAndTheirAsides)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto suffix = Persistence::effectiveTempFileSuffix(std::nullopt);
+        const auto localRoot = localDirectory_.path() / "syncAsides";
+        std::filesystem::create_directories(localRoot);
+        std::ofstream{localRoot / "keep.txt"} << "keep";
+        std::ofstream{localRoot / fmt::format("part.txt{}", suffix)} << "part";
+        std::ofstream{localRoot / fmt::format("old.txt{}", Persistence::asideFileSuffix(suffix))} << "old";
+
+        const auto syncSessionId = Ids::generateSyncSessionId();
+        runOnStrand(
+            [&]()
+            {
+                queue->addSyncScanOperation(
+                    *sftp,
+                    syncSessionId,
+                    Ids::generateOperationId(),
+                    Ids::generateOperationId(),
+                    remote("/home/test/Music"),
+                    Paths::LocalPath::make(localRoot).value(),
+                    false,
+                    true,
+                    false
+                );
+            }
+        );
+        workUntilCompletions(2);
+        auto session = queue->syncSession(syncSessionId);
+        ASSERT_TRUE(session);
+        std::promise<SharedData::Sync::DiffSummary> summary;
+        boost::asio::post(
+            session->strand(),
+            [&]()
+            {
+                summary.set_value(
+                    session->recomputeDiffInStrand({.direction = SharedData::Sync::Direction::Upload}, {})
+                );
+            }
+        );
+        const auto result = summary.get_future().get();
+        std::set<std::string> excluded;
+        for (auto const& blocked : result.blockedSamples)
+        {
+            if (blocked.reason == SharedData::Sync::BlockReason::Excluded)
+                excluded.insert(blocked.relKey);
+        }
+        EXPECT_EQ(
+            excluded,
+            (std::set<std::string>{
+                fmt::format("part.txt{}", suffix), fmt::format("old.txt{}", Persistence::asideFileSuffix(suffix))
+            })
+        );
+        EXPECT_EQ(result.uploads.itemCount, 1u) << "keep.txt";
+    }
+
     TEST_F(OperationQueueTests, AFailedSyncScanCancelsTheOtherOne)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
