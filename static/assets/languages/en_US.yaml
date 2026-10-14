@@ -1144,7 +1144,7 @@ backend:
     renamePrevented: "File renaming is prevented by configuration."
     createFilePrevented: "File creation is prevented by configuration."
     createDirectoryPrevented: "Directory creation is prevented by configuration."
-    removeFailed: "Failed to remove path '{}': {}"
+    removeSomeFailed: "{} items could not be deleted, the others were:\n{}"
     removeRefused: "Refusing to delete '{}': it is not an absolute path, it is a root directory, or it contains your home directory."
   opener:
     sessionBusUnavailable: "D-Bus session bus is unavailable."

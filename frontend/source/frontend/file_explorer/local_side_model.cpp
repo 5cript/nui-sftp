@@ -554,6 +554,8 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                                 .text = error,
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
+                            // The other items may be gone, the listing has to show it.
+                            navigateTo(currentPath_.value());
                             return;
                         }
 

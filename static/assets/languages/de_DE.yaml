@@ -1142,7 +1142,7 @@ backend:
     renamePrevented: "Das Umbenennen von Dateien ist durch die Konfiguration verhindert."
     createFilePrevented: "Das Erstellen von Dateien ist durch die Konfiguration verhindert."
     createDirectoryPrevented: "Das Erstellen von Verzeichnissen ist durch die Konfiguration verhindert."
-    removeFailed: "Pfad '{}' konnte nicht entfernt werden: {}"
+    removeSomeFailed: "{} Elemente konnten nicht gelöscht werden, die übrigen wurden gelöscht:\n{}"
     removeRefused: "'{}' wird nicht gelöscht: Der Pfad ist nicht absolut, ist ein Wurzelverzeichnis oder enthält Ihr Home-Verzeichnis."
   opener:
     sessionBusUnavailable: "Der D-Bus-Sitzungsbus ist nicht verfügbar."

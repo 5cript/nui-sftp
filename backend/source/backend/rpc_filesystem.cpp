@@ -11,6 +11,8 @@
 
 #include <nui/backend/filesystem/special_paths.hpp>
 
+#include <fmt/ranges.h>
+
 #include <fstream>
 
 #ifndef _WIN32
@@ -315,8 +317,18 @@ void RpcFilesystem::registerRemoveMultiple()
                     if (ec)
                     {
                         Log::error("Failed to remove path '{}': {}", pathUtf8, ec.message());
-                        return reply.error(Utility::localizedMessage("backend.rpcFilesystem.removeFailed", pathUtf8, ec.message()));
+                        failures.push_back(fmt::format("{}: {}", pathUtf8, ec.message()));
                     }
+                }
+                if (!failures.empty())
+                {
+                    return reply.error(
+                        Utility::localizedMessage(
+                            "backend.rpcFilesystem.removeSomeFailed",
+                            failures.size(),
+                            fmt::format("{}", fmt::join(failures, "\n"))
+                        )
+                    );
                 }
                 Log::info("Successfully removed all specified paths.");
                 return reply({{"success", true}, {"removedCount", removedCount}});
