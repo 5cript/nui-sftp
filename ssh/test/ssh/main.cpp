@@ -5,6 +5,7 @@
 #include "test_ssh_session.hpp"
 #include "test_sftp.hpp"
 #include "test_sftp_in_strand.hpp"
+#include "test_key_file.hpp"
 
 #include <utility/node/node.hpp>
 
