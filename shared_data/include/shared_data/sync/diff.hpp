@@ -36,8 +36,10 @@ namespace SharedData::Sync
         /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
         /// case would land on one local file then.
         bool localCaseInsensitive{false};
-        /// When this pair was last synchronized (seconds since the epoch); a side whose modification time is later
-        /// changed since. Unset for the first sync, newest wins then.
+        /**
+         * @brief The server looks like it folds case (Windows or macOS paths), set by the backend. Names that differ
+         *        only in case or normalization would land on one remote file then.
+         */
         std::optional<std::uint64_t> lastSyncTime{};
     };
     BOOST_DESCRIBE_STRUCT(
@@ -114,14 +116,11 @@ namespace SharedData::Sync
      *    whose @ref ScanNode::childrenKnown is false,
      *  - `options.ignoreHidden` filters per-name at every level.
      *
+     * A file that differs on both sides goes from the newer side to the other one in Both mode.
+     *
      * @see DiffSink::onProgress heartbeats fire every 512 compares.
      */
-    void diffScanTrees(
-        ScanNode const& local,
-        ScanNode const& remote,
-        DiffOptions const& options,
-        DiffSink& sink
-    );
+    void diffScanTrees(ScanNode const& local, ScanNode const& remote, DiffOptions const& options, DiffSink& sink);
 
     inline void to_json(nlohmann::json& j, DiffOptions const& s)
     {

@@ -17,6 +17,16 @@ namespace SharedData::Sync
     {
         constexpr std::uint64_t progressCheckpointInterval = 512;
 
+        /**
+         * @brief State of one merge walk.
+         */
+        struct Walk
+        {
+            DiffOptions const& options;
+            DiffSink& sink;
+            std::uint64_t compared{0};
+        };
+
         std::string joinRel(std::string const& parentRelKey, std::string const& name)
         {
             if (parentRelKey.empty())
@@ -138,16 +148,11 @@ namespace SharedData::Sync
             }
         }
 
-        /**
-         * @brief Forward declaration — recursion point for directory pairs.
-         */
         void mergeChildren(
             std::vector<ScanNode> const& localChildren,
             std::vector<ScanNode> const& remoteChildren,
             std::string const& parentRelKey,
-            DiffOptions const& options,
-            DiffSink& sink,
-            std::uint64_t& comparedCounter
+            Walk& walk
         );
 
         std::optional<BlockReason> blockReasonOf(ScanNode const& node)
@@ -166,36 +171,16 @@ namespace SharedData::Sync
             return BlockReason::Excluded;
         }
 
-        /**
-         * @brief The latest modification time in @p node and everything listed below it.
-         */
-        std::uint64_t newestModification(ScanNode const& node)
-        {
-            auto newest = node.mtime;
-            for (auto const& child : node.children)
-                newest = std::max(newest, newestModification(child));
-            return newest;
-        }
-
-        /**
-         * @brief A delete must not remove what appeared or changed on that side since the last sync, nobody has
-         *        seen it on the other side.
-         */
-        bool changedSinceLastSync(ScanNode const& node, DiffOptions const& options)
-        {
-            return options.lastSyncTime && newestModification(node) > *options.lastSyncTime;
-        }
-
         void handleBothPresent(
             ScanNode const& localChild,
             ScanNode const& remoteChild,
             std::string const& relKey,
             std::string const& parentRelKey,
-            DiffOptions const& options,
-            DiffSink& sink,
-            std::uint64_t& comparedCounter
+            Walk& walk
         )
         {
+            auto const& options = walk.options;
+            auto& sink = walk.sink;
             // Unknown or untransferable on one side: neither side may be changed for this name.
             if (auto reason = blockReasonOf(localChild).or_else([&]() { return blockReasonOf(remoteChild); }); reason)
             {
@@ -220,31 +205,12 @@ namespace SharedData::Sync
             if (sameDir)
             {
                 if (options.recursive)
-                    mergeChildren(localChild.children, remoteChild.children, relKey, options, sink, comparedCounter);
+                    mergeChildren(localChild.children, remoteChild.children, relKey, walk);
                 return;
             }
 
             if (!entriesDiffer(localChild, remoteChild))
                 return;
-
-            // With a known last sync, the side changed since then is the one that holds new data.
-            if (options.lastSyncTime)
-            {
-                const bool localChanged = localChild.mtime > *options.lastSyncTime;
-                const bool remoteChanged = remoteChild.mtime > *options.lastSyncTime;
-                const bool destinationChanged = (options.direction == Direction::Upload && remoteChanged) ||
-                    (options.direction == Direction::Download && localChanged);
-                if (options.direction == Direction::Both && localChanged && remoteChanged)
-                {
-                    sink.onBlocked(relKey, BlockReason::ChangedOnBothSides);
-                    return;
-                }
-                if (destinationChanged)
-                {
-                    sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
-                    return;
-                }
-            }
 
             const auto action = chooseTwoSidedAction(localChild, remoteChild, options);
             if (!action)
@@ -331,11 +297,11 @@ namespace SharedData::Sync
             std::vector<ScanNode> const& localChildren,
             std::vector<ScanNode> const& remoteChildren,
             std::string const& parentRelKey,
-            DiffOptions const& options,
-            DiffSink& sink,
-            std::uint64_t& comparedCounter
+            Walk& walk
         )
         {
+            auto const& options = walk.options;
+            auto& sink = walk.sink;
             std::size_t li = 0;
             std::size_t ri = 0;
             const auto caseConflicts = caseConflictsOf(localChildren, remoteChildren, options);
@@ -348,9 +314,9 @@ namespace SharedData::Sync
             };
 
             const auto bumpAndCheckpoint = [&]() {
-                ++comparedCounter;
-                if (comparedCounter % progressCheckpointInterval == 0)
-                    sink.onProgress(comparedCounter);
+                ++walk.compared;
+                if (walk.compared % progressCheckpointInterval == 0)
+                    sink.onProgress(walk.compared);
             };
 
             while (li < localChildren.size() || ri < remoteChildren.size())
@@ -373,7 +339,7 @@ namespace SharedData::Sync
                     if ((!options.ignoreHidden || !isHiddenName(lc.name)) && !blockedForCase(lc.name))
                     {
                         const auto relKey = joinRel(parentRelKey, lc.name);
-                        handleBothPresent(lc, rc, relKey, parentRelKey, options, sink, comparedCounter);
+                        handleBothPresent(lc, rc, relKey, parentRelKey, walk);
                     }
                     ++li;
                     ++ri;
@@ -389,9 +355,6 @@ namespace SharedData::Sync
                         else if (auto action = chooseLocalOnlyAction(lc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, lc.name);
-                            if (*action == Action::DeleteLocal && changedSinceLastSync(lc, options))
-                                sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
-                            else
                             emitOneSided(
                                 makeOneSidedRow(lc, relKey, *action, true), *action, parentRelKey, options, sink
                             );
@@ -410,9 +373,6 @@ namespace SharedData::Sync
                         else if (auto action = chooseRemoteOnlyAction(rc, options); action)
                         {
                             const auto relKey = joinRel(parentRelKey, rc.name);
-                            if (*action == Action::DeleteRemote && changedSinceLastSync(rc, options))
-                                sink.onBlocked(relKey, BlockReason::ChangedOnDestination);
-                            else
                             emitOneSided(
                                 makeOneSidedRow(rc, relKey, *action, false), *action, parentRelKey, options, sink
                             );
@@ -492,17 +452,12 @@ namespace SharedData::Sync
         return false;
     }
 
-    void diffScanTrees(
-        ScanNode const& local,
-        ScanNode const& remote,
-        DiffOptions const& options,
-        DiffSink& sink
-    )
+    void diffScanTrees(ScanNode const& local, ScanNode const& remote, DiffOptions const& options, DiffSink& sink)
     {
-        std::uint64_t compared = 0;
-        mergeChildren(local.children, remote.children, std::string{}, options, sink, compared);
+        Walk walk{.options = options, .sink = sink};
+        mergeChildren(local.children, remote.children, std::string{}, walk);
         // Final heartbeat so observers see the completed count even if it didn't
         // land on a checkpoint boundary.
-        sink.onProgress(compared);
+        sink.onProgress(walk.compared);
     }
 }
