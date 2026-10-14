@@ -291,7 +291,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
         }
     }
 
-    const auto flattenResult = flattenRootsInStrand();
+    const auto flattenResult = flattenRootsInStrand(sftp);
     if (!flattenResult.has_value())
         return std::unexpected(flattenResult.error());
 
@@ -335,7 +335,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     return {};
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInStrand(SecureShell::SftpSession& sftp)
 {
     for (auto const& root : options_.roots)
     {
@@ -352,8 +352,30 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
 
         if (root.entry.type == SharedData::FileType::Regular)
         {
+            // The listing the root came from may be old, the header must carry the size that is read.
+            const auto current = sftp.lstatInStrand(root.path);
+            if (!current)
+            {
+                Log::error(
+                    "ArchiveDownloadOperation: cannot look up root '{}': {}",
+                    root.path.value(),
+                    current.error().toString()
+                );
+                return std::unexpected(
+                    Error{
+                        .type = ErrorType::FileStatFailed,
+                        .sftpError = current.error(),
+                        .extraInfo = root.path.value(),
+                    }
+                );
+            }
+            if (!current->isRegularFile())
+            {
+                Log::error("ArchiveDownloadOperation: root '{}' is no longer a regular file", root.path.value());
+                return std::unexpected(Error{.type = ErrorType::NotAFile, .extraInfo = root.path.value()});
+            }
             ResolvedEntry resolved{
-                .header = TarArchive::memberHeaderOf(archivePrefix.value(), root.entry),
+                .header = TarArchive::memberHeaderOf(archivePrefix.value(), *current),
                 .source = root.path,
             };
             totalPayloadBytes_ += resolved.header.size;

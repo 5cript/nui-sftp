@@ -178,7 +178,10 @@ class ArchiveDownloadOperation : public Operation
     };
 
     std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
-    std::expected<void, Error> flattenRootsInStrand();
+    /**
+     * @brief Resolves the roots into archive members: a file root by a fresh lstat, a directory root from its scan.
+     */
+    std::expected<void, Error> flattenRootsInStrand(SecureShell::SftpSession& sftp);
     /**
      * @brief Expand a preceding ScanOperation's flat entry vector into the
      *        op's ResolvedEntry list, prefixing each entry's tar path with
