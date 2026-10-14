@@ -130,6 +130,42 @@ namespace Test
         EXPECT_NE(it, listResult.value().end());
     }
 
+#ifdef _WIN32
+    TEST_F(UploadOperationTests, InheritedWindowsPermissionsAreNeverExecutable)
+    {
+        // std::filesystem reports every Windows file as executable, those bits must not reach the server.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        std::ofstream{temporaryRoot / "windows.txt"} << "text";
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = remote("/home/test/windows.txt"),
+                .localPath = toLocal(temporaryRoot / "windows.txt"),
+                .inheritPermissions = true,
+            }
+        };
+        UploadOperation::WorkStatus workStatus{};
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto statFuture = sftp->stat(remote("/home/test/windows.txt"));
+        ASSERT_EQ(statFuture.wait_for(5s), std::future_status::ready);
+        const auto information = statFuture.get();
+        ASSERT_TRUE(information.has_value());
+        using std::filesystem::perms;
+        EXPECT_EQ(information->permissions & (perms::owner_exec | perms::group_exec | perms::others_exec), perms::none);
+    }
+#endif
+
     TEST_F(UploadOperationTests, CanUploadFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
