@@ -6,6 +6,7 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -18,6 +19,16 @@ using BulkResumeRequest =
     std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest>;
 
 /**
+ * @brief Entries and bytes of a bulk finished on an earlier connection. Its resumed card counts them as done, so it
+ *        shows the whole bulk instead of a smaller one.
+ */
+struct BulkResumeProgress
+{
+    std::uint64_t entries{0};
+    std::uint64_t bytes{0};
+};
+
+/**
  * @brief Carries the state needed to re-enqueue a bulk operation against a
  *        replacement Session after a seamless reconnect.
  *
@@ -28,6 +39,8 @@ using BulkResumeRequest =
 struct BulkResumeEntry
 {
     BulkResumeRequest request;
+    /** @brief What the bulk finished before the backup, left out of @ref request. */
+    BulkResumeProgress finished{};
     std::chrono::steady_clock::time_point storedAt{std::chrono::steady_clock::now()};
 };
 

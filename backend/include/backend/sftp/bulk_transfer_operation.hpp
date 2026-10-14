@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/scan_phase.hpp>
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -174,6 +175,26 @@ class BulkTransferOperation : public Operation
      *        created as a directory, nor skipped for its type. Failed and in flight entries are among them.
      */
     std::vector<std::size_t> unfinishedEntryIndices() const;
+
+    /**
+     * @brief Counts @p progress, what an earlier connection finished of this bulk, as done: its entries and bytes
+     *        are part of the totals and of the progress from the start. Call it after the entries are set.
+     */
+    void countEarlierProgress(BulkResumeProgress progress);
+
+    /**
+     * @brief What a resume of this bulk leaves out: the entries it finished, without the root of a tree, and the
+     *        bytes of their files, with what an earlier connection finished.
+     */
+    BulkResumeProgress finishedProgress() const;
+
+    /**
+     * @brief What an earlier connection finished of this bulk, see @ref countEarlierProgress.
+     */
+    BulkResumeProgress earlierProgress() const noexcept
+    {
+        return earlierProgress_;
+    }
 
     std::uint64_t completedCount() const noexcept
     {
@@ -359,6 +380,7 @@ class BulkTransferOperation : public Operation
     std::uint64_t completedBytes_{0};
     std::uint64_t totalBytes_{0};
     int budget_{1};
+    BulkResumeProgress earlierProgress_{};
     /** @brief Per entry: transferred, created or skipped for its type, so a resume leaves it out. */
     std::vector<bool> finishedEntries_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};

@@ -574,6 +574,12 @@ void OperationQueue::adoptBulkResume(
         },
         entry.request
     );
+
+    auto* adopted = findOperation(operationId);
+    if (adopted &&
+        (adopted->type() == SharedData::OperationType::BulkDownload ||
+            adopted->type() == SharedData::OperationType::BulkUpload))
+        static_cast<BulkTransferOperation&>(*adopted).countEarlierProgress(entry.finished);
 }
 
 void OperationQueue::deepPause(bool pause)

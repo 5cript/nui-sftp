@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 class BulkDownloadOperation : public BulkTransferOperation

@@ -367,8 +367,8 @@ std::uint64_t BulkTransferOperation::fileCount() const noexcept
     // Tree mode treats entries_[0] as the synthetic root (not counted toward the user-visible
     // total); prescanned mode has no root, so every entry counts.
     if (entries_.empty())
-        return 0;
-    return entries_.size() - (prescanned() ? 0 : 1);
+        return earlierProgress_.entries;
+    return earlierProgress_.entries + entries_.size() - (prescanned() ? 0 : 1);
 }
 
 std::uint64_t BulkTransferOperation::bytesNow() const noexcept
@@ -480,7 +480,7 @@ void BulkTransferOperation::setScanResult(std::vector<SharedData::DirectoryEntry
 {
     entries_ = std::move(entries);
     finishedEntries_.assign(entries_.size(), false);
-    totalBytes_ = totalBytes;
+    totalBytes_ = totalBytes + earlierProgress_.bytes;
     prescannedPaths_.clear();
     entrySource_ = EntrySource::Tree;
 }
@@ -494,7 +494,7 @@ void BulkTransferOperation::setPrescannedEntries(
     entries_ = std::move(entries);
     finishedEntries_.assign(entries_.size(), false);
     prescannedPaths_ = std::move(paths);
-    totalBytes_ = totalBytes;
+    totalBytes_ = totalBytes + earlierProgress_.bytes;
     entrySource_ = EntrySource::Flat;
 }
 
@@ -538,6 +538,27 @@ void BulkTransferOperation::addUnreadableDirectories(std::vector<std::string> co
 std::vector<std::pair<std::string, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
 {
     return failedEntries_;
+}
+
+void BulkTransferOperation::countEarlierProgress(BulkResumeProgress progress)
+{
+    earlierProgress_ = progress;
+    completedEntries_ += progress.entries;
+    completedBytes_ += progress.bytes;
+    totalBytes_ += progress.bytes;
+}
+
+BulkResumeProgress BulkTransferOperation::finishedProgress() const
+{
+    auto progress = earlierProgress_;
+    for (std::size_t index = prescanned() ? 0 : 1; index < finishedEntries_.size(); ++index)
+    {
+        if (!finishedEntries_[index])
+            continue;
+        ++progress.entries;
+        progress.bytes += entries_[index].isRegularFile() ? entries_[index].size : 0u;
+    }
+    return progress;
 }
 
 std::vector<std::size_t> BulkTransferOperation::unfinishedEntryIndices() const
