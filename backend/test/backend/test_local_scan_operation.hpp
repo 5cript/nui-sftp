@@ -3,6 +3,7 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include "real_server_tests.hpp"
 
+#include <paths/native.hpp>
 #include <shared_data/sync/diff_tree_store.hpp>
 #include <utility/temporary_directory.hpp>
 
