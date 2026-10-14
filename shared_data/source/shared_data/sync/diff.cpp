@@ -1,3 +1,4 @@
+#include <shared_data/sync/case_fold.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 
@@ -222,22 +223,11 @@ namespace SharedData::Sync
                 sink.emitDownload(std::move(row), parentRelKey);
         }
 
-        std::string foldedCase(std::string_view name)
-        {
-            std::string folded{name};
-            for (auto& character : folded)
-            {
-                if (character >= 'A' && character <= 'Z')
-                    character = static_cast<char>(character - 'A' + 'a');
-            }
-            return folded;
-        }
-
         /**
-         * @brief Names of one directory that would meet as one file on a case folding filesystem: a local-only and a
-         *        remote-only name that differ only in case, and remote names that differ only in case when the local
-         *        filesystem folds case. Transferring either could overwrite the other and a delete could hit both.
-         *        ASCII letters only.
+         * @brief Names of one directory that would meet as one file on a destination that folds case: variants that
+         *        differ only in case or normalization across the sides, and variants on the side transferred from.
+         *        Transferring one could overwrite the other and a delete could hit both. Only the directions whose
+         *        destination folds count, a case sensitive destination stores every variant. See @ref caseFoldedName.
          */
         std::unordered_set<std::string> caseConflictsOf(
             std::vector<ScanNode> const& localChildren,
@@ -245,18 +235,18 @@ namespace SharedData::Sync
             DiffOptions const& options
         )
         {
-            const auto hasUpper = [](std::vector<ScanNode> const& children)
+            const auto anyFolds = [](std::vector<ScanNode> const& children)
             {
                 return std::ranges::any_of(
                     children,
                     [](ScanNode const& node)
                     {
-                        return std::ranges::any_of(node.name, [](char character) { return character >= 'A' && character <= 'Z'; });
+                        return foldingChanges(node.name);
                     }
                 );
             };
-            // Without an upper case letter folding changes nothing, which is the common case.
-            if (!hasUpper(localChildren) && !hasUpper(remoteChildren))
+            // Lower case ASCII names fold to themselves, which is the common case.
+            if (!anyFolds(localChildren) && !anyFolds(remoteChildren))
                 return {};
 
             struct Variants
@@ -266,9 +256,9 @@ namespace SharedData::Sync
             };
             std::unordered_map<std::string, Variants> byFolded;
             for (auto const& node : localChildren)
-                byFolded[foldedCase(node.name)].local.push_back(node.name);
+                byFolded[caseFoldedName(node.name)].local.push_back(node.name);
             for (auto const& node : remoteChildren)
-                byFolded[foldedCase(node.name)].remote.push_back(node.name);
+                byFolded[caseFoldedName(node.name)].remote.push_back(node.name);
 
             std::unordered_set<std::string> conflicts;
             for (auto const& [folded, variants] : byFolded)
@@ -413,6 +403,11 @@ namespace SharedData::Sync
     bool isHiddenName(std::string_view name)
     {
         return !name.empty() && name.front() == '.';
+    }
+
+    bool isPlannable(ScanNode const& child, DiffOptions const& options)
+    {
+        return child.availability == Availability::Listed && (!options.ignoreHidden || !isHiddenName(child.name));
     }
 
     /**

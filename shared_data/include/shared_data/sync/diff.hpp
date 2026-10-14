@@ -105,6 +105,12 @@ namespace SharedData::Sync
     bool isHiddenName(std::string_view name);
 
     /**
+     * @brief Whether a child inside a directory that is transferred or deleted as a whole is part of it: listed and
+     *        not dropped as hidden.
+     */
+    bool isPlannable(ScanNode const& child, DiffOptions const& options);
+
+    /**
      * @brief Parallel merge walk of two sorted scan trees.
      *
      * Assumes both @p local and @p remote have children sorted ascending by name

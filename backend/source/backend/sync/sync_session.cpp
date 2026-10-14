@@ -85,12 +85,8 @@ DiffSummary SyncSession::recomputeDiffInStrand(
 )
 {
     auto options = requestedOptions;
-#if defined(_WIN32) || defined(__APPLE__)
-    // NTFS and APFS fold case by default.
-    options.localCaseInsensitive = true;
-#else
-    options.localCaseInsensitive = false;
-#endif
+    options.localCaseInsensitive = options_.localFoldsCase;
+    options.remoteCaseInsensitive = options_.remoteFoldsCase;
     uploads_.clear(options);
     downloads_.clear(options);
     deletes_.clear(options);
