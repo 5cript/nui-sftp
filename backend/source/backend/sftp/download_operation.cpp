@@ -22,7 +22,11 @@ DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOpe
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
     remotePath_ = options_.remotePath;
     if (!options_.localPath.empty())
+    {
         localNativePath_ = options_.localPath.native();
+        tempNativePath_ = localNativePath_;
+        tempNativePath_ += options_.tempFileSuffix;
+    }
 }
 
 DownloadOperation::~DownloadOperation()
@@ -340,21 +344,20 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
     }
 
     const auto readAmount = result.value();
+    const auto fileSize = options_.entry->size;
 
     if (readAmount == 0)
     {
-        return false;
+        if (bytesInFile_ >= fileSize)
+            return false;
+        Log::error("DownloadOperation: '{}' ended after {} of {} bytes.", options_.remotePath.value(), bytesInFile_, fileSize);
+        return enterErrorState<bool>(sizeMismatch());
     }
 
-    std::uint64_t fileSize = 0;
-    bool good = true;
-    {
-        localFile_.write(buffer_.data(), static_cast<std::streamsize>(readAmount));
-        bytesInFile_ += static_cast<std::uint64_t>(readAmount);
-        fileSize = options_.entry->size;
-        good = localFile_.good();
-        options_.progressCallback(0ull, fileSize, bytesInFile_, 0);
-    }
+    localFile_.write(buffer_.data(), static_cast<std::streamsize>(readAmount));
+    bytesInFile_ += static_cast<std::uint64_t>(readAmount);
+    const bool good = localFile_.good();
+    options_.progressCallback(0ull, fileSize, bytesInFile_, 0);
     if (!good)
     {
         Log::error("DownloadOperation read cycle stopped: localFile_.good() == false");
@@ -363,12 +366,23 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
         });
         return false;
     }
-    return good && bytesInFile_ < fileSize;
+    return bytesInFile_ < fileSize;
+}
+
+DownloadOperation::Error DownloadOperation::sizeMismatch() const
+{
+    return Error{
+        .type = ErrorType::SizeMismatch,
+        .extraInfo = fmt::format(
+            "Received {} of {} bytes for {}", bytesInFile_, options_.entry->size, options_.remotePath.value()
+        ),
+    };
 }
 
 bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead)
 {
     localFile_.write(buffer_.data(), static_cast<std::streamsize>(bytesRead));
+    bytesInFile_ += static_cast<std::uint64_t>(bytesRead);
     if (!localFile_.good())
     {
         Log::error("DownloadOperation read cycle stopped: localFile_.good() == false");
@@ -410,8 +424,7 @@ DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
 std::expected<void, DownloadOperation::Error>
 DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
-    auto tempPath = localNativePath_;
-    tempPath += options_.tempFileSuffix;
+    auto const& tempPath = tempNativePath_;
 
     // Opening for writing follows a link planted at the temp path or above it, out of the target directory.
     if (const auto refused = refuseLinkedPath(tempPath); !refused)
@@ -425,48 +438,59 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         {
             Log::error(
                 "DownloadOperation: Failed to create parent directories for '{}': {}.",
-                tempPath.generic_string(),
+                Paths::nativeToUtf8(tempPath),
                 mkErr.message()
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
 
-    if (options_.tryContinue && std::filesystem::exists(tempPath))
+    std::error_code existsError{};
+    if (options_.tryContinue && std::filesystem::exists(tempPath, existsError))
     {
-        // The size on disk, tellp right after opening in append mode reports 0 on Windows.
         std::error_code sizeError{};
         const auto existingSize = std::filesystem::file_size(tempPath, sizeError);
         if (sizeError)
         {
-            Log::error("DownloadOperation: Cannot read the size of '{}': {}", tempPath.generic_string(), sizeError.message());
+            Log::error(
+                "DownloadOperation: Cannot read the size of '{}': {}",
+                Paths::nativeToUtf8(tempPath),
+                Utility::errorMessage(sizeError)
+            );
             return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
 
         // A leftover of another program or of an older version of the source must not be continued.
-        bool belongsToSource = existingSize > 0 && existingSize <= options_.entry->size;
-        if (belongsToSource)
+        const auto belongsToSource = [&]() -> std::expected<bool, Error>
         {
-            const auto matches = ResumeCheck::tailsMatchInStrand(stream, tempPath, existingSize);
-            if (!matches)
-                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = matches.error()});
-            belongsToSource = *matches;
-        }
+            if (existingSize == 0 || existingSize > options_.entry->size)
+                return false;
+            return ResumeCheck::tailsMatchInStrand(stream, tempPath, existingSize)
+                .transform_error(
+                    [](SecureShell::SftpError error)
+                    {
+                        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+                    }
+                );
+        }();
+        if (!belongsToSource)
+            return std::unexpected(belongsToSource.error());
 
-        if (belongsToSource && existingSize == options_.entry->size)
+        if (*belongsToSource && existingSize == options_.entry->size)
         {
             Log::info(
                 "DownloadOperation: File '{}' already complete, will be renamed in finalize() step.",
-                tempPath.generic_string()
+                Paths::nativeToUtf8(tempPath)
             );
+            bytesInFile_ = existingSize;
             transferComplete_ = true;
             return {};
         }
-        else if (!belongsToSource)
+        else if (!*belongsToSource)
         {
             Log::info(
                 "DownloadOperation: File '{}' is not a part of this source, discarding and starting over.",
-                tempPath.generic_string()
+                Paths::nativeToUtf8(tempPath)
             );
             if (auto rewound = stream.seekInStrand(0); !rewound)
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
@@ -474,11 +498,11 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
         }
         else
         {
-            Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath.generic_string());
+            Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", Paths::nativeToUtf8(tempPath));
             localFile_.open(tempPath, std::ios::binary | std::ios::app);
             if (!localFile_.is_open())
             {
-                Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
+                Log::error("DownloadOperation: Failed to open file for appending: {}", Paths::nativeToUtf8(tempPath));
                 return std::unexpected(Error{.type = ErrorType::OpenFailure});
             }
             resumeOffset_ = existingSize;
@@ -495,7 +519,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 
     if (!localFile_.is_open())
     {
-        Log::error("DownloadOperation: Failed to open file: {}", tempPath.generic_string());
+        Log::error("DownloadOperation: Failed to open file: {}", Paths::nativeToUtf8(tempPath));
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
 
@@ -647,7 +671,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         );
     }
 
-    if (options_.reserveSpace && options_.entry->size != 0)
+    // Appending to a partial file or finishing a complete one reserves nothing.
+    if (options_.reserveSpace && options_.entry->size != 0 && resumeOffset_ == 0 && !transferComplete_)
     {
         const auto pos = localFile_.tellp();
         localFile_.seekp(options_.entry->size - 1);
@@ -691,10 +716,17 @@ void DownloadOperation::cleanup()
 
     localFile_.close();
 
-    auto tempPath = localNativePath_;
-    tempPath += options_.tempFileSuffix;
-    if (options_.doCleanup && std::filesystem::exists(tempPath))
-        std::filesystem::remove(tempPath);
+    if (options_.doCleanup && !tempNativePath_.empty())
+    {
+        std::error_code removeError{};
+        std::filesystem::remove(tempNativePath_, removeError);
+        if (removeError)
+            Log::warn(
+                "DownloadOperation: Cannot remove '{}': {}",
+                Paths::nativeToUtf8(tempNativePath_),
+                Utility::errorMessage(removeError)
+            );
+    }
 }
 
 void DownloadOperation::pause(bool doPause)
@@ -729,31 +761,22 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
 
     localFile_.close();
 
-    auto tempPath = localNativePath_;
-    tempPath += options_.tempFileSuffix;
+    auto const& tempPath = tempNativePath_;
 
-    // A short file must never replace the destination.
+    // A short file must never replace the destination. A reserved file has its full size from the start, so the
+    // bytes written count.
     std::error_code sizeError{};
-    const auto writtenSize = std::filesystem::file_size(tempPath, sizeError);
-    if (sizeError || writtenSize != options_.entry->size)
+    const auto sizeOnDisk = std::filesystem::file_size(tempPath, sizeError);
+    if (sizeError || sizeOnDisk != options_.entry->size || bytesInFile_ != options_.entry->size)
     {
         Log::error(
-            "DownloadOperation: '{}' holds {} bytes instead of {}.",
-            tempPath.generic_string(),
-            sizeError ? 0u : writtenSize,
+            "DownloadOperation: '{}' received {} bytes and holds {} instead of {}.",
+            Paths::nativeToUtf8(tempPath),
+            bytesInFile_,
+            sizeError ? 0u : sizeOnDisk,
             options_.entry->size
         );
-        return std::unexpected(
-            Error{
-                .type = ErrorType::SizeMismatch,
-                .extraInfo = fmt::format(
-                    "Received {} of {} bytes for {}",
-                    sizeError ? 0u : writtenSize,
-                    options_.entry->size,
-                    options_.remotePath.value()
-                ),
-            }
-        );
+        return std::unexpected(sizeMismatch());
     }
 
     // Marked before the rename, so the final file never exists without the mark. A filesystem without streams or

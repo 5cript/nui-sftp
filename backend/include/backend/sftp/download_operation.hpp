@@ -140,6 +140,11 @@ class DownloadOperation : public Operation
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
     readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
 
+    /**
+     * @brief The error of a file that ended before its listed size arrived.
+     */
+    Error sizeMismatch() const;
+
     void cleanup();
 
   private:
@@ -150,12 +155,14 @@ class DownloadOperation : public Operation
     Paths::RemotePath remotePath_{};
     /** @brief options_.localPath for the filesystem calls, empty when none was given. */
     std::filesystem::path localNativePath_{};
+    /** @brief Where the download is written before it replaces localNativePath_, empty when no local path was given. */
+    std::filesystem::path tempNativePath_{};
     std::ofstream localFile_;
     SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
     /** @brief Bytes already present in an adopted partial file. */
     std::uint64_t resumeOffset_{0u};
-    /** @brief Bytes in the temp file so far, counted instead of tellp, which append mode misreports on Windows. */
+    /** @brief Bytes of the content in the temp file so far, an adopted partial file included. */
     std::uint64_t bytesInFile_{0u};
     /** @brief An adopted partial file already holds the whole content. */
     bool transferComplete_{false};
