@@ -2,6 +2,7 @@
 
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/sftp/sequential_scan_progress.hpp>
 #include "nui_env.hpp"
 #include "real_server_tests.hpp"
 
@@ -778,6 +779,64 @@ namespace Test
         EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Failed);
         ASSERT_TRUE(finished.front().error.has_value()) << "the card has to say why";
         EXPECT_EQ(finished.front().error->type, SharedData::OperationErrorType::FileExists);
+    }
+
+    TEST_F(OperationQueueTests, BulkDeleteGoesOnPastARootItCannotScan)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/doomed"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/doomed/a.txt"}, {"content", "a"}}));
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto bulk = Ids::generateOperationId();
+        const SharedData::BulkDeleteRequest request{
+            .entries = {
+                {.target = remote("/home/test/Documents"), .isDirectory = true},
+                {.target = remote("/home/test/doomed"), .isDirectory = true},
+                {.target = remote("/home/test/file2.txt")},
+            },
+        };
+        EXPECT_EQ(
+            runOnStrand(
+                [&]()
+                {
+                    return queue->addBulkDeleteOperation(*sftp, request, bulk);
+                }
+            ),
+            3u
+        );
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        ASSERT_EQ(finished.front().failedEntries.size(), 1u);
+        EXPECT_EQ(finished.front().failedEntries.front().first, "/home/test/Documents");
+        const auto home = remoteNames(*sftp, "/home/test");
+        EXPECT_TRUE(home.contains("Documents"));
+        EXPECT_FALSE(home.contains("doomed"));
+        EXPECT_FALSE(home.contains("file2.txt"));
+    }
+
+    TEST(SequentialScanProgressTests, CountsOfLaterScansAddToTheFinishedOnes)
+    {
+        std::vector<std::array<std::uint64_t, 3>> reports;
+        const auto next = Detail::sequentialScanProgress(
+            [&reports](std::uint64_t bytes, std::uint64_t index, std::uint64_t scanned)
+            {
+                reports.push_back({bytes, index, scanned});
+            }
+        );
+        auto first = next();
+        auto second = next();
+        first(10, 1, 1);
+        first(30, 2, 2);
+        second(5, 1, 1);
+        second(7, 3, 3);
+        EXPECT_EQ(reports.back(), (std::array<std::uint64_t, 3>{37, 5, 5}));
     }
 
     TEST_F(OperationQueueTests, BulkDeleteOfAnAlreadyDeletedItemSucceeds)
