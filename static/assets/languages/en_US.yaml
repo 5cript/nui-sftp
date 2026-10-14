@@ -183,7 +183,7 @@ remoteSideModel:
   failedToCreateDeleteOperation: "Failed to create delete operation: {}"
   deleteMultipleConfirm: "Are you sure you want to delete the following {} items?"
   deleteSingleConfirm: "Are you sure you want to delete this item '{}'?"
-  deleteItemsQuestion: "Delete Items?"
+  deleteRemoteItemsQuestion: "Delete on the server?"
   failedToDeleteItems: "Failed to delete one or more files / directories: {}."
   downloadFailed: "Download Failed"
   failedToCreateDownloadOperation: "Failed to create download operation: {}."
@@ -221,6 +221,8 @@ localSideModel:
   portalUnavailableText: "The desktop portal used to open files in other applications is not available. \"Open\", \"Open With\", and \"Open in File Manager\" have been disabled.\n\n{}"
   archiveUploadFailed: "Archive Upload Failed"
   deleteSelectedConfirm: "Are you sure you want to delete the selected items?"
+  deleteLocalItemsQuestion: "Delete on this computer?"
+  deleteDirectoriesWithContent: "Folders are deleted with everything inside them. This cannot be undone."
   remoteSideUnavailable: "Remote side is not available"
   transferFailedTitle: "File Transfer Failed"
 sessionFrontend:

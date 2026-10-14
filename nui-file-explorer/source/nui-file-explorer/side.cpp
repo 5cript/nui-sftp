@@ -59,6 +59,14 @@ namespace NuiFileExplorer
 
         // PgUp/PgDn should align with the pagination step so keyboard paging matches the footer.
         impl_->selectionManager.setPageJumpSize(static_cast<std::size_t>(std::max(1, impl_->pageSize.value())));
+        // Items a filter hides are never acted on: select-all and shift ranges skip them.
+        impl_->selectionManager.setVisibilityPredicate(
+            [impl = impl_.get()](std::size_t index)
+            {
+                return impl->filterQuery.value().empty() ||
+                    impl->filterMatchPosition.contains(static_cast<long long>(index));
+            }
+        );
 
         if (impl_->model->placesProvider() || impl_->model->favoritesProvider() || impl_->model->drivesProvider())
         {
@@ -1210,6 +1218,7 @@ namespace NuiFileExplorer
             impl_->currentPage = 0;
 
         impl_->filterQuery = std::move(query);
+        impl_->selectionManager.refreshSelection();
         impl_->items.modifyNow();
         Nui::globalEventContext.executeActiveEventsImmediately();
     }

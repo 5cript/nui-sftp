@@ -580,11 +580,11 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     }
 
     confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("remoteSideModel", "deleteRemoteItemsQuestion"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::Yes,
+            .focusButton = ConfirmDialog::Button::No,
             .listItems = listItems,
             .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
             {

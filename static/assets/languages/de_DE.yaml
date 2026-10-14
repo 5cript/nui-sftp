@@ -92,7 +92,7 @@ remoteSideModel:
   failedToCreateDeleteOperation: "Löschoperation konnte nicht erstellt werden: {}"
   deleteMultipleConfirm: "Sind Sie sicher, dass Sie die folgenden {} Elemente löschen möchten?"
   deleteSingleConfirm: "Sind Sie sicher, dass Sie dieses Element '{}' löschen möchten?"
-  deleteItemsQuestion: "Elemente löschen?"
+  deleteRemoteItemsQuestion: "Auf dem Server löschen?"
   failedToDeleteItems: "Fehler beim Löschen einer oder mehrerer Dateien / Verzeichnisse: {}."
   downloadFailed: "Download fehlgeschlagen"
   failedToCreateDownloadOperation: "Download-Operation konnte nicht erstellt werden: {}."
@@ -130,6 +130,8 @@ localSideModel:
   portalUnavailableText: "Das Desktop-Portal zum Öffnen von Dateien in anderen Anwendungen ist nicht verfügbar. \"Öffnen\", \"Öffnen mit\" und \"Im Dateimanager öffnen\" wurden deaktiviert.\n\n{}"
   archiveUploadFailed: "Archiv-Upload fehlgeschlagen"
   deleteSelectedConfirm: "Sind Sie sicher, dass Sie die ausgewählten Elemente löschen möchten?"
+  deleteLocalItemsQuestion: "Auf diesem Computer löschen?"
+  deleteDirectoriesWithContent: "Ordner werden mit ihrem gesamten Inhalt gelöscht. Dies kann nicht rückgängig gemacht werden."
   remoteSideUnavailable: "Die Remote-Seite ist nicht verfügbar"
   transferFailedTitle: "Dateiübertragung fehlgeschlagen"
 operationQueue:

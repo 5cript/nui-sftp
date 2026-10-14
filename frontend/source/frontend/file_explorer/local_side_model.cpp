@@ -489,18 +489,23 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         return;
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
+    bool anyDirectory = false;
     for (const auto& item : items)
     {
         listItems.push_back({item.name, item.fullPath.generic_string()});
         anyDirectory = anyDirectory || item.type == NuiFileExplorer::Item::Type::Directory;
     }
+    // Local directories go with their content in one step, unlike remote ones there is no second question.
+    auto text = language->get("localSideModel", "deleteSelectedConfirm");
+    if (anyDirectory)
+        text += "\n" + language->get("localSideModel", "deleteDirectoriesWithContent");
 
     confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
-            .text = language->get("localSideModel", "deleteSelectedConfirm"),
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("localSideModel", "deleteLocalItemsQuestion"),
+            .text = std::move(text),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::Yes,
+            .focusButton = ConfirmDialog::Button::No,
             .listItems = listItems,
             .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
             {

@@ -97,6 +97,17 @@ namespace NuiFileExplorer
         /// Not called by selectAll / deselectAll / selectRange / ctrlAddRange.
         void setScrollIntoViewCallback(std::function<void(std::size_t)> callback);
 
+        /**
+         * @brief Items for which @p isVisible is false (hidden by a filter) are never selected, not by select-all and
+         *        not inside a shift range. Call @ref refreshSelection when the answer changes.
+         */
+        void setVisibilityPredicate(std::function<bool(std::size_t)> isVisible);
+
+        /**
+         * @brief Re-applies the selection model, dropping items that are no longer visible.
+         */
+        void refreshSelection();
+
         // ------------------------------------------------------------------ interaction
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent const& event);
 
@@ -277,6 +288,7 @@ namespace NuiFileExplorer
 
         // Scroll-into-view
         std::function<void(std::size_t)> scrollIntoView_{};
+        std::function<bool(std::size_t)> isVisible_{};
         std::optional<std::size_t> lastScrolledIndex_{};
     };
 }
