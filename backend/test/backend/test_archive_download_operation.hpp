@@ -513,6 +513,48 @@ namespace Test
         EXPECT_EQ(entries[0].contents.size(), 65536u);
     }
 
+    TEST_F(ArchiveDownloadOperationTests, AFileRootIsArchivedWithItsCurrentSize)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // The listing the root came from is older than the file.
+        const auto archivePath = archiveDir_.path() / "fresh.tar";
+        ArchiveDownloadOperation operation{
+            sftp,
+            {
+                .roots = {makeFileEntry("/home/test/large.txt", 100u)},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+            }
+        };
+        ASSERT_TRUE(runToCompletion(operation, 2000).has_value());
+
+        const auto entries = recoverArchiveEntries(archivePath);
+        ASSERT_EQ(entries.size(), 1u);
+        EXPECT_EQ(entries[0].contents.size(), 65536u);
+    }
+
+    TEST_F(ArchiveDownloadOperationTests, AFileRootThatIsGoneFailsTheArchive)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto archivePath = archiveDir_.path() / "gone.tar";
+        ArchiveDownloadOperation operation{
+            sftp,
+            {
+                .roots = {makeFileEntry("/home/test/not_there.txt", 10u)},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+            }
+        };
+        const auto result = runToCompletion(operation, 2000);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::FileStatFailed);
+        EXPECT_FALSE(std::filesystem::exists(archivePath));
+    }
+
     TEST_F(ArchiveDownloadOperationTests, FilepartAbsentAfterCompletion)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
