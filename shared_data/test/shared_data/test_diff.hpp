@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shared_data/sync/case_fold.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -810,6 +811,49 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(sink.uploads.front().node.relKey, "other");
         EXPECT_TRUE(sink.deletes.empty());
         ASSERT_EQ(sink.blocked.size(), 2u);
+        for (auto const& blocked : sink.blocked)
+            EXPECT_EQ(blocked.reason, BlockReason::CaseConflict) << blocked.relKey;
+    }
+
+    TEST(SyncCaseFoldTests, LettersOfEveryCoveredScriptFoldToOneKey)
+    {
+        EXPECT_EQ(caseFoldedName("README.md"), "readme.md");
+        EXPECT_EQ(caseFoldedName("\xC3\x84PFEL"), caseFoldedName("\xC3\xA4pfel")) << "Ä and ä";
+        EXPECT_EQ(caseFoldedName("ŁÓDŹ"), caseFoldedName("łódź")) << "Latin Extended-A";
+        EXPECT_EQ(
+            caseFoldedName("\xCE\xA3\xCE\x9F\xCE\xA6\xCE\x9F\xCE\xA3"),
+            caseFoldedName("\xCF\x83\xCE\xBF\xCF\x86\xCE\xBF\xCF\x82")
+        ) << "ΣΟΦΟΣ and σοφος with a final sigma";
+        EXPECT_EQ(caseFoldedName("\xD0\x81\xD0\x96"), caseFoldedName("\xD1\x91\xD0\xB6")) << "ЁЖ and ёж";
+        EXPECT_NE(caseFoldedName("a"), caseFoldedName("b"));
+        EXPECT_EQ(caseFoldedName("caf\xFF"), "caf\xFF") << "text that is not UTF-8 is its own key";
+    }
+
+    TEST(SyncCaseFoldTests, ComposedAndDecomposedSpellingsFoldToOneKey)
+    {
+        EXPECT_EQ(caseFoldedName("caf\xC3\xA9"), caseFoldedName("cafe\xCC\x81")) << "é as NFC and NFD";
+        EXPECT_EQ(caseFoldedName("CAF\xC3\x89"), caseFoldedName("cafe\xCC\x81")) << "É folds to e and the accent";
+        EXPECT_EQ(caseFoldedName("\xCE\x90"), caseFoldedName("\xCE\xB9\xCC\x88\xCC\x81")) << "ΐ decomposes twice";
+        EXPECT_FALSE(foldingChanges("plain-name_1.txt"));
+        EXPECT_TRUE(foldingChanges("Name"));
+        EXPECT_TRUE(foldingChanges("caf\xC3\xA9"));
+    }
+
+    TEST(SyncDiffTests, NonAsciiNamesDifferingOnlyInCaseOrNormalizationAreBlocked)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir(
+                "", {makeFile("\xC3\x84pfel.txt", 1, 100), makeFile("cafe\xCC\x81", 1, 100), makeFile("other", 1, 100)}
+            ),
+            makeDir("", {makeFile("\xC3\xA4pfel.txt", 2, 100), makeFile("caf\xC3\xA9", 2, 100)}),
+            {.direction = Direction::Upload, .actionDelete = true, .remoteCaseInsensitive = true},
+            sink
+        );
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "other");
+        EXPECT_TRUE(sink.deletes.empty());
+        EXPECT_EQ(sink.blocked.size(), 4u);
         for (auto const& blocked : sink.blocked)
             EXPECT_EQ(blocked.reason, BlockReason::CaseConflict) << blocked.relKey;
     }
