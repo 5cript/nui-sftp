@@ -21,6 +21,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -38,6 +39,11 @@ struct TrackedEntry
     bool moveRemoteOnLocalMove{false};
     bool deleteRemote{false};
     std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
+    /**
+     * @brief Changed files whose upload is being queued, by local path. True when the file changed again meanwhile,
+     *        it is then queued once more. A tracked directory has many files, each is tracked on its own.
+     */
+    std::shared_ptr<std::map<std::string, bool>> uploadsBeingQueued{std::make_shared<std::map<std::string, bool>>()};
 };
 
 struct FileTrackingPanel::Implementation
@@ -368,6 +374,129 @@ struct FileTrackingPanel::Implementation
             instanceIdStr
         );
     }
+
+    /**
+     * @brief Queues the upload of the changed @p source of the tracked item @p instanceId. A change that arrives while
+     *        the same file is being queued is not dropped, the file is queued again afterwards.
+     */
+    void queueReupload(Ids::InstanceId const& instanceId, Paths::LocalPath const& source, Paths::RemotePath const& destination)
+    {
+        auto entry = std::find_if(
+            entries.value().begin(),
+            entries.value().end(),
+            [&instanceId](TrackedEntry const& tracked)
+            {
+                return tracked.instanceId.value() == instanceId.value();
+            }
+        );
+        if (entry == entries.value().end() || !operationQueue)
+            return;
+
+        auto queued = entry->uploadsBeingQueued;
+        const auto key = source.toUtf8();
+        if (auto found = queued->find(key); found != queued->end())
+        {
+            found->second = true;
+            return;
+        }
+        queued->emplace(key, false);
+        (*entry->uploading) = true;
+
+        Reupload reupload{
+            .instanceId = instanceId,
+            .source = source,
+            .destination = destination,
+            .queued = queued,
+            .uploading = entry->uploading,
+            .serverStates = entry->serverStates,
+        };
+        auto fileEngine = operationQueue->fileEngine();
+        if (!entry->checkRemoteChanges || !fileEngine)
+            return enqueueReupload(std::move(reupload));
+
+        fileEngine->stat(
+            std::filesystem::path{destination.value()},
+            [this, reupload](
+                std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const& info
+            ) mutable
+            {
+                const auto known = reupload.serverStates->find(reupload.source.toUtf8());
+                // A file the server has but nobody saw here, a vanished one and one with another size or time all
+                // changed on the server. An unanswered check counts as changed.
+                bool changed = true;
+                if (result)
+                {
+                    auto const& [exists, stat] = *result;
+                    if (known == reupload.serverStates->end())
+                        changed = exists;
+                    else
+                        changed = !exists || stat.mtime != known->second.mtime || stat.size != known->second.size;
+                }
+                else
+                {
+                    Log::warn("FileTracking: cannot check '{}' on the server: {}", reupload.destination.value(), info);
+                }
+                if (!changed)
+                    return enqueueReupload(std::move(reupload));
+
+                confirmDialog->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                    .headerText = language->get("fileTracking", "serverChangedHeader"),
+                    .text = fmt::format(
+                        fmt::runtime(language->get("fileTracking", "serverChangedText")), reupload.destination.value()
+                    ),
+                    .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+                    .focusButton = ConfirmDialog::Button::No,
+                    .onClose =
+                        [this, reupload](std::optional<ConfirmDialog::Button> button) mutable
+                    {
+                        if (button == ConfirmDialog::Button::Yes)
+                            return enqueueReupload(std::move(reupload));
+                        Log::info("FileTracking: kept the server's version of '{}'.", reupload.destination.value());
+                        finishQueueing(reupload);
+                    },
+                });
+            }
+        );
+    }
+
+    /**
+     * @brief A changed tracked file on its way to the server.
+     */
+    struct Reupload
+    {
+        Ids::InstanceId instanceId;
+        Paths::LocalPath source;
+        Paths::RemotePath destination;
+        std::shared_ptr<std::map<std::string, bool>> queued;
+        std::shared_ptr<Nui::Observed<bool>> uploading;
+        std::shared_ptr<std::map<std::string, TrackedEntry::ServerState>> serverStates;
+    };
+
+    void enqueueReupload(Reupload reupload)
+    {
+        if (!operationQueue)
+            return finishQueueing(reupload);
+        operationQueue->enqueueUpload(
+            reupload.source,
+            reupload.destination,
+            /*sizeBytes=*/0,
+            [this, reupload](std::optional<Ids::OperationId> const& opId, std::string const& info)
+            {
+                if (!opId)
+                    Log::error(
+                        "FileTracking: failed to enqueue upload for instance {}: {}", reupload.instanceId.value(), info
+                    );
+                else
+                    rememberServerStateAfter(*opId, reupload);
+                finishQueueing(reupload);
+            },
+            true, // allowOverwrite: the tracked file replaces its remote original, checked above
+            false, // insertRefresh
+            false, // createMissingDirectories
+            SharedData::OperationMode::PriorityQueued
+        );
+    }
 };
 
 FileTrackingPanel::FileTrackingPanel(
@@ -573,7 +702,7 @@ void FileTrackingPanel::startWatching(
                 return;
             }
 
-            if (!it->autoReupload || *it->uploading)
+            if (!it->autoReupload)
                 return;
 
             if (!impl_->operationQueue)
