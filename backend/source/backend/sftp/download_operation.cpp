@@ -74,7 +74,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 Log::error("DownloadOperation: Invalid local path.");
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             }
-            if (std::filesystem::exists(localNativePath_) && !options_.mayOverwrite)
+            if (std::error_code existsError{}; std::filesystem::exists(localNativePath_, existsError) && !options_.mayOverwrite)
             {
                 Log::error(
                     "DownloadOperation: File '{}' already exists and may not be overwritten.",
@@ -276,18 +276,40 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
-    // The copy keeps the link's own content, so a relative link still points into the downloaded tree.
+    // The link is created under the temp name and moved into place like a file. Its copy keeps the link's own
+    // content, so a relative link still points into the downloaded tree.
+    auto const& linkText = readResult.value().linkContent;
+    if (!Paths::isValidUtf8(linkText))
+    {
+        Log::error("DownloadOperation: The link '{}' points to a name that is not UTF-8.", options_.remotePath.value());
+        return std::unexpected(
+            Error{.type = ErrorType::InvalidName, .extraInfo = Paths::sanitizedUtf8(linkText)}
+        );
+    }
+    std::filesystem::remove(tempNativePath_, ec);
+    ec.clear();
     const auto linkContent = Paths::nativeFromUtf8(readResult.value().linkContent);
     if (linkEntry && linkEntry->isDirectory())
-        std::filesystem::create_directory_symlink(linkContent, localNativePath_, ec);
+        std::filesystem::create_directory_symlink(linkContent, tempNativePath_, ec);
     else
-        std::filesystem::create_symlink(linkContent, localNativePath_, ec);
+        std::filesystem::create_symlink(linkContent, tempNativePath_, ec);
     if (ec)
     {
         Log::error(
-            "DownloadOperation: Failed to create symlink at '{}': {}.", options_.localPath.toUtf8(), ec.message()
+            "DownloadOperation: Failed to create symlink at '{}': {}.",
+            Paths::nativeToUtf8(tempNativePath_),
+            Utility::errorMessage(ec)
         );
         return std::unexpected(Error{.type = ErrorType::CannotCreateSymlink});
+    }
+
+    if (auto moved = ComparedStateCheck::moveLocalIntoPlace(
+            tempNativePath_, localNativePath_, options_.mayOverwrite, options_.comparedDestination
+        );
+        !moved)
+    {
+        std::filesystem::remove(tempNativePath_, ec);
+        return std::unexpected(std::move(moved).error());
     }
     return {};
 }
@@ -576,8 +598,7 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         return enterErrorState({.type = ErrorType::InvalidPath});
     }
 
-    // Initial check. Check again later before rename.
-    if (std::filesystem::exists(localNativePath_))
+    if (std::error_code existsError{}; std::filesystem::exists(localNativePath_, existsError))
     {
         if (!options_.mayOverwrite)
         {
