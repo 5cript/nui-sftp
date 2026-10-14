@@ -96,6 +96,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     auto downloadOptions = individualOptions_;
     downloadOptions.remotePath = paths.remote;
     downloadOptions.localPath = paths.local;
+    downloadOptions.mayOverwrite = downloadOptions.mayOverwrite || paths.mayOverwrite;
     downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     downloadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
@@ -111,6 +112,7 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
 {
     // Missing or unreadable single files, and local files that cannot be written, do not compromise
     // the rest of the bulk.
+    // A destination that appeared after the existence check and may not be replaced fails only its own entry.
     if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory ||
         error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists)
         return true;

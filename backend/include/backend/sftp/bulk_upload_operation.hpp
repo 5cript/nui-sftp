@@ -39,6 +39,7 @@ class BulkUploadOperation : public BulkTransferOperation
         Paths::LocalPath source;
         Paths::RemotePath destination;
         std::uint64_t sizeBytes;
+        bool mayOverwrite{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 

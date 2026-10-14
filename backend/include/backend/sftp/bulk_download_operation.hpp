@@ -50,6 +50,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::uint64_t sizeBytes;
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        bool mayOverwrite{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 

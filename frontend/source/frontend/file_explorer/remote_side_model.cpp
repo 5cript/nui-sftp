@@ -683,6 +683,19 @@ void RemoteSideModel::enqueueSingleDownload(
     );
 }
 
+namespace
+{
+    /**
+     * @brief @p entry with the user's consent to replace its existing destination.
+     */
+    template <typename EntryT>
+    EntryT approvedForOverwrite(EntryT entry)
+    {
+        entry.mayOverwrite = true;
+        return entry;
+    }
+}
+
 void RemoteSideModel::downloadItemsConfirmed(
     std::vector<SharedData::BulkDownloadEntry> candidates,
     std::shared_ptr<std::vector<bool>> existsResults,
@@ -699,10 +712,8 @@ void RemoteSideModel::downloadItemsConfirmed(
     if (!accepted)
         accepted = std::make_shared<std::vector<SharedData::BulkDownloadEntry>>();
 
-    // Every entry in `accepted` is either a non-existing destination or an
-    // item the user explicitly approved for overwrite (Yes / All); the "No"
-    // and "None" branches skip the push.  So allowOverwrite=true at flush
-    // time is semantically correct regardless of the overwriteAlways flag.
+    // Only entries the user approved (Yes / All) may replace their destination. The others did not exist when
+    // probed, one that appears before the transfer runs fails instead of being replaced.
     auto flushAccepted = [this, &accepted]()
     {
         if (accepted->empty())
@@ -715,7 +726,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         {
             enqueueSingleDownload(
                 accepted->front(),
-                /*allowOverwrite=*/true,
+                /*allowOverwrite=*/accepted->front().mayOverwrite,
                 /*insertRefresh=*/true
             );
             accepted->clear();
@@ -727,7 +738,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         // RPCs with one.
         operationQueue_->enqueueBulkDownload(
             std::move(*accepted),
-            /*allowOverwrite*/ true,
+            /*allowOverwrite*/ false,
             /*insertRefresh*/ true,
             SharedData::OperationMode::Queued,
             /*onEachComplete*/ {},
@@ -772,8 +783,6 @@ void RemoteSideModel::downloadItemsConfirmed(
         auto const& candidate = candidates[index];
         // existsResults was filled by a single batched RpcFilesystem::existsBatch
         // call before the loop started, so this adds zero RPC round-trips.
-        // Defensive: if results are missing or shorter than expected, treat
-        // the file as not-existing.
         // Without an answer the destination counts as existing, so the user is asked.
         const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
 

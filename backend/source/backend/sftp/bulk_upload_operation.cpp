@@ -76,6 +76,7 @@ std::unique_ptr<Operation> BulkUploadOperation::makeChild(
     auto uploadOptions = individualOptions_;
     uploadOptions.remotePath = paths.remote;
     uploadOptions.localPath = paths.local;
+    uploadOptions.mayOverwrite = uploadOptions.mayOverwrite || paths.mayOverwrite;
     uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {

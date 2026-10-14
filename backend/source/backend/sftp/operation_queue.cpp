@@ -1157,7 +1157,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 operationIdFor(idx),
                 entry.destination,
                 entry.source,
-                request.allowOverwrite,
+                request.allowOverwrite || entry.mayOverwrite,
                 /*isBigFile*/ false,
                 // Propagate the request's flag so manual folder downloads refresh
                 // the local panel. Sync passes false to avoid refresh spam; a
@@ -1187,6 +1187,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                 .sizeBytes = entry.sizeBytes,
                 .mtime = entry.mtime,
                 .mtimeNsec = entry.mtimeNsec,
+                .mayOverwrite = entry.mayOverwrite,
             }
         );
     }
@@ -1433,7 +1434,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 operationIdFor(idx),
                 entry.source,
                 entry.destination,
-                request.allowOverwrite,
+                request.allowOverwrite || entry.mayOverwrite,
                 /*isBigFile*/ false,
                 // Propagate the request's flag so manual folder uploads refresh
                 // the remote panel. Sync passes false to avoid refresh spam; a
@@ -1461,6 +1462,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 .source = entry.source,
                 .destination = entry.destination,
                 .sizeBytes = entry.sizeBytes,
+                .mayOverwrite = entry.mayOverwrite,
             }
         );
     }
