@@ -13,6 +13,7 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <unordered_set>
 #include <vector>
 #include <memory>
 
@@ -116,16 +117,19 @@ class LocalScanOperation : public Operation
 
     /**
      * @brief Eject the scanned directory entries. Careful!: The internal list is moved out.
-     *        Only valid when @ref buildsTree() is false.
+     *        Only valid when @ref buildsTree() is false. A directory that could not be listed is kept as an entry
+     *        of unknown type, which no consumer creates, see @ref unreadableDirectories.
      */
     std::vector<SharedData::DirectoryEntry> ejectEntries()
     {
-        return withWalkerDo(
+        auto entries = withWalkerDo(
             [](auto& walker)
             {
                 return std::move(walker).ejectEntries();
             }
         );
+        markUnreadable(entries);
+        return entries;
     }
 
     /**
@@ -149,12 +153,20 @@ class LocalScanOperation : public Operation
     }
 
     /**
-     * @brief Full paths of directories below the root that could not be listed. Flat scans only, they are left out
-     *        of the entries; the tree of a sync scan keeps them as unreadable nodes.
+     * @brief Full paths of directories below the root that could not be listed. Flat scans only, their entries are
+     *        never created; the tree of a sync scan keeps them as unreadable nodes.
      */
     std::vector<std::string> const& unreadableDirectories() const noexcept
     {
         return unreadableDirectories_;
+    }
+
+    /**
+     * @brief Full paths of links and junctions a flat scan on Windows leaves out, they are not uploaded from there.
+     */
+    std::vector<std::string> const& skippedLinks() const noexcept
+    {
+        return skippedLinks_;
     }
 
     /**
@@ -193,8 +205,16 @@ class LocalScanOperation : public Operation
         std::error_code const& errorCode
     );
 
+    /**
+     * @brief Gives the entries of @ref unreadableDirectories an unknown type.
+     */
+    void markUnreadable(std::vector<SharedData::DirectoryEntry>& entries) const;
+
   private:
     std::vector<std::string> unreadableDirectories_{};
+    /** @brief The unreadable directories below the root, as relative paths. */
+    std::unordered_set<std::string> unreadableRelatives_{};
+    std::vector<std::string> skippedLinks_{};
     Paths::LocalPath localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

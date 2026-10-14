@@ -114,6 +114,8 @@ class BulkTransferOperation : public Operation
                 addRejectedEntries(finished.rejectedPaths());
                 if constexpr (requires { finished.unreadableDirectories(); })
                     addUnreadableDirectories(finished.unreadableDirectories());
+                if constexpr (requires { finished.skippedLinks(); })
+                    addSkippedLinks(finished.skippedLinks());
                 setScanResult(finished.ejectEntries(), scannedBytes);
             }
         );
@@ -130,6 +132,11 @@ class BulkTransferOperation : public Operation
      * @brief Records entries the scan refused because of their name as failed, they are never transferred.
      */
     void addRejectedEntries(std::vector<std::string> const& paths);
+
+    /**
+     * @brief Records links the scan left out as failed, they are not transferred.
+     */
+    void addSkippedLinks(std::vector<std::string> const& paths);
 
     /**
      * @brief Records directories the scan could not list as failed, their content is not transferred.

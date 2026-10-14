@@ -492,6 +492,21 @@ void BulkTransferOperation::addRejectedEntries(std::vector<std::string> const& p
     }
 }
 
+void BulkTransferOperation::addSkippedLinks(std::vector<std::string> const& paths)
+{
+    for (auto const& path : paths)
+    {
+        Log::warn("{}: Skipping the link '{}', links are not transferred from here.", logName(), path);
+        failedEntries_.emplace_back(
+            path,
+            Error{
+                .type = ErrorType::OperationNotPossibleOnFileType,
+                .extraInfo = "Links and junctions are not transferred"
+            }
+        );
+    }
+}
+
 void BulkTransferOperation::addUnreadableDirectories(std::vector<std::string> const& paths)
 {
     for (auto const& path : paths)

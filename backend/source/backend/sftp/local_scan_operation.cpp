@@ -102,20 +102,9 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
             if (isSymlink)
             {
 #ifdef _WIN32
-                // Windows symlinks and junctions are not transferred. A sync tree keeps them as excluded
-                // placeholders, so the name still counts as present and the remote side is left alone.
-                if (!buildTree_)
-                    continue;
-                type = SharedData::DirectoryEntry::FileType::Unknown;
-#else
-                type = SharedData::DirectoryEntry::FileType::Symlink;
-#endif
-            }
-            else if (std::filesystem::is_directory(status))
-                type = SharedData::DirectoryEntry::FileType::Directory;
-            else if (std::filesystem::is_regular_file(status))
-                type = SharedData::DirectoryEntry::FileType::Regular;
-            else
+            // Windows symlinks and junctions are not transferred. A sync tree keeps them as excluded
+            // placeholders, so the name still counts as present and the remote side is left alone.
+            if (!buildTree_)
             {
                 // Sockets, devices and FIFOs are not uploadable, a sync tree keeps them as excluded placeholders.
                 if (!buildTree_)
@@ -186,8 +175,9 @@ LocalScanOperation::listingFailed(
         );
         if (!buildTree_)
         {
-            // Left out of the entries, the consumer reports it instead of transferring an empty directory.
+            // The consumer reports it instead of transferring an empty directory.
             unreadableDirectories_.push_back(Paths::nativeToUtf8(path));
+            unreadableRelatives_.insert(relative.value());
             return std::vector<SharedData::DirectoryEntry>{};
         }
         return std::unexpected(
@@ -203,6 +193,20 @@ LocalScanOperation::listingFailed(
     return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
         {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(errorCode)}
     );
+}
+
+void LocalScanOperation::markUnreadable(std::vector<SharedData::DirectoryEntry>& entries) const
+{
+    if (unreadableRelatives_.empty())
+        return;
+    for (auto& entry : entries)
+    {
+        if (!entry.isDirectory())
+            continue;
+        if (const auto relative = SharedData::relativePath(entries, entry);
+            relative && unreadableRelatives_.contains(relative->value()))
+            entry.type = SharedData::FileType::Unknown;
+    }
 }
 
 std::uint64_t LocalScanOperation::totalBytes() const
