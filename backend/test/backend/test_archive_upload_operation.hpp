@@ -301,6 +301,51 @@ namespace Test
         EXPECT_EQ(deep->contents, "deep payload");
     }
 
+#ifndef _WIN32
+    TEST_F(ArchiveUploadOperationTests, SpecialPermissionBitsNeverTravel)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        using std::filesystem::perms;
+        const auto executable = perms::owner_all | perms::group_read | perms::group_exec | perms::others_read |
+            perms::others_exec;
+        std::filesystem::permissions(srcDir_.path() / "alpha.txt", executable | perms::set_uid);
+        std::filesystem::permissions(srcDir_.path() / "nested" / "deep.txt", executable | perms::set_gid);
+        auto restore = Nui::ScopeExit{[this]() noexcept {
+            std::error_code error{};
+            std::filesystem::permissions(srcDir_.path() / "alpha.txt", perms::owner_read | perms::owner_write, error);
+            std::filesystem::permissions(
+                srcDir_.path() / "nested" / "deep.txt", perms::owner_read | perms::owner_write, error
+            );
+        }};
+        if ((std::filesystem::status(srcDir_.path() / "alpha.txt").permissions() & perms::set_uid) == perms::none)
+            GTEST_SKIP() << "the filesystem drops setuid";
+
+        auto scan = runLocalScan(srcDir_.path() / "nested");
+        const std::filesystem::path remoteArchive = "/home/test/special.tar";
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt"), toLocal(srcDir_.path() / "nested")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+        operation.setScanResultForRoot(toLocal(srcDir_.path() / "nested"), std::move(scan.entries), scan.totalBytes);
+        ASSERT_TRUE(runToCompletion(operation).has_value());
+
+        const auto entries = recoverArchiveEntries(pullRemoteArchive(*sftp, remoteArchive, "special.tar"));
+        const auto* alpha = findEntry(entries, "alpha.txt");
+        ASSERT_NE(alpha, nullptr);
+        EXPECT_EQ(alpha->permissions, executable);
+        const auto* deep = findEntry(entries, "nested/deep.txt");
+        ASSERT_NE(deep, nullptr);
+        EXPECT_EQ(deep->permissions, executable);
+    }
+#endif
+
     TEST_F(ArchiveUploadOperationTests, DirectoryRootWithoutPrescanErrors)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
