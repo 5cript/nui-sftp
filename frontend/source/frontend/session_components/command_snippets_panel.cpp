@@ -5,6 +5,7 @@
 #include <frontend/command_store/danger_level_text.hpp>
 
 #include <command-store/snippet_transfer.hpp>
+#include <paths/utf8.hpp>
 
 #include <utility/command_template.hpp>
 #include <utility/language.hpp>
@@ -45,6 +46,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -474,14 +476,11 @@ struct CommandSnippetsPanel::Implementation
         if (!unmatched)
             return {};
         constexpr std::size_t excerptLength = 24u;
-        auto excerptEnd = std::min(command.size(), *unmatched + excerptLength);
-        // Never cut a UTF-8 sequence in half.
-        while (excerptEnd < command.size() && (static_cast<unsigned char>(command[excerptEnd]) & 0xC0u) == 0x80u)
-            --excerptEnd;
-        const auto excerpt = command.substr(*unmatched, excerptEnd - *unmatched);
+        const auto rest = std::string_view{command}.substr(*unmatched);
+        const auto excerpt = Paths::truncatedUtf8(rest, excerptLength);
         return fmt::format(
             fmt::runtime(language->get("commandSnippetsPanel", "unmatchedBraces")),
-            excerptEnd < command.size() ? fmt::format("{}...", excerpt) : excerpt
+            excerpt.size() < rest.size() ? fmt::format("{}...", excerpt) : std::string{excerpt}
         );
     }
 

@@ -1,5 +1,7 @@
 #include <utility/typed_line_buffer.hpp>
 
+#include <paths/utf8.hpp>
+
 #include <cctype>
 #include <utility>
 
@@ -56,11 +58,8 @@ namespace Utility
                 case '\x7f':
                 case '\b':
                 {
-                    // A multibyte character goes as a whole: its continuation bytes, then its lead.
-                    while (!line_.empty() && (static_cast<unsigned char>(line_.back()) & 0xC0) == 0x80)
-                        line_.pop_back();
                     if (!line_.empty())
-                        line_.pop_back();
+                        line_.resize(Paths::truncatedUtf8(line_, line_.size() - 1u).size());
                     continue;
                 }
                 case '\x03': // Ctrl-C
