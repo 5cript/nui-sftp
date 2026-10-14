@@ -2,6 +2,7 @@
 
 #include <backend/sftp/all_operations.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sync/sync_session.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
@@ -151,10 +152,24 @@ class OperationQueue
     );
 
     /**
-     * @brief Queues the delete of @p remotePath, refused for the root and for the home directory or any directory
-     *        that contains it.
+     * @brief Queues the delete of @p remotePath, refused by a @ref remoteDeleteGuard for the root and for the home
+     *        directory or any directory that contains it.
      */
     std::expected<void, Operation::Error> addDeleteOperation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId operationId,
+        Paths::RemotePath const& remotePath,
+        bool recursive,
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+    );
+
+    /**
+     * @brief @ref addDeleteOperation checking with @p guard, so a caller that checked the target with it already
+     *        costs no further round trip.
+     */
+    std::expected<void, Operation::Error> addDeleteOperation(
+        RemoteDeleteGuard& guard,
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
         Paths::RemotePath const& remotePath,
@@ -201,19 +216,28 @@ class OperationQueue
     );
 
     /**
-     * @brief Bulk-delete: collapse N file entries (and any directory entries)
-     *        into a single delete operation card on the frontend.  File
-     *        entries are pre-known so no SFTP stat is needed.  Directory
-     *        entries get the existing Scan+Delete pair so descendants are
-     *        recursively removed.
+     * @brief Queues the remote items of @p request as one delete operation with one card, labelled with the
+     *        directory they lie in. Entries a @ref remoteDeleteGuard refuses, and directories that could not be
+     *        looked up in time, are failed entries of that card.
      *
-     * @param sftp           SFTP session to use.
-     * @param request        The remote items; directories are scanned and deleted with their content.
-     * @param bulkOperationId  Single OperationId for the aggregate file-bulk
-     *                         card.  Per-directory ids are generated locally.
-     * @return Number of entries successfully enqueued.
+     * @param sftp SFTP session to use.
+     * @param request The remote items; directories are scanned and deleted with their content, unless the request
+     *        deletes listed content only.
+     * @param bulkOperationId Operation id of the one card.
+     * @return Number of entries queued for deletion; zero queues nothing, not even the card.
      */
     std::size_t addBulkDeleteOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkDeleteRequest const& request,
+        Ids::OperationId bulkOperationId
+    );
+
+    /**
+     * @brief @ref addBulkDeleteOperation checking with @p guard, so a caller that checked the targets with it
+     *        already costs no further round trip.
+     */
+    std::size_t addBulkDeleteOperation(
+        RemoteDeleteGuard& guard,
         SecureShell::SftpSession& sftp,
         SharedData::BulkDeleteRequest const& request,
         Ids::OperationId bulkOperationId
@@ -242,10 +266,9 @@ class OperationQueue
     );
 
     /**
-     * @brief Refuses an unset delete target, the root, and the home directory or any directory that contains it.
+     * @brief A guard for the remote deletes of one request, sharing the home directory this queue looked up.
      */
-    std::expected<void, Operation::Error>
-    refuseProtectedDeleteTarget(SecureShell::SftpSession& sftp, Paths::RemotePath const& target);
+    RemoteDeleteGuard remoteDeleteGuard(SecureShell::SftpSession& sftp);
 
     std::expected<void, Operation::Error> addRenameOperation(
         SecureShell::SftpSession& sftp,
@@ -380,6 +403,6 @@ class OperationQueue
     // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
     std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
 
-    /** @brief The server's home directory, asked once for the delete guard. */
+    /** @brief The canonical home directory of the server, asked once for the delete guards. */
     std::optional<Paths::RemotePath> remoteHome_{};
 };

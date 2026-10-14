@@ -1153,6 +1153,12 @@ terminalPanel:
   saveDialogTitle: "Save terminal contents"
   saveToFile: "Save terminal to file"
 backend:
+  deleteGuard:
+    noPath: "Nothing was deleted. A path is missing."
+    root: "Nothing was deleted. '{}' is the root directory."
+    containsHome: "Nothing was deleted. '{}' is or contains the home directory '{}'."
+    windowsName: "Nothing was deleted. The server uses Windows paths, where '{}' could name a different item."
+    notVerified: "Nothing was deleted, because the server did not answer in time whether '{}' contains the home directory."
   rename:
     targetExists: "An item with this name already exists."
     invalidName: "The new name must be a plain name in the same directory."

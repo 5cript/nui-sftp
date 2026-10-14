@@ -542,7 +542,8 @@ void RemoteSideModel::enqueueDeletes(
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("remoteSideModel", "deleteFailed"),
                     .text = fmt::format(
-                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
+                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
+                        language->translate(info)
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });

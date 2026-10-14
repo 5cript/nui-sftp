@@ -1151,6 +1151,12 @@ terminalPanel:
   saveDialogTitle: "Terminalinhalt speichern"
   saveToFile: "Terminal in Datei speichern"
 backend:
+  deleteGuard:
+    noPath: "Es wurde nichts gelöscht. Ein Pfad fehlt."
+    root: "Es wurde nichts gelöscht. '{}' ist das Wurzelverzeichnis."
+    containsHome: "Es wurde nichts gelöscht. '{}' ist oder enthält das Heimatverzeichnis '{}'."
+    windowsName: "Es wurde nichts gelöscht. Der Server verwendet Windows-Pfade, unter denen '{}' ein anderes Element bezeichnen könnte."
+    notVerified: "Es wurde nichts gelöscht, weil der Server nicht rechtzeitig beantwortet hat, ob '{}' das Heimatverzeichnis enthält."
   rename:
     targetExists: "Ein Eintrag mit diesem Namen existiert bereits."
     invalidName: "Der neue Name muss ein einfacher Name im selben Verzeichnis sein."

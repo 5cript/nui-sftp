@@ -5,7 +5,10 @@ add_library(
         session.cpp
         rpc_filesystem.cpp
         local_delete_guard.cpp
+        local_removal.cpp
+        local_operation_queue.cpp
         existence_check.cpp
+        rpc_path_parameters.cpp
         rpc_system.cpp
         theme_finder.cpp
         dropped_entry.cpp
@@ -31,8 +34,10 @@ add_library(
         sftp/bulk_download_operation.cpp
         sftp/bulk_upload_operation.cpp
         sftp/bulk_resume_registry.cpp
+        sftp/compared_state_check.cpp
         sftp/delete_operation.cpp
         sftp/local_delete_operation.cpp
+        sftp/remote_delete_guard.cpp
         sftp/rename_operation.cpp
         sftp/archive_download_operation.cpp
         sftp/archive_upload_operation.cpp

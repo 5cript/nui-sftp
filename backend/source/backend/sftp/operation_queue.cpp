@@ -1565,6 +1565,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     SharedData::BulkDeleteRequest remoteDeletes{.mode = request.mode, .listedContentOnly = true};
     std::vector<Paths::LocalPath> localDeletes;
     const auto localHomes = localHomeDirectories();
+    auto remoteGuard = remoteDeleteGuard(sftp);
+    remoteGuard.trustScannedBelow(session.remoteRoot());
 
     for (auto& [entry, paths] : plan.entries)
     {
@@ -1611,7 +1613,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             }
             case Action::DeleteRemote:
             {
-                if (!refuseProtectedDeleteTarget(sftp, paths.remote).has_value())
+                if (isBelowAny(refusedRemoteDirectories, entry.relKey))
                 {
                     result.failed.push_back(std::move(entry.relKey));
                     break;
@@ -1661,7 +1663,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             request.downloadId
         );
     }
-    if (!remoteDeletes.entries.empty() && addBulkDeleteOperation(sftp, remoteDeletes, request.remoteDeleteId) == 0)
+    if (!remoteDeletes.entries.empty() &&
+        addBulkDeleteOperation(remoteGuard, sftp, remoteDeletes, request.remoteDeleteId) == 0)
     {
         std::ranges::move(result.remoteDeletes, std::back_inserter(result.failed));
         result.remoteDeletes.clear();
@@ -1744,32 +1747,9 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     return {};
 }
 
-std::expected<void, Operation::Error>
-OperationQueue::refuseProtectedDeleteTarget(SecureShell::SftpSession& sftp, Paths::RemotePath const& target)
+RemoteDeleteGuard OperationQueue::remoteDeleteGuard(SecureShell::SftpSession& sftp)
 {
-    const auto refuse = [&target](std::string_view why)
-    {
-        Log::error("Refusing to delete '{}': {}", target.value(), why);
-        return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = target.value()});
-    };
-    if (target.empty())
-        return refuse("no path");
-    if (target.isRoot())
-        return refuse("it is the root directory");
-
-    if (!remoteHome_)
-    {
-        auto homeFuture = sftp.homeDirectory();
-        if (homeFuture.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
-            return refuse("the home directory could not be determined in time");
-        auto home = homeFuture.get();
-        if (!home)
-            return refuse("the home directory could not be determined");
-        remoteHome_ = *std::move(home);
-    }
-    if (remoteHome_->isWithin(target))
-        return refuse(fmt::format("it contains the home directory '{}'", remoteHome_->value()));
-    return {};
+    return RemoteDeleteGuard{sftp, remoteHome_, sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)};
 }
 
 std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
@@ -1781,11 +1761,30 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     SharedData::OperationMode mode
 )
 {
+    auto guard = remoteDeleteGuard(sftp);
+    return addDeleteOperation(guard, sftp, std::move(operationId), remotePath, recursive, insertRefresh, mode);
+}
+
+std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
+    RemoteDeleteGuard& guard,
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId operationId,
+    Paths::RemotePath const& remotePath,
+    bool recursive,
+    bool insertRefresh,
+    SharedData::OperationMode mode
+)
+{
     // Assumed in strand
     auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
 
-    if (auto allowed = refuseProtectedDeleteTarget(sftp, remotePath); !allowed)
-        return allowed;
+    if (auto allowed = guard.check(remotePath); !allowed)
+    {
+        Log::error("Refusing to delete: {}", allowed.error().toString());
+        return std::unexpected(
+            Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = allowed.error().toString()}
+        );
+    }
 
     // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
     auto statFut = sftp.lstat(remotePath);
@@ -1862,6 +1861,17 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     Ids::OperationId bulkOperationId
 )
 {
+    auto guard = remoteDeleteGuard(sftp);
+    return addBulkDeleteOperation(guard, sftp, request, std::move(bulkOperationId));
+}
+
+std::size_t OperationQueue::addBulkDeleteOperation(
+    RemoteDeleteGuard& guard,
+    SecureShell::SftpSession& sftp,
+    SharedData::BulkDeleteRequest const& request,
+    Ids::OperationId bulkOperationId
+)
+{
     // Assumed in strand. One DeleteOperation, so one card and one completion for the whole request: files are
     // deleted as given, every real directory is scanned first and deleted with its content.
     auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
@@ -1897,8 +1907,11 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     std::size_t scannedDirectories = 0;
     for (auto const& entry : request.entries)
     {
-        if (!refuseProtectedDeleteTarget(sftp, entry.target).has_value())
+        if (auto allowed = guard.check(entry.target); !allowed)
+        {
+            Log::error("Bulk delete: refusing to delete: {}", allowed.error().toString());
             continue;
+        }
         if (entry.isDirectory && !request.listedContentOnly)
         {
             // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.

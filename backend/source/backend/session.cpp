@@ -77,6 +77,15 @@ namespace
         }
         return result;
     }
+
+    /**
+     * @brief Answers a delete request with the localized reason why nothing was deleted.
+     */
+    void replyRefusal(RpcHelper::RpcOnce const& reply, RemoteDeleteRefusal const& refusal)
+    {
+        Log::error("Refusing to delete: {}", refusal.toString());
+        reply.error(refusal.toLocalizedMessage());
+    }
 }
 
 Session::Session(
@@ -773,19 +782,16 @@ void Session::registerRpcQueuedRemoves()
                         if (!self)
                             return reply.error("Session no longer exists");
 
-                        // Nothing is queued when one of the targets is protected.
-                        for (auto const& path : paths)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
-                        }
+                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        if (const auto refusal = refuseAnyProtected(guard, paths); refusal)
+                            return replyRefusal(reply, *refusal);
 
                         std::vector<std::string> operationIds;
                         for (auto const& path : paths)
                         {
                             const auto newOperationId = Ids::generateOperationId();
                             const auto result = self->operationQueue_->addDeleteOperation(
+                                guard,
                                 *channel,
                                 newOperationId,
                                 path,
@@ -1766,12 +1772,9 @@ void Session::registerRpcSftpDeleteFiles()
                         auto remotePaths = parseRemotePaths(paths);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
-                        for (auto const& path : *remotePaths)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
-                        }
+                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        if (const auto refusal = refuseAnyProtected(guard, *remotePaths); refusal)
+                            return replyRefusal(reply, *refusal);
                         auto fut = channel->removeAll(*std::move(remotePaths));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to delete files: timeout");
@@ -1887,27 +1890,13 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                         bulkOperationIdString,
                         request](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        // Nothing is queued when one of the targets is protected.
-                        for (auto const& entry : request.entries)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, entry.target);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", entry.target.value()));
-                        }
-
-                        const auto enqueued = self->operationQueue_->addBulkDeleteOperation(
-                            *channel, request, Ids::makeOperationId(bulkOperationIdString)
-                        );
-
-                        Log::info("addBulkDelete: queued {} entries", enqueued);
-                        self->resetQueueThrottle();
-                        reply({{"success", true}, {"enqueued", enqueued}});
-                    },
-                    std::move(reply)
+                        auto guard = queue.remoteDeleteGuard(channel);
+                        if (const auto refusal =
+                                refuseAnyProtected(guard, request.entries, &SharedData::BulkDeleteEntry::target);
+                            refusal)
+                            return std::unexpected(refusal->toLocalizedMessage());
+                        return enqueuedReply(queue.addBulkDeleteOperation(guard, channel, request, operationId));
+                    }
                 );
             }
         );

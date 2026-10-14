@@ -10,8 +10,10 @@
 #include <vector>
 
 /**
- * @brief Deletes local items through the queue, so they honour pause and show progress like remote deletes.
- *        Exactly the given items are removed: a directory only once empty, a link as the link itself.
+ * @brief Deletes local items in the LocalOperationQueue, so they can be held and canceled and show progress like
+ *        remote deletes. Each work step deletes until its time budget is used. Links and junctions are removed
+ *        themselves and never followed. The queue checks the items with the local delete guard before it adds the
+ *        operation.
  */
 class LocalDeleteOperation : public Operation
 {
