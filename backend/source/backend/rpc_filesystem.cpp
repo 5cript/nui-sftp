@@ -48,11 +48,6 @@ namespace
             );
     }
 
-    std::expected<Paths::LocalPath, std::string> deletableLocalPath(std::string const& utf8)
-    {
-        return localDeleteTarget(utf8, localHomeDirectory());
-    }
-
 #ifndef _WIN32
     /**
      *  @brief Per-call uid/gid → name cache, so a directory full of files owned by the same user
@@ -223,7 +218,7 @@ void RpcFilesystem::registerRemove()
 
                 const bool recursive = parameters.value("recursive", false);
                 const auto pathUtf8 = parameters["path"].get<std::string>();
-                const auto target = deletableLocalPath(pathUtf8);
+                const auto target = localDeleteTarget(pathUtf8, localHomeDirectories());
                 if (!target)
                 {
                     Log::error("RpcFilesystem::remove refused: {}", target.error());
@@ -283,25 +278,8 @@ void RpcFilesystem::registerRemoveMultiple()
 
                 const bool recursive = parameters.value("recursive", false);
                 const auto pathsUtf8 = parameters["paths"].get<std::vector<std::string>>();
-
-                // Nothing is removed when one of the paths is refused.
-                std::vector<Paths::LocalPath> targets;
-                targets.reserve(pathsUtf8.size());
-                for (const auto& pathUtf8 : pathsUtf8)
-                {
-                    auto target = deletableLocalPath(pathUtf8);
-                    if (!target)
-                    {
-                        Log::error("RpcFilesystem::removeSome refused: {}", target.error());
-                        return reply.error(Utility::localizedMessage("backend.rpcFilesystem.removeRefused", pathUtf8));
-                    }
-                    targets.push_back(*std::move(target));
-                }
-
-                // One item that cannot be removed does not keep the others, every failure is reported.
-                size_t removedCount = 0;
-                std::vector<std::string> failures;
-                for (const auto& target : targets)
+                const auto removal = removeLocalItems(pathsUtf8, localHomeDirectories());
+                if (!removal)
                 {
                     const auto path = target.native();
                     const auto& pathUtf8 = target.toUtf8();

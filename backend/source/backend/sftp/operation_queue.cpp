@@ -1564,7 +1564,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     SharedData::BulkDownloadRequest downloads{.allowOverwrite = true, .mode = request.mode};
     SharedData::BulkDeleteRequest remoteDeletes{.mode = request.mode, .listedContentOnly = true};
     std::vector<Paths::LocalPath> localDeletes;
-    const auto localHome = localHomeDirectory();
+    const auto localHomes = localHomeDirectories();
 
     for (auto& [entry, paths] : plan.entries)
     {
@@ -1623,7 +1623,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             }
             case Action::DeleteLocal:
             {
-                if (auto allowed = refuseProtectedLocalDelete(paths.local, localHome); !allowed)
+                if (isBelowAny(refusedLocalDirectories, entry.relKey))
                 {
                     Log::error("Sync: refusing to delete locally: {}", allowed.error());
                     result.failed.push_back(std::move(entry.relKey));
@@ -1695,10 +1695,10 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     // Assumed in strand
     if (targets.empty())
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = "no targets"});
-    const auto home = localHomeDirectory();
+    const auto homes = localHomeDirectories();
     for (auto const& target : targets)
     {
-        if (auto allowed = refuseProtectedLocalDelete(target, home); !allowed)
+        if (auto allowed = refuseProtectedLocalDelete(target, homes); !allowed)
         {
             Log::error("Refusing to delete locally: {}", allowed.error());
             return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = target.toUtf8()});
