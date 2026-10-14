@@ -570,6 +570,46 @@ namespace Test
         EXPECT_EQ(maxInFlight, 3u);
     }
 
+    TEST_F(BulkUploadOperationTests, AResumedBulkCountsWhatAnEarlierConnectionFinished)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        writeFile(uploadSrc_.path() / "rest.txt", "rest");
+        std::vector<SharedData::BulkProgress> updates;
+        BulkUploadOperation operation{
+            sftp,
+            {
+                .overallProgressCallback =
+                    [&updates](SharedData::BulkProgress const& update)
+                {
+                    updates.push_back(update);
+                },
+                .remotePath = remote("/home/test"),
+                .localPath = toLocal(uploadSrc_.path()),
+                .progressEmitInterval = std::chrono::milliseconds{0},
+            }
+        };
+        operation.setPrescannedFileList({{
+            .source = toLocal(uploadSrc_.path() / "rest.txt"),
+            .destination = remote("/home/test/rest.txt"),
+            .sizeBytes = 4,
+        }});
+        operation.countEarlierProgress({.entries = 2, .bytes = 10});
+
+        ASSERT_EQ(runBulkToCompletion(operation), BulkUploadOperation::WorkStatus::Complete);
+        ASSERT_FALSE(updates.empty());
+        EXPECT_EQ(updates.front().fileCount, 3u);
+        EXPECT_EQ(updates.front().fileCurrentIndex, 2u);
+        EXPECT_EQ(updates.front().bytesCurrent, 10u);
+        EXPECT_EQ(updates.front().bytesTotal, 14u);
+        EXPECT_EQ(updates.back().fileCurrentIndex, 3u);
+        EXPECT_EQ(updates.back().bytesCurrent, 14u);
+        const auto finished = operation.finishedProgress();
+        EXPECT_EQ(finished.entries, 3u);
+        EXPECT_EQ(finished.bytes, 14u);
+    }
+
     TEST_F(BulkUploadOperationTests, DirectoriesAreCreatedBeforeTheirFilesWithConcurrency)
     {
         // Two-level local tree scanned for real, uploaded with more files than slots.
