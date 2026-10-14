@@ -472,6 +472,9 @@ fileTracking:
   columnAutoReupload: "Auto Reupload"
   columnMoveRemote: "Move Remote"
   columnDeleteRemote: "Delete Remote"
+  columnCheckRemote: "Check Server"
+  serverChangedHeader: "Changed on the Server"
+  serverChangedText: "'{}' was changed on the server since it was opened here. Replace the server's version with your local one?\n\nNo keeps the server's version, a later save asks again."
   columnStatus: "Status"
   stopButton: "Stop"
   statusWatching: "Watching"
@@ -1024,6 +1027,8 @@ settings:
       moveRemoteOnLocalMoveHelpText: "Default for new tracked entries: when a tracked file is moved or renamed locally, perform the same move on the remote."
       deleteRemoteOnLocalDelete: "Delete Remote on Local Delete"
       deleteRemoteOnLocalDeleteHelpText: "Default for new tracked entries: when a tracked file is deleted locally, also delete it on the remote."
+      checkRemoteChanges: "Check Server Before Re-upload"
+      checkRemoteChangesHelpText: "Default for new tracked entries: before an edited file is uploaded again, check whether the copy on the server changed since it was opened and ask before replacing it."
   colorSetting:
     pickButton: "Pick"
 persistence:

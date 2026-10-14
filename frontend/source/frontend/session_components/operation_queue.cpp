@@ -449,6 +449,11 @@ void OperationQueue::deactivate()
     impl_->sessionId = {};
 }
 
+std::shared_ptr<FileEngine> OperationQueue::fileEngine() const
+{
+    return impl_->fileEngine;
+}
+
 void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId)
 {
     impl_->fileEngine = std::move(fileEngine);

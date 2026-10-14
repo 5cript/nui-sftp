@@ -63,6 +63,11 @@ class OperationQueue
     ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
 
     void activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId);
+
+    /**
+     * @brief The file engine of the session, empty before @ref activate.
+     */
+    std::shared_ptr<FileEngine> fileEngine() const;
     void deactivate();
 
     void enqueueDownload(

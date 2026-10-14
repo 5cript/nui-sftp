@@ -472,6 +472,9 @@ fileTracking:
   columnAutoReupload: "Auto-Hochladen"
   columnMoveRemote: "Remote verschieben"
   columnDeleteRemote: "Remote löschen"
+  columnCheckRemote: "Server prüfen"
+  serverChangedHeader: "Auf dem Server geändert"
+  serverChangedText: "'{}' wurde auf dem Server geändert, seit sie hier geöffnet wurde. Die Version auf dem Server durch die lokale ersetzen?\n\nNein behält die Version auf dem Server, beim nächsten Speichern wird erneut gefragt."
   columnStatus: "Status"
   stopButton: "Stopp"
   statusWatching: "Beobachtend"
@@ -1022,6 +1025,8 @@ settings:
       moveRemoteOnLocalMoveHelpText: "Standardwert für neue überwachte Einträge: Wenn eine überwachte Datei lokal verschoben oder umbenannt wird, die gleiche Aktion auf dem Remote ausführen."
       deleteRemoteOnLocalDelete: "Remote löschen bei lokalem Löschen"
       deleteRemoteOnLocalDeleteHelpText: "Standardwert für neue überwachte Einträge: Wenn eine überwachte Datei lokal gelöscht wird, auch auf dem Remote löschen."
+      checkRemoteChanges: "Server vor erneutem Hochladen prüfen"
+      checkRemoteChangesHelpText: "Standard für neue verfolgte Einträge: Vor dem erneuten Hochladen einer bearbeiteten Datei prüfen, ob sich die Kopie auf dem Server seit dem Öffnen geändert hat, und vor dem Ersetzen fragen."
   colorSetting:
     pickButton: "Wählen"
 persistence:

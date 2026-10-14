@@ -44,6 +44,18 @@ struct TrackedEntry
      *        it is then queued once more. A tracked directory has many files, each is tracked on its own.
      */
     std::shared_ptr<std::map<std::string, bool>> uploadsBeingQueued{std::make_shared<std::map<std::string, bool>>()};
+    /** @brief Ask before replacing a server copy that changed since it was opened or last uploaded. */
+    bool checkRemoteChanges{true};
+    struct ServerState
+    {
+        std::uint64_t mtime{0};
+        std::uint64_t size{0};
+    };
+    /**
+     * @brief What the server had for each file, by local path: taken from the download (it keeps the server's
+     *        modification time) and updated after every upload.
+     */
+    std::shared_ptr<std::map<std::string, ServerState>> serverStates{std::make_shared<std::map<std::string, ServerState>>()};
 };
 
 struct FileTrackingPanel::Implementation
@@ -86,6 +98,11 @@ struct FileTrackingPanel::Implementation
             },
             ScriptNuiComponents::ResizableTable::HeaderTableCell{
                 .content = std::string{language->get("fileTracking", "columnDeleteRemote")},
+                .initialWidth = 120,
+                .resizeable = false,
+            },
+            ScriptNuiComponents::ResizableTable::HeaderTableCell{
+                .content = std::string{language->get("fileTracking", "columnCheckRemote")},
                 .initialWidth = 120,
                 .resizeable = false,
             },
@@ -298,6 +315,27 @@ struct FileTrackingPanel::Implementation
                 },
             },
             ResizableTable::TableCell{
+                [this, instanceIdStr, isChecked = entry.checkRemoteChanges](
+                    std::unique_ptr<ResizableTable::ISelfController>
+                ) -> Nui::ElementRenderer
+                {
+                    return ScriptNuiComponents::switch_({
+                        .isChecked = isChecked,
+                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
+                        {
+                            for (auto& ent : entries.value())
+                            {
+                                if (ent.instanceId.value() == instanceIdStr)
+                                {
+                                    ent.checkRemoteChanges = checked;
+                                    break;
+                                }
+                            }
+                        },
+                    });
+                },
+            },
+            ResizableTable::TableCell{
                 [uploadingObs](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
                 {
                     return Nui::Elements::div{
@@ -496,6 +534,52 @@ struct FileTrackingPanel::Implementation
             false, // createMissingDirectories
             SharedData::OperationMode::PriorityQueued
         );
+    }
+
+    /**
+     * @brief Once the upload finished, what the server has now is the state the next check compares with.
+     */
+    void rememberServerStateAfter(Ids::OperationId const& operationId, Reupload const& reupload)
+    {
+        operationQueue->addCompletionCallback(
+            operationId,
+            [this, reupload](bool success)
+            {
+                auto fileEngine = operationQueue ? operationQueue->fileEngine() : nullptr;
+                if (!success || !fileEngine)
+                    return;
+                fileEngine->stat(
+                    std::filesystem::path{reupload.destination.value()},
+                    [reupload](
+                        std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const&
+                    )
+                    {
+                        if (result && result->first)
+                        {
+                            (*reupload.serverStates)[reupload.source.toUtf8()] = TrackedEntry::ServerState{
+                                .mtime = result->second.mtime,
+                                .size = result->second.size,
+                            };
+                        }
+                    }
+                );
+            }
+        );
+    }
+
+    /**
+     * @brief The file is no longer being queued; when it changed again meanwhile it goes through once more.
+     */
+    void finishQueueing(Reupload const& reupload)
+    {
+        const auto key = reupload.source.toUtf8();
+        const auto found = reupload.queued->find(key);
+        const bool changedAgain = found != reupload.queued->end() && found->second;
+        if (found != reupload.queued->end())
+            reupload.queued->erase(found);
+        (*reupload.uploading) = !reupload.queued->empty();
+        if (changedAgain)
+            queueReupload(reupload.instanceId, reupload.source, reupload.destination);
     }
 };
 
@@ -734,10 +818,38 @@ void FileTrackingPanel::startWatching(
             .autoReupload = ftOpts.autoReupload,
             .moveRemoteOnLocalMove = ftOpts.moveRemoteOnLocalMove,
             .deleteRemote = ftOpts.deleteRemoteOnLocalDelete,
+            .checkRemoteChanges = ftOpts.checkRemoteChanges.value_or(true),
         }
     );
     impl_->table->addRow(impl_->buildRowForEntry(impl_->entries.value().back()));
     impl_->entries.modifyNow();
+
+    // The downloaded files carry the server's modification time, so they tell what the server had.
+    Nui::RpcClient::callWithBackChannel(
+        "FileTracking::fileStates",
+        [serverStates = impl_->entries.value().back().serverStates, instanceId](Nui::val reply)
+        {
+            if (!reply.hasOwnProperty("files"))
+            {
+                Log::warn("FileTracking: no file states for instance {}, every re-upload will ask.", instanceId.value());
+                return;
+            }
+            const auto files = reply["files"];
+            const auto count = files["length"].as<int>();
+            for (int index = 0; index < count; ++index)
+            {
+                const auto file = files[index];
+                serverStates->insert_or_assign(
+                    file["path"].as<std::string>(),
+                    TrackedEntry::ServerState{
+                        .mtime = static_cast<std::uint64_t>(file["mtime"].as<double>()),
+                        .size = static_cast<std::uint64_t>(file["size"].as<double>()),
+                    }
+                );
+            }
+        },
+        instanceId.value()
+    );
 }
 
 Nui::ElementRenderer FileTrackingPanel::operator()()

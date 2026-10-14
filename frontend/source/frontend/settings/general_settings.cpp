@@ -293,6 +293,15 @@ GeneralSettings::GeneralSettings(
                 onChange();
             },
         },
+        .checkRemoteChanges = BoolSetting<>{
+            fileTrackingFactory_.identity({"general", "fileTrackingOptions", "checkRemoteChanges"}),
+            onChange,
+            [this, onChange]()
+            {
+                fileTrackingOptions.checkRemoteChanges.value(true);
+                onChange();
+            },
+        },
     }
     , logOptions(factory.within({"loggingAndErrorReportingGroupHeader"}), onChange)
     , availableThemesListener{
@@ -354,6 +363,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.fileTrackingOptions.autoReupload = fileTrackingOptions.autoReupload.value();
     state.fileTrackingOptions.moveRemoteOnLocalMove = fileTrackingOptions.moveRemoteOnLocalMove.value();
     state.fileTrackingOptions.deleteRemoteOnLocalDelete = fileTrackingOptions.deleteRemoteOnLocalDelete.value();
+    state.fileTrackingOptions.checkRemoteChanges = fileTrackingOptions.checkRemoteChanges.value();
 
     // Local FS
     state.localFilesystemOptions.preventDeletion = localFilesystemOptions.preventDeletion.value();
@@ -388,6 +398,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     fileTrackingOptions.autoReupload.value(state.fileTrackingOptions.autoReupload);
     fileTrackingOptions.moveRemoteOnLocalMove.value(state.fileTrackingOptions.moveRemoteOnLocalMove);
     fileTrackingOptions.deleteRemoteOnLocalDelete.value(state.fileTrackingOptions.deleteRemoteOnLocalDelete);
+    fileTrackingOptions.checkRemoteChanges.value(state.fileTrackingOptions.checkRemoteChanges.value_or(true));
 
     // Local FS
     localFilesystemOptions.preventDeletion.value(state.localFilesystemOptions.preventDeletion);
@@ -463,7 +474,8 @@ Nui::ElementRenderer GeneralSettings::render(
         auto fileTrackingOptionsUi = fragment(
             fileTrackingOptions.autoReupload(),
             fileTrackingOptions.moveRemoteOnLocalMove(),
-            fileTrackingOptions.deleteRemoteOnLocalDelete()
+            fileTrackingOptions.deleteRemoteOnLocalDelete(),
+            fileTrackingOptions.checkRemoteChanges()
         );
         // clang-format on
 

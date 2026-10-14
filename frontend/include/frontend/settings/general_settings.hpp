@@ -88,6 +88,7 @@ struct GeneralSettings
         BoolSetting<> autoReupload;
         BoolSetting<> moveRemoteOnLocalMove;
         BoolSetting<> deleteRemoteOnLocalDelete;
+        BoolSetting<> checkRemoteChanges;
     } fileTrackingOptions;
 
     LogOptions logOptions;

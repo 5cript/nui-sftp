@@ -397,6 +397,48 @@ namespace FileTracking
             }
         );
 
+        // Size and modification time of every file in an instance, taken right after the download: downloads keep
+        // the server's modification time, so this is what the server had. File tracking compares against it
+        // before replacing the server's copy.
+        registerOnStrand(
+            "FileTracking::fileStates",
+            [this](RpcHelper::RpcOnce&& reply, std::string instanceId)
+            {
+                auto* inst = findInstance(instanceId);
+                if (!inst)
+                {
+                    reply.error("Instance not found: " + instanceId);
+                    return;
+                }
+                nlohmann::json files = nlohmann::json::array();
+                std::error_code walkError{};
+                for (std::filesystem::recursive_directory_iterator iter{inst->instanceDir(), walkError}, end;
+                     !walkError && iter != end;
+                     iter.increment(walkError))
+                {
+                    std::error_code entryError{};
+                    if (!iter->is_regular_file(entryError) || iter->is_symlink(entryError))
+                        continue;
+                    const auto size = iter->file_size(entryError);
+                    const auto modified = iter->last_write_time(entryError);
+                    if (entryError)
+                        continue;
+                    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::file_clock::to_sys(modified).time_since_epoch()
+                    );
+                    // Canonical like the watched directory, so the paths match the change events.
+                    files.push_back({
+                        {"path", Paths::nativeToUtf8(std::filesystem::weakly_canonical(iter->path(), entryError))},
+                        {"size", size},
+                        {"mtime", seconds.count()},
+                    });
+                }
+                if (walkError)
+                    Log::warn("FileTracking::fileStates: walking '{}' failed: {}", instanceId, walkError.message());
+                reply({{"success", true}, {"files", std::move(files)}});
+            }
+        );
+
         registerOnStrand(
             "FileTracking::manualCleanup",
             [this](RpcHelper::RpcOnce&& reply)
