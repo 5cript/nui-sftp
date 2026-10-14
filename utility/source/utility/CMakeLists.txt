@@ -21,6 +21,7 @@ else()
         utility
         PRIVATE
         node/node.cpp
+        error_message.cpp
         permissions.cpp
         rename.cpp
         link_safe_remove.cpp

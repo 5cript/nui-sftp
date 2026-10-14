@@ -1,6 +1,7 @@
 #pragma once
 
 #include <paths/local_path_segment.hpp>
+#include <paths/native.hpp>
 #include <paths/relative_path.hpp>
 
 #include <algorithm>
@@ -182,19 +183,22 @@ namespace Paths
 
 #ifndef __EMSCRIPTEN__
         /**
-         * @brief Takes a native path, which has to be absolute.
+         * @brief Takes a native path, which has to be absolute. Refused with InvalidUtf8 when its text is not
+         *        UTF-8 (POSIX) or has an unpaired surrogate (Windows). Never throws.
          */
         static std::expected<LocalPath, PathError> make(std::filesystem::path const& path)
         {
-            const auto utf8 = path.generic_u8string();
-            return fromUtf8(std::string_view{reinterpret_cast<char const*>(utf8.data()), utf8.size()});
+            return checkedNativeToUtf8(path).and_then(
+                [](std::string const& utf8)
+                {
+                    return fromUtf8(utf8);
+                }
+            );
         }
 
         std::filesystem::path native() const
         {
-            return std::filesystem::path{
-                std::u8string{reinterpret_cast<char8_t const*>(value_.data()), value_.size()}
-            }.make_preferred();
+            return nativeFromUtf8(value_).make_preferred();
         }
 #endif
 
