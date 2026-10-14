@@ -199,6 +199,8 @@ syncDialog:
   confirmDeleteRow: "'{}' {} jetzt löschen?"
   blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden oder sie sich seit der letzten Synchronisation so geändert haben, dass Daten verloren gingen. Zum Anzeigen klicken."
   blockedTitle: "Unveränderte Einträge"
+  synchronizeUnavailable: "Der Vergleich läuft noch oder wurde abgebrochen. Vergleichen Sie erneut, um zu synchronisieren."
+  executionRejected: "Diese Einträge wurden nicht synchronisiert: {}"
   blockReason:
     Unreadable: "nicht lesbar"
     Excluded: "nicht übertragbar"
@@ -1202,3 +1204,5 @@ backend:
     connectFailedUnspecified: "Verbindung zum SSH-Server aus unbekanntem Grund fehlgeschlagen."
   persistence:
     saveFailed: "Der Zustand konnte nicht gespeichert werden: {}"
+  sync:
+    staleComparison: "der Vergleich hat sich seit der Anzeige geändert, bitte erneut vergleichen"

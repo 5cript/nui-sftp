@@ -87,8 +87,7 @@ struct OperationQueue::Implementation
 
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
-    std::unordered_map<std::string, std::function<void(std::vector<std::string> const&)>>
-        failedEntriesCallbacks;
+    std::unordered_map<std::string, OperationQueue::FailedEntriesCallback> failedEntriesCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
     // Keyed by the aggregate bulk operation id (first pre-generated opId for
     // bulk up/download, or the aggregate id for bulk delete).  Auto-erased on
@@ -1296,14 +1295,8 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     {
         auto callback = std::move(failedIt->second);
         impl_->failedEntriesCallbacks.erase(failedIt);
-        if (!completed.failedEntries.empty())
-        {
-            std::vector<std::string> failedPaths;
-            failedPaths.reserve(completed.failedEntries.size());
-            for (auto const& entry : completed.failedEntries)
-                failedPaths.push_back(entry.first);
-            callback(failedPaths);
-        }
+        if (!completed.failedEntries.empty() || !completed.indexedFailures.empty())
+            callback(completed.failedEntries, completed.indexedFailures);
     }
 
     bool partial = false;
@@ -1407,10 +1400,7 @@ void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::fu
     impl_->completionCallbacks[opId.value()] = std::move(callback);
 }
 
-void OperationQueue::addFailedEntriesCallback(
-    Ids::OperationId const& opId,
-    std::function<void(std::vector<std::string> const&)> callback
-)
+void OperationQueue::addFailedEntriesCallback(Ids::OperationId const& opId, FailedEntriesCallback callback)
 {
     impl_->failedEntriesCallbacks[opId.value()] = std::move(callback);
 }

@@ -1642,20 +1642,28 @@ void Session::registerRpcSftpExecuteSyncSelection()
                 auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
                 boost::asio::post(
                     session->strand(),
-                    [self, session, request = std::move(request), channelIdString, replyShared]() mutable
+                    [weak, session, request = std::move(request), channelIdString, replyShared]() mutable
                     {
                         if (session->generation() != request.generation)
-                            return replyShared->error("stale generation");
+                            return replyShared->error(Utility::localizedMessage("backend.sync.staleComparison"));
+                        auto self = weak.lock();
+                        if (!self)
+                            return replyShared->error("Session no longer exists");
 
                         auto plan = session->resolvePlanInStrand(
                             request.section, std::unordered_set<std::string>{request.relKeys.begin(), request.relKeys.end()}
                         );
                         self->withSftpChannelDo(
                             Ids::makeChannelId(channelIdString),
-                            [self, session, plan = std::move(plan), request = std::move(request)](
-                                RpcHelper::RpcOnce&& reply, auto&& channel
+                            [session, plan = std::move(plan), request = std::move(request)](
+                                RpcHelper::RpcOnce&& reply,
+                                Session& self,
+                                std::shared_ptr<SecureShell::SftpSession> const& channel
                             ) mutable
                             {
+                                // A stopped session has no queue any more.
+                                if (!self.operationQueue_)
+                                    return reply.error("Session no longer exists");
                                 auto result = self->operationQueue_->executeSyncPlan(
                                     *channel, *session, std::move(plan), request
                                 );

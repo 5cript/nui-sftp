@@ -61,7 +61,7 @@ struct SyncProgressDialog::Implementation
 
     std::shared_ptr<BackendSyncProvider> provider_{};
     SharedData::Sync::DiffOptions initialOptions_{};
-    std::function<void(SharedData::Sync::DiffSnapshot)> onDone_{};
+    std::function<void(std::shared_ptr<BackendSyncProvider>, SharedData::Sync::DiffSnapshot)> onDone_{};
 
     // Cancel token; replaced on each open() to invalidate stale callback captures.
     // The provider also has its own cancel flag that kills the backend walk — this
@@ -86,7 +86,7 @@ void SyncProgressDialog::open(
     bool recursive,
     bool ignoreHidden,
     SharedData::Sync::DiffOptions initialOptions,
-    std::function<void(SharedData::Sync::DiffSnapshot)> onDone
+    std::function<void(std::shared_ptr<BackendSyncProvider>, SharedData::Sync::DiffSnapshot)> onDone
 )
 {
     // Invalidate any stale callbacks from a previous open() by flipping the old
@@ -150,8 +150,9 @@ void SyncProgressDialog::open(
                     impl_->phase_ = SharedData::SyncPhase::Done;
                     impl_->open_ = false;
                     Nui::globalEventContext.executeActiveEventsImmediately();
-                    if (impl_->onDone_)
-                        impl_->onDone_(std::move(snapshot));
+                    auto provider = std::exchange(impl_->provider_, nullptr);
+                    if (auto onDone = std::exchange(impl_->onDone_, nullptr); onDone)
+                        onDone(std::move(provider), std::move(snapshot));
                 }
             );
         },
@@ -162,6 +163,8 @@ void SyncProgressDialog::open(
                 return;
             impl_->failureReason_ = reason;
             impl_->phase_ = SharedData::SyncPhase::Failed;
+            impl_->onDone_ = nullptr;
+            impl_->provider_.reset();
             Nui::globalEventContext.executeActiveEventsImmediately();
         },
         // onDiffProgress
@@ -181,8 +184,9 @@ void SyncProgressDialog::cancel()
     impl_->cancelToken_ = std::make_shared<bool>(false);
     impl_->open_ = false;
     impl_->phase_ = SharedData::SyncPhase::Idle;
-    if (impl_->provider_)
-        impl_->provider_->cancelDiff();
+    impl_->onDone_ = nullptr;
+    if (auto provider = std::exchange(impl_->provider_, nullptr); provider)
+        provider->cancelDiff();
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 

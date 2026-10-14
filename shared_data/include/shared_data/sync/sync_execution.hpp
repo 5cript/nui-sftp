@@ -13,8 +13,8 @@
 namespace SharedData::Sync
 {
     /**
-     * @brief Asks the backend to plan and queue the selected rows of one section. Paths never travel: the backend
-     *        resolves every row below its own roots.
+     * @brief Asks the backend to plan and queue the selected rows of one section. The request names rows only, the
+     *        backend resolves every row below its own roots.
      *
      * The operation ids are chosen by the frontend, so it can listen to them before the reply arrives. An id is
      * unused when its part of the plan is empty.
@@ -43,14 +43,12 @@ namespace SharedData::Sync
      */
     struct SyncExecutionResult
     {
-        /** @brief Rows of the bulk upload, in the order of its entry indices. */
+        /** @brief Rows of the bulk upload, in the order of its entry indices, by which it reports failures. */
         std::vector<std::string> uploads{};
-        /** @brief The source each upload row reports when it fails, in the same order. */
-        std::vector<std::string> uploadSources{};
         std::vector<std::string> downloads{};
-        std::vector<std::string> downloadSources{};
         /** @brief Every listed item of a directory delete is a row of its own, its content after it. */
         std::vector<std::string> remoteDeletes{};
+        /** @brief The path each delete row reports when it fails, in the same order. */
         std::vector<std::string> remoteDeleteSources{};
         std::vector<std::string> localDeletes{};
         std::vector<std::string> localDeleteSources{};
@@ -61,9 +59,7 @@ namespace SharedData::Sync
         SyncExecutionResult,
         (),
         (uploads,
-         uploadSources,
          downloads,
-         downloadSources,
          remoteDeletes,
          remoteDeleteSources,
          localDeletes,

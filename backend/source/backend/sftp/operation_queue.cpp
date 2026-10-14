@@ -1587,7 +1587,6 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             case Action::Upload:
             {
                 uploadRecording.entries.emplace_back(entry.relKey, std::move(planned.record));
-                result.uploadSources.push_back(paths.local.toUtf8());
                 uploads.entries.push_back({
                     .source = std::move(paths.local),
                     .destination = std::move(paths.remote),
@@ -1603,7 +1602,6 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
             case Action::Download:
             {
                 downloadRecording.entries.emplace_back(entry.relKey, std::move(planned.record));
-                result.downloadSources.push_back(paths.remote.value());
                 downloads.entries.push_back({
                     .source = std::move(paths.remote),
                     .destination = std::move(paths.local),

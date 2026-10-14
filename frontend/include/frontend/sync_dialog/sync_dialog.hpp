@@ -41,13 +41,13 @@ class SyncDialog
      * @brief Opens the dialog against a backend-resident sync session whose first
      *        diff has already completed.
      *
-     * @param provider Non-owning handle to the session; must outlive the dialog.
+     * @param provider The sync session, kept until the dialog closes or opens with another one. Callbacks of
+     *                 executions under a previous provider are dropped then.
      * @param snapshot The result of the initial recompute: summary and section roots.
-     * @param localPath Local scan root (for path column formatting only — data is
+     * @param localPath Local scan root (for path column formatting only, data is
      *                  served lazily from @p provider).
      * @param remotePath Remote scan root.
      * @param scanned Settings the scans of @p provider ran with.
-     * @param lastSyncTime When this pair was last synchronized, every recompute compares against it.
      */
     void open(
         std::shared_ptr<BackendSyncProvider> provider,
@@ -57,11 +57,6 @@ class SyncDialog
         ScanSettings scanned,
         std::optional<std::uint64_t> lastSyncTime
     );
-
-    /**
-     * @brief Called when the user synchronized the whole selection, so the session can record the sync.
-     */
-    void setOnSynchronized(std::function<void()> callback);
 
     /**
      * @brief Scan + diff settings snapshot handed to the Recompare callback.

@@ -216,18 +216,18 @@ struct Session::Implementation
 
         // The progress dialog holds the provider while it scans and compares, then hands it to the sync dialog.
         syncProgressDialog.open(
-            syncProvider_,
+            std::make_shared<BackendSyncProvider>(&operationQueue),
             localPath,
             remotePath,
             scan.respectIgnoreFiles,
             scan.recursive,
             scan.ignoreHidden,
             initialDiffOptions,
-            [this, provider = syncProvider_, localPath, remotePath, scan, lastSyncTime](
-                SharedData::Sync::DiffSnapshot snapshot
+            [this, localPath, remotePath, scan](
+                std::shared_ptr<BackendSyncProvider> provider, SharedData::Sync::DiffSnapshot snapshot
             )
             {
-                syncDialog.open(provider, std::move(snapshot), localPath, remotePath, scan, lastSyncTime);
+                syncDialog.open(std::move(provider), std::move(snapshot), localPath, remotePath, scan);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );

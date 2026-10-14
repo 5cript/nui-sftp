@@ -204,14 +204,11 @@ class OperationQueue
     bool isActive() const;
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
-    /** @brief Register a callback that receives the source paths of the entries a bulk operation
-     *         could not transfer.  Runs on completion, before the completion callback, because the
-     *         final BulkProgress can arrive after the completion and is dropped then.
+    /** @brief Register a callback that receives the entries a bulk operation could not transfer or
+     *         delete. Runs on completion, before the completion callback, because the final BulkProgress
+     *         can arrive after the completion and is dropped then.
      */
-    void addFailedEntriesCallback(
-        Ids::OperationId const& opId,
-        std::function<void(std::vector<std::string> const& failedPaths)> callback
-    );
+    void addFailedEntriesCallback(Ids::OperationId const& opId, FailedEntriesCallback callback);
     /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
      *         Automatically removed when the operation completes.
      */
