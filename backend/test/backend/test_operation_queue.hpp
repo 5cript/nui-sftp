@@ -1037,6 +1037,96 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(localRoot / "localGone.txt"));
     }
 
+#ifndef _WIN32
+    TEST_F(OperationQueueTests, SyncRefusesEveryDeleteBelowAProtectedDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/other.txt"}, {"content", "other"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "syncProtected";
+        std::filesystem::create_directories(localRoot / "home" / "inner");
+        std::ofstream{localRoot / "home" / "keep.txt"} << "keep";
+        std::ofstream{localRoot / "home" / "inner" / "keep.txt"} << "keep";
+        std::ofstream{localRoot / "loose.txt"} << "loose";
+
+        auto const* previousHome = std::getenv("HOME");
+        const std::optional<std::string> savedHome =
+            previousHome ? std::optional<std::string>{previousHome} : std::nullopt;
+        ASSERT_EQ(setenv("HOME", (localRoot / "home").c_str(), 1), 0);
+        const auto restoreHome = Nui::ScopeExit{[&savedHome]() noexcept
+            {
+                if (savedHome)
+                    setenv("HOME", savedHome->c_str(), 1);
+                else
+                    unsetenv("HOME");
+            }};
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session, &sftp](std::string relKey, Action action, bool isDirectory)
+        {
+            return plannedNow(session, *sftp, std::move(relKey), action, isDirectory);
+        };
+        SyncSession::ResolvedPlan plan{
+            .entries =
+                {
+                    entry("test", Action::DeleteRemote, true),
+                    entry("test/file2.txt", Action::DeleteRemote, false),
+                    entry("test/Documents", Action::DeleteRemote, true),
+                    entry("test/Documents/doc1.txt", Action::DeleteRemote, false),
+                    entry("other.txt", Action::DeleteRemote, false),
+                    entry("home", Action::DeleteLocal, true),
+                    entry("home/inner", Action::DeleteLocal, true),
+                    entry("home/inner/keep.txt", Action::DeleteLocal, false),
+                    entry("home/keep.txt", Action::DeleteLocal, false),
+                    entry("loose.txt", Action::DeleteLocal, false),
+                },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+
+        const auto result = runOnStrand([&]() {
+            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+        });
+        EXPECT_EQ(result.remoteDeletes, (std::vector<std::string>{"other.txt"}));
+        EXPECT_EQ(result.localDeletes, (std::vector<std::string>{"loose.txt"}));
+        EXPECT_EQ(
+            result.failed,
+            (std::vector<std::string>{
+                "test",
+                "test/file2.txt",
+                "test/Documents",
+                "test/Documents/doc1.txt",
+                "home",
+                "home/inner",
+                "home/inner/keep.txt",
+                "home/keep.txt",
+            })
+        );
+
+        setPaused(false);
+        workUntilCompletions(2);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("file2.txt"));
+        EXPECT_FALSE(remoteNames(*sftp, "/home").contains("other.txt"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "home" / "keep.txt"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "home" / "inner" / "keep.txt"));
+        EXPECT_FALSE(std::filesystem::exists(localRoot / "loose.txt"));
+    }
+#endif
+
     TEST_F(OperationQueueTests, CancelledDirectoryDownloadDuringScanLeavesNextUnitIntact)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
