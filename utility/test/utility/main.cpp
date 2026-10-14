@@ -1,4 +1,5 @@
 #include <utility/process_temporary_directory.hpp>
+#include "test_case_convert.hpp"
 #include "test_command_template.hpp"
 #include "test_directory_traversal.hpp"
 #include "test_echo_suppressor.hpp"
