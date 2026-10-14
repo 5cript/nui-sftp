@@ -91,6 +91,9 @@ if (WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/icon.cmake")
     file(TO_CMAKE_PATH "${NUI_SFTP_ICO}" NUI_SFTP_ICO_FORWARD)
+    # activeCodePage UTF-8: narrow Windows APIs in third-party code (libssh, yaml-cpp, spdlog) read UTF-8.
+    set(NUI_SFTP_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/nui-sftp.manifest")
+    file(TO_CMAKE_PATH "${NUI_SFTP_MANIFEST}" NUI_SFTP_MANIFEST_FORWARD)
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/nui-sftp.rc.in"
         "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
@@ -99,7 +102,7 @@ if (WIN32)
     target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc")
     set_source_files_properties(
         "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
-        PROPERTIES OBJECT_DEPENDS "${NUI_SFTP_ICO}"
+        PROPERTIES OBJECT_DEPENDS "${NUI_SFTP_ICO};${NUI_SFTP_MANIFEST}"
     )
     add_dependencies(${PROJECT_NAME} nui-sftp-icon)
 elseif (APPLE AND NOT EMSCRIPTEN)
