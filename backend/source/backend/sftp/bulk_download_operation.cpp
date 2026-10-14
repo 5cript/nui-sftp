@@ -6,6 +6,7 @@
 #include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
 
+#include <algorithm>
 #include <ranges>
 
 namespace
@@ -219,4 +220,41 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         );
     }
     setPrescannedEntries(std::move(entries), std::move(paths), totalBytes);
+}
+
+std::optional<SharedData::BulkDownloadRequest>
+BulkDownloadOperation::resumeRequest(SharedData::BulkDownloadRequest request) const
+{
+    if (!hasEntries())
+        return std::nullopt;
+    const auto unfinished = unfinishedEntryIndices();
+    const auto isSymlink = [this](std::size_t index)
+    {
+        return entries()[index].isSymlink();
+    };
+    if (std::ranges::any_of(unfinished, isSymlink))
+        return std::nullopt;
+
+    request.entries.clear();
+    for (const auto index : unfinished)
+    {
+        auto const& entry = entries()[index];
+        const auto paths = entryPaths(index);
+        if (!paths || (!entry.isRegularFile() && !entry.isDirectory()))
+            continue;
+        request.entries.push_back({
+            .source = paths->remote,
+            .destination = paths->local,
+            .sizeBytes = entry.isDirectory() ? 0u : entry.size,
+            .isDirectory = entry.isDirectory(),
+            .withoutContent = entry.isDirectory(),
+            .mtime = entry.mtime,
+            .mtimeNsec = entry.mtimeNsec,
+            .mayOverwrite = paths->mayOverwrite,
+            .comparedDestination = paths->comparedDestination,
+        });
+    }
+    request.remoteRoot = common().remotePath;
+    request.localRoot = common().localPath;
+    return request;
 }

@@ -150,6 +150,7 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
         const auto result = prepareRootInStrand(sftp, root);
         if (!result.has_value())
             return enterErrorState<WorkStatus>(result.error());
+        finishedEntries_[0] = true;
         cursor_ = 1;
     }
 
@@ -255,6 +256,10 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
                 failedEntries_.emplace_back(failureSource(index), result.error());
                 failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
             }
+            else
+            {
+                finishedEntries_[index] = true;
+            }
             ++completedEntries_;
             ++directoriesCreated;
             continue;
@@ -277,6 +282,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
             continue;
         }
         Log::warn("{}: Skipping unsupported file type for entry: {}.", logName(), displayPath(index));
+        finishedEntries_[index] = true;
         ++completedEntries_;
     }
     return {};
@@ -290,7 +296,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         if (result.has_value())
         {
             if (result.value() == WorkStatus::Complete)
-                finishSlot(slot);
+                finishSlot(slot, true);
             continue;
         }
 
@@ -317,7 +323,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             // Not critical for the bulk as a whole: record the entry for the user and move on.
             failedEntries_.emplace_back(failureSource(slot.entryIndex), error);
             failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
-            finishSlot(slot);
+            finishSlot(slot, false);
             if (common_.failFast)
             {
                 Log::error("{}: failFast is enabled, failing the whole operation due to the error.", logName());
@@ -330,8 +336,10 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
     return {};
 }
 
-void BulkTransferOperation::finishSlot(Slot& slot)
+void BulkTransferOperation::finishSlot(Slot& slot, bool transferred)
 {
+    if (transferred)
+        finishedEntries_[slot.entryIndex] = true;
     // Advance by the entry's reported size, not the child's measured size: totalBytes_ is
     // summed from the same reported sizes, so the two converge exactly.
     completedBytes_ += entries_[slot.entryIndex].size;
@@ -471,6 +479,7 @@ void BulkTransferOperation::setParallelBudget(int slots)
 void BulkTransferOperation::setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t totalBytes)
 {
     entries_ = std::move(entries);
+    finishedEntries_.assign(entries_.size(), false);
     totalBytes_ = totalBytes;
     prescannedPaths_.clear();
     entrySource_ = EntrySource::Tree;
@@ -483,6 +492,7 @@ void BulkTransferOperation::setPrescannedEntries(
 )
 {
     entries_ = std::move(entries);
+    finishedEntries_.assign(entries_.size(), false);
     prescannedPaths_ = std::move(paths);
     totalBytes_ = totalBytes;
     entrySource_ = EntrySource::Flat;
@@ -528,6 +538,17 @@ void BulkTransferOperation::addUnreadableDirectories(std::vector<std::string> co
 std::vector<std::pair<std::string, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
 {
     return failedEntries_;
+}
+
+std::vector<std::size_t> BulkTransferOperation::unfinishedEntryIndices() const
+{
+    std::vector<std::size_t> unfinished;
+    for (std::size_t index = 0; index < finishedEntries_.size(); ++index)
+    {
+        if (!finishedEntries_[index])
+            unfinished.push_back(index);
+    }
+    return unfinished;
 }
 
 std::expected<BulkTransferOperation::EntryPaths, BulkTransferOperation::Error>

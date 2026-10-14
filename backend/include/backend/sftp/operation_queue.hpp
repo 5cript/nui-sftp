@@ -179,40 +179,35 @@ class OperationQueue
     );
 
     /**
-     * @brief Bulk-add download operations from a pre-known entry list.
-     *        Files are taken at face value (no lstat — sizes come from the
-     *        caller) and turned into individual DownloadOperation cards.
-     *        Directory entries fall back to the existing Scan+BulkDownload
-     *        flow. Everything happens inside a single strand dispatch so
-     *        only one SSH-thread context switch is paid for the batch.
+     * @brief Queues the entries of @p request: each directory with its content as a bulk of its own that scans it
+     *        first, under the id @p operationIdFor gives its index; all files, and directories created without their
+     *        content, as one bulk under @p bulkCardId. Sizes and times of files are taken as given, without an lstat.
+     *        Each queued part keeps a resume backup under its id.
      *
-     * @param sftp           SFTP session to use.
-     * @param request        Full bulk request (file + directory entries).
-     * @param operationIdFor Callback producing a fresh OperationId per entry
-     *                       index (frontend reserves them so it can register
-     *                       completion callbacks before the RPC returns).
-     * @return Number of entries successfully enqueued.
+     * @param sftp SFTP session to use.
+     * @param request The entries; the card of the files works below its roots, unset the closest directories
+     *        holding every source and every destination.
+     * @param operationIdFor The id of the entry at an index, reserved by the frontend so it can register callbacks
+     *        before the reply.
+     * @param bulkCardId The id of the card of the files, reserved by the frontend apart from the entry ids.
+     * @return Number of entries queued: the files and directories of the card and the directories queued on their
+     *         own. A request without any entry still queues the card, which then completes at once.
      */
     std::size_t addBulkDownloadOperation(
         SecureShell::SftpSession& sftp,
-        SharedData::BulkDownloadRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor,
-        Ids::OperationId bulkCardId
+        SharedData::BulkDownloadRequest request,
+        std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+        Ids::OperationId const& bulkCardId
     );
 
-    /** @brief Upload analogue of addBulkDownloadOperation.  File entries skip
-     *         the per-file local lstat + RPC round-trip; directories fall
-     *         back to the existing LocalScan+BulkUpload flow.
-     *
-     *  @param bulkCardId  Separate id reserved by the frontend for the aggregate
-     *                     BulkUpload card that covers all file entries. Must not
-     *                     collide with any of the per-entry ids produced by
-     *                     @p operationIdFor. */
+    /**
+     * @brief Upload analogue of @ref addBulkDownloadOperation.
+     */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
-        SharedData::BulkUploadRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor,
-        Ids::OperationId bulkCardId
+        SharedData::BulkUploadRequest request,
+        std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+        Ids::OperationId const& bulkCardId
     );
 
     /**
@@ -339,24 +334,21 @@ class OperationQueue
     bool hasPriorityWork() const;
 
     /**
-     * @brief Moves every still-tracked bulk-operation backup into @p
-     *        registry, keyed by the bulk's OperationId.  Called by Session
-     *        during teardown so a seamless reconnect can adopt them.
+     * @brief Moves every resume backup into @p registry, keyed by the id of its card. Called by Session during
+     *        teardown so a seamless reconnect can adopt them.
      *
-     *        Covers both queued-not-started bulks and bulks already running
-     *        — for the latter we re-issue the full original entry list and
-     *        rely on the per-file tryContinue path to skip whole files
-     *        already present (the in-progress file's bytes are not
-     *        byte-checkpointed here).
+     *        A bulk transfer that has its entries already leaves only the entries it has not finished, as a flat
+     *        list below its roots, and records how many entries and bytes it finished, which the resumed card counts
+     *        as done; a running file in it starts over unless its partial file can be continued. A bulk that did not
+     *        start yet or is still scanning keeps its request.
      */
     void dumpBulkResumes(BulkResumeRegistry& registry);
 
     /**
-     * @brief Re-enqueues the bulk operation described by @p entry against
-     *        this queue, reusing @p operationId as the bulk-card id so the
-     *        frontend's existing card surface stays attached.  Called from
-     *        Session::adoptBulkResumes after pulling @p entry out of the
-     *        registry.
+     * @brief Re-enqueues the backup @p entry under @p operationId as the id of every part, so the frontend's card
+     *        stays attached. Refuses a backup of more than one directory, or of a directory and other entries,
+     *        which would complete the card more than once. Called from Session::adoptBulkResumes after pulling
+     *        @p entry out of the registry.
      */
     void adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
 
@@ -379,6 +371,38 @@ class OperationQueue
 
   private:
     bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
+
+    /**
+     * @brief The queue an operation of @p mode goes to.
+     */
+    auto queueFor(SharedData::OperationMode mode)
+        -> std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>&;
+
+    /**
+     * @brief Shared part of the bulk transfer requests: each directory with content goes to @p queueDirectory as
+     *        (index, entry, request options) and counts when it returns true, every other entry into one request that
+     *        @p queueFiles queues as the card @p bulkCardId and sets the roots of. That request is the card's backup.
+     *
+     * @return Number of entries queued.
+     */
+    template <typename RequestT, typename QueueDirectoryT, typename QueueFilesT>
+    std::size_t splitBulkRequest(
+        RequestT request,
+        Ids::OperationId const& bulkCardId,
+        QueueDirectoryT&& queueDirectory,
+        QueueFilesT&& queueFiles
+    );
+
+    /**
+     * @brief The queued or running operation @p operationId, none when there is none.
+     */
+    Operation* findOperation(Ids::OperationId const& operationId);
+
+    /**
+     * @brief Reduces the backup @p entry of @p operation to what the operation has not finished yet and records
+     *        what it left out in @p entry, which the resumed card counts as done.
+     */
+    static void leaveOutFinished(Operation const& operation, BulkResumeEntry& entry);
 
     /**
      * @brief Tells the sync session waiting for the scan @p id, if any, that it failed or was cancelled.
@@ -426,9 +450,7 @@ class OperationQueue
     std::map<std::string, std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>>
         syncScanCallbacks_{};
 
-    // SyncSessions active on this channel.  Keyed by SyncSessionId.value() because
-    // Ids::IdHash isn't specialized on the strongly-typed id; the existing
-    // bulkResumeStash_ does the specialization — we stay string-keyed for simplicity.
+    // SyncSessions active on this channel, keyed by SyncSessionId.value().
     std::map<std::string, std::shared_ptr<SyncSession>> syncSessions_{};
 
     // Per-bulk backup snapshot, populated when a bulk-add path enqueues an

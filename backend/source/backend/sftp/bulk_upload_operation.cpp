@@ -198,3 +198,31 @@ void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> file
     }
     setPrescannedEntries(std::move(entries), std::move(paths), totalBytes);
 }
+
+std::optional<SharedData::BulkUploadRequest>
+BulkUploadOperation::resumeRequest(SharedData::BulkUploadRequest request) const
+{
+    if (!hasEntries())
+        return std::nullopt;
+
+    request.entries.clear();
+    for (const auto index : unfinishedEntryIndices())
+    {
+        auto const& entry = entries()[index];
+        const auto paths = entryPaths(index);
+        if (!paths || (!entry.isRegularFile() && !entry.isSymlink() && !entry.isDirectory()))
+            continue;
+        request.entries.push_back({
+            .source = paths->local,
+            .destination = paths->remote,
+            .sizeBytes = entry.isDirectory() ? 0u : entry.size,
+            .isDirectory = entry.isDirectory(),
+            .withoutContent = entry.isDirectory(),
+            .mayOverwrite = paths->mayOverwrite,
+            .comparedDestination = paths->comparedDestination,
+        });
+    }
+    request.remoteRoot = common().remotePath;
+    request.localRoot = common().localPath;
+    return request;
+}

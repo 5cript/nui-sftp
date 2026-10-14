@@ -161,6 +161,20 @@ class BulkTransferOperation : public Operation
         return slots_.size();
     }
 
+    /**
+     * @brief The entries are known: the scan delivered them or a flat list was set.
+     */
+    bool hasEntries() const noexcept
+    {
+        return entrySource_ != EntrySource::None;
+    }
+
+    /**
+     * @brief The indices of the entries a resume has to do again: every entry that was neither transferred, nor
+     *        created as a directory, nor skipped for its type. Failed and in flight entries are among them.
+     */
+    std::vector<std::size_t> unfinishedEntryIndices() const;
+
     std::uint64_t completedCount() const noexcept
     {
         return completedEntries_;
@@ -297,7 +311,10 @@ class BulkTransferOperation : public Operation
     std::expected<WorkStatus, Error> step(SecureShell::SftpSession& sftp);
     std::expected<void, Error> fillSlots(SecureShell::SftpSession& sftp);
     std::expected<void, Error> stepSlots();
-    void finishSlot(Slot& slot);
+    /**
+     * @brief Counts the entry of @p slot as done, as @p transferred or as a failure recorded for the user.
+     */
+    void finishSlot(Slot& slot, bool transferred);
     void cancelChildrenInStrand(bool adoptCancelState);
     Slot* slotFor(std::size_t entryIndex) noexcept;
     std::uint64_t fileCount() const noexcept;
@@ -342,6 +359,8 @@ class BulkTransferOperation : public Operation
     std::uint64_t completedBytes_{0};
     std::uint64_t totalBytes_{0};
     int budget_{1};
+    /** @brief Per entry: transferred, created or skipped for its type, so a resume leaves it out. */
+    std::vector<bool> finishedEntries_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};
     std::vector<std::uint32_t> failedEntryIndices_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number

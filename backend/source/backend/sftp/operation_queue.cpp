@@ -158,6 +158,24 @@ namespace
         );
     }
 
+    /**
+     * @brief The resume backup of the directory transfer @p source to @p destination: the directory alone, a resume
+     *        scans it again.
+     */
+    template <typename RequestT, typename SourceT, typename DestinationT>
+    RequestT directoryResumeRequest(
+        SourceT const& source,
+        DestinationT const& destination,
+        bool allowOverwrite,
+        bool insertRefresh,
+        SharedData::OperationMode mode
+    )
+    {
+        RequestT request{.allowOverwrite = allowOverwrite, .insertRefresh = insertRefresh, .mode = mode};
+        request.entries.push_back({.source = source, .destination = destination, .isDirectory = true});
+        return request;
+    }
+
     DownloadOperation::DownloadOperationOptions
     resolveDownloadOptions(Persistence::DownloadOptions const& opts, std::chrono::seconds futureTimeout)
     {
@@ -469,9 +487,61 @@ void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
     if (bulkResumeStash_.empty())
         return;
     Log::info("OperationQueue::dumpBulkResumes: persisting {} bulk-operation backup(s)", bulkResumeStash_.size());
-    for (auto& [opId, entry] : bulkResumeStash_)
-        registry.store(opId, std::move(entry));
+    for (auto& [operationId, entry] : bulkResumeStash_)
+    {
+        if (auto* operation = findOperation(operationId); operation)
+            leaveOutFinished(*operation, entry);
+        registry.store(operationId, std::move(entry));
+    }
     bulkResumeStash_.clear();
+}
+
+Operation* OperationQueue::findOperation(Ids::OperationId const& operationId)
+{
+    for (auto* queue : {&priorityOperations_, &operations_})
+    {
+        const auto found =
+            std::ranges::find(*queue, operationId, &std::pair<Ids::OperationId, std::unique_ptr<Operation>>::first);
+        if (found != queue->end())
+            return found->second.get();
+    }
+    return nullptr;
+}
+
+void OperationQueue::leaveOutFinished(Operation const& operation, BulkResumeEntry& entry)
+{
+    const auto trim = [&entry](auto const& bulk, auto& request)
+    {
+        auto remaining = bulk.resumeRequest(request);
+        if (remaining)
+        {
+            request = *std::move(remaining);
+            entry.finished = bulk.finishedProgress();
+        }
+        else
+        {
+            entry.finished = bulk.earlierProgress();
+        }
+    };
+    std::visit(
+        Utility::overloaded{
+            [&](SharedData::BulkDownloadRequest& download)
+            {
+                if (operation.type() == SharedData::OperationType::BulkDownload)
+                    trim(static_cast<BulkDownloadOperation const&>(operation), download);
+            },
+            [&](SharedData::BulkUploadRequest& upload)
+            {
+                if (operation.type() == SharedData::OperationType::BulkUpload)
+                    trim(static_cast<BulkUploadOperation const&>(operation), upload);
+            },
+            [](SharedData::BulkDeleteRequest&)
+            {
+                // A delete of an item that is gone already counts as done, the whole request can run again.
+            },
+        },
+        entry.request
+    );
 }
 
 void OperationQueue::adoptBulkResume(
@@ -480,34 +550,54 @@ void OperationQueue::adoptBulkResume(
     BulkResumeEntry entry
 )
 {
-    Log::info(
-        "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' ({} entries)",
-        operationId.value(),
-        std::visit(
+    const auto [entryCount, directoriesWithContent] = std::visit(
+        Utility::overloaded{
+            [](SharedData::BulkDeleteRequest const& request)
+            {
+                return std::pair{request.entries.size(), std::size_t{0}};
+            },
             [](auto const& request)
             {
-                return request.entries.size();
+                const auto directories = std::ranges::count_if(
+                    request.entries,
+                    [](auto const& transferEntry)
+                    {
+                        return transferEntry.isDirectory && !transferEntry.withoutContent;
+                    }
+                );
+                return std::pair{request.entries.size(), static_cast<std::size_t>(directories)};
             },
-            entry.request
-        )
+        },
+        entry.request
+    );
+    // A backup holds the files of one card or a single directory, more would complete the card more than once.
+    if (directoriesWithContent > 1 || (directoriesWithContent == 1 && entryCount > 1))
+    {
+        Log::error(
+            "OperationQueue::adoptBulkResume: refusing the backup of '{}', it holds {} directories among {} entries",
+            operationId.value(),
+            directoriesWithContent,
+            entryCount
+        );
+        return;
+    }
+    Log::info(
+        "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' ({} entries)", operationId.value(), entryCount
     );
 
-    // A transfer backup holds either the files of one bulk card or a single directory, both resume under the
-    // stashed id so the surviving card re-attaches.
-    auto operationIdFor = [&operationId](std::size_t)
+    const auto operationIdFor = [&operationId](std::size_t)
     {
         return operationId;
     };
-
     std::visit(
         Utility::overloaded{
-            [&](SharedData::BulkDownloadRequest const& request)
+            [&](SharedData::BulkDownloadRequest& request)
             {
-                addBulkDownloadOperation(sftp, request, operationIdFor, operationId);
+                addBulkDownloadOperation(sftp, std::move(request), operationIdFor, operationId);
             },
-            [&](SharedData::BulkUploadRequest const& request)
+            [&](SharedData::BulkUploadRequest& request)
             {
-                addBulkUploadOperation(sftp, request, operationIdFor, operationId);
+                addBulkUploadOperation(sftp, std::move(request), operationIdFor, operationId);
             },
             [&](SharedData::BulkDeleteRequest const& request)
             {
@@ -738,6 +828,50 @@ void OperationQueue::paused(bool pause)
     );
 }
 
+auto OperationQueue::queueFor(SharedData::OperationMode mode)
+    -> std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>&
+{
+    return mode == SharedData::OperationMode::PriorityQueued ? priorityOperations_ : operations_;
+}
+
+template <typename RequestT, typename QueueDirectoryT, typename QueueFilesT>
+std::size_t OperationQueue::splitBulkRequest(
+    RequestT request,
+    Ids::OperationId const& bulkCardId,
+    QueueDirectoryT&& queueDirectory,
+    QueueFilesT&& queueFiles
+)
+{
+    // A directory resumes as a unit of its own under its own id, so the card's backup holds the rest.
+    RequestT unit{
+        .allowOverwrite = request.allowOverwrite,
+        .insertRefresh = request.insertRefresh,
+        .mode = request.mode,
+        .localRoot = std::move(request.localRoot),
+        .remoteRoot = std::move(request.remoteRoot),
+    };
+    std::size_t queued = 0;
+    for (std::size_t index = 0; index < request.entries.size(); ++index)
+    {
+        auto& entry = request.entries[index];
+        if (entry.isDirectory && !entry.withoutContent)
+        {
+            if (queueDirectory(index, entry, unit))
+                ++queued;
+            continue;
+        }
+        unit.entries.push_back(std::move(entry));
+    }
+    // Without any entry the card is still queued, so a resumed card that had nothing left completes.
+    if (unit.entries.empty() && !request.entries.empty())
+        return queued;
+
+    queueFiles(unit);
+    queued += unit.entries.size();
+    bulkResumeStash_.insert_or_assign(bulkCardId, BulkResumeEntry{.request = std::move(unit)});
+    return queued;
+}
+
 std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
@@ -787,7 +921,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            // Invoked from the SFTP processing strand via workInStrand — marshal back.
+            // Invoked from the SFTP processing strand via workInStrand, marshal back.
             self->within_strand_do(
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
                 {
@@ -809,7 +943,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             );
         };
 
-        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(
             operationId, std::make_unique<DownloadOperation>(sftp.weak_from_this(), std::move(opts))
         );
@@ -858,7 +992,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             )
         );
 
-        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(operationId, std::move(bulk));
 
         RpcHelper::callRemoteSafely(
@@ -875,18 +1009,14 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             }
         );
 
-        // Synthetic single-entry resume backup: re-issuing this through
-        // adopt walks the same scan+bulk path, so the entry list itself
-        // doesn't matter — we just need the directory paths preserved.
-        SharedData::BulkDownloadRequest synthetic{
-            .entries = {SharedData::BulkDownloadEntry{
-                .source = remotePath, .destination = localPath, .isDirectory = true
-            }},
-            .allowOverwrite = allowOverwrite,
-            .insertRefresh = insertRefresh,
-            .mode = mode,
-        };
-        bulkResumeStash_.insert_or_assign(operationId, BulkResumeEntry{.request = std::move(synthetic)});
+        bulkResumeStash_.insert_or_assign(
+            operationId,
+            BulkResumeEntry{
+                .request = directoryResumeRequest<SharedData::BulkDownloadRequest>(
+                    remotePath, localPath, allowOverwrite, insertRefresh, mode
+                )
+            }
+        );
 
         return {};
     }
@@ -1025,7 +1155,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         );
     };
 
-    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(mode);
 
     // Directory roots are scanned by the archive operation itself before it packs.
     auto archive = std::make_unique<ArchiveDownloadOperation>(sftp.weak_from_this(), std::move(opts));
@@ -1154,7 +1284,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         );
     };
 
-    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(mode);
 
     // Directory roots are scanned by the archive operation itself before it packs.
     auto archive = std::make_unique<ArchiveUploadOperation>(sftp.weak_from_this(), std::move(opts));
@@ -1193,22 +1323,17 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 
 std::size_t OperationQueue::addBulkDownloadOperation(
     SecureShell::SftpSession& sftp,
-    SharedData::BulkDownloadRequest const& request,
-    std::function<Ids::OperationId(std::size_t)> operationIdFor,
-    Ids::OperationId bulkCardId
+    SharedData::BulkDownloadRequest request,
+    std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+    Ids::OperationId const& bulkCardId
 )
 {
-    // Assumed in strand.  The file portion is collapsed into a SINGLE
-    // BulkDownloadOperation with prescanned entries — one card on the
-    // frontend, one SSH-thread worker for the whole batch.  Directory
-    // entries still use the existing Scan+BulkDownload flow (one card
-    // per directory root).
-
+    // Assumed in strand.
     auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{});
     if (request.allowOverwrite)
         transferOptions.mayOverwrite = true;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    const auto allowOverwrite = request.allowOverwrite;
 
     return splitBulkRequest(
         std::move(request),
@@ -1217,30 +1342,80 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         {
             const auto result = addDownloadOperation(
                 sftp,
-                operationIdFor(idx),
+                operationIdFor(index),
                 entry.destination,
                 entry.source,
-                request.allowOverwrite || entry.mayOverwrite,
+                allowOverwrite || entry.mayOverwrite,
                 /*isBigFile*/ false,
-                // Propagate the request's flag so manual folder downloads refresh
-                // the local panel. Sync passes false to avoid refresh spam; a
-                // manual bulk download passes true and expects one refresh per
-                // top-level directory on completion.
-                /*insertRefresh*/ request.insertRefresh,
+                unit.insertRefresh,
                 /*createMissingDirectories*/ true,
-                request.mode
+                unit.mode
             );
-            if (!result.has_value())
+            if (!result)
             {
                 Log::error(
                     "Bulk download: directory entry '{}' failed to queue: {}",
                     entry.source.value(),
                     result.error().toString()
                 );
-                continue;
             }
-            ++directoryCount;
-            continue;
+            return result.has_value();
+        },
+        [&](SharedData::BulkDownloadRequest& unit)
+        {
+            std::vector<BulkDownloadOperation::PrescannedFile> files;
+            files.reserve(unit.entries.size());
+            std::ranges::transform(
+                unit.entries,
+                std::back_inserter(files),
+                [](SharedData::BulkDownloadEntry const& entry)
+                {
+                    return BulkDownloadOperation::PrescannedFile{
+                        .source = entry.source,
+                        .destination = entry.destination,
+                        .sizeBytes = entry.sizeBytes,
+                        .mtime = entry.mtime,
+                        .mtimeNsec = entry.mtimeNsec,
+                        .mayOverwrite = entry.mayOverwrite,
+                        .isDirectory = entry.isDirectory,
+                        .comparedDestination = entry.comparedDestination,
+                    };
+                }
+            );
+            unit.remoteRoot = unit.remoteRoot ? *unit.remoteRoot
+                                              : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::source);
+            unit.localRoot = unit.localRoot
+                ? *unit.localRoot
+                : commonParentOf(files, &BulkDownloadOperation::PrescannedFile::destination);
+
+            auto downloadOptions = resolveDownloadOptions(transferOptions, resolvedTimeout);
+            // Sync plans list files of directories that do not exist locally yet.
+            downloadOptions.createMissingDirectories = true;
+            auto bulk = std::make_unique<BulkDownloadOperation>(
+                sftp.weak_from_this(),
+                BulkDownloadOperation::BulkDownloadOperationOptions{
+                    .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkCardId),
+                    .remotePath = *unit.remoteRoot,
+                    .localPath = *unit.localRoot,
+                    .individualOptions = std::move(downloadOptions),
+                    .failFast = transferOptions.failFast.value_or(false),
+                    .concurrency = bulkConcurrency_,
+                }
+            );
+            bulk->setPrescannedFileList(std::move(files));
+            queueFor(unit.mode).emplace_back(bulkCardId, std::move(bulk));
+            RpcHelper::callRemoteSafely(
+                *hub_,
+                rpcName("onOperationAdded"),
+                SharedData::OperationAdded{
+                    .operationId = bulkCardId,
+                    .type = SharedData::OperationType::BulkDownload,
+                    .mode = unit.mode,
+                    .insertRefresh = unit.insertRefresh,
+                    .localPath = *unit.localRoot,
+                    .remotePath = *unit.remoteRoot,
+                }
+            );
         }
     );
 }
@@ -1327,7 +1502,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             );
         };
 
-        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(
             operationId, std::make_unique<UploadOperation>(sftp.weak_from_this(), std::move(opts))
         );
@@ -1369,7 +1544,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             })
         );
 
-        auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+        auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(operationId, std::move(bulk));
 
         RpcHelper::callRemoteSafely(
@@ -1386,16 +1561,14 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             }
         );
 
-        // Synthetic single-entry resume backup: adopting it walks the same scan and bulk path.
-        SharedData::BulkUploadRequest synthetic{
-            .entries = {SharedData::BulkUploadEntry{
-                .source = localPath, .destination = remotePath, .isDirectory = true
-            }},
-            .allowOverwrite = allowOverwrite,
-            .insertRefresh = insertRefresh,
-            .mode = mode,
-        };
-        bulkResumeStash_.insert_or_assign(operationId, BulkResumeEntry{.request = std::move(synthetic)});
+        bulkResumeStash_.insert_or_assign(
+            operationId,
+            BulkResumeEntry{
+                .request = directoryResumeRequest<SharedData::BulkUploadRequest>(
+                    localPath, remotePath, allowOverwrite, insertRefresh, mode
+                )
+            }
+        );
 
         return {};
     }
@@ -1408,19 +1581,17 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 
 std::size_t OperationQueue::addBulkUploadOperation(
     SecureShell::SftpSession& sftp,
-    SharedData::BulkUploadRequest const& request,
-    std::function<Ids::OperationId(std::size_t)> operationIdFor,
-    Ids::OperationId bulkCardId
+    SharedData::BulkUploadRequest request,
+    std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+    Ids::OperationId const& bulkCardId
 )
 {
-    // Mirrors addBulkDownloadOperation — file portion collapses into one
-    // BulkUploadOperation card; directory entries reuse the existing
-    // LocalScan+BulkUpload flow.
+    // Assumed in strand.
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
     if (request.allowOverwrite)
         transferOptions.mayOverwrite = true;
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
-    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    const auto allowOverwrite = request.allowOverwrite;
 
     return splitBulkRequest(
         std::move(request),
@@ -1429,30 +1600,77 @@ std::size_t OperationQueue::addBulkUploadOperation(
         {
             const auto result = addUploadOperation(
                 sftp,
-                operationIdFor(idx),
+                operationIdFor(index),
                 entry.source,
                 entry.destination,
-                request.allowOverwrite || entry.mayOverwrite,
+                allowOverwrite || entry.mayOverwrite,
                 /*isBigFile*/ false,
-                // Propagate the request's flag so manual folder uploads refresh
-                // the remote panel. Sync passes false to avoid refresh spam; a
-                // manual bulk upload passes true and expects one refresh per
-                // top-level directory on completion.
-                /*insertRefresh*/ request.insertRefresh,
+                unit.insertRefresh,
                 /*createMissingDirectories*/ true,
-                request.mode
+                unit.mode
             );
-            if (!result.has_value())
+            if (!result)
             {
                 Log::error(
                     "Bulk upload: directory entry '{}' failed to queue: {}",
                     entry.source.toUtf8(),
                     result.error().toString()
                 );
-                continue;
             }
-            ++directoryCount;
-            continue;
+            return result.has_value();
+        },
+        [&](SharedData::BulkUploadRequest& unit)
+        {
+            std::vector<BulkUploadOperation::PrescannedFile> files;
+            files.reserve(unit.entries.size());
+            std::ranges::transform(
+                unit.entries,
+                std::back_inserter(files),
+                [](SharedData::BulkUploadEntry const& entry)
+                {
+                    return BulkUploadOperation::PrescannedFile{
+                        .source = entry.source,
+                        .destination = entry.destination,
+                        .sizeBytes = entry.sizeBytes,
+                        .mayOverwrite = entry.mayOverwrite,
+                        .isDirectory = entry.isDirectory,
+                        .comparedDestination = entry.comparedDestination,
+                    };
+                }
+            );
+            unit.localRoot =
+                unit.localRoot ? *unit.localRoot : commonParentOf(files, &BulkUploadOperation::PrescannedFile::source);
+            unit.remoteRoot = unit.remoteRoot
+                ? *unit.remoteRoot
+                : commonParentOf(files, &BulkUploadOperation::PrescannedFile::destination);
+
+            auto uploadOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
+            uploadOptions.createMissingDirectories = true;
+            auto bulk = std::make_unique<BulkUploadOperation>(
+                sftp.weak_from_this(),
+                BulkUploadOperation::BulkUploadOperationOptions{
+                    .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkCardId),
+                    .remotePath = *unit.remoteRoot,
+                    .localPath = *unit.localRoot,
+                    .individualOptions = std::move(uploadOptions),
+                    .failFast = transferOptions.failFast.value_or(false),
+                    .concurrency = bulkConcurrency_,
+                }
+            );
+            bulk->setPrescannedFileList(std::move(files));
+            queueFor(unit.mode).emplace_back(bulkCardId, std::move(bulk));
+            RpcHelper::callRemoteSafely(
+                *hub_,
+                rpcName("onOperationAdded"),
+                SharedData::OperationAdded{
+                    .operationId = bulkCardId,
+                    .type = SharedData::OperationType::BulkUpload,
+                    .mode = unit.mode,
+                    .insertRefresh = unit.insertRefresh,
+                    .localPath = *unit.localRoot,
+                    .remotePath = *unit.remoteRoot,
+                }
+            );
         }
     );
 }
@@ -1607,7 +1825,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     {
         addBulkUploadOperation(
             sftp,
-            uploads,
+            std::move(uploads),
             [](std::size_t)
             {
                 return Ids::generateOperationId();
@@ -1619,7 +1837,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     {
         addBulkDownloadOperation(
             sftp,
-            downloads,
+            std::move(downloads),
             [](std::size_t)
             {
                 return Ids::generateOperationId();
@@ -1704,7 +1922,7 @@ std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
     }
 
     auto parent = LocalDeleteOperation::commonParentOf(targets);
-    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(mode);
     targetQueue.emplace_back(
         operationId,
         std::make_unique<LocalDeleteOperation>(LocalDeleteOperation::LocalDeleteOperationOptions{
@@ -1785,7 +2003,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 )
 {
     // Assumed in strand
-    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(mode);
 
     if (auto allowed = guard.check(remotePath); !allowed)
     {
@@ -1867,7 +2085,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
 {
     // Assumed in strand. One DeleteOperation, so one card and one completion for the whole request: files are
     // deleted as given, every real directory is scanned first and deleted with its content.
-    auto& targetQueue = (request.mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(request.mode);
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
     auto operation = std::make_unique<DeleteOperation>(
@@ -1985,7 +2203,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
         }
     );
 
-    auto& targetQueue = (mode == SharedData::OperationMode::PriorityQueued) ? priorityOperations_ : operations_;
+    auto& targetQueue = queueFor(mode);
     targetQueue.emplace_back(operationId, std::move(operation));
 
     RpcHelper::callRemoteSafely(

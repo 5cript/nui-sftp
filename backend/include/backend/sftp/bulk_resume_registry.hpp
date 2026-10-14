@@ -12,17 +12,22 @@
 #include <variant>
 
 /**
+ * @brief The request a backup re-issues, its type picks the addBulk* path.
+ */
+using BulkResumeRequest =
+    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest>;
+
+/**
  * @brief Carries the state needed to re-enqueue a bulk operation against a
  *        replacement Session after a seamless reconnect.
  *
- *        One entry per frontend card: the request's type picks the addBulk*
- *        path. A transfer entry holds either the files of one bulk card or a
- *        single directory, so adopting it re-issues exactly that card under
- *        its own id.
+ *        One entry per frontend card. A transfer entry holds either the files
+ *        of one bulk card or a single directory, so adopting it re-issues
+ *        exactly that card under its own id.
  */
 struct BulkResumeEntry
 {
-    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest> request;
+    BulkResumeRequest request;
     std::chrono::steady_clock::time_point storedAt{std::chrono::steady_clock::now()};
 };
 

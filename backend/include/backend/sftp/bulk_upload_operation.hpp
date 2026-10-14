@@ -2,6 +2,7 @@
 
 #include <backend/sftp/bulk_transfer_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -44,6 +45,13 @@ class BulkUploadOperation : public BulkTransferOperation
         bool isDirectory{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
+
+    /**
+     * @brief The request that resumes this bulk on another connection: the entries it has not finished, as a flat
+     *        list below its roots, with the options of @p request. None while the entries are not known yet, the
+     *        backup then stays as it is.
+     */
+    std::optional<SharedData::BulkUploadRequest> resumeRequest(SharedData::BulkUploadRequest request) const;
 
   protected:
     std::expected<void, Error>
