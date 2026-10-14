@@ -326,7 +326,8 @@ namespace Test
         ASSERT_EQ(finished.front().failedEntries.size(), 1u) << "an unreadable directory is never a silent success";
         EXPECT_EQ(finished.front().failedEntries.front().first, Paths::nativeToUtf8(localPath / "locked"));
         EXPECT_EQ(finished.front().failedEntries.front().second.type, SharedData::OperationErrorType::DirectoryUnreadable);
-        EXPECT_TRUE(remoteNames(*sftp, "/home/test/withLocked").contains("a.txt"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/withLocked"), (std::set<std::string>{"a.txt"}))
+            << "the unreadable directory is not created empty";
     }
 
     TEST_F(OperationQueueTests, ArchiveUploadOfAnUnreadableSubdirectoryFails)
