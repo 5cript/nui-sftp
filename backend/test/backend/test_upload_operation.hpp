@@ -634,7 +634,7 @@ namespace Test
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
-        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::NotAFile);
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::FileNotFound);
     }
 
     TEST_F(UploadOperationTests, UploadLocalDirectoryFails)
