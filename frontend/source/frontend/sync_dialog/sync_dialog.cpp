@@ -939,6 +939,18 @@ struct SyncDialog::Implementation
         return text;
     }
 
+    /** @brief The entries sync leaves alone in a dialog, its text scrolls however many there are. */
+    void showBlockedEntries()
+    {
+        confirmDialog_->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("syncDialog", "blockedTitle"),
+            .text = blockedSamplesText(),
+            .buttons = ConfirmDialog::Button::Ok,
+            .focusButton = ConfirmDialog::Button::Ok,
+        });
+    }
+
     /** @brief The arrow of a row: plans just that row (a directory with its content) and runs it. */
     void enqueueSingleNode(DiffSection section, std::string const& relKey)
     {
