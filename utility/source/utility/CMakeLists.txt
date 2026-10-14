@@ -25,6 +25,7 @@ else()
         permissions.cpp
         rename.cpp
         link_safe_remove.cpp
+        no_follow_tree_walk.cpp
         download_mark.cpp
         resources.cpp
     )
