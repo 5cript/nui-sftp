@@ -916,8 +916,8 @@ namespace Test
         const auto result = runOnStrand([&]() {
             return queue->executeSyncPlan(*sftp, session, std::move(plan), request);
         });
-        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt"}));
-        EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt"}));
+        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt", "emptyA/emptyB"}));
+        EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt", "newLocal/dir"}));
         EXPECT_EQ(result.remoteDeletes, (std::vector<std::string>{"gone.txt"}));
         EXPECT_EQ(result.localDeletes, (std::vector<std::string>{"localGone.txt"}));
         EXPECT_EQ(result.remoteDeleteSources, (std::vector<std::string>{"/home/test/syncRemote/gone.txt"}));
@@ -925,7 +925,6 @@ namespace Test
             result.localDeleteSources,
             (std::vector<std::string>{Paths::LocalPath::make(localRoot / "localGone.txt").value().toUtf8()})
         );
-        EXPECT_EQ(result.createdDirectories, (std::vector<std::string>{"emptyA/emptyB", "newLocal/dir"}));
         EXPECT_EQ(result.failed, (std::vector<std::string>{"CON"}));
 
         setPaused(false);
@@ -951,6 +950,148 @@ namespace Test
         EXPECT_TRUE(std::filesystem::is_directory(localRoot / "newLocal" / "dir"));
         EXPECT_FALSE(std::filesystem::exists(localRoot / "localGone.txt"));
     }
+
+    TEST_F(OperationQueueTests, SyncTransfersFilesOfSiblingDirectoriesBelowTheRoots)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/siblings"}}));
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/siblings/src"}}));
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/siblings/src/a.cpp"}, {"content", "a"}})
+        );
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/siblings/README.md"}, {"content", "readme"}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "siblings";
+        std::filesystem::create_directories(localRoot / "lib");
+        std::ofstream{localRoot / "lib" / "b.cpp"} << "b";
+        std::ofstream{localRoot / "NOTES.md"} << "notes";
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/siblings"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session](std::string relKey, Action action, std::uint64_t size)
+        {
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size},
+                .paths = std::move(paths),
+            };
+        };
+        // The first file of each direction lies in a subdirectory, its parent is not the root of the others.
+        SyncSession::ResolvedPlan plan{
+            .entries = {
+                entry("src/a.cpp", Action::Download, 1),
+                entry("README.md", Action::Download, 6),
+                entry("lib/b.cpp", Action::Upload, 1),
+                entry("NOTES.md", Action::Upload, 5),
+            },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        runOnStrand(
+            [&]()
+            {
+                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            }
+        );
+
+        setPaused(false);
+        workUntilCompletions(2);
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            EXPECT_TRUE(completed.failedEntries.empty()) << completed.operationId.value();
+        }
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "src" / "a.cpp"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "README.md"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/siblings/lib"), (std::set<std::string>{"b.cpp"}));
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test/siblings").contains("NOTES.md"));
+    }
+
+#ifndef _WIN32
+    TEST_F(OperationQueueTests, SyncCreatesEmptyDirectoriesInItsBulksButNeverThroughALink)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/emptyDirs"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "emptyDirs";
+        const auto outside = localDirectory_.path() / "emptyDirsOutside";
+        std::filesystem::create_directories(localRoot);
+        std::filesystem::create_directories(outside);
+        std::filesystem::create_directory_symlink(outside, localRoot / "linked");
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/emptyDirs"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session](std::string relKey, Action action)
+        {
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .isDirectory = true},
+                .paths = std::move(paths),
+            };
+        };
+        SyncSession::ResolvedPlan plan{
+            .entries = {
+                entry("linked/inside", Action::Download),
+                entry("fresh/deep", Action::Download),
+                entry("up/deep", Action::Upload),
+            },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        const auto result = runOnStrand(
+            [&]()
+            {
+                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            }
+        );
+        EXPECT_EQ(result.downloads, (std::vector<std::string>{"linked/inside", "fresh/deep"}));
+        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up/deep"}));
+
+        setPaused(false);
+        workUntilCompletions(2);
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            if (completed.operationId == request.downloadId)
+                EXPECT_EQ(completed.failedEntries.size(), 1u);
+            else
+                EXPECT_TRUE(completed.failedEntries.empty());
+        }
+        EXPECT_FALSE(std::filesystem::exists(outside / "inside"));
+        EXPECT_TRUE(std::filesystem::is_directory(localRoot / "fresh" / "deep"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/emptyDirs/up"), (std::set<std::string>{"deep"}));
+    }
+#endif
 
     TEST_F(OperationQueueTests, SyncTransfersNonAsciiNames)
     {

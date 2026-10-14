@@ -1,5 +1,6 @@
 #pragma once
 
+#include <paths/common_parent.hpp>
 #include <paths/paths.hpp>
 
 #include <gtest/gtest.h>
@@ -126,5 +127,22 @@ namespace Paths::Test
         EXPECT_FALSE(unset.parent().has_value());
         EXPECT_FALSE(unset.isWithin(RemotePath::root()));
         EXPECT_FALSE(RemotePath::root().isWithin(unset));
+    }
+
+    TEST(RemotePathTests, CommonParentHoldsEveryPathBelowIt)
+    {
+        const auto path = [](std::string_view text)
+        {
+            return RemotePath::make(text).value();
+        };
+        const std::vector siblings{path("/r/src/a.cpp"), path("/r/README.md")};
+        EXPECT_EQ(commonParentOf(std::span{siblings}), path("/r"));
+        const std::vector nested{path("/r/a/b/c"), path("/r/a/d")};
+        EXPECT_EQ(commonParentOf(std::span{nested}), path("/r/a"));
+        const std::vector single{path("/r/x")};
+        EXPECT_EQ(commonParentOf(std::span{single}), path("/r"));
+        const std::vector root{RemotePath::root()};
+        EXPECT_EQ(commonParentOf(std::span{root}), RemotePath::root());
+        EXPECT_FALSE(commonParentOf(std::span<RemotePath const>{}));
     }
 }
