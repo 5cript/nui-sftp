@@ -1576,6 +1576,48 @@ namespace Test
         );
     }
 
+    TEST_F(OperationQueueTests, AFailedSyncScanCancelsTheOtherOne)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "syncSibling";
+        for (int directory = 0; directory < 50; ++directory)
+        {
+            const auto path = localRoot / fmt::format("d{}", directory);
+            std::filesystem::create_directories(path);
+            for (int file = 0; file < 20; ++file)
+                std::ofstream{path / fmt::format("f{}", file)} << "x";
+        }
+
+        const auto remoteScan = Ids::generateOperationId();
+        const auto localScan = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                queue->addSyncScanOperation(
+                    *sftp,
+                    Ids::generateSyncSessionId(),
+                    remoteScan,
+                    localScan,
+                    remote("/home/test/Documents"),
+                    Paths::LocalPath::make(localRoot).value(),
+                    false,
+                    true,
+                    false
+                );
+            }
+        );
+        workUntilCompletions(2);
+        std::map<std::string, SharedData::OperationCompletionReason> reasons;
+        for (auto const& completed : completions())
+            reasons.emplace(completed.operationId.value(), completed.reason);
+        EXPECT_EQ(reasons.at(remoteScan.value()), SharedData::OperationCompletionReason::Failed);
+        EXPECT_EQ(reasons.at(localScan.value()), SharedData::OperationCompletionReason::Canceled);
+    }
+
     TEST_F(OperationQueueTests, HostileNamesNeverBecomeLocalPaths)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
