@@ -68,10 +68,10 @@ namespace SharedData::Test
             .entries =
                 {
                     {.source = remote("/srv/a.txt"),
-                     .destination = local("a.txt"),
-                     .sizeBytes = 7,
-                     .mtime = 1700000000u,
-                     .mtimeNsec = 5u},
+                        .destination = local("a.txt"),
+                        .sizeBytes = 7,
+                        .mtime = 1700000000u,
+                        .mtimeNsec = 5u},
                 },
             .localRoot = local(""),
         };
