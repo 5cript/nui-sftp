@@ -527,6 +527,227 @@ namespace Test
         EXPECT_TRUE(names.contains("adopted_b.txt"));
     }
 
+    TEST_F(OperationQueueTests, AResumedBulkUploadLeavesOutTheFilesItFinished)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "partly";
+        std::filesystem::create_directories(localPath);
+        SharedData::BulkUploadRequest request{};
+        for (auto const* name : {"partly_a.txt", "partly_b.txt", "partly_c.txt"})
+        {
+            std::ofstream{localPath / name} << name;
+            request.entries.push_back(
+                {.source = toLocal(localPath / name),
+                    .destination = remote(fmt::format("/home/test/{}", name)),
+                    .sizeBytes = std::string_view{name}.size()}
+            );
+        }
+        const auto card = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+            }
+        );
+
+        for (int step = 0; step < 50 && !remoteNames(*sftp, "/home/test").contains("partly_a.txt"); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("partly_a.txt"));
+        ASSERT_FALSE(remoteNames(*sftp, "/home/test").contains("partly_c.txt")) << "the bulk ran to its end";
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(card);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkUploadRequest>(backup->request);
+        ASSERT_FALSE(resumed.entries.empty());
+        EXPECT_LT(resumed.entries.size(), 3u);
+        for (auto const& entry : resumed.entries)
+            EXPECT_NE(entry.destination.value(), "/home/test/partly_a.txt");
+        EXPECT_EQ(backup->finished.entries, 3u - resumed.entries.size()) << "the card counts them as done";
+        EXPECT_GE(backup->finished.bytes, std::string_view{"partly_a.txt"}.size());
+        registry.store(card, *std::move(backup));
+
+        adoptInto(*sftp, registry, {card});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().operationId, card);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty()) << finished.front().failedEntries.front().first;
+        const auto names = remoteNames(*sftp, "/home/test");
+        for (auto const* name : {"partly_a.txt", "partly_b.txt", "partly_c.txt"})
+            EXPECT_TRUE(names.contains(name)) << name;
+    }
+
+    TEST_F(OperationQueueTests, AResumedSyncUploadKeepsWhatTheCompareSawAtItsDestinations)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "compared";
+        std::filesystem::create_directories(localPath);
+        SharedData::BulkUploadRequest request{};
+        for (auto const* name : {"compared_a.txt", "compared_b.txt", "compared_c.txt"})
+        {
+            std::ofstream{localPath / name} << name;
+            request.entries.push_back(
+                {.source = toLocal(localPath / name),
+                    .destination = remote(fmt::format("/home/test/{}", name)),
+                    .sizeBytes = std::string_view{name}.size(),
+                    .mayOverwrite = true,
+                    .comparedDestination = SharedData::ComparedState{}}
+            );
+        }
+        const auto card = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+            }
+        );
+        for (int step = 0; step < 50 && !remoteNames(*sftp, "/home/test").contains("compared_a.txt"); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("compared_a.txt"));
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(card);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkUploadRequest>(backup->request);
+        ASSERT_FALSE(resumed.entries.empty());
+        for (auto const& entry : resumed.entries)
+        {
+            EXPECT_EQ(entry.comparedDestination, SharedData::ComparedState{}) << entry.destination.value();
+            ASSERT_TRUE(serverStartResult->command(
+                "createFile", {{"path", entry.destination.value()}, {"content", "appeared meanwhile"}}
+            ));
+        }
+        const auto appeared = resumed.entries.size();
+        registry.store(card, *std::move(backup));
+
+        adoptInto(*sftp, registry, {card});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        ASSERT_EQ(finished.front().failedEntries.size(), appeared) << "the resumed entries replace nothing";
+        for (auto const& [path, error] : finished.front().failedEntries)
+            EXPECT_EQ(error.type, Operation::ErrorType::ChangedSinceCompare) << path;
+    }
+
+    TEST_F(OperationQueueTests, AResumedDirectoryDownloadLeavesOutTheFilesItFinished)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "Documents";
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                );
+            }
+        ).has_value());
+        for (int step = 0; step < 100 && localNames(localPath).empty(); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_EQ(localNames(localPath).size(), 1u);
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(operationId);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkDownloadRequest>(backup->request);
+        ASSERT_EQ(resumed.entries.size(), 1u) << "only the file that is not there yet, as a flat list";
+        EXPECT_FALSE(resumed.entries.front().isDirectory);
+        EXPECT_FALSE(
+            localNames(localPath).contains(Paths::nativeToUtf8(resumed.entries.front().destination.native().filename()))
+        );
+        ASSERT_TRUE(resumed.localRoot.has_value());
+        EXPECT_EQ(resumed.localRoot->native(), localPath);
+        EXPECT_EQ(backup->finished.entries, 1u);
+        registry.store(operationId, *std::move(backup));
+
+        adoptInto(*sftp, registry, {operationId});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().operationId, operationId);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty()) << finished.front().failedEntries.front().first;
+        EXPECT_EQ(localNames(localPath), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
+    }
+
+    TEST_F(OperationQueueTests, ABackupOfSeveralDirectoriesIsRefused)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        makeQueue();
+        setPaused(false);
+
+        BulkResumeEntry backup{
+            .request = SharedData::BulkDownloadRequest{
+                .entries = {
+                    {.source = remote("/home/test/Documents"),
+                        .destination = toLocal(localDirectory_.path() / "Documents"),
+                        .isDirectory = true},
+                    {.source = remote("/home/test/Pictures"),
+                        .destination = toLocal(localDirectory_.path() / "Pictures"),
+                        .isDirectory = true},
+                },
+            },
+        };
+        const auto operationId = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                queue_->adoptBulkResume(*sftp, operationId, std::move(backup));
+            }
+        );
+        EXPECT_TRUE(completedIdsAfterSettling().empty());
+        EXPECT_TRUE(localNames(localDirectory_.path()).empty());
+    }
+
     TEST_F(OperationQueueTests, QueuedRenameMovesTheFileButNeverReplacesTheDestination)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
