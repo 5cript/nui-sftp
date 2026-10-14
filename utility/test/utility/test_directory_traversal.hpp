@@ -20,7 +20,6 @@ namespace Utility::Test
     class DirectoryTraversalTests : public ::testing::Test
     {
       public:
-        template <bool IncludesDotAndDotDot = false>
         auto withWalkerDo(auto&& fn)
         {
             auto scan = [this](Paths::RelativePath const& relative)
@@ -30,8 +29,7 @@ namespace Utility::Test
                 else
                     return std::unexpected("No Scanner Installed In Test"s);
             };
-            using WalkerType =
-                DeepDirectoryWalker<SharedData::DirectoryEntry, std::string, decltype(scan), IncludesDotAndDotDot>;
+            using WalkerType = DeepDirectoryWalker<SharedData::DirectoryEntry, std::string, decltype(scan)>;
             if (!walker_)
                 walker_ = std::make_unique<WalkerType>(std::move(scan));
             return fn(static_cast<WalkerType&>(*walker_));
@@ -347,9 +345,15 @@ namespace Utility::Test
         const auto walkResult = withWalkerDo([this, &paths](auto& walker) {
             auto res = walker.walkAll();
             auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
-                return absolutePath(walker.relativePath(entry));
-            });
+            std::transform(
+                entries.begin(),
+                entries.end(),
+                std::back_inserter(paths),
+                [this, &walker](auto const& entry)
+                {
+                    return absolutePath(*walker.relativePath(entry));
+                }
+            );
             return res;
         });
 
@@ -431,14 +435,23 @@ namespace Utility::Test
         };
 
         std::vector<std::filesystem::path> paths{};
-        const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
-            auto res = walker.walk();
-            auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
-                return absolutePath(walker.relativePath(entry));
-            });
-            return res;
-        });
+        const auto walkResult = withWalkerDo(
+            [this, &paths](auto& walker)
+            {
+                auto res = walker.walk();
+                auto const& entries = walker.entries();
+                std::transform(
+                    entries.begin(),
+                    entries.end(),
+                    std::back_inserter(paths),
+                    [this, &walker](auto const& entry)
+                    {
+                        return absolutePath(*walker.relativePath(entry));
+                    }
+                );
+                return res;
+            }
+        );
 
         ASSERT_TRUE(walkResult.has_value())
             << "Error during walk: " << (walkResult.has_value() ? "" : walkResult.error());
@@ -488,15 +501,24 @@ namespace Utility::Test
 
         auto doTheWalk = [this, &paths]() {
             paths.clear();
-            const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
-                walker.reset();
-                auto res = walker.walk();
-                auto const& entries = walker.entries();
-                std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
-                    return absolutePath(walker.relativePath(entry));
-                });
-                return res;
-            });
+            const auto walkResult = withWalkerDo(
+                [this, &paths](auto& walker)
+                {
+                    walker.reset();
+                    auto res = walker.walk();
+                    auto const& entries = walker.entries();
+                    std::transform(
+                        entries.begin(),
+                        entries.end(),
+                        std::back_inserter(paths),
+                        [this, &walker](auto const& entry)
+                        {
+                            return absolutePath(*walker.relativePath(entry));
+                        }
+                    );
+                    return res;
+                }
+            );
             ASSERT_TRUE(walkResult.has_value())
                 << "Error during walk: " << (walkResult.has_value() ? "" : walkResult.error());
         };
@@ -521,5 +543,74 @@ namespace Utility::Test
         shuffle();
         doTheWalk();
         EXPECT_THAT(paths, ::testing::UnorderedElementsAreArray(expectedPaths));
+    }
+
+    namespace
+    {
+        std::vector<SharedData::DirectoryEntry> smallTree()
+        {
+            using SharedData::DirectoryEntry;
+            return {
+                DirectoryEntry{.type = DirectoryEntry::FileType::Directory},
+                DirectoryEntry{.name = "sub", .type = DirectoryEntry::FileType::Directory, .parent = 0},
+                DirectoryEntry{.name = "file.txt", .type = DirectoryEntry::FileType::Regular, .parent = 1},
+                DirectoryEntry{.name = "a/b", .type = DirectoryEntry::FileType::Regular, .parent = 1},
+                DirectoryEntry{.name = "lost.txt", .type = DirectoryEntry::FileType::Regular, .parent = 9},
+            };
+        }
+    }
+
+    TEST(WalkedEntryTests, RelativePathsFollowTheParents)
+    {
+        const auto entries = smallTree();
+        const auto root = walkedRelativePath(entries, entries[0]);
+        ASSERT_TRUE(root.has_value());
+        EXPECT_TRUE(root->empty());
+        const auto file = walkedRelativePath(entries, entries[2]);
+        ASSERT_TRUE(file.has_value()) << file.error().toString();
+        EXPECT_EQ(file->value(), "sub/file.txt");
+    }
+
+    TEST(WalkedEntryTests, RelativePathsRefuseInvalidNamesAndUnknownParentsWithoutThrowing)
+    {
+        const auto entries = smallTree();
+        const auto invalid = walkedRelativePath(entries, entries[3]);
+        ASSERT_FALSE(invalid.has_value());
+        EXPECT_EQ(invalid.error().reason, Paths::PathRejection::ContainsSeparator);
+        const auto lost = walkedRelativePath(entries, entries[4]);
+        ASSERT_FALSE(lost.has_value());
+        EXPECT_EQ(lost.error().reason, Paths::PathRejection::UnknownParent);
+        const auto shared = SharedData::relativePath(entries, entries[4]);
+        ASSERT_FALSE(shared.has_value());
+        EXPECT_EQ(shared.error().reason, Paths::PathRejection::UnknownParent);
+    }
+
+    TEST(WalkedEntryTests, DescriptionsUseTheNamesAsListed)
+    {
+        const auto entries = smallTree();
+        EXPECT_EQ(describeWalkedEntry("/home/test", entries, entries[3]), "/home/test/sub/a/b");
+        EXPECT_EQ(describeWalkedEntry("/", entries, entries[2]), "/sub/file.txt");
+        EXPECT_EQ(describeWalkedEntry("", entries, entries[2]), "sub/file.txt");
+        EXPECT_EQ(describeWalkedEntry("/home/test", entries, entries[0]), "/home/test");
+        EXPECT_EQ(describeWalkedEntry("/home/test", entries, entries[4]), "/home/test/lost.txt");
+    }
+
+    TEST_F(DirectoryTraversalTests, ACompletedWalkReportsItsEnd)
+    {
+        createSomeFilesIn(isolateDirectory_.path(), 2);
+        makeDefaultScan();
+        withWalkerDo(
+            [](auto& walker)
+            {
+                ASSERT_TRUE(walker.walkAll().has_value());
+                ASSERT_TRUE(walker.completed());
+                const auto again = walker.walk();
+                ASSERT_TRUE(again.has_value());
+                EXPECT_TRUE(*again) << "a walk that is done says so";
+                EXPECT_EQ(walker.entries().size(), 3u);
+                for (auto const& entry : walker.entries())
+                    EXPECT_TRUE(walker.relativePath(entry).has_value()) << entry.name;
+            }
+        );
     }
 }

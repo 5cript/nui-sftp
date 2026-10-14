@@ -19,6 +19,46 @@ extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
+    TEST(TreeEntryPathsTests, EntriesAreJoinedBelowBothRoots)
+    {
+        using SharedData::DirectoryEntry;
+        const std::vector<DirectoryEntry> entries{
+            DirectoryEntry{.type = DirectoryEntry::FileType::Directory},
+            DirectoryEntry{.name = "sub", .type = DirectoryEntry::FileType::Directory, .parent = 0},
+            DirectoryEntry{.name = "file.txt", .type = DirectoryEntry::FileType::Regular, .parent = 1},
+            DirectoryEntry{.name = "..", .type = DirectoryEntry::FileType::Regular, .parent = 1},
+            DirectoryEntry{.name = "lost.txt", .type = DirectoryEntry::FileType::Regular, .parent = 7},
+        };
+        const auto remoteRoot = remote("/home/test/tree");
+        const auto localRoot = toLocal(temporaryRoot / "tree");
+
+        const auto root = Detail::treeEntryPaths(entries, 0, remoteRoot, localRoot);
+        ASSERT_TRUE(root.has_value()) << root.error().toString();
+        EXPECT_EQ(root->remote, remoteRoot);
+        EXPECT_EQ(root->local, localRoot);
+
+        const auto file = Detail::treeEntryPaths(entries, 2, remoteRoot, localRoot);
+        ASSERT_TRUE(file.has_value()) << file.error().toString();
+        EXPECT_EQ(file->remote.value(), "/home/test/tree/sub/file.txt");
+        EXPECT_EQ(file->local.native(), (temporaryRoot / "tree" / "sub" / "file.txt"));
+
+        const auto invalid = Detail::treeEntryPaths(entries, 3, remoteRoot, localRoot);
+        ASSERT_FALSE(invalid.has_value());
+        EXPECT_EQ(invalid.error().type, Operation::ErrorType::InvalidName);
+
+        const auto lost = Detail::treeEntryPaths(entries, 4, remoteRoot, localRoot);
+        ASSERT_FALSE(lost.has_value());
+        EXPECT_EQ(lost.error().type, Operation::ErrorType::ImplementationError);
+
+        const auto outside = Detail::treeEntryPaths(entries, 5, remoteRoot, localRoot);
+        ASSERT_FALSE(outside.has_value());
+        EXPECT_EQ(outside.error().type, Operation::ErrorType::ImplementationError);
+
+        const auto noRoot = Detail::treeEntryPaths(entries, 2, Paths::RemotePath{}, localRoot);
+        ASSERT_FALSE(noRoot.has_value());
+        EXPECT_EQ(noRoot.error().type, Operation::ErrorType::ImplementationError);
+    }
+
     class BulkDownloadOperationTests : public RealServerTests
     {
       public:
