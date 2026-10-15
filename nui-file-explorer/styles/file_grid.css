@@ -212,8 +212,8 @@
     overflow: hidden;
     isolation: isolate;
 
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
-    transition: transform 120ms ease, box-shadow 120ms ease;
+    /* WebKitGTK paints without compositing: blurry shadows and hover transitions repaint the whole grid */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
 
     &[data-type="Symbolic Link"] {
         color: var(--nui-file-grid-symbolic-link-color, rgb(0, 242, 255));
@@ -261,8 +261,6 @@
         linear-gradient(145deg,
             rgba(255, 255, 255, 0.32),
             rgba(255, 255, 255, 0.05));
-
-    transition: background 120ms ease;
 }
 
 /* ── Specular highlight border ── */
@@ -277,7 +275,6 @@
         inset 2px 2px 0px -1px rgba(255, 255, 255, 0.75),
         inset 0 0 4px 1px rgba(255, 255, 255, 0.45);
     pointer-events: none;
-    transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
 /* ── Content above pseudo layers ── */
@@ -288,7 +285,7 @@
 
 .nui-file-grid-item-icons.is-muted {
     opacity: 0.55;
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.45);
     filter: saturate(70%) brightness(85%);
 }
 
@@ -343,7 +340,7 @@
 
 .nui-file-grid-item-icons:hover {
     transform: translateY(-2px);
-    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.45);
 }
 
 .nui-file-grid-item-icons:hover::before {
