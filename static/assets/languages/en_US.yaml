@@ -70,6 +70,7 @@ fileExplorer:
   errors:
     dropOnSameSide: "Moving items by drag and drop within the same side is not supported."
     dropDataUnreadable: "Failed to read the drag and drop data: {}"
+    dropTargetNameInvalid: "Nothing can be transferred into '{}' because its name is not valid UTF-8."
 newSessionDialog:
   title: "Create New Session"
   validationMessage: "Please fill in all required fields."

@@ -1,4 +1,5 @@
 #include <nui-file-explorer/side.hpp>
+#include <nui-file-explorer/transfer_target.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -183,13 +184,15 @@ namespace NuiFileExplorer
                 const auto& copiedFiles = impl_->otherSide->impl_->copiedFiles;
                 if (!copiedFiles.empty())
                 {
-                    // If only a single item is selected and its a directory, set that as the target subdir for the
-                    // transfer. Otherwise, transfer to the current directory.
-                    std::optional<std::string> targetSubdir = std::nullopt;
-                    auto selectedItems = this->selectedItems();
-                    if (selectedItems.size() == 1 && selectedItems.front().isDirectory())
-                        targetSubdir = selectedItems.front().name;
-                    impl_->otherSide->model().onTransfer(copiedFiles, targetSubdir);
+                    // A single selected directory takes the items, else the directory this side shows.
+                    const auto selectedItems = this->selectedItems();
+                    const auto target = selectedItems.size() == 1
+                        ? transferTargetOf(selectedItems.front())
+                        : std::expected<std::optional<std::string>, Error>{std::nullopt};
+                    if (!target)
+                        impl_->model->onError(target.error());
+                    else
+                        impl_->otherSide->model().onTransfer(copiedFiles, *target);
                 }
             }
         }

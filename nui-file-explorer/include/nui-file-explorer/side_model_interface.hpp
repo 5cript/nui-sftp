@@ -107,14 +107,15 @@ namespace NuiFileExplorer
         /**
          * @brief Triggered when items are requested to be downloaded / uploaded.
          *
-         * @param subDir Optional sub-directory within the current path to transfer into.
+         * @param subDir Where the items go below the directory the other side shows: a child directory, ".." for
+         *        its parent, nothing for the directory itself (see transferTargetOf).
          */
         virtual void onTransfer(std::vector<Item> const& items, std::optional<std::string> const& subDir) = 0;
 
         /**
          * @brief Triggered when items are requested to be downloaded / uploaded via drop.
          *
-         * @param subDir Optional sub-directory within the current path to transfer into.
+         * @param subDir Where the items go, as for @ref onTransfer.
          * @param issueWebkitWarning Whether to show a warning that dropping external items is not fully supported on
          * WebKit-based engines due to technical limitations and bugs.
          */

@@ -1,5 +1,6 @@
 #include <nui-file-explorer/drop_event_extractor.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
+#include <nui-file-explorer/transfer_target.hpp>
 
 #include <nui/frontend/api/console.hpp>
 #include <nui/frontend/api/json.hpp>
@@ -131,8 +132,16 @@ namespace NuiFileExplorer
         const auto types = dataTransferOpt->types();
 
         DropEventResult result;
-        if (droppedOnItem && droppedOnItem->type == Item::Type::Directory)
-            result.internalDropSubdir = droppedOnItem->name;
+        if (droppedOnItem)
+        {
+            auto target = transferTargetOf(*droppedOnItem);
+            if (!target)
+            {
+                sideModel.onError(target.error());
+                return std::nullopt;
+            }
+            result.internalDropSubdir = *std::move(target);
+        }
 
         const auto files = dataTransferOpt->files();
         if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)

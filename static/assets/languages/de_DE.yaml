@@ -70,6 +70,7 @@ fileExplorer:
   errors:
     dropOnSameSide: "Das Verschieben von Elementen per Drag and Drop innerhalb derselben Seite wird nicht unterstützt."
     dropDataUnreadable: "Die Drag-and-Drop-Daten konnten nicht gelesen werden: {}"
+    dropTargetNameInvalid: "In '{}' kann nichts übertragen werden, weil der Name kein gültiges UTF-8 ist."
 newSessionDialog:
   title: "Neue Sitzung erstellen"
   validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."
