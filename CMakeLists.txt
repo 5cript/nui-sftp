@@ -24,24 +24,6 @@ option(FETCH_EFSW "Fetch efsw" ON)
 option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which includes a command line tool for checking language files" OFF)
 option(TAR_ARCHIVE_HAS_XZ "Enable xz (liblzma) compression in the tar-archive library" ON)
 
-if (OFFLINE_BUILD)
-    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/offline_build.cmake")
-endif()
-
-if (OMIT_FRONTEND_BUILD)
-    set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
-endif()
-
-if (NOT EMSCRIPTEN)
-    set(BACKEND_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
-endif()
-configure_file(
-    "${CMAKE_CURRENT_LIST_DIR}/_cmake/configured_files/build_environment.hpp.in"
-    "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
-)
-
-include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
-
 # Webkit from custom build
 if (NOT EMSCRIPTEN)
     if (WEBKIT_PATH)
@@ -61,6 +43,37 @@ if (NOT EMSCRIPTEN)
         message(STATUS "WebKit include directories: ${WEBKIT_INCLUDE_DIRS}")
     endif()
 endif()
+
+# Nui and webview both look up WebKitGTK, with different preferences they linked GTK 3 and GTK 4 at once.
+# One API for both: webkitgtk-6.0 (GTK 4) where it is installed, otherwise webkit2gtk-4.1 (GTK 3).
+if (NOT EMSCRIPTEN AND UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    if (WEBKIT_PATH)
+        pkg_search_module(webkit REQUIRED IMPORTED_TARGET ${WEBKIT_PACKAGE_NAME})
+    else()
+        pkg_search_module(webkit REQUIRED IMPORTED_TARGET webkitgtk-6.0 webkit2gtk-4.1 webkit2gtk-4.0)
+    endif()
+    set(WEBVIEW_WEBKITGTK_MODULE_NAME "${webkit_MODULE_NAME}")
+    message(STATUS "WebKitGTK API: ${webkit_MODULE_NAME}")
+endif()
+
+if (OFFLINE_BUILD)
+    include("${CMAKE_CURRENT_LIST_DIR}/_cmake/offline_build.cmake")
+endif()
+
+if (OMIT_FRONTEND_BUILD)
+    set(NUI_OMIT_FRONTEND ON CACHE BOOL "Do not build the frontend, sometimes useful for environments where emscripten is hard to use" FORCE)
+endif()
+
+if (NOT EMSCRIPTEN)
+    set(BACKEND_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_LIST_DIR}/_cmake/configured_files/build_environment.hpp.in"
+    "${CMAKE_BINARY_DIR}/include/build_environment.hpp"
+)
+
+include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 
 # Nui Dependency
 add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui" EXCLUDE_FROM_ALL)
