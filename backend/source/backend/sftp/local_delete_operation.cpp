@@ -1,3 +1,4 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/local_delete_operation.hpp>
 #include <paths/common_parent.hpp>
 #include <paths/native.hpp>

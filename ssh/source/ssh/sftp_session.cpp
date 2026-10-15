@@ -1022,6 +1022,18 @@ namespace SecureShell
         );
     }
 
+    std::expected<std::string, SftpSession::Error> SftpSession::readLinkInStrand(Paths::RemotePath const& path)
+    {
+        if (auto valid = requireSetInStrand(path); !valid)
+            return std::unexpected(valid.error());
+        const std::unique_ptr<char, decltype(&ssh_string_free_char)> literal{
+            sftp_readlink(session_, path.c_str()), ssh_string_free_char
+        };
+        if (!literal)
+            return std::unexpected(lastError());
+        return Paths::sanitizedUtf8(literal.get());
+    }
+
     std::expected<void, SftpSession::Error>
     SftpSession::createSymLinkInStrand(std::string const& target, Paths::RemotePath const& linkPath)
     {

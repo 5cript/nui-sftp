@@ -1,7 +1,31 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/delete_operation.hpp>
 #include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
+
+namespace
+{
+    /**
+     * @brief Removes @p path by itself, a directory only when it is empty. Its type is looked up unless given.
+     */
+    std::expected<void, SecureShell::SftpError> removeOneInStrand(
+        SecureShell::SftpSession& sftp,
+        Paths::RemotePath const& path,
+        std::optional<SharedData::FileType> type
+    )
+    {
+        if (!type)
+        {
+            const auto information = sftp.lstatInStrand(path);
+            if (!information)
+                return std::unexpected(information.error());
+            type = information->type;
+        }
+        return *type == SharedData::FileType::Directory ? sftp.removeDirectoryInStrand(path)
+                                                        : sftp.removeFileInStrand(path);
+    }
+}
 
 DeleteOperation::DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options)
     : Operation{}
@@ -47,7 +71,7 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                     Log::error("DeleteOperation: Refusing to delete '{}'.", remotePath_.value());
                     return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath, .extraInfo = remotePath_.value()});
                 }
-                targets_ = {remotePath_};
+                targets_ = {Target{.path = remotePath_}};
                 totalToDelete_ = 1;
                 filesRemovedProgress_ = {};
             }
@@ -125,7 +149,7 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::RemotePath const& path)
+std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Target const& target)
 {
     const auto sftp = openSession(sftp_);
     if (!sftp)
@@ -162,15 +186,12 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::R
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<void>({.type = ErrorType::FutureTimeout});
 
-    // One item that cannot be deleted does not keep the others, its directories then stay as well. An item that is
-    // already gone, after a resume for one, counts as deleted.
-    if (const auto result = fut.get(); !result.has_value() && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+    // One item that cannot be deleted does not keep the others, its directories then stay as well.
+    if (auto result = fut.get(); !result.has_value())
     {
         Log::error("DeleteOperation: Failed to delete '{}': {}", path.value(), result.error().toString());
         ++removalFailures_;
-        failedEntries_.emplace_back(
-            path.value(), Error{.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.value()}
-        );
+        failedEntries_.emplace_back(path.value(), std::move(result).error());
     }
 
     ++deletedThusFar_;
@@ -208,21 +229,21 @@ void DeleteOperation::appendScanResult(Paths::RemotePath const& root, std::vecto
             invalidScanEntry_ = target.value();
             break;
         }
-        targets_.push_back(std::move(target));
+        targets_.push_back(Target{.path = std::move(target)});
     }
     if (invalidScanEntry_)
         targets_.clear();
     totalToDelete_ = targets_.size();
 }
 
-void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
+void DeleteOperation::setTargets(std::vector<Target> targets)
 {
     scanDelivered_ = true;
     for (auto& target : targets)
     {
-        if (target.empty() || target.isRoot())
+        if (target.path.empty() || target.path.isRoot())
         {
-            invalidScanEntry_ = target.value();
+            invalidScanEntry_ = target.path.value();
             break;
         }
         targets_.push_back(std::move(target));

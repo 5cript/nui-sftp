@@ -137,9 +137,11 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
 {
     // Missing or unreadable single files, and local files that cannot be written, do not compromise
     // the rest of the bulk.
-    // A destination that appeared after the existence check and may not be replaced fails only its own entry.
+    // A destination that appeared after the existence check and may not be replaced, or one that changed after a
+    // sync compared it, fails only its own entry.
     if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory ||
-        error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists)
+        error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists ||
+        error.type == ErrorType::ChangedSinceCompare)
         return true;
     return error.sftpError &&
         (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||

@@ -1,3 +1,4 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
@@ -7,7 +8,6 @@
 
 #include <ssh/sftp_session.hpp>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>

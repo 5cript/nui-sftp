@@ -435,6 +435,12 @@ namespace SecureShell
         std::expected<DeepLinkResult, Error> readLinkDeepInStrand(Paths::RemotePath const& path, int maxDepth = 10);
 
         /**
+         * @brief The literal of the symlink @p path, valid UTF-8 like a listed link target (U+FFFD for every invalid
+         *        byte). Must be called from within the processing thread.
+         */
+        std::expected<std::string, Error> readLinkInStrand(Paths::RemotePath const& path);
+
+        /**
          * @brief Creates a symlink at @p linkPath with the content @p target, which may be relative.
          */
         std::future<std::expected<void, Error>>

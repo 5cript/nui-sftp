@@ -6,6 +6,7 @@
 #include <ssh/file_stream.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <paths/remote_path.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -34,6 +35,19 @@ class DeleteOperation : public Operation
         return false;
     }
 
+    /**
+     * @brief One item to delete.
+     */
+    struct Target
+    {
+        Paths::RemotePath path{};
+        /**
+         * @brief What a sync compare saw there. An item that no longer is what it saw is not deleted but fails with
+         *        ChangedSinceCompare. Unset outside of sync.
+         */
+        std::optional<SharedData::ComparedState> compared{};
+    };
+
     DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options);
     ~DeleteOperation() override;
     DeleteOperation(DeleteOperation const&) = delete;
@@ -58,7 +72,7 @@ class DeleteOperation : public Operation
     /**
      * @brief Deletes exactly @p targets, last first, without a scan. For the files of a bulk delete.
      */
-    void setTargets(std::vector<Paths::RemotePath> targets);
+    void setTargets(std::vector<Target> targets);
 
     /**
      * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first. One operation can
@@ -113,7 +127,7 @@ class DeleteOperation : public Operation
     }
 
   private:
-    std::expected<void, DeleteOperation::Error> removeOnce(Paths::RemotePath const& path);
+    std::expected<void, DeleteOperation::Error> removeOnce(Target const& target);
 
   private:
     std::weak_ptr<SecureShell::SftpSession> sftp_;
@@ -125,7 +139,7 @@ class DeleteOperation : public Operation
     /** @brief Targets whose removal failed, the operation fails when that is all of them and nothing else. */
     std::size_t removalFailures_{0};
     /** @brief Deleted from the back, so a scanned directory goes after its content. */
-    std::vector<Paths::RemotePath> targets_{};
+    std::vector<Target> targets_{};
     /** @brief Why a scan result was refused, nothing may be deleted then. */
     std::optional<std::string> invalidScanEntry_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};

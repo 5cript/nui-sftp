@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/shared_data.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <utility/describe.hpp>
 #include <paths/paths.hpp>
@@ -8,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace SharedData
@@ -21,6 +23,11 @@ namespace SharedData
         bool isDirectory{false};
         /** @brief Only shown on the card for files. */
         std::uint64_t sizeBytes{0};
+        /**
+         * @brief What a sync compare saw at the target, which is then only deleted while it still holds that. Set
+         *        by the backend's sync only, it is not part of the request the frontend sends.
+         */
+        std::optional<ComparedState> compared{};
     };
     BOOST_DESCRIBE_STRUCT(BulkDeleteEntry, (), (target, isDirectory, sizeBytes))
 

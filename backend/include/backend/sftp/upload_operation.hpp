@@ -8,6 +8,7 @@
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -42,6 +43,12 @@ class UploadOperation : public Operation
          *         subtrees whose remote structure may not exist yet.
          */
         bool createMissingDirectories{false};
+        /**
+         * @brief What a sync compare saw at the destination. The transfer then fails with ChangedSinceCompare
+         *        instead of replacing a destination that no longer holds it. A source that changed since is still
+         *        transferred as it is now. Unset outside of sync.
+         */
+        std::optional<SharedData::ComparedState> comparedDestination{std::nullopt};
     };
 
     SecureShell::ProcessingStrand* strand() const override;

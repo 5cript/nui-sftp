@@ -252,26 +252,6 @@ class OperationQueue
     );
 
     /**
-     * @brief Queues the delete of local items as one operation with one card, labelled with the directory they lie
-     *        in. Refused as a whole when one of them is a root directory or contains the home directory.
-     * @param recursive Every target goes with its content, see LocalDeleteOperationOptions::recursive.
-     * @param insertRefresh The card refreshes the local listing when the delete ends.
-     */
-    std::expected<void, Operation::Error> addLocalDeleteOperation(
-        Ids::OperationId operationId,
-        std::vector<Paths::LocalPath> targets,
-        bool recursive,
-        bool insertRefresh,
-        SharedData::OperationMode mode = SharedData::OperationMode::Queued
-    );
-
-    /**
-     * @brief Ends every queued and running local delete as canceled, telling the frontend. A local delete cannot be
-     *        resumed by another session, so a session ending stops it this way instead of leaving its card behind.
-     */
-    void cancelLocalDeletes();
-
-    /**
      * @brief A guard for the remote deletes of one request, sharing the home directory this queue looked up.
      */
     RemoteDeleteGuard remoteDeleteGuard(SecureShell::SftpSession& sftp);

@@ -1832,81 +1832,6 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     return result;
 }
 
-std::expected<void, Operation::Error> OperationQueue::addLocalDeleteOperation(
-    Ids::OperationId operationId,
-    std::vector<Paths::LocalPath> targets,
-    bool recursive,
-    bool insertRefresh,
-    SharedData::OperationMode mode,
-    std::vector<SharedData::ComparedState> comparedStates
-)
-{
-    // Assumed in strand
-    if (targets.empty())
-        return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = "no targets"});
-    const auto homes = localHomeDirectories();
-    for (auto const& target : targets)
-    {
-        if (auto allowed = refuseProtectedLocalDelete(target, homes); !allowed)
-        {
-            Log::error("Refusing to delete locally: {}", allowed.error());
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::InvalidPath, .extraInfo = target.toUtf8()});
-        }
-    }
-
-    auto parent = LocalDeleteOperation::commonParentOf(targets);
-    auto& targetQueue = queueFor(mode);
-    targetQueue.emplace_back(
-        operationId,
-        std::make_unique<LocalDeleteOperation>(LocalDeleteOperation::LocalDeleteOperationOptions{
-            .itemsRemovedProgress = makeDeleteProgressCallback(operationId),
-            .scanProgress =
-                [progress = makeScanProgressCallback("onScanProgress", operationId)](
-                    std::uint64_t bytes, std::uint64_t entries
-                )
-            {
-                progress(bytes, entries, entries);
-            },
-            .targets = std::move(targets),
-            .recursive = recursive,
-        })
-    );
-
-    RpcHelper::callRemoteSafely(
-        *hub_,
-        rpcName("onOperationAdded"),
-        SharedData::OperationAdded{
-            .operationId = operationId,
-            .type = SharedData::OperationType::LocalDelete,
-            .mode = mode,
-            .insertRefresh = insertRefresh,
-            .localPath = std::move(parent),
-            .scanPhase = recursive,
-        }
-    );
-    return {};
-}
-
-void OperationQueue::cancelLocalDeletes()
-{
-    // Assumed in strand
-    for (auto* queue : {&priorityOperations_, &operations_})
-    {
-        std::erase_if(
-            *queue,
-            [this](auto& entry)
-            {
-                auto& [id, operation] = entry;
-                if (operation->type() != SharedData::OperationType::LocalDelete)
-                    return false;
-                std::ignore = operation->cancel(true);
-                completeOperation(makeCompletedOperation(CompletionReason::Canceled, id, *operation));
-                return true;
-            }
-        );
-    }
-}
-
 RemoteDeleteGuard OperationQueue::remoteDeleteGuard(SecureShell::SftpSession& sftp)
 {
     return RemoteDeleteGuard{sftp, remoteHome_, sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)};
@@ -2030,7 +1955,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
         }
     );
 
-    std::vector<Paths::RemotePath> fileTargets;
+    std::vector<DeleteOperation::Target> fileTargets;
     std::size_t scannedDirectories = 0;
     std::size_t failedTargets = 0;
     const auto failTarget = [&](Paths::RemotePath const& target, Operation::Error error)
@@ -2079,7 +2004,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
                 continue;
             }
         }
-        fileTargets.push_back(entry.target);
+        fileTargets.push_back(DeleteOperation::Target{.path = entry.target, .compared = entry.compared});
     }
 
     const auto queued = fileTargets.size() + scannedDirectories;

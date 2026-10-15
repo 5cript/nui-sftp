@@ -1,3 +1,4 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/download_operation.hpp>
 #include <utility/error_message.hpp>
 #include <backend/sftp/resume_check.hpp>
@@ -8,7 +9,6 @@
 #include <utility/permissions.hpp>
 #include <utility/download_mark.hpp>
 #include <utility/link_safe_remove.hpp>
-#include <utility/rename.hpp>
 
 #include <tuple>
 

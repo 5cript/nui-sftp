@@ -2,6 +2,7 @@
 
 #include <backend/sftp/operation.hpp>
 #include <paths/local_path.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <utility/no_follow_tree_walk.hpp>
 
 #include <chrono>

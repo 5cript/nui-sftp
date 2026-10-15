@@ -164,6 +164,29 @@ class Operation
         return std::unexpected(error_.value());
     }
 
+  public:
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error remoteMoveError(SecureShell::SftpError error)
+    {
+        if (error.sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+    }
+
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on this machine: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error localMoveError(std::error_code error)
+    {
+        if (error == std::errc::file_exists)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::RenameFailure};
+    }
+
   protected:
     void enterState(OperationState newState)
     {
@@ -217,28 +240,6 @@ class Operation
     {
         if (strand && !strand->withinProcessingThread())
             strand->pushPromiseTask([]() {}).wait();
-    }
-
-    /**
-     * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
-     *        destination exists and may not be replaced.
-     */
-    static Error remoteMoveError(SecureShell::SftpError error)
-    {
-        if (error.sftpError == SSH_FX_FILE_ALREADY_EXISTS)
-            return Error{.type = ErrorType::FileExists};
-        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
-    }
-
-    /**
-     * @brief The error of a finished transfer that could not be moved into place on this machine: FileExists when the
-     *        destination exists and may not be replaced.
-     */
-    static Error localMoveError(std::error_code error)
-    {
-        if (error == std::errc::file_exists)
-            return Error{.type = ErrorType::FileExists};
-        return Error{.type = ErrorType::RenameFailure};
     }
 
     /**

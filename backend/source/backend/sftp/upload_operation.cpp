@@ -1,3 +1,4 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <backend/sftp/resume_check.hpp>
 #include <paths/native.hpp>
@@ -308,20 +309,19 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
-    const auto moved = sftp.moveIntoPlaceInStrand(
+    auto moved = ComparedStateCheck::moveRemoteIntoPlaceInStrand(
+        sftp,
         tempPath_,
         remotePath_,
         options_.mayOverwrite,
         Persistence::asideFileSuffix(options_.tempFileSuffix),
-        SharedData::FileType::Symlink
+        SharedData::FileType::Symlink,
+        options_.comparedDestination
     );
     if (!moved.has_value())
     {
         std::ignore = sftp.removeFileInStrand(tempPath_);
-        Log::error(
-            "UploadOperation: Failed to move symlink to '{}': {}.", options_.remotePath.value(), moved.error().message
-        );
-        return std::unexpected(remoteMoveError(moved.error()));
+        return std::unexpected(std::move(moved).error());
     }
     return {};
 }
@@ -796,19 +796,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
     // The modification time goes on the temp file, so nothing can fail once the destination is replaced.
     applyModificationTimeInStrand(sftp);
 
-    const auto moved = sftp.moveIntoPlaceInStrand(
+    auto moved = ComparedStateCheck::moveRemoteIntoPlaceInStrand(
+        sftp,
         tempPath_,
         remotePath_,
         options_.mayOverwrite,
         Persistence::asideFileSuffix(options_.tempFileSuffix),
-        SharedData::FileType::Regular
+        SharedData::FileType::Regular,
+        options_.comparedDestination
     );
     if (!moved.has_value())
     {
-        Log::error("UploadOperation: Failed to move '{}' into place: {}", options_.remotePath.value(), moved.error().message);
         if (auto removed = sftp.removeFileInStrand(tempPath_); !removed.has_value())
             Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
-        return std::unexpected(remoteMoveError(moved.error()));
+        return std::unexpected(std::move(moved).error());
     }
     return {};
 }
