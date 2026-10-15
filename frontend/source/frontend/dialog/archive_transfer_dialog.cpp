@@ -37,6 +37,24 @@ std::string archiveCodecExtension(ArchiveCodec codec)
     return {};
 }
 
+int backendCompressionCode(ArchiveCodec codec)
+{
+    switch (codec)
+    {
+        case ArchiveCodec::None:
+            return 1;
+        case ArchiveCodec::Gzip:
+            return 2;
+        case ArchiveCodec::Bzip2:
+            return 3;
+        case ArchiveCodec::Zstd:
+            return 4;
+        case ArchiveCodec::Xz:
+            return 5;
+    }
+    return 2;
+}
+
 ArchiveCodec archiveCodecFromExtension(std::string const& extension)
 {
     if (extension == ".gz" || extension == "gz")

@@ -11,7 +11,6 @@
 
 #include <nui-file-explorer/side_model_interface.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
-#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
 #include <nui/event_system/observed_value.hpp>
@@ -30,7 +29,6 @@ class LocalSideModel
     : public SideModel
     , public NuiFileExplorer::IPlacesProvider
     , public NuiFileExplorer::IDrivesProvider
-    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     LocalSideModel(
@@ -40,14 +38,6 @@ class LocalSideModel
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog
     );
-
-    /**
-     * @brief Sets the callback invoked whenever the favorites list changes. The callback
-     *        receives the updated list as strings so the caller can persist it.
-     *
-     * @param callback Invoked on every add/remove.
-     */
-    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
 
     // --- IPlacesProvider ---
     NuiFileExplorer::IPlacesProvider* placesProvider() override
@@ -61,15 +51,6 @@ class LocalSideModel
     // --- IDrivesProvider ---
     NuiFileExplorer::IDrivesProvider* drivesProvider() override;
     void requestDrives(std::function<void(std::vector<PlaceEntry>)> callback) override;
-
-    // --- IFavoritesProvider ---
-    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
-    {
-        return this;
-    }
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
-    void addFavorite(std::filesystem::path const& path) override;
-    void removeFavorite(std::filesystem::path const& path) override;
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
@@ -132,6 +113,8 @@ class LocalSideModel
      */
     std::expected<Paths::LocalPath, Paths::PathError> localPathOf(NuiFileExplorer::Item const& item) const;
 
+    std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
+
     /**
      * @brief Queues the uploads the user accepted, a single file as a transfer of its own.
      */
@@ -160,7 +143,5 @@ class LocalSideModel
 
     RemoteSideModel* remoteModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
-    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
     SharedData::OpenerCapabilities openerCaps_{};
 };

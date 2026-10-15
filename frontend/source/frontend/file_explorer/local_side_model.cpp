@@ -16,8 +16,6 @@
 #include <ui5-sap-icons/icons/edit.hpp>
 #include <ui5-sap-icons/icons/detail-view.hpp>
 #include <ui5-sap-icons/icons/show.hpp>
-#include <ui5-sap-icons/icons/add-favorite.hpp>
-#include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <nui/frontend/api/console.hpp>
 #include <nui/frontend/utility/val_conversion.hpp>
@@ -96,17 +94,8 @@ LocalSideModel::LocalSideModel(
           },
           0.,
       }
-    , favorites_{std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>(
-          [this]()
-          {
-              std::vector<std::filesystem::path> paths;
-              paths.reserve(uiOptions_.localFavorites.size());
-              for (auto const& str : uiOptions_.localFavorites)
-                  paths.emplace_back(str);
-              return paths;
-          }()
-      )}
 {
+    setFavorites(uiOptions_.localFavorites);
     probeOpenerCapabilities();
 }
 
@@ -156,11 +145,6 @@ void LocalSideModel::probeOpenerCapabilities()
             }
         }
     );
-}
-
-void LocalSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
-{
-    onFavoritesChanged_ = std::move(callback);
 }
 
 // --- IPlacesProvider ---
@@ -299,49 +283,6 @@ void LocalSideModel::requestDrives(std::function<void(std::vector<PlaceEntry>)> 
     callback({});
 }
 
-// --- IFavoritesProvider ---
-
-std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> LocalSideModel::favorites() const
-{
-    return favorites_;
-}
-
-void LocalSideModel::addFavorite(std::filesystem::path const& path)
-{
-    auto& favs = favorites_->value();
-    if (std::find(favs.begin(), favs.end(), path) != favs.end())
-        return;
-    favorites_->push_back(path);
-
-    if (onFavoritesChanged_)
-    {
-        std::vector<std::string> strs;
-        strs.reserve(favorites_->value().size());
-        for (auto const& fav : favorites_->value())
-            strs.push_back(fav.generic_string());
-        onFavoritesChanged_(std::move(strs));
-    }
-}
-
-void LocalSideModel::removeFavorite(std::filesystem::path const& path)
-{
-    auto& favs = favorites_->value();
-    const auto it = std::find(favs.begin(), favs.end(), path);
-    if (it == favs.end())
-        return;
-    favs.erase(it);
-    favorites_->modifyNow();
-
-    if (onFavoritesChanged_)
-    {
-        std::vector<std::string> strs;
-        strs.reserve(favorites_->value().size());
-        for (auto const& fav : favorites_->value())
-            strs.push_back(fav.generic_string());
-        onFavoritesChanged_(std::move(strs));
-    }
-}
-
 void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
 {
     if (!item.isDirectoryLike())
@@ -351,41 +292,21 @@ void LocalSideModel::onActivateItem(NuiFileExplorer::Item const& item)
         return;
     }
 
-    // The item's own path, the side may already be loading another directory.
     Log::debug("Local onActivateItem: {}.", item.displayName());
-    navigateTo(item.fullPath.empty() ? currentPath_.value() / item.name : item.fullPath);
+    navigateInto(item);
 }
 void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
 {
-    inputDialog_->open(
-        {.whatFor = language->get(
-             "remoteSideModel", type == NuiFileExplorer::Item::Type::Directory ? "newDirectory" : "newFile"
-         ),
-            .prompt = language->get(
-                "remoteSideModel",
-                type == NuiFileExplorer::Item::Type::Directory ? "enterNewDirectoryName" : "enterNewFileName"
-            ),
-            .headerText = language->get(
-                "remoteSideModel", type == NuiFileExplorer::Item::Type::Directory ? "createNewDirectory" : "createNewFile"
-            ),
-            .isPassword = false,
-            .onConfirm = [this, type](std::optional<std::string> const& name)
-            {
-                if (!name)
-                    return;
-
-                if (!isValidItemName(*name))
-                    return showInvalidItemName(*name);
-                auto path = currentLocalPath().and_then(
-                    [&name](Paths::LocalPath const& directory)
-                    {
-                        return Paths::LocalPathSegment::make(*name).transform(
-                            [&directory](Paths::LocalPathSegment const& segment)
-                            {
-                                return directory / segment;
-                            }
-                        );
-                    }
+    promptNewItem<Paths::LocalPath>(
+        type,
+        [this, type](Paths::LocalPath const& path)
+        {
+            if (type == NuiFileExplorer::Item::Type::Directory)
+                return createItem(
+                    "RpcFilesystem::createDirectory",
+                    "path",
+                    path,
+                    language->get("localSideModel", "createDirectoryFailedTitle")
                 );
                 if (!path)
                     return showPathRefused(language->get("localSideModel", "createItemFailedTitle"), path.error());
@@ -396,35 +317,15 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                     Nui::val args = Nui::val::object();
                     args.set("path", path->toUtf8());
 
-                    Nui::RpcClient::callWithBackChannel(
-                        "RpcFilesystem::createDirectory",
-                        [this](Nui::val val)
-                        {
-                            if (!val.hasOwnProperty("success"))
-                            {
-                                Log::error("Invalid response from RpcFilesystem::createDirectory");
-                                confirmDialog_->open({
-                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                    .headerText = language->get("localSideModel", "createDirectoryFailedTitle"),
-                                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
-
-                            const auto success = val["success"].as<bool>();
-                            if (!success)
-                            {
-                                const auto error = language->translate(val["error"].as<std::string>());
-                                Log::error("Failed to create directory: {}", error);
-                                confirmDialog_->open({
-                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                    .headerText = language->get("localSideModel", "createDirectoryFailedTitle"),
-                                    .text = error,
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
+void LocalSideModel::createItem(
+    char const* function,
+    char const* pathArgument,
+    Paths::LocalPath const& path,
+    std::string failedTitle
+)
+{
+    Nui::val args = Nui::val::object();
+    args.set(pathArgument, path.toUtf8());
 
                             Log::info("Directory created successfully");
                             // Refresh list:
@@ -712,6 +613,66 @@ void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
     promptRename(item, localPathOf(item));
 }
 
+namespace
+{
+    std::optional<Nui::val> presentField(Nui::val const& source, char const* key)
+    {
+        if (!source.hasOwnProperty(key))
+            return std::nullopt;
+        auto value = source[key];
+        if (value.isNull() || value.isUndefined())
+            return std::nullopt;
+        return value;
+    }
+
+    template <typename ValueT>
+    ValueT fieldOrDefault(Nui::val const& source, char const* key)
+    {
+        return presentField(source, key)
+            .transform(
+                [](Nui::val const& value)
+                {
+                    return value.as<ValueT>();
+                }
+            )
+            .value_or(ValueT{});
+    }
+
+    /**
+     * @brief The entry the backend describes in @p source, with the entry a symlink resolves to when @p source
+     *        carries it.
+     */
+    SharedData::DirectoryEntry directoryEntryOf(Nui::val const& source)
+    {
+        SharedData::DirectoryEntry entry{
+            .name = source["name"].as<std::string>(),
+            .type = SharedData::fileTypeFromStdFilesystemType(
+                static_cast<std::filesystem::file_type>(source["type"].as<int>())
+            ),
+            .size = fieldOrDefault<std::uint64_t>(source, "size"),
+            .uid = fieldOrDefault<std::uint32_t>(source, "uid"),
+            .gid = fieldOrDefault<std::uint32_t>(source, "gid"),
+            .owner = fieldOrDefault<std::string>(source, "owner"),
+            .group = fieldOrDefault<std::string>(source, "group"),
+            .permissions = static_cast<std::filesystem::perms>(fieldOrDefault<std::uint32_t>(source, "permissions")),
+            .atime = fieldOrDefault<std::uint64_t>(source, "atime"),
+            .atimeNsec = fieldOrDefault<std::uint32_t>(source, "atimeNsec"),
+            .createTime = fieldOrDefault<std::uint64_t>(source, "createTime"),
+            .createTimeNsec = fieldOrDefault<std::uint32_t>(source, "createTimeNsec"),
+            .mtime = fieldOrDefault<std::uint64_t>(source, "mtime"),
+            .mtimeNsec = fieldOrDefault<std::uint32_t>(source, "mtimeNsec"),
+            .acl = fieldOrDefault<std::string>(source, "acl"),
+        };
+        if (const auto valid = presentField(source, "nameIsValidUtf8"); valid)
+            entry.nameIsValidUtf8 = valid->as<bool>();
+        if (const auto link = presentField(source, "linkTarget"); link)
+            entry.linkTarget = link->as<std::string>();
+        if (const auto target = presentField(source, "resolvedTarget"); target && entry.isSymlink())
+            entry.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(directoryEntryOf(*target));
+        return entry;
+    }
+}
+
 void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
     // listFiles only carries the lean field set; fetch the full entry (atime, birthtime, acl, ...)
@@ -748,74 +709,7 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                     return;
                 }
 
-            const auto extractFull = [](Nui::val const& source) -> SharedData::DirectoryEntry
-            {
-                const auto pickU64 = [&source](char const* key) -> std::uint64_t
-                {
-                    if (!source.hasOwnProperty(key))
-                        return 0;
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return 0;
-                    return field.template as<std::uint64_t>();
-                };
-                const auto pickU32 = [&source](char const* key) -> std::uint32_t
-                {
-                    if (!source.hasOwnProperty(key))
-                        return 0;
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return 0;
-                    return field.template as<std::uint32_t>();
-                };
-                const auto pickString = [&source](char const* key) -> std::string
-                {
-                    if (!source.hasOwnProperty(key))
-                        return {};
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return {};
-                    return field.template as<std::string>();
-                };
-
-                SharedData::DirectoryEntry out{
-                    .name = source["name"].template as<std::string>(),
-                    .type = SharedData::fileTypeFromStdFilesystemType(
-                        static_cast<std::filesystem::file_type>(source["type"].template as<int>())
-                    ),
-                    .size = pickU64("size"),
-                    .uid = pickU32("uid"),
-                    .gid = pickU32("gid"),
-                    .owner = pickString("owner"),
-                    .group = pickString("group"),
-                    .permissions = static_cast<std::filesystem::perms>(pickU32("permissions")),
-                    .atime = pickU64("atime"),
-                    .atimeNsec = pickU32("atimeNsec"),
-                    .createTime = pickU64("createTime"),
-                    .createTimeNsec = pickU32("createTimeNsec"),
-                    .mtime = pickU64("mtime"),
-                    .mtimeNsec = pickU32("mtimeNsec"),
-                    .acl = pickString("acl"),
-                };
-                if (source.hasOwnProperty("nameIsValidUtf8"))
-                    out.nameIsValidUtf8 = source["nameIsValidUtf8"].template as<bool>();
-                if (source.hasOwnProperty("linkTarget"))
-                {
-                    const auto link = source["linkTarget"];
-                    if (!link.isNull() && !link.isUndefined())
-                        out.linkTarget = link.template as<std::string>();
-                }
-                return out;
-            };
-
-            const auto entryVal = val["entry"];
-            auto full = extractFull(entryVal);
-            if (full.type == SharedData::FileType::Symlink && entryVal.hasOwnProperty("resolvedTarget"))
-            {
-                const auto target = entryVal["resolvedTarget"];
-                if (!target.isNull() && !target.isUndefined())
-                    full.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(extractFull(target));
-            }
+                const auto full = directoryEntryOf(val["entry"]);
 
             std::string resolvedPath{};
             if (val.hasOwnProperty("resolvedPath") && val["resolvedPath"].isString())
@@ -912,83 +806,12 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 return;
             }
 
-            const auto extractEntry = [](Nui::val const& source) -> SharedData::DirectoryEntry
-            {
-                const auto pickU64 = [&source](char const* key) -> std::uint64_t
-                {
-                    if (!source.hasOwnProperty(key))
-                        return 0;
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return 0;
-                    return field.template as<std::uint64_t>();
-                };
-                const auto pickU32 = [&source](char const* key) -> std::uint32_t
-                {
-                    if (!source.hasOwnProperty(key))
-                        return 0;
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return 0;
-                    return field.template as<std::uint32_t>();
-                };
-                const auto pickString = [&source](char const* key) -> std::string
-                {
-                    if (!source.hasOwnProperty(key))
-                        return {};
-                    const auto field = source[key];
-                    if (field.isNull() || field.isUndefined())
-                        return {};
-                    return field.template as<std::string>();
-                };
-
-                SharedData::DirectoryEntry entry{
-                    .name = source["name"].template as<std::string>(),
-                    .type = SharedData::fileTypeFromStdFilesystemType(
-                        static_cast<std::filesystem::file_type>(source["type"].template as<int>())
-                    ),
-                    .size = pickU64("size"),
-                    .uid = pickU32("uid"),
-                    .gid = pickU32("gid"),
-                    .owner = pickString("owner"),
-                    .group = pickString("group"),
-                    .permissions = static_cast<std::filesystem::perms>(pickU32("permissions")),
-                    .atime = pickU64("atime"),
-                    .atimeNsec = pickU32("atimeNsec"),
-                    .createTime = pickU64("createTime"),
-                    .createTimeNsec = pickU32("createTimeNsec"),
-                    .mtime = pickU64("mtime"),
-                    .mtimeNsec = pickU32("mtimeNsec"),
-                };
-                if (source.hasOwnProperty("nameIsValidUtf8"))
-                    entry.nameIsValidUtf8 = source["nameIsValidUtf8"].template as<bool>();
-                if (source.hasOwnProperty("linkTarget"))
-                {
-                    const auto link = source["linkTarget"];
-                    if (!link.isNull() && !link.isUndefined())
-                        entry.linkTarget = link.template as<std::string>();
-                }
-                return entry;
-            };
-
-            std::vector<SharedData::DirectoryEntry> directoryEntries;
-            const auto files = val["files"];
-            const auto fileCount = files["length"].as<int>();
-            directoryEntries.reserve(static_cast<std::size_t>(fileCount));
-            for (int idx = 0; idx < fileCount; ++idx)
-            {
-                const auto file = files[idx];
-                auto entry = extractEntry(file);
-                if (entry.type == SharedData::FileType::Symlink && file.hasOwnProperty("resolvedTarget"))
-                {
-                    const auto target = file["resolvedTarget"];
-                    if (!target.isNull() && !target.isUndefined())
-                    {
-                        entry.resolvedTarget = std::make_shared<SharedData::DirectoryEntry>(extractEntry(target));
-                    }
-                }
-                directoryEntries.push_back(std::move(entry));
-            }
+                std::vector<SharedData::DirectoryEntry> directoryEntries;
+                const auto files = val["files"];
+                const auto fileCount = files["length"].as<int>();
+                directoryEntries.reserve(static_cast<std::size_t>(fileCount));
+                for (int index = 0; index < fileCount; ++index)
+                    directoryEntries.push_back(directoryEntryOf(files[index]));
 
             onDirectoryListing(directory, std::move(directoryEntries));
         },
@@ -1092,26 +915,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
         items.push_back(Snc::PopupMenu::separator());
     }
 
-    if (singleItem && selectedItems.front().isDirectoryLike() && !selectedItems.front().isParentLink)
-    {
-        const auto& selPath = selectedItems.front().fullPath;
-        const auto& favs = favorites_->value();
-        const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
-        items.push_back(
-            Snc::PopupMenu::item(
-                language->get("fileExplorer", "contextMenu", isFav ? "removeFromFavorites" : "addToFavorites"),
-                isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
-                [this, selPath, isFav]()
-                {
-                    if (isFav)
-                        removeFavorite(selPath);
-                    else
-                        addFavorite(selPath);
-                }
-            )
-        );
-        items.push_back(Snc::PopupMenu::separator());
-    }
+    std::ranges::move(favoriteMenuItems(selectedItems), std::back_inserter(items));
 
     const auto remainingItems = std::vector<NuiFileExplorer::ContextMenuItem>{
         Snc::PopupMenu::item(
@@ -1237,6 +1041,16 @@ std::expected<Paths::LocalPath, Paths::PathError> LocalSideModel::currentLocalPa
     return Paths::LocalPath::fromUtf8(listedPath_.generic_string());
 }
 
+std::expected<std::string, Paths::PathError> LocalSideModel::itemPathText(NuiFileExplorer::Item const& item) const
+{
+    return localPathOf(item).transform(
+        [](Paths::LocalPath const& path)
+        {
+            return path.toUtf8();
+        }
+    );
+}
+
 std::expected<Paths::LocalPath, Paths::PathError> LocalSideModel::localPathOf(NuiFileExplorer::Item const& item) const
 {
     if (item.isParentLink)
@@ -1259,29 +1073,6 @@ std::expected<Paths::LocalPath, Paths::PathError> LocalSideModel::localPathOf(Nu
 bool LocalSideModel::isComplete() const
 {
     return SideModel::isComplete();
-}
-
-namespace
-{
-    /** @brief Same mapping as RemoteSideModel — frontend-local ArchiveCodec →
-     *         raw TarArchive::Compression int value used by the backend wire. */
-    int backendCompressionCode(ArchiveCodec codec)
-    {
-        switch (codec)
-        {
-            case ArchiveCodec::None:
-                return 1;
-            case ArchiveCodec::Gzip:
-                return 2;
-            case ArchiveCodec::Bzip2:
-                return 3;
-            case ArchiveCodec::Zstd:
-                return 4;
-            case ArchiveCodec::Xz:
-                return 5;
-        }
-        return 2;
-    }
 }
 
 void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items)

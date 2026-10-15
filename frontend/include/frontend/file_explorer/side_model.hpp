@@ -15,6 +15,8 @@
 #include <log/log.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <nui-file-explorer/favorites_provider_interface.hpp>
+#include <nui-file-explorer/context_menu_item.hpp>
 #include <paths/paths.hpp>
 
 #include <fmt/format.h>
@@ -54,7 +56,9 @@
 #define CHECK_COMPLETE() CHECK_COMPLETE_RET()
 
 // Incomplete class, provides base functionality
-class SideModel : public NuiFileExplorer::ISideModel
+class SideModel
+    : public NuiFileExplorer::ISideModel
+    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     SideModel(
@@ -125,9 +129,55 @@ class SideModel : public NuiFileExplorer::ISideModel
         return {};
     }
 
+    /**
+     * @brief Sets the callback invoked whenever the favorites list changes. The callback
+     *        receives the updated list as strings so the caller can persist it.
+     *
+     * @param callback Invoked on every add/remove.
+     */
+    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
+
+    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
+    {
+        return this;
+    }
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
+    void addFavorite(std::filesystem::path const& path) override;
+    void removeFavorite(std::filesystem::path const& path) override;
+
   protected:
     // Design smell:
     virtual bool isComplete() const;
+
+    /**
+     * @brief Replaces the favorites without telling the callback, for the list the side starts with.
+     */
+    void setFavorites(std::vector<std::string> const& favorites);
+
+    /**
+     * @brief The context menu entries that add the one selected directory to the favorites or remove it, none for
+     *        another selection.
+     */
+    std::vector<NuiFileExplorer::ContextMenuItem>
+    favoriteMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems);
+
+    /**
+     * @brief The UTF-8 path of @p item on its side, refused for the ".." entry and for names that are no single
+     *        path segment.
+     */
+    virtual std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const = 0;
+
+    /**
+     * @brief The full path of each of @p items for the list of a confirmation, the listed path for an item whose
+     *        name is no single path segment.
+     */
+    std::vector<ConfirmDialog::OpenOptions::ListElement> pathList(std::vector<NuiFileExplorer::Item> const& items) const;
+
+    /**
+     * @brief Shows the directory @p item stands for: the parent for "..", else the item's own path, the side may
+     *        already be loading another directory.
+     */
+    void navigateInto(NuiFileExplorer::Item const& item);
 
     /**
      * @brief A new name is a single path segment: not empty, not "." or "..", without '/', '\\' or NUL.
@@ -530,6 +580,10 @@ class SideModel : public NuiFileExplorer::ISideModel
     std::function<void(bool, bool)> refreshCallback_{nullptr};
     bool reapplySelectionOnce_{false};
     std::string dropMetadata_{};
+    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_{
+        std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>()
+    };
+    std::function<void(std::vector<std::string>)> onFavoritesChanged_{};
     /** @brief Guards callbacks that can arrive after the side model is gone, like RPC replies and dialog closes. */
     Utility::LifetimeToken lifetime_{};
 };

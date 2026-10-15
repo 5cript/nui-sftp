@@ -13,8 +13,6 @@
 #include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/edit.hpp>
 #include <ui5-sap-icons/icons/detail-view.hpp>
-#include <ui5-sap-icons/icons/add-favorite.hpp>
-#include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <utility/language.hpp>
 #include <utility/user_directories.hpp>
@@ -84,62 +82,8 @@ RemoteSideModel::RemoteSideModel(
           },
           0.,
       }
-    , favorites_{std::make_shared<Nui::Observed<std::vector<std::filesystem::path>>>(
-          [&initialFavorites]()
-          {
-              std::vector<std::filesystem::path> paths;
-              paths.reserve(initialFavorites.size());
-              for (auto const& str : initialFavorites)
-                  paths.emplace_back(str);
-              return paths;
-          }()
-      )}
-{}
-
-void RemoteSideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
 {
-    onFavoritesChanged_ = std::move(callback);
-}
-
-std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> RemoteSideModel::favorites() const
-{
-    return favorites_;
-}
-
-void RemoteSideModel::addFavorite(std::filesystem::path const& path)
-{
-    auto& favs = favorites_->value();
-    if (std::find(favs.begin(), favs.end(), path) != favs.end())
-        return;
-    favorites_->push_back(path);
-
-    if (onFavoritesChanged_)
-    {
-        std::vector<std::string> strs;
-        strs.reserve(favorites_->value().size());
-        for (auto const& fav : favorites_->value())
-            strs.push_back(fav.generic_string());
-        onFavoritesChanged_(std::move(strs));
-    }
-}
-
-void RemoteSideModel::removeFavorite(std::filesystem::path const& path)
-{
-    auto& favs = favorites_->value();
-    const auto it = std::find(favs.begin(), favs.end(), path);
-    if (it == favs.end())
-        return;
-    favs.erase(it);
-    favorites_->modifyNow();
-
-    if (onFavoritesChanged_)
-    {
-        std::vector<std::string> strs;
-        strs.reserve(favorites_->value().size());
-        for (auto const& fav : favorites_->value())
-            strs.push_back(fav.generic_string());
-        onFavoritesChanged_(std::move(strs));
-    }
+    setFavorites(initialFavorites);
 }
 
 std::vector<NuiFileExplorer::ContextMenuItem>
@@ -151,26 +95,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
 
     std::vector<NuiFileExplorer::ContextMenuItem> items;
 
-    if (singleItem && selectedItems.front().isDirectoryLike() && !selectedItems.front().isParentLink)
-    {
-        const auto& selPath = selectedItems.front().fullPath;
-        const auto& favs = favorites_->value();
-        const bool isFav = std::find(favs.begin(), favs.end(), selPath) != favs.end();
-        items.push_back(
-            Snc::PopupMenu::item(
-                language->get("fileExplorer", "contextMenu", isFav ? "removeFromFavorites" : "addToFavorites"),
-                isFav ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
-                [this, selPath, isFav]()
-                {
-                    if (isFav)
-                        removeFavorite(selPath);
-                    else
-                        addFavorite(selPath);
-                }
-            )
-        );
-        items.push_back(Snc::PopupMenu::separator());
-    }
+    std::ranges::move(favoriteMenuItems(selectedItems), std::back_inserter(items));
 
     // "Open" variants on the remote side ultimately route the downloaded file through the
     // local Opener (xdg-desktop-portal / ShellExecute), so gate them on the same capability
@@ -202,7 +127,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             Ui5Icons::open_folder(),
             [this, selectedItems]()
             {
-                onDownloadAndOpen(selectedItems.front(), false);
+                onDownloadAndOpen(selectedItems.front(), false, false);
             },
             !singleItem || fileTracking_ == nullptr || !canOpen
         ),
@@ -211,7 +136,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             Ui5Icons::open_command_field(),
             [this, selectedItems]()
             {
-                onDownloadAndOpen(selectedItems.front(), true);
+                onDownloadAndOpen(selectedItems.front(), true, false);
             },
             !singleItem || fileTracking_ == nullptr || !canOpen
         ),
@@ -220,7 +145,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             Ui5Icons::show(),
             [this, selectedItems]()
             {
-                onWatchDownloadAndOpen(selectedItems.front(), false);
+                onDownloadAndOpen(selectedItems.front(), false, true);
             },
             !singleItem || fileTracking_ == nullptr || !canOpen
         ),
@@ -229,7 +154,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             Ui5Icons::show(),
             [this, selectedItems]()
             {
-                onWatchDownloadAndOpen(selectedItems.front(), true);
+                onDownloadAndOpen(selectedItems.front(), true, true);
             },
             !singleItem || fileTracking_ == nullptr || !canOpen
         ),
@@ -295,6 +220,16 @@ std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::remotePathOf
         );
 }
 
+std::expected<std::string, Paths::PathError> RemoteSideModel::itemPathText(NuiFileExplorer::Item const& item) const
+{
+    return remotePathOf(item).transform(
+        [](Paths::RemotePath const& path)
+        {
+            return path.value();
+        }
+    );
+}
+
 std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::childOfCurrentPath(std::string_view name) const
 {
     return currentRemotePath().and_then(
@@ -323,13 +258,12 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
     {
         const bool canOpen = localModel_ ? localModel_->openerCapabilities().canOpenFile : true;
         if (fileTracking_ != nullptr && canOpen)
-            onDownloadAndOpen(item, false);
+            onDownloadAndOpen(item, false, false);
         return;
     }
 
-    // The item's own path, the side may already be loading another directory.
     Log::debug("Remote onActivateItem: {}.", item.displayName());
-    navigateTo(item.fullPath.empty() ? currentPath_.value() / item.name : item.fullPath);
+    navigateInto(item);
 }
 
 void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
@@ -337,90 +271,31 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
     CHECK_COMPLETE();
 
     Log::info("New item requested: {}", static_cast<int>(type));
-    if (type == NuiFileExplorer::Item::Type::Directory)
-    {
-        inputDialog_->open({
-            .whatFor = language->get("remoteSideModel", "newDirectory"),
-            .prompt = language->get("remoteSideModel", "enterNewDirectoryName"),
-            .headerText = language->get("remoteSideModel", "createNewDirectory"),
-            .isPassword = false,
-            .onConfirm = [this](std::optional<std::string> const& name)
-            {
-                if (!name)
-                    return;
-
-                if (!isValidItemName(*name))
-                    return showInvalidItemName(*name);
-                auto path = childOfCurrentPath(*name);
-                if (!path)
-                    return showPathRefused(language->get("remoteSideModel", "createNewDirectory"), path.error());
-                Log::info("Creating new directory: {}", path->value());
-                fileEngine_->createDirectory(
-                    *path,
-                    [this](bool success, std::string const& info)
-                    {
-                        if (!success)
-                        {
-                            Log::error("Failed to create directory: {}", info);
-                            confirmDialog_->open({
-                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                .headerText = "",
-                                .text = info,
-                                .buttons = ConfirmDialog::Button::Ok,
-                            });
-                            return;
-                        }
-                        // Refresh list from server:
-                        navigateTo(currentPath_.value());
-                    }
-                );
-            },
-        });
-    }
-    else if (type == NuiFileExplorer::Item::Type::Regular)
-    {
-        inputDialog_->open({
-            .whatFor = language->get("remoteSideModel", "newFile"),
-            .prompt = language->get("remoteSideModel", "enterNewFileName"),
-            .headerText = language->get("remoteSideModel", "createNewFile"),
-            .isPassword = false,
-            .onConfirm = [this](std::optional<std::string> const& name)
-            {
-                if (!name)
-                    return;
-
-                if (!isValidItemName(*name))
-                    return showInvalidItemName(*name);
-                auto path = childOfCurrentPath(*name);
-                if (!path)
-                    return showPathRefused(language->get("remoteSideModel", "createNewFile"), path.error());
-                Log::info("Creating new file: {}", path->value());
-                fileEngine_->createFile(
-                    *path,
-                    [this](bool success, std::string const& info)
-                    {
-                        if (!success)
-                        {
-                            Log::error("Failed to create file: {}", info);
-                            confirmDialog_->open({
-                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                .headerText = "",
-                                .text = info,
-                                .buttons = ConfirmDialog::Button::Ok,
-                            });
-                            return;
-                        }
-                        // Refresh list from server:
-                        navigateTo(currentPath_.value());
-                    }
-                );
-            },
-        });
-    }
-    else
-    {
-        // TODO: create file
-    }
+    promptNewItem<Paths::RemotePath>(
+        type,
+        [this, type](Paths::RemotePath const& path)
+        {
+            const bool isDirectory = type == NuiFileExplorer::Item::Type::Directory;
+            auto onCreated = lifetime_.guarded(
+                [this, isDirectory](bool success, std::string const& info)
+                {
+                    if (success)
+                        return navigateTo(currentPath_.value());
+                    Log::error("Failed to create {}: {}", isDirectory ? "directory" : "file", info);
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = isDirectory ? language->get("remoteSideModel", "createDirectoryFailedTitle")
+                                                  : language->get("remoteSideModel", "createFileFailedTitle"),
+                        .text = language->translate(info),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                }
+            );
+            if (isDirectory)
+                return fileEngine_->createDirectory(path, std::move(onCreated));
+            fileEngine_->createFile(path, std::move(onCreated));
+        }
+    );
 }
 
 void RemoteSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
@@ -789,33 +664,6 @@ void RemoteSideModel::onTransfer(
     );
 }
 
-namespace
-{
-    /**
-     * @brief Translate the frontend-local ArchiveCodec to the integer value the
-     *        backend expects (the raw int of TarArchive::Compression). The order
-     *        must match tar_archive/compression.hpp: Auto=0, None=1, Gzip=2,
-     *        Bzip2=3, Zstd=4, Xz=5.
-     */
-    int backendCompressionCode(ArchiveCodec codec)
-    {
-        switch (codec)
-        {
-            case ArchiveCodec::None:
-                return 1;
-            case ArchiveCodec::Gzip:
-                return 2;
-            case ArchiveCodec::Bzip2:
-                return 3;
-            case ArchiveCodec::Zstd:
-                return 4;
-            case ArchiveCodec::Xz:
-                return 5;
-        }
-        return 2;
-    }
-}
-
 void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items)
 {
     CHECK_COMPLETE();
@@ -978,7 +826,7 @@ void RemoteSideModel::generatePathBoxSuggestions(
     );
 }
 
-void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith)
+void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith, bool watch)
 {
     CHECK_COMPLETE();
 
@@ -988,11 +836,11 @@ void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool 
         return;
     }
 
+    // The download goes into an instance directory of its own, which the watch observes.
     Nui::RpcClient::callWithBackChannel(
         "FileTracking::createInstance",
-        [this, item, openWith](Nui::val response)
-        {
-            if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+        lifetime_.guarded(
+            [this, item, openWith, watch](Nui::val response)
             {
                 Log::error("FileTracking: createInstance failed");
                 confirmDialog_->open({
@@ -1003,51 +851,7 @@ void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool 
                 });
                 return;
             }
-            onFileTrackingInstanceCreated(
-                item,
-                openWith,
-                false,
-                Ids::makeInstanceId(response["instanceId"].as<std::string>()),
-                response["instanceDir"].as<std::string>()
-            );
-        }
-    );
-}
-
-void RemoteSideModel::onWatchDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith)
-{
-    CHECK_COMPLETE();
-
-    if (fileTracking_ == nullptr)
-    {
-        Log::error("File tracking panel is not available, cannot watch/download/open file.");
-        return;
-    }
-
-    // First create an instance where stuff to watch is placed:
-    Nui::RpcClient::callWithBackChannel(
-        "FileTracking::createInstance",
-        [this, item, openWith](Nui::val response)
-        {
-            if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
-            {
-                Log::error("FileTracking: createInstance failed");
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("fileTrackingPanel", "instanceCreationFailed"),
-                    .text = language->get("fileTrackingPanel", "instanceCreationFailedDesc"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-            onFileTrackingInstanceCreated(
-                item,
-                openWith,
-                true,
-                Ids::makeInstanceId(response["instanceId"].as<std::string>()),
-                response["instanceDir"].as<std::string>()
-            );
-        }
+        )
     );
 }
 

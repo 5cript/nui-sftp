@@ -9,7 +9,6 @@
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
-#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
@@ -30,7 +29,6 @@ class LocalSideModel;
 class RemoteSideModel
     : public SideModel
     , public NuiFileExplorer::IPlacesProvider
-    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     RemoteSideModel(
@@ -41,14 +39,6 @@ class RemoteSideModel
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog
     );
-
-    /**
-     * @brief Sets the callback invoked whenever the favorites list changes. The callback
-     *        receives the updated list as strings so the caller can persist it.
-     *
-     * @param callback Invoked on every add/remove.
-     */
-    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
 
     // --- IPlacesProvider ---
     NuiFileExplorer::IPlacesProvider* placesProvider() override
@@ -64,15 +54,6 @@ class RemoteSideModel
      * @param readUserDirectories Whether the places come from the user-dirs.dirs file of the server when it has one.
      */
     void setRemoteHome(std::filesystem::path home, bool readUserDirectories);
-
-    // --- IFavoritesProvider ---
-    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
-    {
-        return this;
-    }
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
-    void addFavorite(std::filesystem::path const& path) override;
-    void removeFavorite(std::filesystem::path const& path) override;
 
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
@@ -124,6 +105,8 @@ class RemoteSideModel
      */
     std::expected<Paths::RemotePath, Paths::PathError> remotePathOf(NuiFileExplorer::Item const& item) const;
 
+    std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
+
     /**
      * @brief @p name directly below the directory the shown items were listed from.
      */
@@ -147,8 +130,11 @@ class RemoteSideModel
     enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
     void continueDeletion();
-    void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
-    void onWatchDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
+    /**
+     * @brief Downloads @p item into a file tracking instance and opens it, with @p watch also uploads it again when
+     *        it changes.
+     */
+    void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith, bool watch);
     void onFileTrackingInstanceCreated(
         NuiFileExplorer::Item const& item,
         bool openWith,
@@ -196,6 +182,4 @@ class RemoteSideModel
     LocalSideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
-    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
 };

@@ -1,6 +1,13 @@
 #include <frontend/file_explorer/side_model.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <script-nui-components/popup_menu.hpp>
+
+#include <ui5-sap-icons/icons/add-favorite.hpp>
+#include <ui5-sap-icons/icons/unfavorite.hpp>
+
+#include <algorithm>
+#include <iterator>
 
 void SideModel::operationQueue(OperationQueue* operationQueue)
 {
@@ -19,6 +26,121 @@ void SideModel::engine(std::shared_ptr<FileEngine> fileEngine)
 std::shared_ptr<FileEngine> SideModel::engine()
 {
     return fileEngine_;
+}
+
+void SideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
+{
+    onFavoritesChanged_ = std::move(callback);
+}
+
+std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> SideModel::favorites() const
+{
+    return favorites_;
+}
+
+void SideModel::setFavorites(std::vector<std::string> const& favorites)
+{
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(favorites.size());
+    std::ranges::transform(
+        favorites,
+        std::back_inserter(paths),
+        [](std::string const& favorite)
+        {
+            return std::filesystem::path{favorite};
+        }
+    );
+    *favorites_ = std::move(paths);
+}
+
+void SideModel::addFavorite(std::filesystem::path const& path)
+{
+    if (std::ranges::contains(favorites_->value(), path))
+        return;
+    favorites_->push_back(path);
+    notifyFavoritesChanged();
+}
+
+void SideModel::removeFavorite(std::filesystem::path const& path)
+{
+    if (std::erase(favorites_->value(), path) == 0)
+        return;
+    favorites_->modifyNow();
+    notifyFavoritesChanged();
+}
+
+void SideModel::notifyFavoritesChanged()
+{
+    if (!onFavoritesChanged_)
+        return;
+    std::vector<std::string> favorites;
+    favorites.reserve(favorites_->value().size());
+    std::ranges::transform(
+        favorites_->value(),
+        std::back_inserter(favorites),
+        [](std::filesystem::path const& favorite)
+        {
+            return favorite.generic_string();
+        }
+    );
+    onFavoritesChanged_(std::move(favorites));
+}
+
+std::vector<NuiFileExplorer::ContextMenuItem>
+SideModel::favoriteMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
+{
+    if (selectedItems.size() != 1 || !selectedItems.front().isDirectoryLike())
+        return {};
+    const auto pathText = itemPathText(selectedItems.front());
+    if (!pathText)
+        return {};
+
+    const auto path = std::filesystem::path{*pathText};
+    const bool isFavorite = std::ranges::contains(favorites_->value(), path);
+    return {
+        ScriptNuiComponents::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", isFavorite ? "removeFromFavorites" : "addToFavorites"),
+            isFavorite ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
+            lifetime_.guarded(
+                [this, path, isFavorite]()
+                {
+                    if (isFavorite)
+                        removeFavorite(path);
+                    else
+                        addFavorite(path);
+                }
+            )
+        ),
+        ScriptNuiComponents::PopupMenu::separator(),
+    };
+}
+
+std::vector<ConfirmDialog::OpenOptions::ListElement>
+SideModel::pathList(std::vector<NuiFileExplorer::Item> const& items) const
+{
+    std::vector<ConfirmDialog::OpenOptions::ListElement> list;
+    list.reserve(items.size());
+    std::ranges::transform(
+        items,
+        std::back_inserter(list),
+        [this](NuiFileExplorer::Item const& item)
+        {
+            return ConfirmDialog::OpenOptions::ListElement{
+                .text = itemPathText(item).value_or(item.fullPath.generic_string()),
+            };
+        }
+    );
+    return list;
+}
+
+void SideModel::navigateInto(NuiFileExplorer::Item const& item)
+{
+    if (item.isParentLink)
+        return navigateTo(item.fullPath);
+    const auto path = itemPathText(item);
+    if (!path)
+        return showPathRefused(language->get("sideModel", "failedToListDirectory"), path.error());
+    navigateTo(std::filesystem::path{*path});
 }
 
 bool SideModel::isValidItemName(std::string_view name)
