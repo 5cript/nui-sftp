@@ -185,7 +185,7 @@ operationQueue:
   noError: "Kein Fehler"
   renameCard: "Umbenennen: '{}' -> '{}'"
   scanCard: "Durchsuche '{}'"
-  scanningItems: "Durchsuche... {} Einträge ({})"
+  scanningItems: "Durchsuche... {} Elemente ({})"
   unknownError: "Unbekannter Fehler"
 syncDialog:
   titleFormat: "Synchronisieren: {} / {}"
