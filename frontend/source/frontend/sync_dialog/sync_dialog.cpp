@@ -47,6 +47,7 @@
 
 #include <fmt/format.h>
 #include <fmt/chrono.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <any>
@@ -54,6 +55,7 @@
 #include <chrono>
 #include <iterator>
 #include <memory>
+#include <ranges>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -992,33 +994,33 @@ struct SyncDialog::Implementation
         });
     }
 
-    /** @brief Names the entries sync leaves alone, one per line. */
+    /** @brief Names the skipped entries with their reasons, one per line. */
     std::string blockedSamplesText() const
     {
         auto const& summary = summary_.value();
-        std::string text;
-        for (auto const& entry : summary.blockedSamples)
+        const auto sampleLine = [](SharedData::Sync::BlockedEntry const& entry)
         {
-            if (!text.empty())
-                text.push_back('\n');
-            text += fmt::format(
+            return fmt::format(
                 "{} ({})",
                 entry.relKey,
                 language->get("syncDialog", "blockReason", Utility::enumToString(entry.reason).c_str())
             );
-        }
-        if (summary.blockedCount > summary.blockedSamples.size())
-        {
-            text += '\n';
-            text += fmt::format(
+        };
+        const auto samples =
+            fmt::format("{}", fmt::join(summary.blockedSamples | std::views::transform(sampleLine), "\n"));
+        if (summary.blockedCount <= summary.blockedSamples.size())
+            return samples;
+        return fmt::format(
+            "{}\n{}",
+            samples,
+            fmt::format(
                 fmt::runtime(language->get("confirmDialog", "andMore")),
                 summary.blockedCount - summary.blockedSamples.size()
-            );
-        }
-        return text;
+            )
+        );
     }
 
-    /** @brief The entries sync leaves alone in a dialog, its text scrolls however many there are. */
+    /** @brief Shows the skipped entries in a dialog, its text scrolls however many there are. */
     void showBlockedEntries()
     {
         confirmDialog_->open({
