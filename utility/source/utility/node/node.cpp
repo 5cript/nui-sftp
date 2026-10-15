@@ -39,9 +39,9 @@ namespace SecureShell::Test
             {"command", command},
         };
 #ifdef _WIN32
-        const std::string commandWithNewline = j.dump() + "\r\n";
+        const auto commandWithNewline = fmt::format("{}\r\n", j.dump());
 #else
-        const std::string commandWithNewline = j.dump() + "\n";
+        const auto commandWithNewline = fmt::format("{}\n", j.dump());
 #endif
         boost::system::error_code ec;
         boost::asio::write(stdinPipe, boost::asio::buffer(commandWithNewline), ec);
@@ -64,9 +64,9 @@ namespace SecureShell::Test
         commandObject["command"] = command;
         commandObject["ack"] = true;
 #ifdef _WIN32
-        const std::string commandWithNewline = commandObject.dump() + "\r\n";
+        const auto commandWithNewline = fmt::format("{}\r\n", commandObject.dump());
 #else
-        const std::string commandWithNewline = commandObject.dump() + "\n";
+        const auto commandWithNewline = fmt::format("{}\n", commandObject.dump());
 #endif
 
         boost::system::error_code ec;
