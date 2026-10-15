@@ -1151,7 +1151,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        // The scan root carries no permissions, applying "unknown" used to chmod it to 07777.
+        // The scan root carries no permissions, applying "unknown" must not chmod it to 07777.
         const auto localRoot = downloadDir_.path() / "inherited";
         BulkDownloadOperation operation{
             sftp,
