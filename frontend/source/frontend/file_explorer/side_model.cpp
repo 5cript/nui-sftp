@@ -226,6 +226,20 @@ const std::vector<NuiFileExplorer::Item>& SideModel::items() const
     return items_;
 }
 
+std::string SideModel::iconOf(SharedData::DirectoryEntry const& entry) const
+{
+    if (entry.isDirectoryLike())
+        return "nui://app.example/icons/folder.svg";
+    if (entry.type == SharedData::DirectoryEntry::FileType::BlockDevice)
+        return "nui://app.example/icons/hard-drive.svg";
+
+    const auto extension = std::filesystem::path{entry.name}.extension().generic_string();
+    if (const auto icon = uiOptions_.fileGridExtensionIcons.find(extension);
+        icon != uiOptions_.fileGridExtensionIcons.end())
+        return fmt::format("nui://app.example/{}", icon->second);
+    return "nui://app.example/icons/file.svg";
+}
+
 void SideModel::revertNavigation()
 {
     if (currentPath_.value() != listedPath_)
@@ -277,32 +291,18 @@ void SideModel::onDirectoryListing(
     listedPath_ = directory;
 
     std::vector<NuiFileExplorer::Item> items{};
+    items.reserve(directoryEntries->size() + 1);
     if (auto parent = parentOf(directory); parent)
         items.push_back(NuiFileExplorer::Item::parentLink(*std::move(parent), "nui://app.example/icons/folder.svg"));
-    std::transform(
-        begin(*directoryEntries),
-        end(*directoryEntries),
+    std::ranges::transform(
+        *directoryEntries,
         std::back_inserter(items),
-        [this, &directory](auto const& entry)
+        [this, &directory](SharedData::DirectoryEntry& entry)
         {
-            auto item = NuiFileExplorer::Item{
-                entry,
-                [&entry, this]() -> std::string
-                {
-                    const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
-                    if (entry.isDirectoryLike())
-                        return "nui://app.example/icons/folder.svg";
-                    if (type == NuiFileExplorer::Item::Type::BlockDevice)
-                        return "nui://app.example/icons/hard-drive.svg";
-
-                    const auto extension = std::filesystem::path{entry.name}.extension().string();
-                    if (uiOptions_.fileGridExtensionIcons.contains(extension))
-                        return "nui://app.example/" + uiOptions_.fileGridExtensionIcons.at(extension);
-
-                    return "nui://app.example/icons/file.svg";
-                }()
-            };
-            item.fullPath = directory / entry.name;
+            auto fullPath = directory / entry.name;
+            auto icon = iconOf(entry);
+            auto item = NuiFileExplorer::Item{std::move(entry), std::move(icon)};
+            item.fullPath = std::move(fullPath);
             return item;
         }
     );

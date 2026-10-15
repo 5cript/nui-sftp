@@ -5,6 +5,7 @@
 #include <nui-file-explorer/icon_size.hpp>
 #include <nui-file-explorer/side/side_settings.hpp>
 #include <nui-file-explorer/side/selection_manager.hpp>
+#include <nui-file-explorer/side/item_order.hpp>
 
 #include <nui/frontend/val.hpp>
 
@@ -28,14 +29,6 @@ using namespace std::string_literals;
 namespace NuiFileExplorer
 {
     class Side;
-
-    enum class SortCriterion
-    {
-        Name,
-        Size,
-        Info,
-        Mtime
-    };
 
     struct SideImplementation
     {
@@ -72,7 +65,7 @@ namespace NuiFileExplorer
         Nui::val loadingHintTimerHandle{Nui::val::undefined()};
         Nui::ListenRemover<Nui::Observed<std::filesystem::path>> currentPathListener{};
 
-        // Pagination — render-only slicing. SelectionManager remains index-absolute against
+        // Pagination: render-only slicing. SelectionManager remains index-absolute against
         // the full items vector. Default pageSize is intentionally large (the user prefers
         // unpaginated UX); the footer hides itself when pageCount <= 1.
         Nui::Observed<int> currentPage{0};
@@ -111,141 +104,15 @@ namespace NuiFileExplorer
         void sortItems()
         {
             const auto [criterion, ascending] = sorting.value();
-            switch (criterion)
-            {
-                case SortCriterion::Name:
-                    sortByName(ascending);
-                    break;
-                case SortCriterion::Size:
-                    sortBySize(ascending);
-                    break;
-                case SortCriterion::Info:
-                    sortByInfo(ascending);
-                    break;
-                case SortCriterion::Mtime:
-                    sortByMtime(ascending);
-                    break;
-            }
-        }
-
-        auto partitionItems()
-        {
-            auto& items = this->items.value();
-            return std::stable_partition(
-                items.begin(),
-                items.end(),
-                [](auto const& lhs)
+            NuiFileExplorer::sortItems(
+                items.value(),
+                criterion,
+                ascending,
+                [](ItemWithInternals const& entry) -> Item const&
                 {
-                    return lhs.item.isDirectoryLike();
+                    return entry.item;
                 }
             );
-        }
-
-        void sortByPredicate(auto const& predicate)
-        {
-            auto partitionBorder = partitionItems();
-            auto& items = this->items.value();
-            std::sort(items.begin(), partitionBorder, predicate);
-            if (partitionBorder != items.end())
-                std::sort(partitionBorder, items.end(), predicate);
-            // The parent link leads in every order.
-            std::stable_partition(
-                items.begin(),
-                items.end(),
-                [](auto const& entry)
-                {
-                    return entry.item.isParentLink;
-                }
-            );
-        }
-
-        void sortByName(bool ascending)
-        {
-            if (ascending)
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return Utility::Algorithm::caseInsensitiveCompare(
-                                   lhs.item.displayName(),
-                                   rhs.item.displayName()) < 0;
-                    }
-                );
-            }
-            else
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return Utility::Algorithm::caseInsensitiveCompare(
-                                   lhs.item.displayName(),
-                                   rhs.item.displayName()) > 0;
-                    }
-                );
-            }
-        }
-        void sortByInfo(bool ascending)
-        {
-            if (ascending)
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.lsStyleTypePermsUserGroup() < rhs.item.lsStyleTypePermsUserGroup();
-                    }
-                );
-            }
-            else
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.lsStyleTypePermsUserGroup() > rhs.item.lsStyleTypePermsUserGroup();
-                    }
-                );
-            }
-        }
-        void sortBySize(bool ascending)
-        {
-            if (ascending)
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.size < rhs.item.size;
-                    }
-                );
-            }
-            else
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.size > rhs.item.size;
-                    }
-                );
-            }
-        }
-        void sortByMtime(bool ascending)
-        {
-            if (ascending)
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.mtime < rhs.item.mtime;
-                    }
-                );
-            }
-            else
-            {
-                sortByPredicate(
-                    [](auto const& lhs, auto const& rhs)
-                    {
-                        return lhs.item.mtime > rhs.item.mtime;
-                    }
-                );
-            }
         }
 
         /**
@@ -419,7 +286,7 @@ namespace NuiFileExplorer
                 [this](std::size_t idx)
                 {
                     // Keyboard navigation can land us on an item that's outside the current
-                    // pagination slice — in that case we first jump to the page that contains
+                    // pagination slice, in that case we first jump to the page that contains
                     // the active index, force the render flush so the element materializes,
                     // and only then scroll it into view.
                     const auto pageSizeValue = std::max(1, pageSize.value());

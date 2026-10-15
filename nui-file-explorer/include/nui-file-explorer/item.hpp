@@ -11,6 +11,7 @@
 #include <string_view>
 #include <cstdint>
 #include <chrono>
+#include <utility>
 
 namespace NuiFileExplorer
 {
@@ -23,8 +24,8 @@ namespace NuiFileExplorer
         /** @brief The entry leading to the parent directory, shown as "..". It is never selected or acted on. */
         bool isParentLink{false};
 
-        explicit Item(SharedData::DirectoryEntry const& entry, std::string icon = {})
-            : SharedData::DirectoryEntry{entry}
+        explicit Item(SharedData::DirectoryEntry entry, std::string icon = {})
+            : SharedData::DirectoryEntry{std::move(entry)}
             , icon{std::move(icon)}
         {}
 
@@ -50,14 +51,14 @@ namespace NuiFileExplorer
                 trimmed.remove_suffix(1);
             const auto separator = trimmed.find_last_of("/\\");
             entry.name = std::string{separator == std::string_view::npos ? trimmed : trimmed.substr(separator + 1)};
-            Item item{entry};
+            Item item{std::move(entry)};
             item.fullPath = std::filesystem::path{std::string{trimmed}};
             return item;
         }
 
-        std::string displayName() const
+        std::string_view displayName() const
         {
-            return isParentLink ? std::string{".."} : name;
+            return isParentLink ? std::string_view{".."} : std::string_view{name};
         }
     };
 }

@@ -29,9 +29,14 @@ class FileEngine
 
     std::optional<Ids::ChannelId> release();
 
+    /**
+     * @brief Lists the remote directory @p path.
+     *
+     * @param onComplete Receives the entries, or std::nullopt and the reason on failure.
+     */
     void listDirectory(
         std::filesystem::path const& path,
-        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
+        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info)>
             onComplete
     );
 
@@ -96,8 +101,8 @@ class FileEngine
 
     /**
      * @brief Loads direct children of @p parentRelKey in @p section.  @p generation
-     *        must match the most recent @ref recomputeSyncDiff reply or the server
-     *        rejects as stale — the caller then discards.
+     *        must match the most recent @ref recomputeSyncDiff reply, else the server
+     *        rejects it as stale and the caller discards it.
      */
     void loadSyncDiffChildren(
         Ids::SyncSessionId syncSessionId,
@@ -204,7 +209,7 @@ class FileEngine
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
     );
 
-    /** @brief Upload analogue of addBulkDownload — see its docs. */
+    /** @brief Upload analogue of addBulkDownload, see its docs. */
     void addBulkUpload(
         std::vector<SharedData::BulkUploadEntry> entries,
         std::vector<Ids::OperationId> operationIds,

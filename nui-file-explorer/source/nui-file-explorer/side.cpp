@@ -602,7 +602,7 @@ namespace NuiFileExplorer
 
         if (item != nullptr)
         {
-            Nui::WebApi::Console::log("Context menu item: ", item->item.displayName());
+            Nui::WebApi::Console::log("Context menu item: ", std::string{item->item.displayName()});
             auto selected = selectedItems();
 
             if (std::find_if(
@@ -1087,7 +1087,7 @@ namespace NuiFileExplorer
          * (highlight) and applyFilter (hide non-matches) so the two modes agree on what counts as a match.
          */
         bool matchesQuery(
-            std::string const& itemText,
+            std::string_view itemText,
             std::u32string const& normalizedQuery,
             std::vector<std::u32string> const& queryTokens
         )

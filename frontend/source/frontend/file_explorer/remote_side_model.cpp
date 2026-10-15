@@ -788,7 +788,7 @@ void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
     const auto path = remotePathOf(item);
     filePropertyDialog_->open(
         static_cast<SharedData::DirectoryEntry const&>(item),
-        path ? path->value() : item.displayName(),
+        path ? path->value() : std::string{item.displayName()},
         item.linkTarget.value_or(std::string{})
     );
 }
@@ -803,12 +803,14 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     currentPath_ = std::filesystem::path{target};
     fileEngine_->listDirectory(
         currentPath_.value(),
-        [this, directory = currentPath_.value()](
-            std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
+        lifetime_.guarded(
+            [this, directory = currentPath_.value()](
+                std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info
+            )
+            {
+                onDirectoryListing(directory, std::move(entries), info);
+            }
         )
-        {
-            onDirectoryListing(directory, entries, info);
-        }
     );
 }
 

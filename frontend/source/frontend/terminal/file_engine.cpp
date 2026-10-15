@@ -114,7 +114,7 @@ void FileEngine::lazyOpen(
 
 void FileEngine::listDirectory(
     std::filesystem::path const& path,
-    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
+    std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info)>
         onComplete
 )
 {
@@ -151,7 +151,11 @@ void FileEngine::listDirectory(
                         return;
                     }
 
-                    onComplete(nlohmann::json::parse(Nui::JSON::stringify(val))["entries"], "Success");
+                    onComplete(
+                        nlohmann::json::parse(Nui::JSON::stringify(val))["entries"]
+                            .get<std::vector<SharedData::DirectoryEntry>>(),
+                        "Success"
+                    );
                 },
                 channelId.value().value(),
                 path.generic_string()

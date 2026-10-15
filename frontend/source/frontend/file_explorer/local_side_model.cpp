@@ -682,7 +682,7 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
     if (!path)
     {
         Log::warn("Properties of '{}' use the listed entry: {}", item.name, path.error().toString());
-        filePropertyDialog_->open(fallback, item.displayName());
+        filePropertyDialog_->open(fallback, std::string{item.displayName()});
         return;
     }
     Nui::val args = Nui::val::object();
