@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <expected>
 #include <optional>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -400,6 +402,27 @@ namespace FileTracking
         );
 
         registerOnStrand(
+            "FileTracking::discardContent",
+            [this](RpcHelper::RpcOnce&& reply, std::string instanceId, std::string path)
+            {
+                const auto content = Paths::LocalPath::fromUtf8(path);
+                if (!content)
+                {
+                    reply.error(fmt::format("Cannot discard '{}': {}", path, content.error().toString()));
+                    return;
+                }
+                const auto outcome = discardContent(instanceId, content->native());
+                if (!outcome)
+                {
+                    Log::error("FileTracking::discardContent: {}", outcome.error());
+                    reply.error(outcome.error());
+                    return;
+                }
+                reply({{"success", true}, {"instanceDestroyed", *outcome == DiscardOutcome::InstanceDestroyed}});
+            }
+        );
+
+        registerOnStrand(
             "FileTracking::countOrphaned",
             [this](RpcHelper::RpcOnce&& reply)
             {
@@ -454,6 +477,32 @@ namespace FileTracking
     {
         watches_.erase(instanceId);
         instances_.erase(instanceId);
+    }
+
+    std::expected<DiscardOutcome, std::string>
+    TempDirInstanceManager::discardContent(std::string const& instanceId, std::filesystem::path const& path)
+    {
+        auto* instance = findInstance(instanceId);
+        if (!instance)
+            return std::unexpected{fmt::format("Instance not found: {}", instanceId)};
+        const auto content = InstanceManagerDetail::removableContentPath(instance->instanceDir(), path);
+        if (!content)
+            return std::unexpected{content.error()};
+
+        watches_.erase(instanceId);
+        Log::info("Discarding '{}' of instance '{}'", Paths::nativeToUtf8(*content), instanceId);
+        std::error_code removeError;
+        Utility::removeAllNoFollow(*content, removeError);
+        if (removeError)
+            return std::unexpected{fmt::format(
+                "Cannot remove '{}': {}", Paths::nativeToUtf8(*content), Utility::errorMessage(removeError)
+            )};
+
+        if (InstanceManagerDetail::hasContent(instance->instanceDir()))
+            return DiscardOutcome::InstanceKept;
+        instance->cleanupNow();
+        destroyInstance(instanceId);
+        return DiscardOutcome::InstanceDestroyed;
     }
 
     TemporaryDirectoryInstance*

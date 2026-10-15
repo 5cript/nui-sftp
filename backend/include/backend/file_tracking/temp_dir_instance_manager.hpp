@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -56,6 +57,15 @@ namespace FileTracking
     }
 
     /**
+     * @brief What TempDirInstanceManager::discardContent did with the instance after removing the content.
+     */
+    enum class DiscardOutcome
+    {
+        InstanceKept,
+        InstanceDestroyed,
+    };
+
+    /**
      * @brief Owns and tracks all TemporaryDirectoryInstance objects for a session.
      *
      * Inherits RpcHelper::StrandRpc so that all RPC handlers it registers run on
@@ -73,6 +83,7 @@ namespace FileTracking
      * | listInstances           | —                                   | {success, instances: [...]}    |
      * | getInstanceInfo         | instanceId: string                  | {success, instanceId, instanceDir} |
      * | fileStates              | instanceId: string                  | {success, files: [...]}, see InstanceManagerDetail::fileStatesOf |
+     * | discardContent          | instanceId: string, path: string    | {success, instanceDestroyed: bool}, see discardContent |
      * | countOrphaned           | —                                   | {success, count: int}          |
      * | forceCleanup            | —                                   | {success, removed: int}        |
      *
@@ -145,6 +156,19 @@ namespace FileTracking
          * @param instanceId ID returned by TemporaryDirectoryInstance::instanceId().
          */
         void destroyInstance(std::string const& instanceId);
+
+        /**
+         * @brief Removes @p path, content of the instance @p instanceId that the user decided not to keep, after
+         *        ending the instance's watches, so the removal is reported as no change. A link is removed itself,
+         *        never followed. When nothing else is left in the instance directory, the instance is destroyed
+         *        and, unlike destroyInstance(), its directory is removed as well (bookkeeping included, after its
+         *        lock is released), so no orphan stays behind.
+         *
+         * @return An error when the instance does not exist, @p path is no content of it (see
+         *         InstanceManagerDetail::removableContentPath) or cannot be removed.
+         */
+        std::expected<DiscardOutcome, std::string>
+        discardContent(std::string const& instanceId, std::filesystem::path const& path);
 
         /**
          * @brief Look up an instance by ID.
