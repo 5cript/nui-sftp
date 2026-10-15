@@ -61,8 +61,11 @@ CLANGXX="${LLVM_ROOT}/bin/clang++"
     exit 1
 }
 
-# Upstream clang honours both for the builds that do not go through CMake.
+# Upstream clang honours both for the builds that do not go through CMake, but links without naming the SDK pick
+# the newest one of the Command Line Tools, which the linker may not be able to read (an SDK of the next macOS), so
+# those builds name it in SYSROOT_FLAGS as well.
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+SYSROOT_FLAGS="-isysroot ${SDKROOT}"
 export MACOSX_DEPLOYMENT_TARGET="${MINIMUM_MACOS}"
 
 WORK="${PREFIX}.work"
@@ -257,8 +260,8 @@ build_cryptopp() {
     # The makefile probes the ARM crypto extensions with small test programs, those have to link too.
     make -C "${source}" -j "${JOBS}" static \
         CXX="${CLANGXX}" \
-        CXXFLAGS="-DNDEBUG -O3 -fPIC ${LIBCXX_COMPILE_FLAGS}" \
-        LDFLAGS="${LIBCXX_LINK_FLAGS}"
+        CXXFLAGS="-DNDEBUG -O3 -fPIC ${SYSROOT_FLAGS} ${LIBCXX_COMPILE_FLAGS}" \
+        LDFLAGS="${SYSROOT_FLAGS} ${LIBCXX_LINK_FLAGS}"
     mkdir -p "${PREFIX}/include/cryptopp" "${PREFIX}/lib"
     cp "${source}"/*.h "${PREFIX}/include/cryptopp/"
     cp "${source}/libcryptopp.a" "${PREFIX}/lib/"
@@ -273,17 +276,16 @@ build_boost() {
         cd "${source}"
         ./bootstrap.sh
         cat > user-config.jam <<JAM
-using clang : nui : "${CLANGXX}" : <cxxflags>"${LIBCXX_COMPILE_FLAGS}" <linkflags>"${LIBCXX_LINK_FLAGS}" ;
+using clang : nui : "${CLANGXX}" : <cxxflags>"${SYSROOT_FLAGS} ${LIBCXX_COMPILE_FLAGS}" <linkflags>"${SYSROOT_FLAGS} ${LIBCXX_LINK_FLAGS}" ;
 JAM
         # Only the compiled libraries are listed, the headers of all of boost are installed regardless.
-        # Nui gzips its assets through iostreams, with the zlib of the SDK, named explicitly since b2's probe
-        # does not always find it. The standard matches nui-sftp, boost's configuration macros change
-        # signatures between standards.
+        # Nui gzips its assets through iostreams, with the zlib of the SDK; without SYSROOT_FLAGS b2's link checks
+        # fail and iostreams is built without it. The standard matches nui-sftp, boost's configuration macros
+        # change signatures between standards.
         ./b2 --user-config=user-config.jam toolset=clang-nui \
             variant=release link=static threading=multi cxxstd=23 cxxstd-dialect=gnu \
             --prefix="${PREFIX}" --layout=system -j "${JOBS}" -d1 \
             -sNO_BZIP2=1 -sNO_ZSTD=1 -sNO_LZMA=1 \
-            -sZLIB_INCLUDE="${SDKROOT}/usr/include" -sZLIB_LIBRARY_PATH="${SDKROOT}/usr/lib" -sZLIB_NAME=z \
             --with-atomic --with-chrono --with-container --with-context --with-date_time --with-exception \
             --with-filesystem --with-iostreams --with-process --with-program_options --with-random \
             --with-serialization --with-system --with-thread \
