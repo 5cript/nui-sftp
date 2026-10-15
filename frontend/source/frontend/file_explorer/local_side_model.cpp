@@ -103,47 +103,49 @@ void LocalSideModel::probeOpenerCapabilities()
 {
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::openerCapabilities",
-        [this](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+        lifetime_.guarded(
+            [this](Nui::val val)
             {
-                Log::warn("RpcFilesystem::openerCapabilities failed or unavailable; assuming capable.");
-                return;
-            }
+                if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+                {
+                    Log::warn("RpcFilesystem::openerCapabilities failed or unavailable; assuming capable.");
+                    return;
+                }
 
-            SharedData::OpenerCapabilities caps{};
-            try
-            {
-                Nui::convertFromVal(val["capabilities"], caps);
-            }
-            catch (std::exception const& e)
-            {
-                Log::warn("Failed to parse openerCapabilities response: {}", e.what());
-                return;
-            }
+                SharedData::OpenerCapabilities caps{};
+                try
+                {
+                    Nui::convertFromVal(val["capabilities"], caps);
+                }
+                catch (std::exception const& e)
+                {
+                    Log::warn("Failed to parse openerCapabilities response: {}", e.what());
+                    return;
+                }
 
-            openerCaps_ = caps;
-            Log::info(
-                "Opener capabilities: canOpenFile={}, canOpenInFileManager={}, reason='{}'",
-                caps.canOpenFile,
-                caps.canOpenInFileManager,
-                caps.reason
-            );
+                openerCaps_ = caps;
+                Log::info(
+                    "Opener capabilities: canOpenFile={}, canOpenInFileManager={}, reason='{}'",
+                    caps.canOpenFile,
+                    caps.canOpenInFileManager,
+                    caps.reason
+                );
 
-            if (!caps.canOpenFile || !caps.canOpenInFileManager)
-            {
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                    .headerText = language->get("localSideModel", "portalUnavailableHeader"),
-                    .text = fmt::format(
-                        fmt::runtime(language->get("localSideModel", "portalUnavailableText")),
-                        language->translate(caps.reason)
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                    .neverShowAgainId = "localSideModel.portalUnavailable",
-                });
+                if (!caps.canOpenFile || !caps.canOpenInFileManager)
+                {
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                        .headerText = language->get("localSideModel", "portalUnavailableHeader"),
+                        .text = fmt::format(
+                            fmt::runtime(language->get("localSideModel", "portalUnavailableText")),
+                            language->translate(caps.reason)
+                        ),
+                        .buttons = ConfirmDialog::Button::Ok,
+                        .neverShowAgainId = "localSideModel.portalUnavailable",
+                    });
+                }
             }
-        }
+        )
     );
 }
 
@@ -550,10 +552,12 @@ void LocalSideModel::onDropExternal(
             .headerText = language->get("sessionFrontend", "externalDropWebkitWarningTitle"),
             .text = language->get("sessionFrontend", "externalDropWebkitWarningText"),
             .buttons = ConfirmDialog::Button::Ok,
-            .onClose = [this, items, subDir](std::optional<ConfirmDialog::Button>)
-            {
-                onDropExternal(items, subDir, false);
-            },
+            .onClose = lifetime_.guarded(
+                [this, items, subDir](std::optional<ConfirmDialog::Button>)
+                {
+                    onDropExternal(items, subDir, false);
+                }
+            ),
         });
     }
     else
@@ -644,12 +648,13 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::properties",
-        [this, fallback = std::move(fallback), displayPath = path->toUtf8()](Nui::val val) mutable
-        {
-            const auto useFallback = [this, &fallback, &displayPath]()
+        lifetime_.guarded(
+            [this, fallback = std::move(fallback), displayPath = path->toUtf8()](Nui::val val) mutable
             {
-                filePropertyDialog_->open(fallback, displayPath);
-            };
+                const auto useFallback = [this, &fallback, &displayPath]()
+                {
+                    filePropertyDialog_->open(fallback, displayPath);
+                };
 
                 if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
                 {
@@ -665,11 +670,12 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 
                 const auto full = directoryEntryOf(val["entry"]);
 
-            std::string resolvedPath{};
-            if (val.hasOwnProperty("resolvedPath") && val["resolvedPath"].isString())
-                resolvedPath = val["resolvedPath"].as<std::string>();
-            filePropertyDialog_->open(full, displayPath, std::move(resolvedPath));
-        },
+                std::string resolvedPath{};
+                if (val.hasOwnProperty("resolvedPath") && val["resolvedPath"].isString())
+                    resolvedPath = val["resolvedPath"].as<std::string>();
+                filePropertyDialog_->open(full, displayPath, std::move(resolvedPath));
+            }
+        ),
         args
     );
 }
@@ -766,23 +772,27 @@ void LocalSideModel::enqueueSingleUpload(
         entry.source,
         entry.destination,
         entry.sizeBytes,
-        [this, source = entry.source](std::optional<Ids::OperationId> const& opId, std::string const& info)
-        {
-            if (!opId)
+        lifetime_.guarded(
+            [this, source = entry.source](std::optional<Ids::OperationId> const& opId, std::string const& info)
             {
-                Log::error("Failed to create upload operation: {}", info);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = "",
-                    .text = fmt::format(
-                        fmt::runtime(language->get("localSideModel", "failedToEnqueueUpload")), source.toUtf8(), info
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
+                if (!opId)
+                {
+                    Log::error("Failed to create upload operation: {}", info);
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = "",
+                        .text = fmt::format(
+                            fmt::runtime(language->get("localSideModel", "failedToEnqueueUpload")),
+                            source.toUtf8(),
+                            info
+                        ),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
+                Log::info("Upload operation created with id: {}", opId->value());
             }
-            Log::info("Upload operation created with id: {}", opId->value());
-        },
+        ),
         allowOverwrite,
         insertRefresh
     );
@@ -895,7 +905,7 @@ void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
     if (!path)
         return showPathRefused(language->get("localSideModel", "failedToOpenFile"), path.error());
 
-    FileExplorer::openLocalFile(*confirmDialog_, *path, openWith);
+    FileExplorer::openLocalFile(lifetime_, *confirmDialog_, *path, openWith);
 }
 
 void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
@@ -908,34 +918,36 @@ void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::openInFileManager",
-        [this](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
+        lifetime_.guarded(
+            [this](Nui::val val)
             {
-                Log::error("Invalid response from RpcFilesystem::openInFileManager");
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "openInFileManagerFailed"),
-                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
+                if (!val.hasOwnProperty("success"))
+                {
+                    Log::error("Invalid response from RpcFilesystem::openInFileManager");
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = language->get("localSideModel", "openInFileManagerFailed"),
+                        .text = language->get("localSideModel", "invalidResponseFromBackend"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
 
-            const auto success = val["success"].as<bool>();
-            if (!success)
-            {
-                const auto error = language->translate(val["error"].as<std::string>());
-                Log::error("Failed to open in file manager: {}", error);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "openInFileManagerFailed"),
-                    .text = error,
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
+                const auto success = val["success"].as<bool>();
+                if (!success)
+                {
+                    const auto error = language->translate(val["error"].as<std::string>());
+                    Log::error("Failed to open in file manager: {}", error);
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = language->get("localSideModel", "openInFileManagerFailed"),
+                        .text = error,
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
             }
-        },
+        ),
         absolutePath
     );
 }
@@ -1025,56 +1037,62 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
-        .onConfirm = [this, paths = std::move(localPaths)](std::optional<ArchiveTransferResult> const& result) mutable
-        {
-            if (!result)
+        .onConfirm = lifetime_.guarded(
+            [this, paths = std::move(localPaths)](std::optional<ArchiveTransferResult> const& result) mutable
             {
-                Log::info("Upload as Archive: user cancelled");
-                return;
-            }
-            if (!remoteModel_)
-                return;
-
-            const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
-            auto archivePath = remoteModel_->currentRemotePath().and_then(
-                [&filename](Paths::RemotePath const& directory)
+                if (!result)
                 {
-                    return Paths::PathSegment::make(filename).transform(
-                        [&directory](Paths::PathSegment const& segment)
-                        {
-                            return directory / segment;
-                        }
-                    );
+                    Log::info("Upload as Archive: user cancelled");
+                    return;
                 }
-            );
-            if (!archivePath)
-                return showPathRefused(language->get("localSideModel", "archiveUploadFailed"), archivePath.error());
-            const auto remotePath = *std::move(archivePath);
+                if (!remoteModel_)
+                    return;
 
-            operationQueue_->enqueueArchiveUpload(
-                std::move(paths),
-                remotePath,
-                backendCompressionCode(result->codec),
-                result->compressionLevel,
-                /*mayOverwrite=*/false,
-                SharedData::OperationMode::Queued,
-                [this, remotePath](std::optional<Ids::OperationId> const& opId, std::string const& info)
-                {
-                    if (!opId)
+                const auto filename = fmt::format("{}.tar{}", result->fileStem, archiveCodecExtension(result->codec));
+                auto archivePath = remoteModel_->currentRemotePath().and_then(
+                    [&filename](Paths::RemotePath const& directory)
                     {
-                        Log::error("Archive upload failed to enqueue: {}", info);
-                        confirmDialog_->open({
-                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = language->get("localSideModel", "archiveUploadFailed"),
-                            .text = info,
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
-                        return;
+                        return Paths::PathSegment::make(filename).transform(
+                            [&directory](Paths::PathSegment const& segment)
+                            {
+                                return directory / segment;
+                            }
+                        );
                     }
-                    Log::info("Archive upload queued as {} (destination {})", opId->value(), remotePath.value());
-                }
-            );
-        },
+                );
+                if (!archivePath)
+                    return showPathRefused(language->get("localSideModel", "archiveUploadFailed"), archivePath.error());
+                const auto remotePath = *std::move(archivePath);
+
+                operationQueue_->enqueueArchiveUpload(
+                    std::move(paths),
+                    remotePath,
+                    backendCompressionCode(result->codec),
+                    result->compressionLevel,
+                    /*mayOverwrite=*/false,
+                    SharedData::OperationMode::Queued,
+                    lifetime_.guarded(
+                        [this, remotePath](std::optional<Ids::OperationId> const& opId, std::string const& info)
+                        {
+                            if (!opId)
+                            {
+                                Log::error("Archive upload failed to enqueue: {}", info);
+                                confirmDialog_->open({
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                    .headerText = language->get("localSideModel", "archiveUploadFailed"),
+                                    .text = info,
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                                return;
+                            }
+                            Log::info(
+                                "Archive upload queued as {} (destination {})", opId->value(), remotePath.value()
+                            );
+                        }
+                    )
+                );
+            }
+        ),
     });
 }
 

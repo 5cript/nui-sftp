@@ -102,14 +102,14 @@ void FileEngine::lazyOpen(
         return;
 
     Log::info("Creating sftp channel");
-    impl_->engine->createSftpChannel(
-        [this](auto const& id, std::string const& info)
+    impl_->engine->createSftpChannel(lifetime_.guarded(
+        [this](std::optional<Ids::ChannelId> const& id, std::string const& info)
         {
             impl_->sftpChannelId = id;
             for (auto const& pendingOpen : std::exchange(impl_->pendingOpens, {}))
                 pendingOpen(id, info);
         }
-    );
+    ));
 }
 
 void FileEngine::listDirectory(

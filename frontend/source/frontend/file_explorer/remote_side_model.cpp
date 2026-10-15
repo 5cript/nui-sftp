@@ -51,33 +51,35 @@ RemoteSideModel::RemoteSideModel(
 
               fileEngine_->listDirectory(
                   dirPath,
-                  [this, onResultsAvailable = std::move(onResultsAvailable)](
-                      std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info
+                  lifetime_.guarded(
+                      [this, onResultsAvailable = std::move(onResultsAvailable)](
+                          std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info
+                      )
+                      {
+                          if (!entries)
+                          {
+                              Log::error("Failed to list files from remote side: {}", info);
+                              confirmDialog_->open({
+                                  .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                  .headerText = "",
+                                  .text = info,
+                                  .buttons = ConfirmDialog::Button::Ok,
+                              });
+                              onResultsAvailable({});
+                              return;
+                          }
+
+                          std::vector<std::filesystem::path> listing{};
+                          listing.reserve(entries->size());
+                          for (auto&& entry : std::move(*entries))
+                          {
+                              if (entry.isDirectory())
+                                  listing.emplace_back(std::move(entry).name);
+                          }
+
+                          onResultsAvailable(listing);
+                      }
                   )
-                  {
-                      if (!entries)
-                      {
-                          Log::error("Failed to list files from remote side: {}", info);
-                          confirmDialog_->open({
-                              .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                              .headerText = "",
-                              .text = info,
-                              .buttons = ConfirmDialog::Button::Ok,
-                          });
-                          onResultsAvailable({});
-                          return;
-                      }
-
-                      std::vector<std::filesystem::path> listing{};
-                      listing.reserve(entries->size());
-                      for (auto&& entry : std::move(*entries))
-                      {
-                          if (entry.isDirectory())
-                              listing.emplace_back(std::move(entry).name);
-                      }
-
-                      onResultsAvailable(listing);
-                  }
               );
           },
           0.,
@@ -322,55 +324,57 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::None |
                 ConfirmDialog::Button::All | ConfirmDialog::Button::Cancel,
             .focusButton = ConfirmDialog::Button::No,
-            .onClose = [this,
-                           confirmedToDelete = std::move(confirmedToDelete),
-                           nonEmpties = std::move(nonEmpties),
-                           filesAndEmptyDirs = std::move(filesAndEmptyDirs),
-                           currentNonEmpty,
-                           dir](std::optional<ConfirmDialog::Button> button) mutable
-            {
-                if (button && button == ConfirmDialog::Button::Yes)
+            .onClose = lifetime_.guarded(
+                [this,
+                    confirmedToDelete = std::move(confirmedToDelete),
+                    nonEmpties = std::move(nonEmpties),
+                    filesAndEmptyDirs = std::move(filesAndEmptyDirs),
+                    currentNonEmpty,
+                    dir](std::optional<ConfirmDialog::Button> button) mutable
                 {
-                    confirmedToDelete.push_back(dir);
-                    askNonEmptyDirectoryDeletions(
-                        std::move(confirmedToDelete),
-                        std::move(nonEmpties),
-                        std::move(filesAndEmptyDirs),
-                        currentNonEmpty + 1
-                    );
-                    return;
-                }
-
-                if (button && button == ConfirmDialog::Button::All)
-                {
-                    confirmedToDelete.push_back(dir);
-                    for (; currentNonEmpty + 1 < nonEmpties.size(); ++currentNonEmpty)
+                    if (button && button == ConfirmDialog::Button::Yes)
                     {
-                        confirmedToDelete.push_back(nonEmpties[currentNonEmpty + 1]);
+                        confirmedToDelete.push_back(dir);
+                        askNonEmptyDirectoryDeletions(
+                            std::move(confirmedToDelete),
+                            std::move(nonEmpties),
+                            std::move(filesAndEmptyDirs),
+                            currentNonEmpty + 1
+                        );
+                        return;
                     }
-                    enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
-                    return;
-                }
 
-                if (button && button == ConfirmDialog::Button::No)
-                {
-                    askNonEmptyDirectoryDeletions(
-                        std::move(confirmedToDelete),
-                        std::move(nonEmpties),
-                        std::move(filesAndEmptyDirs),
-                        currentNonEmpty + 1
-                    );
-                    return;
-                }
+                    if (button && button == ConfirmDialog::Button::All)
+                    {
+                        confirmedToDelete.insert(
+                            confirmedToDelete.end(),
+                            std::make_move_iterator(std::next(nonEmpties.begin(), currentNonEmpty)),
+                            std::make_move_iterator(nonEmpties.end())
+                        );
+                        enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
+                        return;
+                    }
 
-                if (button && button == ConfirmDialog::Button::None)
-                {
-                    enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
-                    return;
-                }
+                    if (button && button == ConfirmDialog::Button::No)
+                    {
+                        askNonEmptyDirectoryDeletions(
+                            std::move(confirmedToDelete),
+                            std::move(nonEmpties),
+                            std::move(filesAndEmptyDirs),
+                            currentNonEmpty + 1
+                        );
+                        return;
+                    }
 
-                Log::info("User cancelled deletion of non-empty directories.");
-            }}
+                    if (button && button == ConfirmDialog::Button::None)
+                    {
+                        enqueueDeletes(std::move(confirmedToDelete), std::move(filesAndEmptyDirs));
+                        return;
+                    }
+
+                    Log::info("User cancelled deletion of non-empty directories.");
+                }
+            )}
     );
 }
 
@@ -396,22 +400,24 @@ void RemoteSideModel::enqueueDeletes(
         /*insertRefresh*/ true,
         SharedData::OperationMode::Queued,
         /*onBulkComplete*/ {},
-        [this](bool success, std::string const& info)
-        {
-            if (!success)
+        lifetime_.guarded(
+            [this](bool success, std::string const& info)
             {
-                Log::error("Bulk delete failed: {}", info);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("remoteSideModel", "deleteFailed"),
-                    .text = fmt::format(
-                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
-                        language->translate(info)
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
+                if (!success)
+                {
+                    Log::error("Bulk delete failed: {}", info);
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = language->get("remoteSideModel", "deleteFailed"),
+                        .text = fmt::format(
+                            fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
+                            language->translate(info)
+                        ),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                }
             }
-        }
+        )
     );
 }
 
@@ -438,68 +444,78 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::No,
             .listItems = pathList(items),
-            .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
-            {
-                if (!button || button != ConfirmDialog::Button::Yes)
+            .onClose = lifetime_.guarded(
+                [this, items](std::optional<ConfirmDialog::Button> button)
                 {
-                    Log::info("Delete items cancelled");
-                    return;
-                }
-
-                std::vector<Paths::RemotePath> directories;
-                std::vector<Paths::RemotePath> files;
-                for (auto const& item : items)
-                {
-                    // A name like "x/.." or ".." must not turn into another delete target.
-                    auto path = remotePathOf(item);
-                    if (!path)
+                    if (!button || button != ConfirmDialog::Button::Yes)
                     {
-                        Log::error("Refusing to delete '{}': not an item of the current directory.", item.name);
-                        confirmDialog_->open({
-                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = language->get("remoteSideModel", "deleteFailed"),
-                            .text = fmt::format(
-                                fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")),
-                                item.name
-                            ),
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
+                        Log::info("Delete items cancelled");
                         return;
                     }
-                    if (item.type == NuiFileExplorer::Item::Type::Directory)
-                        directories.push_back(*std::move(path));
-                    else
-                        files.push_back(*std::move(path));
-                }
 
-                Log::info("Deleting items");
-                fileEngine_->remove(
-                    std::move(files),
-                    std::move(directories),
-                    [this](bool success, std::string const& info)
+                    std::vector<Paths::RemotePath> directories;
+                    std::vector<Paths::RemotePath> files;
+                    for (auto const& item : items)
                     {
-                        if (!success)
+                        // A name like "x/.." or ".." must not turn into another delete target.
+                        auto path = remotePathOf(item);
+                        if (!path)
                         {
-                            Log::error("Failed to delete files");
+                            Log::error("Refusing to delete '{}': not an item of the current directory.", item.name);
                             confirmDialog_->open({
                                 .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                                 .headerText = language->get("remoteSideModel", "deleteFailed"),
                                 .text = fmt::format(
-                                    fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")), info
+                                    fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")), item.name
                                 ),
                                 .buttons = ConfirmDialog::Button::Ok,
                             });
                             return;
                         }
-                        // Refresh list from server:
-                        onRefresh();
-                    },
-                    [this](std::vector<Paths::RemotePath> filesAndEmptyDirs, std::vector<Paths::RemotePath> nonEmpties)
-                    {
-                        askNonEmptyDirectoryDeletions({}, std::move(nonEmpties), std::move(filesAndEmptyDirs), 0);
+                        if (item.type == NuiFileExplorer::Item::Type::Directory)
+                            directories.push_back(*std::move(path));
+                        else
+                            files.push_back(*std::move(path));
                     }
-                );
-            }}
+
+                    Log::info("Deleting items");
+                    fileEngine_->remove(
+                        std::move(files),
+                        std::move(directories),
+                        lifetime_.guarded(
+                            [this](bool success, std::string const& info)
+                            {
+                                if (!success)
+                                {
+                                    Log::error("Failed to delete files");
+                                    confirmDialog_->open({
+                                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                        .headerText = language->get("remoteSideModel", "deleteFailed"),
+                                        .text = fmt::format(
+                                            fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")), info
+                                        ),
+                                        .buttons = ConfirmDialog::Button::Ok,
+                                    });
+                                    return;
+                                }
+                                // Refresh list from server:
+                                onRefresh();
+                            }
+                        ),
+                        lifetime_.guarded(
+                            [this](
+                                std::vector<Paths::RemotePath> filesAndEmptyDirs,
+                                std::vector<Paths::RemotePath> nonEmpties
+                            )
+                            {
+                                askNonEmptyDirectoryDeletions(
+                                    {}, std::move(nonEmpties), std::move(filesAndEmptyDirs), 0
+                                );
+                            }
+                        )
+                    );
+                }
+            )}
     );
 }
 
@@ -513,23 +529,25 @@ void RemoteSideModel::enqueueSingleDownload(
         entry.source,
         entry.destination,
         entry.sizeBytes,
-        [this](std::optional<Ids::OperationId> const& opId, std::string const& info)
-        {
-            if (!opId)
+        lifetime_.guarded(
+            [this](std::optional<Ids::OperationId> const& opId, std::string const& info)
             {
-                Log::error("Failed to create download operation: {}", info);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("remoteSideModel", "downloadFailed"),
-                    .text = fmt::format(
-                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
+                if (!opId)
+                {
+                    Log::error("Failed to create download operation: {}", info);
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = language->get("remoteSideModel", "downloadFailed"),
+                        .text = fmt::format(
+                            fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
+                        ),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
+                Log::info("Download operation created with id: {}", opId->value());
             }
-            Log::info("Download operation created with id: {}", opId->value());
-        },
+        ),
         allowOverwrite,
         insertRefresh
     );
@@ -688,57 +706,64 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
-        .onConfirm =
+        .onConfirm = lifetime_.guarded(
             [this, roots = std::move(roots)](std::optional<ArchiveTransferResult> const& result) mutable
-        {
-            if (!result)
             {
-                Log::info("Download as Archive: user cancelled");
-                return;
-            }
-            if (!localModel_)
-                return;
-
-            const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
-            auto archivePath = localModel_->currentLocalPath().and_then(
-                [&filename](Paths::LocalPath const& directory)
+                if (!result)
                 {
-                    return Paths::LocalPathSegment::make(filename).transform(
-                        [&directory](Paths::LocalPathSegment const& segment)
-                        {
-                            return directory / segment;
-                        }
-                    );
+                    Log::info("Download as Archive: user cancelled");
+                    return;
                 }
-            );
-            if (!archivePath)
-                return showPathRefused(language->get("remoteSideModel", "archiveDownloadFailed"), archivePath.error());
-            const auto localPath = *std::move(archivePath);
+                if (!localModel_)
+                    return;
 
-            operationQueue_->enqueueArchiveDownload(
-                std::move(roots),
-                localPath,
-                backendCompressionCode(result->codec),
-                result->compressionLevel,
-                /*mayOverwrite=*/false,
-                SharedData::OperationMode::Queued,
-                [this, localPath](std::optional<Ids::OperationId> const& opId, std::string const& info)
-                {
-                    if (!opId)
+                const auto filename = fmt::format("{}.tar{}", result->fileStem, archiveCodecExtension(result->codec));
+                auto archivePath = localModel_->currentLocalPath().and_then(
+                    [&filename](Paths::LocalPath const& directory)
                     {
-                        Log::error("Archive download failed to enqueue: {}", info);
-                        confirmDialog_->open({
-                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = language->get("remoteSideModel", "archiveDownloadFailed"),
-                            .text = info,
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
-                        return;
+                        return Paths::LocalPathSegment::make(filename).transform(
+                            [&directory](Paths::LocalPathSegment const& segment)
+                            {
+                                return directory / segment;
+                            }
+                        );
                     }
-                    Log::info("Archive download queued as {} (destination {})", opId->value(), localPath.toUtf8());
-                }
-            );
-        },
+                );
+                if (!archivePath)
+                    return showPathRefused(
+                        language->get("remoteSideModel", "archiveDownloadFailed"), archivePath.error()
+                    );
+                const auto localPath = *std::move(archivePath);
+
+                operationQueue_->enqueueArchiveDownload(
+                    std::move(roots),
+                    localPath,
+                    backendCompressionCode(result->codec),
+                    result->compressionLevel,
+                    /*mayOverwrite=*/false,
+                    SharedData::OperationMode::Queued,
+                    lifetime_.guarded(
+                        [this, localPath](std::optional<Ids::OperationId> const& opId, std::string const& info)
+                        {
+                            if (!opId)
+                            {
+                                Log::error("Archive download failed to enqueue: {}", info);
+                                confirmDialog_->open({
+                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                    .headerText = language->get("remoteSideModel", "archiveDownloadFailed"),
+                                    .text = info,
+                                    .buttons = ConfirmDialog::Button::Ok,
+                                });
+                                return;
+                            }
+                            Log::info(
+                                "Archive download queued as {} (destination {})", opId->value(), localPath.toUtf8()
+                            );
+                        }
+                    )
+                );
+            }
+        ),
     });
 }
 
@@ -821,14 +846,24 @@ void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool 
         lifetime_.guarded(
             [this, item, openWith, watch](Nui::val response)
             {
-                Log::error("FileTracking: createInstance failed");
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("fileTrackingPanel", "instanceCreationFailed"),
-                    .text = language->get("fileTrackingPanel", "instanceCreationFailedDesc"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
+                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                {
+                    Log::error("FileTracking: createInstance failed");
+                    confirmDialog_->open({
+                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                        .headerText = language->get("fileTrackingPanel", "instanceCreationFailed"),
+                        .text = language->get("fileTrackingPanel", "instanceCreationFailedDesc"),
+                        .buttons = ConfirmDialog::Button::Ok,
+                    });
+                    return;
+                }
+                onFileTrackingInstanceCreated(
+                    item,
+                    openWith,
+                    watch,
+                    Ids::makeInstanceId(response["instanceId"].as<std::string>()),
+                    response["instanceDir"].as<std::string>()
+                );
             }
         )
     );
@@ -870,31 +905,37 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
         *remotePath,
         *localPath,
         item.size,
-        [this,
-            instanceId,
-            instanceDirectory = *instanceDirectory,
-            remotePath = *remotePath,
-            localPath = *localPath,
-            openWith,
-            synchronize](
-            std::optional<Ids::OperationId> const& opId, std::string const& info
-        )
-        {
-            if (!opId)
+        lifetime_.guarded(
+            [this,
+                instanceId,
+                instanceDirectory = *instanceDirectory,
+                remotePath = *remotePath,
+                localPath = *localPath,
+                openWith,
+                synchronize](std::optional<Ids::OperationId> const& opId, std::string const& info)
             {
-                Log::error("FileTracking: failed to enqueue download for instance {}: {}", instanceId.value(), info);
-                return;
-            }
-            operationQueue_->addCompletionCallback(
-                *opId,
-                [this, instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize](bool success)
+                if (!opId)
                 {
-                    onFileDownloadComplete(
-                        instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize, success
+                    Log::error(
+                        "FileTracking: failed to enqueue download for instance {}: {}", instanceId.value(), info
                     );
+                    return;
                 }
-            );
-        },
+                operationQueue_->addCompletionCallback(
+                    *opId,
+                    lifetime_.guarded(
+                        [this, instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize](
+                            bool success
+                        )
+                        {
+                            onFileDownloadComplete(
+                                instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize, success
+                            );
+                        }
+                    )
+                );
+            }
+        ),
         false, // allowOverwrite
         false, // insertRefresh
         false, // createMissingDirectories
@@ -922,22 +963,26 @@ void RemoteSideModel::onFileDownloadComplete(
     if (!synchronize)
     {
         Log::info("FileTracking: opening {} (openWith={}, no sync)", localPath.toUtf8(), openWith);
-        FileExplorer::openLocalFile(*confirmDialog_, localPath, openWith);
+        FileExplorer::openLocalFile(
+            lifetime_, *confirmDialog_, localPath, openWith, discardWhenDeclined(instanceId, localPath)
+        );
         return;
     }
 
     Nui::RpcClient::callWithBackChannel(
         "FileTracking::addWatch",
-        [this, instanceId, instanceDirectory, remotePath, localPath, openWith](Nui::val watchResponse)
-        {
-            if (!watchResponse.hasOwnProperty("success") || !watchResponse["success"].as<bool>())
+        lifetime_.guarded(
+            [this, instanceId, instanceDirectory, remotePath, localPath, openWith](Nui::val watchResponse)
             {
-                Log::error("FileTracking: addWatch failed for instance {}", instanceId.value());
-                return;
+                if (!watchResponse.hasOwnProperty("success") || !watchResponse["success"].as<bool>())
+                {
+                    Log::error("FileTracking: addWatch failed for instance {}", instanceId.value());
+                    return;
+                }
+                Log::info("FileTracking: addWatch succeeded for instance {}", instanceId.value());
+                onFileWatchAdded(instanceId, instanceDirectory, remotePath, localPath, openWith);
             }
-            Log::info("FileTracking: addWatch succeeded for instance {}", instanceId.value());
-            onFileWatchAdded(instanceId, instanceDirectory, remotePath, localPath, openWith);
-        },
+        ),
         instanceId.value(),
         instanceDirectory.toUtf8(),
         true,
@@ -957,7 +1002,19 @@ void RemoteSideModel::onFileWatchAdded(
 
     Log::info("FileTracking: opening {} (openWith={})", localPath.toUtf8(), openWith);
 
-    FileExplorer::openLocalFile(*confirmDialog_, localPath, openWith);
+    FileExplorer::openLocalFile(
+        lifetime_, *confirmDialog_, localPath, openWith, discardWhenDeclined(instanceId, localPath)
+    );
+}
+
+std::function<void()>
+RemoteSideModel::discardWhenDeclined(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
+{
+    return [this, instanceId, localPath]()
+    {
+        if (fileTracking_ != nullptr)
+            fileTracking_->discard(instanceId, localPath);
+    };
 }
 
 // --- IPlacesProvider ---
@@ -984,29 +1041,31 @@ void RemoteSideModel::requestDefaultPlaces(std::function<void(std::vector<PlaceE
 
     fileEngine_->userDirectories(
         remoteHome_,
-        [this, home = remoteHome_](
-            std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const& directories,
-            std::string const&
-        )
-        {
-            if (home != remoteHome_)
-                return retryPlacesRequests();
-            if (!directories || directories->empty())
-                return placesFromHomeListing();
-
-            remotePlaces_.emplace();
-            for (auto const& place : Utility::defaultPlaces)
+        lifetime_.guarded(
+            [this, home = remoteHome_](
+                std::optional<std::vector<std::pair<std::string, std::filesystem::path>>> const& directories,
+                std::string const&
+            )
             {
-                if (place.userDirectoryName.empty())
-                    continue;
-                const auto directory = std::ranges::find(
-                    *directories, place.userDirectoryName, &std::pair<std::string, std::filesystem::path>::first
-                );
-                if (directory != directories->end())
-                    remotePlaces_->emplace_back(std::string{place.kind}, directory->second);
+                if (home != remoteHome_)
+                    return retryPlacesRequests();
+                if (!directories || directories->empty())
+                    return placesFromHomeListing();
+
+                remotePlaces_.emplace();
+                for (auto const& place : Utility::defaultPlaces)
+                {
+                    if (place.userDirectoryName.empty())
+                        continue;
+                    const auto directory = std::ranges::find(
+                        *directories, place.userDirectoryName, &std::pair<std::string, std::filesystem::path>::first
+                    );
+                    if (directory != directories->end())
+                        remotePlaces_->emplace_back(std::string{place.kind}, directory->second);
+                }
+                finishPlacesRequests();
             }
-            finishPlacesRequests();
-        }
+        )
     );
 }
 
@@ -1014,35 +1073,37 @@ void RemoteSideModel::placesFromHomeListing()
 {
     fileEngine_->listDirectory(
         remoteHome_,
-        [this, home = remoteHome_](
-            std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
-        )
-        {
-            if (home != remoteHome_)
-                return retryPlacesRequests();
-            if (!entries)
+        lifetime_.guarded(
+            [this, home = remoteHome_](
+                std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
+            )
             {
-                Log::warn("Failed to list the remote home directory for the default places: {}", info);
-                return finishPlacesRequests();
-            }
+                if (home != remoteHome_)
+                    return retryPlacesRequests();
+                if (!entries)
+                {
+                    Log::warn("Failed to list the remote home directory for the default places: {}", info);
+                    return finishPlacesRequests();
+                }
 
-            remotePlaces_.emplace();
-            for (auto const& place : Utility::defaultPlaces)
-            {
-                const auto exists = std::ranges::any_of(
-                    *entries,
-                    [&place](SharedData::DirectoryEntry const& entry)
-                    {
-                        const bool isDirectory = entry.isDirectory() ||
-                            (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
-                        return isDirectory && entry.name == place.directoryName;
-                    }
-                );
-                if (exists)
-                    remotePlaces_->emplace_back(std::string{place.kind}, remoteHome_ / place.directoryName);
+                remotePlaces_.emplace();
+                for (auto const& place : Utility::defaultPlaces)
+                {
+                    const auto exists = std::ranges::any_of(
+                        *entries,
+                        [&place](SharedData::DirectoryEntry const& entry)
+                        {
+                            const bool isDirectory = entry.isDirectory() ||
+                                (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
+                            return isDirectory && entry.name == place.directoryName;
+                        }
+                    );
+                    if (exists)
+                        remotePlaces_->emplace_back(std::string{place.kind}, remoteHome_ / place.directoryName);
+                }
+                finishPlacesRequests();
             }
-            finishPlacesRequests();
-        }
+        )
     );
 }
 

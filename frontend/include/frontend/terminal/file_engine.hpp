@@ -12,6 +12,7 @@
 #include <shared_data/sync/sync_execution.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
+#include <utility/lifetime_token.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 #include <nui/utility/move_detector.hpp>
 
@@ -326,4 +327,6 @@ class FileEngine
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
     Nui::MoveDetector moveDetector_;
+    /** @brief Drops the reply of the channel creation when this engine is gone. */
+    Utility::LifetimeToken lifetime_{};
 };

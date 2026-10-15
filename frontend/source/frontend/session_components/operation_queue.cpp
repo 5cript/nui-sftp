@@ -420,20 +420,22 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
     {
         Nui::RpcClient::callWithBackChannel(
             cancelName,
-            [this, operationId](SharedData::ErrorOrSuccess<> const& result)
-            {
-                if (!result)
+            lifetime_.guarded(
+                [this, operationId](SharedData::ErrorOrSuccess<> const& result)
                 {
-                    return Log::error(
-                        "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
-                    );
-                }
+                    if (!result)
+                    {
+                        return Log::error(
+                            "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
+                        );
+                    }
 
-                auto* operation = impl_->findOperation(operationId);
-                if (operation)
-                    operation->state(SharedData::OperationState::Canceled);
-                Nui::globalEventContext.executeActiveEventsImmediately();
-            },
+                    auto* operation = impl_->findOperation(operationId);
+                    if (operation)
+                        operation->state(SharedData::OperationState::Canceled);
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+            ),
             operationId
         );
     };
@@ -444,11 +446,13 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
             .headerText = language->get("operationQueue", "cancelOperationHeader"),
             .text = language->get("operationQueue", "cancelOperationText"),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .onClose = [doCancel](std::optional<ConfirmDialog::Button> optButton)
-            {
-                if (optButton && *optButton == ConfirmDialog::Button::Yes)
-                    doCancel();
-            },
+            .onClose = lifetime_.guarded(
+                [doCancel](std::optional<ConfirmDialog::Button> optButton)
+                {
+                    if (optButton && *optButton == ConfirmDialog::Button::Yes)
+                        doCancel();
+                }
+            ),
         });
     }
     else
@@ -653,10 +657,12 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::isPaused", impl_->sessionId.value()),
-        [this](SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
-        {
-            onIsPaused(result);
-        }
+        lifetime_.guarded(
+            [this](SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
+            {
+                onIsPaused(result);
+            }
+        )
     );
 }
 
@@ -1486,14 +1492,16 @@ void OperationQueue::unpause()
         return;
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
-        [this](SharedData::ErrorOrSuccess<> const& result)
-        {
-            if (result)
+        lifetime_.guarded(
+            [this](SharedData::ErrorOrSuccess<> const& result)
             {
-                impl_->paused = false;
-                Nui::globalEventContext.executeActiveEventsImmediately();
+                if (result)
+                {
+                    impl_->paused = false;
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
             }
-        },
+        ),
         false
     );
 }
@@ -1541,21 +1549,23 @@ void OperationQueue::openSyncSession(
         respectIgnoreFiles,
         recursive,
         ignoreHidden,
-        [this, syncSessionId, remoteScanId, localScanId](bool success, std::string const& info)
-        {
-            if (success)
-                return;
-            Log::error(
-                "Failed to open sync session (remoteId={}, localId={}): {}",
-                remoteScanId.value(),
-                localScanId.value(),
-                info
-            );
-            // No scan runs, so neither phase would ever report back.
-            const auto routingIt = impl_->syncSessionRouting.find(syncSessionId.value());
-            if (routingIt != impl_->syncSessionRouting.end() && routingIt->second.onScanFailed)
-                routingIt->second.onScanFailed(info);
-        }
+        lifetime_.guarded(
+            [this, syncSessionId, remoteScanId, localScanId](bool success, std::string const& info)
+            {
+                if (success)
+                    return;
+                Log::error(
+                    "Failed to open sync session (remoteId={}, localId={}): {}",
+                    remoteScanId.value(),
+                    localScanId.value(),
+                    info
+                );
+                // No scan runs, so neither phase would ever report back.
+                const auto routingIt = impl_->syncSessionRouting.find(syncSessionId.value());
+                if (routingIt != impl_->syncSessionRouting.end() && routingIt->second.onScanFailed)
+                    routingIt->second.onScanFailed(info);
+            }
+        )
     );
 }
 
@@ -1720,21 +1730,23 @@ void OperationQueue::togglePause()
 {
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::pauseUnpause", impl_->sessionId.value()),
-        [this, requestToPauseUnpauseWas = !impl_->paused.value()](SharedData::ErrorOrSuccess<> const& result)
-        {
-            if (result)
+        lifetime_.guarded(
+            [this, requestToPauseUnpauseWas = !impl_->paused.value()](SharedData::ErrorOrSuccess<> const& result)
             {
-                Log::info("{} operation queue successfully", requestToPauseUnpauseWas ? "Paused" : "Unpaused");
-                impl_->paused = !impl_->paused.value();
-                Nui::globalEventContext.executeActiveEventsImmediately();
+                if (result)
+                {
+                    Log::info("{} operation queue successfully", requestToPauseUnpauseWas ? "Paused" : "Unpaused");
+                    impl_->paused = !impl_->paused.value();
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+                else
+                    Log::error(
+                        "Failed to {} operation queue: {}",
+                        requestToPauseUnpauseWas ? "pause" : "unpause",
+                        result.error.value()
+                    );
             }
-            else
-                Log::error(
-                    "Failed to {} operation queue: {}",
-                    requestToPauseUnpauseWas ? "pause" : "unpause",
-                    result.error.value()
-                );
-        },
+        ),
         !impl_->paused.value()
     );
 }
@@ -1748,17 +1760,19 @@ void OperationQueue::askBackendToCancelAll()
     }
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
-        [this](SharedData::ErrorOrSuccess<> const& result)
-        {
-            if (result)
+        lifetime_.guarded(
+            [this](SharedData::ErrorOrSuccess<> const& result)
             {
-                Log::info("Operation queue all was canceled");
-                cancelAll();
-                Nui::globalEventContext.executeActiveEventsImmediately();
+                if (result)
+                {
+                    Log::info("Operation queue all was canceled");
+                    cancelAll();
+                    Nui::globalEventContext.executeActiveEventsImmediately();
+                }
+                else
+                    Log::error("Failed to cancel all operation queue: {}", result.error.value());
             }
-            else
-                Log::error("Failed to cancel all operation queue: {}", result.error.value());
-        }
+        )
     );
 }
 
@@ -1788,31 +1802,36 @@ void OperationQueue::changeAutoClean(bool doClean)
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
-        [this, name = *impl_->persistenceSessionName](bool success, Persistence::State const&)
-        {
-            if (!success)
-                return;
+        lifetime_.guarded(
+            [this, name = *impl_->persistenceSessionName](bool success, Persistence::State const&)
+            {
+                if (!success)
+                    return;
 
-            auto iter = impl_->stateHolder->stateCache().sessions.find(name);
-            if (iter == impl_->stateHolder->stateCache().sessions.end())
-                return;
-            iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
-            iter->second.queueOptions->liveQueuePageSize = impl_->liveQueuePageSize;
-            impl_->stateHolder->save(
-                [this](std::optional<std::string> const& error)
-                {
-                    if (error)
+                auto iter = impl_->stateHolder->stateCache().sessions.find(name);
+                if (iter == impl_->stateHolder->stateCache().sessions.end())
+                    return;
+                iter->second.queueOptions->autoRemoveCompletedOperations = impl_->autoClean->value();
+                iter->second.queueOptions->liveQueuePageSize = impl_->liveQueuePageSize;
+                impl_->stateHolder->save(lifetime_.guarded(
+                    [this](std::optional<std::string> const& error)
                     {
-                        impl_->confirmDialog->open({
-                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = language->get("persistence", "errorSavingState"),
-                            .text = fmt::format(fmt::runtime(language->get("persistence", "saveFailed")), language->translate(*error)),
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
+                        if (error)
+                        {
+                            impl_->confirmDialog->open({
+                                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                                .headerText = language->get("persistence", "errorSavingState"),
+                                .text = fmt::format(
+                                    fmt::runtime(language->get("persistence", "saveFailed")),
+                                    language->translate(*error)
+                                ),
+                                .buttons = ConfirmDialog::Button::Ok,
+                            });
+                        }
                     }
-                }
-            );
-        }
+                ));
+            }
+        )
     );
 }
 
