@@ -1,5 +1,4 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
-#include <paths/native.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
 #include <utility/permissions.hpp>

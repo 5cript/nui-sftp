@@ -2,7 +2,6 @@
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <backend/rpc_path_parameters.hpp>
-#include <paths/native.hpp>
 #include <utility/localized_message.hpp>
 #include <backend/existence_check.hpp>
 

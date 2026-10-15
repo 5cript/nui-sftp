@@ -3,7 +3,6 @@
 #include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/common_parent.hpp>
-#include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>

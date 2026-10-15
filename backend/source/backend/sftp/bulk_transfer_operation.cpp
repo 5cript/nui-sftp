@@ -1,5 +1,4 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
-#include <paths/native.hpp>
 #include <log/log.hpp>
 #include <utility/directory_traversal.hpp>
 

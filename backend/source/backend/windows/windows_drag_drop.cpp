@@ -2,7 +2,6 @@
 #include <backend/windows/windows_drag_drop.hpp>
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
-#include <paths/native.hpp>
 #include <backend/windows/cotask_mem_string.hpp>
 #include <backend/dropped_entry.hpp>
 #include <shared_data/directory_entry.hpp>

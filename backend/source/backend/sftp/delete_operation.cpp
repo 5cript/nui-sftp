@@ -1,6 +1,5 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/delete_operation.hpp>
-#include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
 
