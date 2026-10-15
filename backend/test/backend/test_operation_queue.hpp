@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/local_delete_guard.hpp>
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/operation_queue.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
 #include "nui_env.hpp"
@@ -12,6 +13,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <future>
@@ -20,6 +22,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #ifndef _WIN32
@@ -129,6 +132,44 @@ namespace Test
         {
             std::scoped_lock lock{completionsMutex_};
             return completions_;
+        }
+
+        /**
+         * @brief What is at @p path on the server now, as a compare that ran right now would have seen it.
+         */
+        static SharedData::ComparedState remoteStateNow(SecureShell::SftpSession& sftp, std::string const& path)
+        {
+            auto future = sftp.performPromise(
+                [&sftp, path = remote(path)]()
+                {
+                    return ComparedStateCheck::remoteStateOfInStrand(sftp, path);
+                }
+            );
+            return future.get().value();
+        }
+
+        /**
+         * @brief The resolved plan entry @p relKey of @p session, which the compare saw as what is at its target now.
+         */
+        static SyncSession::ResolvedPlanEntry plannedNow(
+            SyncSession const& session,
+            SecureShell::SftpSession& sftp,
+            std::string relKey,
+            SharedData::Sync::Action action,
+            bool isDirectory,
+            std::uint64_t size = 0
+        )
+        {
+            using SharedData::Sync::Action;
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            const bool onLocalSide = action == Action::Download || action == Action::DeleteLocal;
+            auto compared = onLocalSide ? ComparedStateCheck::localStateOf(paths.local.native()).value()
+                                        : remoteStateNow(sftp, paths.remote.value());
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size, .isDirectory = isDirectory},
+                .paths = std::move(paths),
+                .compared = std::move(compared),
+            };
         }
 
         static std::set<std::string> remoteNames(SecureShell::SftpSession& sftp, std::string const& directory)
@@ -1215,13 +1256,9 @@ namespace Test
             context.get_executor()
         };
         using SharedData::Sync::Action;
-        const auto entry = [&session](std::string relKey, Action action, bool isDirectory, std::uint64_t size = 0)
+        const auto entry = [&session, &sftp](std::string relKey, Action action, bool isDirectory, std::uint64_t size = 0)
         {
-            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
-            return SyncSession::ResolvedPlanEntry{
-                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size, .isDirectory = isDirectory},
-                .paths = std::move(paths),
-            };
+            return plannedNow(session, *sftp, std::move(relKey), action, isDirectory, size);
         };
         SyncSession::ResolvedPlan plan{
             .entries =
@@ -1421,6 +1458,147 @@ namespace Test
         EXPECT_EQ(remoteNames(*sftp, "/home/test/emptyDirs/up"), (std::set<std::string>{"deep"}));
     }
 #endif
+
+    TEST_F(OperationQueueTests, SyncLeavesWhatChangedBetweenTheCompareAndItsExecution)
+    {
+        using namespace SharedData::Sync;
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/changing"}}));
+        for (auto const& [name, content] :
+             {std::pair{"edited.txt", "old"}, std::pair{"gone.txt", "gone"}, std::pair{"kept.txt", "kept"}})
+        {
+            ASSERT_TRUE(serverStartResult->command(
+                "createFile", {{"path", fmt::format("/home/test/changing/{}", name)}, {"content", content}}
+            ));
+        }
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "changing";
+        std::filesystem::create_directories(localRoot);
+        std::ofstream{localRoot / "edited.txt"} << "new local content";
+        std::ofstream{localRoot / "up.txt"} << "up";
+        std::ofstream{localRoot / "appears.txt"} << "local";
+
+        // The compare sees both sides as they are now.
+        const auto nodeOf = [](std::string name, SharedData::ComparedState const& state)
+        {
+            return ScanNode{.name = std::move(name), .type = state.type, .size = state.size, .mtime = state.mtime};
+        };
+        const auto treeOf = [&](std::vector<std::string> const& names, auto const& stateOf)
+        {
+            std::vector<ScanNode> children;
+            for (auto const& name : names)
+                children.push_back(nodeOf(name, stateOf(name)));
+            std::ranges::sort(children, {}, &ScanNode::name);
+            return ScanNode{.name = "", .type = SharedData::FileType::Directory, .children = std::move(children)};
+        };
+        const auto localTree = [&]()
+        {
+            return treeOf(
+                {"appears.txt", "edited.txt", "up.txt"},
+                [&](std::string const& name)
+                {
+                    return ComparedStateCheck::localStateOf(localRoot / name).value();
+                }
+            );
+        };
+        const auto remoteTree = [&](std::vector<std::string> const& names)
+        {
+            return treeOf(
+                names,
+                [&](std::string const& name)
+                {
+                    return remoteStateNow(*sftp, fmt::format("/home/test/changing/{}", name));
+                }
+            );
+        };
+
+        boost::asio::io_context context{};
+        SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/changing"),
+            },
+            context.get_executor()
+        };
+        const DiffOptions options{.direction = Direction::Upload, .actionDelete = true};
+        session.setLocalTreeInStrand(localTree());
+        session.setRemoteTreeInStrand(remoteTree({"edited.txt", "gone.txt", "kept.txt"}));
+        const auto summary = session.recomputeDiffInStrand(options, {});
+        EXPECT_EQ(summary.uploads.itemCount, 3u);
+        EXPECT_EQ(summary.deletes.itemCount, 2u);
+
+        const auto planOf = [&](DiffSection section, std::unordered_set<std::string> const& selected)
+        {
+            return session.resolvePlanInStrand(section, selected);
+        };
+        auto uploadPlan = planOf(DiffSection::Upload, {"appears.txt", "edited.txt", "up.txt"});
+        auto deletePlan = planOf(DiffSection::Delete, {"gone.txt", "kept.txt"});
+
+        // Meanwhile on the server: one destination is edited, one appears and one delete target changes.
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/edited.txt"}, {"content", "edited on the server"}}
+        ));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/appears.txt"}, {"content", "remote"}}
+        ));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/kept.txt"}, {"content", "kept and edited"}}
+        ));
+
+        const auto execute = [&](DiffSection section, SyncSession::ResolvedPlan plan)
+        {
+            const SyncExecutionRequest request{
+                .section = section,
+                .uploadId = Ids::generateOperationId(),
+                .downloadId = Ids::generateOperationId(),
+                .remoteDeleteId = Ids::generateOperationId(),
+                .localDeleteId = Ids::generateOperationId(),
+            };
+            return runOnStrand(
+                [&]()
+                {
+                    return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+                }
+            );
+        };
+        const auto uploads = execute(DiffSection::Upload, std::move(uploadPlan));
+        EXPECT_EQ(uploads.uploads.size(), 3u);
+        const auto deletes = execute(DiffSection::Delete, std::move(deletePlan));
+        EXPECT_EQ(deletes.remoteDeletes.size(), 2u);
+
+        setPaused(false);
+        workUntilCompletions(2);
+        std::map<std::string, Operation::ErrorType> failures;
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            for (auto const& [path, error] : completed.failedEntries)
+                failures.emplace(path.substr(path.rfind('/') + 1), error.type);
+        }
+        EXPECT_EQ(
+            failures,
+            (std::map<std::string, Operation::ErrorType>{
+                {"appears.txt", Operation::ErrorType::FileExists},
+                {"edited.txt", Operation::ErrorType::ChangedSinceCompare},
+                {"kept.txt", Operation::ErrorType::ChangedSinceCompare},
+            })
+        );
+        EXPECT_EQ(
+            remoteNames(*sftp, "/home/test/changing"),
+            (std::set<std::string>{"appears.txt", "edited.txt", "kept.txt", "up.txt"})
+        );
+        EXPECT_EQ(remoteStateNow(*sftp, "/home/test/changing/edited.txt").size, std::string{"edited on the server"}.size());
+        EXPECT_EQ(remoteStateNow(*sftp, "/home/test/changing/appears.txt").size, std::string{"remote"}.size());
+
+        // A recompare offers the entries that were left alone again.
+        session.setRemoteTreeInStrand(remoteTree({"appears.txt", "edited.txt", "kept.txt", "up.txt"}));
+        const auto again = session.recomputeDiffInStrand(options, {});
+        EXPECT_EQ(again.uploads.itemCount, 2u);
+        EXPECT_EQ(again.deletes.itemCount, 1u);
+    }
 
     TEST_F(OperationQueueTests, SyncTransfersNonAsciiNames)
     {
