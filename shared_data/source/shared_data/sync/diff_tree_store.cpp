@@ -76,6 +76,20 @@ namespace SharedData::Sync
         return current;
     }
 
+    ComparedState comparedStateAt(ScanNode const& root, std::string_view relKey)
+    {
+        auto const* node = findScanNode(root, relKey);
+        if (!node)
+            return ComparedState{};
+        return ComparedState{
+            .exists = true,
+            .type = node->type,
+            .size = node->size,
+            .mtime = node->mtime,
+            .linkTarget = node->type == FileType::Symlink ? node->linkTarget : std::nullopt,
+        };
+    }
+
     bool actionSourceIsLocal(Action action)
     {
         return action == Action::Upload || action == Action::DeleteLocal;

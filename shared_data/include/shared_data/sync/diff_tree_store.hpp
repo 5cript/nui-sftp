@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
@@ -32,6 +33,12 @@ namespace SharedData::Sync
      * @return nullptr when a segment does not exist.
      */
     ScanNode const* findScanNode(ScanNode const& root, std::string_view relKey);
+
+    /**
+     * @brief What the scan @p root saw at @p relKey: absent when no node is there, else its type, size and
+     *        modification time and the link literal of a symlink.
+     */
+    ComparedState comparedStateAt(ScanNode const& root, std::string_view relKey);
 
     /** @brief True when @p action reads from the local side (upload, local delete). */
     bool actionSourceIsLocal(Action action);
