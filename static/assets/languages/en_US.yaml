@@ -628,7 +628,7 @@ settings:
     cleanEnvironment: "Clean Environment"
     terminalEngineTypeShell: "Local Shell"
     executingSessionOptions:
-      isPtyHelpText: "If enabled, a pseudo-terminal (PTY) device will be created for the local shell session. This is strongly recommended for interactive sessions."
+      isPtyHelpText: "If enabled, a pseudo-terminal (PTY) device will be created for the local shell session. This is strongly recommended for interactive sessions. Without it the shell is connected through pipes, and on Windows it runs in a hidden console. Programs that use the console directly instead of their standard input and output, such as password prompts, then show nothing here and get no input."
       commandHelpText: "The command to execute for the local shell sessions."
       argumentsHelpText: "Optional arguments to pass to the command when starting the local shell session."
       environmentHelpText: "Environment variables to set for the local shell session."
@@ -779,8 +779,8 @@ settings:
 
       doCleanup: "Do Cleanup"
       doCleanupHelpText: "Perform cleanup after failed downloads (Prevents continuation of previously failed downloads)."
-      markAsDownloaded: "Mark as Downloaded"
-      markAsDownloadedHelpText: "Mark downloaded files as coming from the internet, so Windows (Mark of the Web) and macOS (quarantine) warn before running them. On by default."
+      markAsDownloaded: "Mark Downloads as Internet Files"
+      markAsDownloadedHelpText: "Marks downloaded files as coming from the internet, with the Mark of the Web on Windows and the quarantine attribute on macOS. Applies to every download, including synchronized files and files opened from the server. Windows then warns before running a program, Office opens documents in Protected View with macros blocked, and PowerShell's RemoteSigned policy refuses unsigned scripts. macOS checks programs with Gatekeeper before they first run and blocks ones that are not signed and notarized. Has no effect on Linux."
       symlinkHandlingHelpText: "How to handle symbolic links during transfers. 'AsSymlink' will transfer symlinks as symlinks (if supported by the filesystem), 'FollowSymlink' will follow the symlink and transfer the target file or directory, and 'SkipSymlink' will skip transferring symlinks entirely."
       symlinkHandling: "Symlink Handling"
       failFastHelpText: "Fail fast on errors during download operations instead of trying to continue."
@@ -1043,7 +1043,7 @@ settings:
       preventCreateDirectory: "Prevent Create Directory"
       homeOverrideHelpText: "If set, overrides the default home directory path used by the application."
       homeOverride: "Home Directory Override"
-      openRiskyFilesHelpText: "What happens when a file that can run code (a program, script, installer or shortcut) is opened from the file explorer, including files opened from the server."
+      openRiskyFilesHelpText: "What happens when you open a file from the file explorer that can run code, such as a program, script, installer or shortcut. This also applies to files opened from the server and to \"Open With\", so with \"Never\" such a file cannot be opened in an editor either. On Linux a file with execute permission counts only when it is a program or script. Installers and launchers such as .desktop files count by their file type."
       openRiskyFiles: "Opening Files That Can Run Code"
       openRiskyFilesAllow: "Always allow"
       openRiskyFilesWarn: "Ask first"
