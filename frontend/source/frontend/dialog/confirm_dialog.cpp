@@ -20,6 +20,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <functional>
+#include <optional>
+#include <utility>
 
 using namespace std::string_literals;
 namespace Snc = ScriptNuiComponents;
@@ -35,6 +38,8 @@ struct ConfirmDialog::Implementation
     Nui::Observed<bool> showNeverAgain{false};
     Nui::Observed<bool> neverAgainChecked{false};
     std::string currentNeverShowAgainId;
+    /** @brief The onClose of the dialog on screen, empty once it ran. */
+    std::function<void(std::optional<Button>)> pendingOnClose;
 
     Implementation(std::string id, Persistence::StateHolder& stateHolder)
         : id{std::move(id)}
@@ -63,6 +68,10 @@ ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(ConfirmDialog);
 
 void ConfirmDialog::open(OpenOptions const& options)
 {
+    // The dialog on screen is replaced, it closes without a button. Its onClose may open another one.
+    while (impl_->pendingOnClose)
+        std::exchange(impl_->pendingOnClose, {})(std::nullopt);
+
     if (options.neverShowAgainId.has_value())
     {
         auto const& neverShow = impl_->stateHolder->stateCache().uiOptions.neverShowAgainDialogs;
@@ -96,12 +105,18 @@ void ConfirmDialog::open(OpenOptions const& options)
         impl_->table.addRow({fmt::format(fmt::runtime(language->get("confirmDialog", "andMore")), totalRows - shownRows)});
     impl_->text = options.text;
     impl_->dialog->setButtonLabels(localizedButtonLabels());
+    impl_->pendingOnClose = options.onClose;
     impl_->dialog->open(
         {.styleVariant = options.styleVariant,
             .headerText = options.headerText,
             .buttons = options.buttons,
             .initialFocus = options.focusButton,
-            .onClose = options.onClose,
+            .onClose =
+                [implementation = impl_.get()](std::optional<Button> button)
+            {
+                if (auto onClose = std::exchange(implementation->pendingOnClose, {}))
+                    onClose(button);
+            },
             .modal = true,
             .mayCloseWithoutButton = (options.buttons & ScriptNuiComponents::Dialog::Button::Cancel) !=
                 ScriptNuiComponents::Dialog::Button::Unknown}
