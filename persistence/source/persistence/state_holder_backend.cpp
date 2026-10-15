@@ -331,7 +331,7 @@ namespace Persistence
                         CommonTransferOptions{
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
-                            .tryContinue = true,
+                            .tryContinue = defaultTryContinue,
                             .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
@@ -348,7 +348,7 @@ namespace Persistence
                         CommonTransferOptions{
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
-                            .tryContinue = true,
+                            .tryContinue = defaultTryContinue,
                             .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,

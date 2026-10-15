@@ -1094,7 +1094,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     opts.compression = compression;
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;
-    opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(true);
+    opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(
+        Persistence::defaultMarkAsDownloaded
+    );
     opts.createMissingDirectories = true;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](

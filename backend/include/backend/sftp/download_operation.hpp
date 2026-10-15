@@ -33,7 +33,7 @@ class DownloadOperation : public Operation
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
         bool reserveSpace{false};
-        bool tryContinue{false};
+        bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
         bool doCleanup{true};
         bool bigFileOptimized{false};
@@ -48,7 +48,7 @@ class DownloadOperation : public Operation
          */
         bool createMissingDirectories{false};
         /** @brief Mark the file as downloaded from the internet, see Utility::markAsDownloaded. */
-        bool markAsDownloaded{true};
+        bool markAsDownloaded{Persistence::defaultMarkAsDownloaded};
         /**
          * @brief When set, a local path running through a symlink or junction below this directory is refused, so
          *        a link planted inside a downloaded tree cannot redirect the download out of it.

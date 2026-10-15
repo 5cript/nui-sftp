@@ -30,7 +30,7 @@ class UploadOperation : public Operation
         Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
-        bool tryContinue{false};
+        bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};

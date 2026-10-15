@@ -51,6 +51,16 @@ namespace Persistence
      */
     inline constexpr bool defaultInheritPermissions = true;
 
+    /**
+     * @brief Whether a transfer continues a partial temp file of an earlier attempt when tryContinue is not set.
+     */
+    inline constexpr bool defaultTryContinue = true;
+
+    /**
+     * @brief Whether a download marks its file as downloaded from the internet when markAsDownloaded is not set.
+     */
+    inline constexpr bool defaultMarkAsDownloaded = true;
+
     struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};
