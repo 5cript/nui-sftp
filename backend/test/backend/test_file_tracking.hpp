@@ -1,5 +1,6 @@
 #pragma once
 
+#include <backend/file_tracking/instance_bookkeeping.hpp>
 #include <backend/file_tracking/instance_lock.hpp>
 #include <backend/file_tracking/instance_watch.hpp>
 #include <backend/file_tracking/temp_dir_instancing.hpp>
@@ -17,6 +18,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -49,7 +51,63 @@ namespace Test
     }
 
     /**
-     * @brief Simulate the on-disk remnants of a dead TemporaryDirectoryInstance.
+     * @brief Reads a JSON file, an empty json when it cannot be read.
+     */
+    inline nlohmann::json readJson(fs::path const& path)
+    {
+        std::ifstream input{path};
+        return nlohmann::json::parse(input, nullptr, false);
+    }
+
+    /**
+     * @brief The content of a text file.
+     */
+    inline std::string readText(fs::path const& path)
+    {
+        std::ifstream input{path};
+        return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    }
+
+    /**
+     * @brief Writes a metadata file with the given @p deadAt (or null if absent).
+     */
+    inline void writeTestMetadata(
+        fs::path const& path,
+        std::string const& instanceId,
+        std::optional<std::chrono::system_clock::time_point> deadAt
+    )
+    {
+        nlohmann::json meta = {
+            {"instanceId", instanceId},
+            {"createdAt", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
+            {"deadAt", nullptr},
+        };
+        if (deadAt)
+            meta["deadAt"] = std::chrono::system_clock::to_time_t(*deadAt);
+        std::ofstream{path} << meta.dump(4);
+    }
+
+    /**
+     * @brief Simulate the on-disk remnants of a dead TemporaryDirectoryInstance of this build.
+     *
+     * Creates @p root / @p instanceId / with an unowned lock file and a metadata file in the bookkeeping
+     * directory, see bookkeepingPaths().
+     */
+    inline void makeDeadBookkeepingInstanceDir(
+        fs::path const& root,
+        std::string const& instanceId,
+        std::optional<std::chrono::system_clock::time_point> deadAt = std::nullopt
+    )
+    {
+        const auto paths = bookkeepingPaths(root / instanceId);
+        fs::create_directories(paths.lock.parent_path());
+        std::ofstream{paths.lock}.flush();
+        writeTestMetadata(paths.metadata, instanceId, deadAt);
+    }
+
+    /**
+     * @brief Simulate the on-disk remnants of a dead TemporaryDirectoryInstance of a build without the bookkeeping
+     *        directory.
      *
      * Creates @p root / @p instanceId / with:
      *  - @c \<instanceId\>.lock — an unowned plain file (isLockedByAnother returns false)
@@ -70,17 +128,7 @@ namespace Test
 
         // Lock file exists but is not held by any process
         std::ofstream{dir / (instanceId + ".lock")}.flush();
-
-        nlohmann::json meta = {
-            {"instanceId", instanceId},
-            {"createdAt", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
-            {"deadAt", nullptr},
-        };
-        if (deadAt)
-            meta["deadAt"] = std::chrono::system_clock::to_time_t(*deadAt);
-
-        std::ofstream metaOut{dir / "metadata.json"};
-        metaOut << meta.dump(4);
+        writeTestMetadata(dir / "metadata.json", instanceId, deadAt);
     }
 
     // =========================================================================
@@ -284,17 +332,42 @@ namespace Test
         EXPECT_FALSE(inst->instanceId().empty());
     }
 
-    TEST_F(TemporaryDirectoryInstanceTest, LockFileExistsInInstanceDir)
+    TEST_F(TemporaryDirectoryInstanceTest, LockFileExistsInBookkeepingDir)
     {
         auto inst = makeInstance();
-        auto lockPath = inst->instanceDir() / (inst->instanceId() + ".lock");
-        EXPECT_TRUE(fs::exists(lockPath));
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(inst->instanceDir()).lock));
+        EXPECT_FALSE(fs::exists(legacyBookkeepingPaths(inst->instanceDir()).lock));
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, BookkeepingDirIsTheOnlyEntryOfANewInstance)
+    {
+        auto inst = makeInstance();
+        std::vector<fs::path> entries;
+        for (auto const& entry : fs::directory_iterator{inst->instanceDir()})
+            entries.push_back(entry.path().filename());
+        ASSERT_EQ(entries.size(), 1u);
+        EXPECT_EQ(entries.front(), fs::path{bookkeepingDirectoryName});
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, ContentNamedLikeLegacyBookkeepingIsLeftAlone)
+    {
+        fs::path dir;
+        {
+            auto inst = makeInstance();
+            dir = inst->instanceDir();
+            std::ofstream{dir / "metadata.json"} << "tracked content";
+            std::ofstream{dir / (inst->instanceId() + ".lock")} << "tracked lock content";
+        }
+        EXPECT_EQ(readText(dir / "metadata.json"), "tracked content");
+        EXPECT_EQ(readText(dir / (dir.filename().string() + ".lock")), "tracked lock content");
+        const auto meta = readJson(bookkeepingPaths(dir).metadata);
+        EXPECT_FALSE(meta["deadAt"].is_null());
     }
 
     TEST_F(TemporaryDirectoryInstanceTest, LockFileIsHeldDuringLifetime)
     {
         auto inst = makeInstance();
-        auto lockPath = inst->instanceDir() / (inst->instanceId() + ".lock");
+        auto lockPath = bookkeepingPaths(inst->instanceDir()).lock;
         EXPECT_TRUE(InstanceLock::isLockedByAnother(lockPath));
     }
 
@@ -305,7 +378,7 @@ namespace Test
         {
             auto inst = makeInstance();
             dir = inst->instanceDir();
-            lockPath = dir / (inst->instanceId() + ".lock");
+            lockPath = bookkeepingPaths(dir).lock;
             ASSERT_TRUE(InstanceLock::isLockedByAnother(lockPath));
         }
         EXPECT_FALSE(InstanceLock::isLockedByAnother(lockPath));
@@ -315,22 +388,21 @@ namespace Test
     TEST_F(TemporaryDirectoryInstanceTest, MetadataFileCreatedOnConstruction)
     {
         auto inst = makeInstance();
-        EXPECT_TRUE(fs::exists(inst->instanceDir() / "metadata.json"));
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(inst->instanceDir()).metadata));
+        EXPECT_FALSE(fs::exists(inst->instanceDir() / "metadata.json"));
     }
 
     TEST_F(TemporaryDirectoryInstanceTest, MetadataContainsCorrectInstanceId)
     {
         auto inst = makeInstance();
-        std::ifstream fin{inst->instanceDir() / "metadata.json"};
-        auto meta = nlohmann::json::parse(fin);
+        auto meta = readJson(bookkeepingPaths(inst->instanceDir()).metadata);
         EXPECT_EQ(meta.at("instanceId").get<std::string>(), inst->instanceId());
     }
 
     TEST_F(TemporaryDirectoryInstanceTest, MetadataHasCreatedAt)
     {
         auto inst = makeInstance();
-        std::ifstream fin{inst->instanceDir() / "metadata.json"};
-        auto meta = nlohmann::json::parse(fin);
+        auto meta = readJson(bookkeepingPaths(inst->instanceDir()).metadata);
         ASSERT_TRUE(meta.contains("createdAt"));
         EXPECT_FALSE(meta["createdAt"].is_null());
     }
@@ -338,8 +410,7 @@ namespace Test
     TEST_F(TemporaryDirectoryInstanceTest, MetadataHasNullDeadAtInitially)
     {
         auto inst = makeInstance();
-        std::ifstream fin{inst->instanceDir() / "metadata.json"};
-        auto meta = nlohmann::json::parse(fin);
+        auto meta = readJson(bookkeepingPaths(inst->instanceDir()).metadata);
         ASSERT_TRUE(meta.contains("deadAt"));
         EXPECT_TRUE(meta["deadAt"].is_null());
     }
@@ -366,13 +437,12 @@ namespace Test
         fs::path metaPath;
         {
             auto inst = makeInstance();
-            metaPath = inst->instanceDir() / "metadata.json";
+            metaPath = bookkeepingPaths(inst->instanceDir()).metadata;
         }
         ASSERT_TRUE(fs::exists(metaPath));
-        auto const meta = nlohmann::json::parse(std::ifstream{metaPath});
+        auto const meta = readJson(metaPath);
         ASSERT_TRUE(meta.contains("deadAt"));
         EXPECT_FALSE(meta["deadAt"].is_null());
-        fs::remove_all(metaPath.parent_path());
     }
 
     TEST_F(TemporaryDirectoryInstanceTest, CleanupNowDeletesDirectory)
@@ -649,11 +719,11 @@ namespace Test
 
         mgr->manualCleanup();
 
-        auto metaPath = dir / "metadata.json";
+        // Added in the bookkeeping directory, no legacy metadata appears.
+        auto metaPath = bookkeepingPaths(dir).metadata;
         ASSERT_TRUE(fs::exists(metaPath));
-        std::ifstream fin{metaPath};
-        auto meta = nlohmann::json::parse(fin);
-        EXPECT_FALSE(meta["deadAt"].is_null());
+        EXPECT_FALSE(readJson(metaPath)["deadAt"].is_null());
+        EXPECT_FALSE(fs::exists(dir / "metadata.json"));
     }
 
     TEST_F(TempDirInstanceManagerTest, ManualCleanupWritesDeadAtWhenDeadAtIsNull)
@@ -664,9 +734,48 @@ namespace Test
 
         mgr->manualCleanup();
 
-        std::ifstream fin{root_ / deadId / "metadata.json"};
-        auto meta = nlohmann::json::parse(fin);
-        EXPECT_FALSE(meta["deadAt"].is_null());
+        // Migrated by adding the bookkeeping metadata, the legacy file gets the same stamp.
+        const auto added = readJson(bookkeepingPaths(root_ / deadId).metadata);
+        const auto legacy = readJson(root_ / deadId / "metadata.json");
+        EXPECT_FALSE(added["deadAt"].is_null());
+        EXPECT_EQ(added["deadAt"], legacy["deadAt"]);
+        EXPECT_EQ(added["instanceId"], deadId);
+        EXPECT_TRUE(fs::exists(root_ / deadId / (deadId + ".lock")));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ManualCleanupDeletesExpiredBookkeepingInstance)
+    {
+        auto mgr = makeManager(1h);
+        makeDeadBookkeepingInstanceDir(root_, "dead-new-expired", std::chrono::system_clock::now() - 2h);
+        makeDeadBookkeepingInstanceDir(root_, "dead-new-recent", std::chrono::system_clock::now() - 10min);
+
+        mgr->manualCleanup();
+
+        EXPECT_FALSE(fs::exists(root_ / "dead-new-expired"));
+        EXPECT_TRUE(fs::exists(root_ / "dead-new-recent"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ManualCleanupKeepsInstanceWhoseBookkeepingLockIsHeld)
+    {
+        auto mgr = makeManager(0h);
+        makeDeadBookkeepingInstanceDir(root_, "held-elsewhere", std::chrono::system_clock::now() - 2h);
+        InstanceLock heldLock{bookkeepingPaths(root_ / "held-elsewhere").lock};
+
+        mgr->manualCleanup();
+
+        EXPECT_TRUE(fs::exists(root_ / "held-elsewhere"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ManualCleanupKeepsLegacyInstanceWhoseLockIsHeld)
+    {
+        auto mgr = makeManager(0h);
+        makeDeadInstanceDir(root_, "legacy-held", std::chrono::system_clock::now() - 2h);
+        InstanceLock heldLock{root_ / "legacy-held" / "legacy-held.lock"};
+
+        mgr->manualCleanup();
+
+        EXPECT_TRUE(fs::exists(root_ / "legacy-held"));
+        EXPECT_FALSE(fs::exists(root_ / "legacy-held" / fs::path{bookkeepingDirectoryName}));
     }
 
     TEST_F(TempDirInstanceManagerTest, ManualCleanupDeletesExpiredDeadInstance)
