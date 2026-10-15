@@ -247,6 +247,8 @@ nui_prepare_emscripten_target(
     OBSERVED_BUNDLE_FILES
         "${CMAKE_SOURCE_DIR}/static/index.html"
         "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
+        "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background.png"
+        "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background_light.png"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_explorer.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"
