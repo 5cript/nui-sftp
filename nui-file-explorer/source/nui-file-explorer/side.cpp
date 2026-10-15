@@ -650,9 +650,14 @@ namespace NuiFileExplorer
         {
             namespace Snc = ScriptNuiComponents;
 
-            const bool thisSideOk = clickItems.size() == 1 && clickItems[0].isDirectoryLike();
+            // A directory whose name is not valid UTF-8 has no path to synchronize.
+            const auto isSyncRoot = [](std::vector<Item> const& items)
+            {
+                return items.size() == 1 && items[0].isDirectoryLike() && items[0].nameIsValidUtf8;
+            };
+            const bool thisSideOk = isSyncRoot(clickItems);
             const auto otherSelected = impl_->otherSide->selectedItems();
-            const bool otherSideOk = otherSelected.size() == 1 && otherSelected[0].isDirectoryLike();
+            const bool otherSideOk = isSyncRoot(otherSelected);
 
             menuItems.push_back(Snc::PopupMenu::separator());
             if (thisSideOk && otherSideOk)
