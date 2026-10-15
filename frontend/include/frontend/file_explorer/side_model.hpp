@@ -547,12 +547,14 @@ class SideModel
   protected:
 
     /**
-     * @brief The directory has a parent to offer as "..".
+     * @brief The parent of the listed @p directory to offer as "..", nullopt for a root.
      */
-    virtual bool hasParent(std::filesystem::path const& directory) const
-    {
-        return directory.has_relative_path();
-    }
+    virtual std::optional<std::filesystem::path> parentOf(std::filesystem::path const& directory) const = 0;
+
+    /**
+     * @brief Shows the directory of the shown items again after a navigation failed, without listing it again.
+     */
+    void revertNavigation();
 
     /**
      * @brief Shows the listing of @p directory. A reply for a directory the side has navigated away from is dropped,

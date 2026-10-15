@@ -220,6 +220,11 @@ std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::remotePathOf
         );
 }
 
+std::optional<std::filesystem::path> RemoteSideModel::parentOf(std::filesystem::path const& directory) const
+{
+    return FileExplorer::parentOf<Paths::RemotePath>(directory.generic_string());
+}
+
 std::expected<std::string, Paths::PathError> RemoteSideModel::itemPathText(NuiFileExplorer::Item const& item) const
 {
     return remotePathOf(item).transform(
@@ -792,10 +797,10 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
 {
     CHECK_COMPLETE();
 
-    auto lexicallyNormal = path.lexically_normal();
-    Log::info("Navigating to: {}", lexicallyNormal.generic_string());
+    const auto target = FileExplorer::navigationTarget<Paths::RemotePath>(path.generic_string());
+    Log::info("Navigating to: {}", target);
     preNavigatePath_ = currentPath_.value();
-    currentPath_ = lexicallyNormal;
+    currentPath_ = std::filesystem::path{target};
     fileEngine_->listDirectory(
         currentPath_.value(),
         [this, directory = currentPath_.value()](

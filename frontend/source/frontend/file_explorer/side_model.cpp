@@ -226,6 +226,18 @@ const std::vector<NuiFileExplorer::Item>& SideModel::items() const
     return items_;
 }
 
+void SideModel::revertNavigation()
+{
+    if (currentPath_.value() != listedPath_)
+    {
+        currentPath_ = listedPath_;
+        currentPath_.modifyNow();
+    }
+    // Showing the listed items again, sorted and with their selection, also ends the side's loading state.
+    if (refreshCallback_)
+        refreshCallback_(true, true);
+}
+
 void SideModel::onDirectoryListing(
     std::filesystem::path const& directory,
     std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
@@ -251,15 +263,7 @@ void SideModel::onDirectoryListing(
             .text = std::move(text),
             .buttons = ConfirmDialog::Button::Ok,
         });
-        // undo the navigation, an initial navigation has nowhere to go back to:
-        if (preNavigatePath_.empty())
-            currentPath_ = preNavigatePath_;
-        else if (currentPath_.value() != preNavigatePath_)
-        {
-            currentPath_ = preNavigatePath_;
-            navigateTo(currentPath_.value());
-        }
-        return;
+        return revertNavigation();
     }
 
     // Servers send "." and "..", the parent link below stands for the parent instead.
@@ -273,8 +277,8 @@ void SideModel::onDirectoryListing(
     listedPath_ = directory;
 
     std::vector<NuiFileExplorer::Item> items{};
-    if (hasParent(directory))
-        items.push_back(NuiFileExplorer::Item::parentLink(directory.parent_path(), "nui://app.example/icons/folder.svg"));
+    if (auto parent = parentOf(directory); parent)
+        items.push_back(NuiFileExplorer::Item::parentLink(*std::move(parent), "nui://app.example/icons/folder.svg"));
     std::transform(
         begin(*directoryEntries),
         end(*directoryEntries),

@@ -731,68 +731,25 @@ void LocalSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
     });
 }
 
-bool LocalSideModel::hasParent(std::filesystem::path const& directory) const
+std::optional<std::filesystem::path> LocalSideModel::parentOf(std::filesystem::path const& directory) const
 {
-    // A drive root like "C:/" has no parent either.
-    return Paths::LocalPath::fromUtf8(directory.generic_string())
-        .transform(
-            [](Paths::LocalPath const& path)
-            {
-                return !path.isRoot();
-            }
-        )
-        .value_or(false);
+    return FileExplorer::parentOf<Paths::LocalPath>(directory.generic_string());
 }
 
 void LocalSideModel::navigateTo(std::filesystem::path const& path)
 {
-    auto lexicallyNormal = path.lexically_normal();
-    Log::info("Local navigating to: {}", lexicallyNormal.generic_string());
+    const auto target = FileExplorer::navigationTarget<Paths::LocalPath>(path.generic_string());
+    Log::info("Local navigating to: {}", target);
     preNavigatePath_ = currentPath_.value();
-    currentPath_ = lexicallyNormal;
+    currentPath_ = std::filesystem::path{target};
 
     Nui::val args = Nui::val::object();
     args.set("path", currentPath_.value().generic_string());
 
     Nui::RpcClient::callWithBackChannel(
         "RpcFilesystem::listFiles",
-        [this, directory = currentPath_.value()](Nui::val val)
-        {
-            Log::debug("Received directory listing response");
-            if (directory != currentPath_.value())
-            {
-                Log::debug("Dropping the listing of '{}', the side moved on.", directory.generic_string());
-                return;
-            }
-            auto revertNavigation = [this]()
-            {
-                if (currentPath_.value() != preNavigatePath_)
-                {
-                    currentPath_ = preNavigatePath_;
-                    currentPath_.modifyNow();
-                }
-                // Re-render the existing items so the side's loading hint clears even though
-                // no new directory data arrived. updateItems preserves selection across the
-                // refresh, so the user lands back on what they had before the failed nav.
-                if (refreshCallback_)
-                    refreshCallback_(false, true);
-            };
-
-            if (!val.hasOwnProperty("success"))
-            {
-                Log::error("Invalid response from RpcFilesystem::listFiles");
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "failedToListFiles"),
-                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                revertNavigation();
-                return;
-            }
-
-            const auto success = val["success"].as<bool>();
-            if (!success)
+        lifetime_.guarded(
+            [this, directory = currentPath_.value()](Nui::val val)
             {
                 const auto error = language->translate(val["error"].as<std::string>());
                 Log::error("Failed to list files: {}", error);

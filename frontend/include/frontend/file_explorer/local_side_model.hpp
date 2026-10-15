@@ -98,7 +98,7 @@ class LocalSideModel
     std::expected<Paths::LocalPath, Paths::PathError> currentLocalPath() const;
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
-    bool hasParent(std::filesystem::path const& directory) const override;
+    std::optional<std::filesystem::path> parentOf(std::filesystem::path const& directory) const override;
 
     void generatePathBoxSuggestions(
         std::filesystem::path const& path,

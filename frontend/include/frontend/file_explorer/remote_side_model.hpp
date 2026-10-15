@@ -84,6 +84,7 @@ class RemoteSideModel
     }
     void navigateTo(std::filesystem::path const& path) override;
     void setLocalModel(LocalSideModel* model);
+    std::optional<std::filesystem::path> parentOf(std::filesystem::path const& directory) const override;
 
     /**
      * @brief The directory the shown items were listed from, an error before the first listing.
