@@ -77,6 +77,19 @@ void SideModel::confirmReplaceOnRename(std::string const& name, std::function<vo
     });
 }
 
+FileExplorer::OverwriteAnswer SideModel::overwriteAnswerOf(std::optional<ConfirmDialog::Button> button)
+{
+    if (button == ConfirmDialog::Button::Yes)
+        return FileExplorer::OverwriteAnswer::Yes;
+    if (button == ConfirmDialog::Button::No)
+        return FileExplorer::OverwriteAnswer::No;
+    if (button == ConfirmDialog::Button::All)
+        return FileExplorer::OverwriteAnswer::All;
+    if (button == ConfirmDialog::Button::None)
+        return FileExplorer::OverwriteAnswer::None;
+    return FileExplorer::OverwriteAnswer::Cancel;
+}
+
 bool SideModel::isComplete() const
 {
     return operationQueue_ != nullptr && fileEngine_ != nullptr;

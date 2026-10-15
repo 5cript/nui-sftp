@@ -137,16 +137,9 @@ class RemoteSideModel
     std::expected<Paths::RemotePath, Paths::PathError> childOfCurrentPath(std::string_view name) const;
 
     /**
-     * @brief Downloads @p candidates, asking per existing destination whether to overwrite it.
+     * @brief Queues the downloads the user accepted, a single file as a transfer of its own.
      */
-    void downloadItemsConfirmed(
-        std::vector<SharedData::BulkDownloadEntry> candidates,
-        std::shared_ptr<std::vector<bool>> existsResults,
-        std::size_t index = 0,
-        bool overwriteNever = false,
-        bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted = nullptr
-    );
+    void enqueueDownloads(std::vector<SharedData::BulkDownloadEntry> accepted);
 
     void enqueueSingleDownload(SharedData::BulkDownloadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 

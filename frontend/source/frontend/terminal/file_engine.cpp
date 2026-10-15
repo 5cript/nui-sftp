@@ -1,12 +1,54 @@
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/file_explorer/side_paths.hpp>
 #include <log/log.hpp>
 #include <constants/sftp.hpp>
 
 #include <nui/rpc.hpp>
 #include <nui/frontend/api/json.hpp>
 
+#include <emscripten/val.h>
+
+#include <algorithm>
+#include <iterator>
+#include <string_view>
 #include <utility>
+
+namespace
+{
+    template <typename PathT>
+    std::vector<std::string> pathTexts(std::vector<PathT> const& paths)
+    {
+        std::vector<std::string> texts;
+        texts.reserve(paths.size());
+        std::ranges::transform(
+            paths,
+            std::back_inserter(texts),
+            [](PathT const& path)
+            {
+                return FileExplorer::pathText(path);
+            }
+        );
+        return texts;
+    }
+
+    /**
+     * @brief Hands the exists flags of an existsBatch reply to @p onComplete, or no flags and the error.
+     */
+    void replyExistsFlags(
+        Nui::val const& reply,
+        std::string_view function,
+        std::function<void(std::vector<bool> exists, std::string const& info)> const& onComplete
+    )
+    {
+        if (reply.hasOwnProperty("success") && reply["success"].as<bool>() && reply.hasOwnProperty("exists"))
+            return onComplete(emscripten::vecFromJSArray<bool>(reply["exists"]), "Success");
+        const auto error = reply.hasOwnProperty("error") ? reply["error"].as<std::string>()
+                                                         : fmt::format("Malformed {} response", function);
+        Log::error("(Frontend) {} failed: {}", function, error);
+        onComplete({}, error);
+    }
+}
 
 struct FileEngine::Implementation
 {
@@ -1159,15 +1201,10 @@ void FileEngine::existsBatchRemote(
 {
     Log::info("Requesting existsBatch for {} remote paths", paths.size());
 
-    std::vector<std::string> pathStrings;
-    pathStrings.reserve(paths.size());
-    for (auto const& path : paths)
-        pathStrings.push_back(path.value());
-
     lazyOpen(
-        [this,
-            pathStrings = std::move(pathStrings),
-            onComplete = std::move(onComplete)](auto const& channelId, std::string const& info) mutable
+        [this, pathStrings = pathTexts(paths), onComplete = std::move(onComplete)](
+            auto const& channelId, std::string const& info
+        ) mutable
         {
             if (!channelId)
             {
@@ -1180,29 +1217,29 @@ void FileEngine::existsBatchRemote(
                 fmt::format("Session::{}::sftp::existsBatch", impl_->engine->sshSessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
-                    if (val.hasOwnProperty("error"))
-                    {
-                        Log::error("(Frontend) sftp::existsBatch failed: {}", val["error"].as<std::string>());
-                        onComplete({}, val["error"].as<std::string>());
-                        return;
-                    }
-                    if (!val.hasOwnProperty("success") || !val["success"].as<bool>() || !val.hasOwnProperty("exists"))
-                    {
-                        onComplete({}, "Malformed sftp::existsBatch response");
-                        return;
-                    }
-                    auto arr = val["exists"];
-                    const auto length = arr["length"].as<long long>();
-                    std::vector<bool> results;
-                    results.reserve(static_cast<std::size_t>(length));
-                    for (long long idx = 0; idx < length; ++idx)
-                        results.push_back(arr[static_cast<int>(idx)].as<bool>());
-                    onComplete(std::move(results), "Success");
+                    replyExistsFlags(val, "sftp::existsBatch", onComplete);
                 },
                 channelId.value().value(),
                 pathStrings
             );
         }
+    );
+}
+
+void FileEngine::existsBatchLocal(
+    std::vector<Paths::LocalPath> const& paths,
+    std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
+)
+{
+    Log::info("Requesting existsBatch for {} local paths", paths.size());
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::existsBatch",
+        [onComplete = std::move(onComplete)](Nui::val val)
+        {
+            replyExistsFlags(val, "RpcFilesystem::existsBatch", onComplete);
+        },
+        pathTexts(paths)
     );
 }
 

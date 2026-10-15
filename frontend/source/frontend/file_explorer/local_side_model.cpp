@@ -645,93 +645,40 @@ void LocalSideModel::onTransfer(
         showPathRefused(language->get("localSideModel", "transferFailedTitle"), error);
     };
     const auto destinationDirectory = remoteModel_->currentRemotePath().and_then(
-        [&subDir](Paths::RemotePath const& directory) -> std::expected<Paths::RemotePath, Paths::PathError>
+        [&subDir](Paths::RemotePath const& directory)
         {
-            if (!subDir)
-                return directory;
-            return Paths::PathSegment::make(*subDir).transform(
-                [&directory](Paths::PathSegment const& segment)
-                {
-                    return directory / segment;
-                }
-            );
+            return FileExplorer::targetDirectoryOf(directory, subDir);
         }
     );
     if (!destinationDirectory)
         return refuse(destinationDirectory.error());
-
-    std::vector<SharedData::BulkUploadEntry> candidates;
-    candidates.reserve(items.size());
-    for (auto const& item : items)
-    {
-        auto source = localPathOf(item);
-        if (!source)
-            return refuse(source.error());
-        const auto name = source->filename();
-        if (!name)
-            return refuse(Paths::PathError{.reason = Paths::PathRejection::Empty, .input = source->toUtf8()});
-        candidates.push_back(
-            SharedData::BulkUploadEntry{
-                .source = *source,
-                .destination = *destinationDirectory / *name,
-                .sizeBytes = item.size,
-                .isDirectory = item.isDirectory(),
-            }
-        );
-    }
-
-    const auto itemsSize = candidates.size();
-    std::string confirmText = fmt::format(
-        fmt::runtime(
-            language->get("localSideModel", itemsSize > 1 ? "uploadMultipleConfirmText" : "uploadSingleConfirmText")
-        ),
-        itemsSize > 1 ? std::to_string(itemsSize) : std::string{candidates.front().destination.filename()->view()},
-        destinationDirectory->value()
+    auto candidates = transferCandidates<SharedData::BulkUploadEntry>(
+        items,
+        [this](NuiFileExplorer::Item const& item)
+        {
+            return localPathOf(item);
+        },
+        *destinationDirectory
     );
+    if (!candidates)
+        return refuse(candidates.error());
 
-    std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    for (const auto& candidate : candidates)
-        listItems.push_back({candidate.source.toUtf8(), ""});
-
-    confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
+    confirmTransfer<SharedData::BulkUploadEntry>(
+        *std::move(candidates),
+        {
             .headerText = language->get("localSideModel", "uploadConfirmTitle"),
-            .text = confirmText,
-            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::Yes,
-            .listItems = listItems,
-            .onClose = [this, candidates = std::move(candidates)](std::optional<ConfirmDialog::Button> button) mutable
+            .singleText = language->get("localSideModel", "uploadSingleConfirmText"),
+            .multipleText = language->get("localSideModel", "uploadMultipleConfirmText"),
+            .destinationDirectory = destinationDirectory->value(),
+            .overwriteHeaderText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
+            .overwriteText = language->get("localSideModel", "fileAlreadyExistsOverwrite"),
+        },
+        lifetime_.guarded(
+            [this](std::vector<SharedData::BulkUploadEntry> accepted)
             {
-                if (!button || *button != ConfirmDialog::Button::Yes)
-                {
-                    Log::info("Upload items cancelled");
-                    return;
-                }
-
-                Log::info("Uploading items");
-
-                // Batched remote-existence probe, one RPC for the whole batch instead of N per-file SFTP stats.
-                std::vector<Paths::RemotePath> destinations;
-                destinations.reserve(candidates.size());
-                for (auto const& candidate : candidates)
-                    destinations.push_back(candidate.destination);
-
-                fileEngine_->existsBatchRemote(
-                    destinations,
-                    [this,
-                        candidates = std::move(candidates)](std::vector<bool> exists, std::string const& info) mutable
-                    {
-                        // An unknown destination is never taken for absent, the batch overwrites what it accepts.
-                        if (exists.size() != candidates.size())
-                            return showExistenceCheckFailed(
-                                exists.empty() ? info : fmt::format("{} of {} answers", exists.size(), candidates.size())
-                            );
-                        uploadItemsConfirmed(
-                            std::move(candidates), std::make_shared<std::vector<bool>>(std::move(exists))
-                        );
-                    }
-                );
-            }}
+                enqueueUploads(std::move(accepted));
+            }
+        )
     );
 }
 
@@ -1131,198 +1078,31 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
     );
 }
 
-namespace
+void LocalSideModel::enqueueUploads(std::vector<SharedData::BulkUploadEntry> accepted)
 {
-    /**
-     * @brief @p entry with the user's consent to replace its existing destination.
-     */
-    template <typename EntryT>
-    EntryT approvedForOverwrite(EntryT entry)
-    {
-        entry.mayOverwrite = true;
-        return entry;
-    }
-}
-
-void LocalSideModel::uploadItemsConfirmed(
-    std::vector<SharedData::BulkUploadEntry> candidates,
-    std::shared_ptr<std::vector<bool>> existsResults,
-    std::size_t index,
-    bool overwriteNever,
-    bool overwriteAlways,
-    std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted
-)
-{
-    // Mirrors RemoteSideModel::downloadItemsConfirmed — see that for the
-    // shape rationale (iterate sync, recurse only on conflict prompts to
-    // keep WASM stack depth bounded by conflicts not by file count).
-
-    if (!accepted)
-        accepted = std::make_shared<std::vector<SharedData::BulkUploadEntry>>();
-
-    // Only entries the user approved (Yes / All) may replace their destination. The others did not exist when
-    // probed, one that appears before the transfer runs fails instead of being replaced.
-    auto flushAccepted = [this, &accepted]()
-    {
-        if (accepted->empty())
-            return;
-        // Single-file fast path: a one-entry flush skips the bulk machinery
-        // so the operation appears as a regular transfer card (progress bar
-        // + resumable) rather than a bulk aggregate.  Directories stay on
-        // the bulk path because they need the Scan+Bulk pair.
-        if (accepted->size() == 1 && !accepted->front().isDirectory)
-        {
-            enqueueSingleUpload(
-                accepted->front(),
-                /*allowOverwrite=*/accepted->front().mayOverwrite,
-                /*insertRefresh=*/true
-            );
-            accepted->clear();
-            return;
-        }
-        operationQueue_->enqueueBulkUpload(
-            std::move(*accepted),
-            /*allowOverwrite*/ false,
-            /*insertRefresh*/ true,
-            SharedData::OperationMode::Queued,
-            /*onEachComplete*/ {},
+    // One file shows as a single transfer card with progress and resume, directories need the scan of a bulk.
+    if (accepted.size() == 1 && !accepted.front().isDirectory)
+        return enqueueSingleUpload(accepted.front(), accepted.front().mayOverwrite, true);
+    operationQueue_->enqueueBulkUpload(
+        std::move(accepted),
+        /*allowOverwrite*/ false,
+        /*insertRefresh*/ true,
+        SharedData::OperationMode::Queued,
+        /*onEachComplete*/ {},
+        lifetime_.guarded(
             [this](bool success, std::string const& info)
             {
-                if (!success)
-                {
-                    Log::error("Bulk upload failed: {}", info);
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("localSideModel", "uploadFailed"),
-                        .text = info,
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                }
+                if (success)
+                    return;
+                Log::error("Bulk upload failed: {}", info);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("localSideModel", "uploadFailed"),
+                    .text = info,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
             }
-        );
-    };
-
-    if (index == candidates.size())
-    {
-        flushAccepted();
-        return;
-    }
-
-    if (overwriteAlways)
-    {
-        for (; index < candidates.size(); ++index)
-            accepted->push_back(approvedForOverwrite(candidates[index]));
-        flushAccepted();
-        return;
-    }
-
-    while (index < candidates.size())
-    {
-        auto const& candidate = candidates[index];
-        // Without an answer the destination counts as existing, so the user is asked.
-        const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
-
-        if (!exists)
-        {
-            accepted->push_back(candidate);
-            ++index;
-            continue;
-        }
-        if (exists && overwriteNever)
-        {
-            ++index;
-            continue;
-        }
-        break;
-    }
-
-    if (index >= candidates.size())
-    {
-        flushAccepted();
-        return;
-    }
-
-    auto const& candidate = candidates[index];
-    Log::info("Uploading '{}' to '{}'.", candidate.source.toUtf8(), candidate.destination.value());
-
-    confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
-            .text = language->get("localSideModel", "fileAlreadyExistsOverwrite"),
-            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
-                ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
-            .focusButton = ConfirmDialog::Button::No,
-            .listItems = {{.text = candidate.destination.value(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
-            .onClose = [this,
-                           candidates = std::move(candidates),
-                           existsResults,
-                           index,
-                           overwriteNever,
-                           overwriteAlways,
-                           accepted](std::optional<ConfirmDialog::Button> button) mutable
-            {
-                if (button && *button == ConfirmDialog::Button::Yes)
-                {
-                    accepted->push_back(approvedForOverwrite(candidates[index]));
-                    uploadItemsConfirmed(
-                        std::move(candidates),
-                        std::move(existsResults),
-                        index + 1,
-                        overwriteNever,
-                        overwriteAlways,
-                        std::move(accepted)
-                    );
-                }
-                else if (button && *button == ConfirmDialog::Button::No)
-                {
-                    Log::info("Skipping upload of existing file: {}", candidates[index].destination.value());
-                    uploadItemsConfirmed(
-                        std::move(candidates),
-                        std::move(existsResults),
-                        index + 1,
-                        overwriteNever,
-                        overwriteAlways,
-                        std::move(accepted)
-                    );
-                }
-                else if (button && *button == ConfirmDialog::Button::All)
-                {
-                    Log::info("Overwriting all existing files from now on.");
-                    accepted->push_back(approvedForOverwrite(candidates[index]));
-                    uploadItemsConfirmed(
-                        std::move(candidates),
-                        std::move(existsResults),
-                        index + 1,
-                        overwriteNever,
-                        /*overwriteAlways*/ true,
-                        std::move(accepted)
-                    );
-                }
-                else if (button && *button == ConfirmDialog::Button::None)
-                {
-                    Log::info("Skipping all existing files from now on.");
-                    uploadItemsConfirmed(
-                        std::move(candidates),
-                        std::move(existsResults),
-                        index + 1,
-                        /*overwriteNever*/ true,
-                        overwriteAlways,
-                        std::move(accepted)
-                    );
-                }
-                else
-                {
-                    const auto terminalIndex = candidates.size();
-                    uploadItemsConfirmed(
-                        std::move(candidates),
-                        std::move(existsResults),
-                        terminalIndex,
-                        overwriteNever,
-                        overwriteAlways,
-                        std::move(accepted)
-                    );
-                }
-            }}
+        )
     );
 }
 

@@ -279,9 +279,7 @@ class FileEngine
     );
 
     /**
-     * @brief Batched remote-existence probe.  Replaces N per-file `sftp::stat`
-     *        round-trips with a single one — used to gate bulk uploads on
-     *        per-file conflict prompts without the latency cost.
+     * @brief Asks the server in one request which of @p paths exist.
      *
      * @param paths       Remote paths to probe.
      * @param onComplete  Receives a vector<bool> aligned with @p paths.  On
@@ -290,6 +288,16 @@ class FileEngine
      */
     void existsBatchRemote(
         std::vector<Paths::RemotePath> const& paths,
+        std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
+    );
+
+    /**
+     * @brief Asks the backend in one request which of the local @p paths exist, needs no connection.
+     *
+     * @param onComplete Same as for @ref existsBatchRemote.
+     */
+    static void existsBatchLocal(
+        std::vector<Paths::LocalPath> const& paths,
         std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
     );
 

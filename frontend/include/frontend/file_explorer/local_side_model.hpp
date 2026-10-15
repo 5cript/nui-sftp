@@ -140,16 +140,9 @@ class LocalSideModel
     std::expected<Paths::LocalPath, Paths::PathError> localPathOf(NuiFileExplorer::Item const& item) const;
 
     /**
-     * @brief Uploads @p candidates, asking per existing destination whether to overwrite it.
+     * @brief Queues the uploads the user accepted, a single file as a transfer of its own.
      */
-    void uploadItemsConfirmed(
-        std::vector<SharedData::BulkUploadEntry> candidates,
-        std::shared_ptr<std::vector<bool>> existsResults,
-        std::size_t index = 0,
-        bool overwriteNever = false,
-        bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted = nullptr
-    );
+    void enqueueUploads(std::vector<SharedData::BulkUploadEntry> accepted);
 
     void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 

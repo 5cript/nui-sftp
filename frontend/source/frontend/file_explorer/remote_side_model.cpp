@@ -683,225 +683,34 @@ void RemoteSideModel::enqueueSingleDownload(
     );
 }
 
-namespace
+void RemoteSideModel::enqueueDownloads(std::vector<SharedData::BulkDownloadEntry> accepted)
 {
-    /**
-     * @brief @p entry with the user's consent to replace its existing destination.
-     */
-    template <typename EntryT>
-    EntryT approvedForOverwrite(EntryT entry)
-    {
-        entry.mayOverwrite = true;
-        return entry;
-    }
-}
-
-void RemoteSideModel::downloadItemsConfirmed(
-    std::vector<SharedData::BulkDownloadEntry> candidates,
-    std::shared_ptr<std::vector<bool>> existsResults,
-    std::size_t index,
-    bool overwriteNever,
-    bool overwriteAlways,
-    std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted
-)
-{
-    // Lazily allocate the accumulator on the first (top-level) call.  All
-    // recursive calls below thread the same shared_ptr so per-file
-    // confirmations land in one batch that's flushed as a single bulk RPC at
-    // the terminal recursion.
-    if (!accepted)
-        accepted = std::make_shared<std::vector<SharedData::BulkDownloadEntry>>();
-
-    // Only entries the user approved (Yes / All) may replace their destination. The others did not exist when
-    // probed, one that appears before the transfer runs fails instead of being replaced.
-    auto flushAccepted = [this, &accepted]()
-    {
-        if (accepted->empty())
-            return;
-        // Single-file fast path: a one-entry flush skips the bulk machinery
-        // so the operation appears as a regular transfer card (progress bar
-        // + resumable) rather than a bulk aggregate.  Directories stay on
-        // the bulk path because they need the Scan+Bulk pair.
-        if (accepted->size() == 1 && !accepted->front().isDirectory)
-        {
-            enqueueSingleDownload(
-                accepted->front(),
-                /*allowOverwrite=*/accepted->front().mayOverwrite,
-                /*insertRefresh=*/true
-            );
-            accepted->clear();
-            return;
-        }
-        // Terminal: flush the accumulated batch in a single RPC. The backend
-        // skips per-file lstats for file entries (sizes are trusted) and
-        // performs all queueing inside one strand dispatch — replacing N
-        // RPCs with one.
-        operationQueue_->enqueueBulkDownload(
-            std::move(*accepted),
-            /*allowOverwrite*/ false,
-            /*insertRefresh*/ true,
-            SharedData::OperationMode::Queued,
-            /*onEachComplete*/ {},
+    // One file shows as a single transfer card with progress and resume, directories need the scan of a bulk.
+    if (accepted.size() == 1 && !accepted.front().isDirectory)
+        return enqueueSingleDownload(accepted.front(), accepted.front().mayOverwrite, true);
+    operationQueue_->enqueueBulkDownload(
+        std::move(accepted),
+        /*allowOverwrite*/ false,
+        /*insertRefresh*/ true,
+        SharedData::OperationMode::Queued,
+        /*onEachComplete*/ {},
+        lifetime_.guarded(
             [this](bool success, std::string const& info)
             {
-                if (!success)
-                {
-                    Log::error("Bulk download failed: {}", info);
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("remoteSideModel", "downloadFailed"),
-                        .text = fmt::format(
-                            fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
-                        ),
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                }
+                if (success)
+                    return;
+                Log::error("Bulk download failed: {}", info);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("remoteSideModel", "downloadFailed"),
+                    .text = fmt::format(
+                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDownloadOperation")), info
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
             }
-        );
-    };
-
-    if (index == candidates.size())
-    {
-        flushAccepted();
-        return;
-    }
-
-    if (overwriteAlways)
-    {
-        for (; index < candidates.size(); ++index)
-            accepted->push_back(approvedForOverwrite(candidates[index]));
-        flushAccepted();
-        return;
-    }
-
-    // Iterate synchronously until we hit either end-of-list or a conflict
-    // that requires an async confirmation dialog.  Recursing per-item would
-    // blow WASM's ~64KB stack at ~175 deep for a 1000-file batch, since each
-    // frame holds a moved copy of the candidates.
-    while (index < candidates.size())
-    {
-        auto const& candidate = candidates[index];
-        // existsResults was filled by a single batched RpcFilesystem::existsBatch
-        // call before the loop started, so this adds zero RPC round-trips.
-        // Without an answer the destination counts as existing, so the user is asked.
-        const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
-
-        if (!exists)
-        {
-            accepted->push_back(candidate);
-            ++index;
-            continue;
-        }
-        if (exists && overwriteNever)
-        {
-            ++index;
-            continue;
-        }
-
-        // Conflict that actually needs a user decision — break out to the
-        // async prompt below.  The dialog's onClose callback resumes the
-        // iteration at index+1 via one non-tail recursion, keeping the
-        // number of stacked frames bounded by the number of conflicts (not
-        // the number of files).
-        break;
-    }
-
-    if (index >= candidates.size())
-    {
-        // All items processed without needing further prompts — flush.
-        flushAccepted();
-        return;
-    }
-
-    auto const& candidate = candidates[index];
-    Log::info("Downloading '{}' to '{}'.", candidate.source.value(), candidate.destination.toUtf8());
-
-    {
-        Log::info("File already exists: {}", candidate.destination.toUtf8());
-        confirmDialog_->open(
-            {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-                .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
-                .text = language->get("remoteSideModel", "allowOverwritingFile"),
-                .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
-                    ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
-                .focusButton = ConfirmDialog::Button::No,
-                .listItems = {{.text = candidate.destination.toUtf8(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
-                .onClose = [this,
-                               candidates = std::move(candidates),
-                               existsResults,
-                               index,
-                               overwriteNever,
-                               overwriteAlways,
-                               accepted](std::optional<ConfirmDialog::Button> button) mutable
-                {
-                    if (button && button == ConfirmDialog::Button::Yes)
-                    {
-                        accepted->push_back(approvedForOverwrite(candidates[index]));
-                        downloadItemsConfirmed(
-                            std::move(candidates),
-                            std::move(existsResults),
-                            index + 1,
-                            overwriteNever,
-                            overwriteAlways,
-                            std::move(accepted)
-                        );
-                    }
-                    else if (button && button == ConfirmDialog::Button::No)
-                    {
-                        Log::info(
-                            "Skipping download of existing file: {}", candidates[index].destination.toUtf8()
-                        );
-                        downloadItemsConfirmed(
-                            std::move(candidates),
-                            std::move(existsResults),
-                            index + 1,
-                            overwriteNever,
-                            overwriteAlways,
-                            std::move(accepted)
-                        );
-                    }
-                    else if (button && button == ConfirmDialog::Button::All)
-                    {
-                        Log::info("Overwriting all existing files from now on.");
-                        accepted->push_back(approvedForOverwrite(candidates[index]));
-                        downloadItemsConfirmed(
-                            std::move(candidates),
-                            std::move(existsResults),
-                            index + 1,
-                            overwriteNever,
-                            /*overwriteAlways*/ true,
-                            std::move(accepted)
-                        );
-                    }
-                    else if (button && button == ConfirmDialog::Button::None)
-                    {
-                        Log::info("Skipping all existing files from now on.");
-                        downloadItemsConfirmed(
-                            std::move(candidates),
-                            std::move(existsResults),
-                            index + 1,
-                            /*overwriteNever*/ true,
-                            overwriteAlways,
-                            std::move(accepted)
-                        );
-                    }
-                    else
-                    {
-                        // Cancel — flush whatever the user has already
-                        // accepted so far and stop iterating.
-                        const auto terminalIndex = candidates.size();
-                        downloadItemsConfirmed(
-                            std::move(candidates),
-                            std::move(existsResults),
-                            terminalIndex,
-                            overwriteNever,
-                            overwriteAlways,
-                            std::move(accepted)
-                        );
-                    }
-                }}
-        );
-    }
+        )
+    );
 }
 
 void RemoteSideModel::onDropExternal(
@@ -942,132 +751,41 @@ void RemoteSideModel::onTransfer(
         showPathRefused(language->get("remoteSideModel", "downloadFailed"), error);
     };
     const auto destinationDirectory = localModel_->currentLocalPath().and_then(
-        [&subDir](Paths::LocalPath const& directory) -> std::expected<Paths::LocalPath, Paths::PathError>
+        [&subDir](Paths::LocalPath const& directory)
         {
-            if (!subDir)
-                return directory;
-            return Paths::LocalPathSegment::make(*subDir).transform(
-                [&directory](Paths::LocalPathSegment const& segment)
-                {
-                    return directory / segment;
-                }
-            );
+            return FileExplorer::targetDirectoryOf(directory, subDir);
         }
     );
     if (!destinationDirectory)
         return refuse(destinationDirectory.error());
+    // A name this platform cannot hold is refused before anything is written.
+    auto candidates = transferCandidates<SharedData::BulkDownloadEntry>(
+        items,
+        [this](NuiFileExplorer::Item const& item)
+        {
+            return remotePathOf(item);
+        },
+        *destinationDirectory
+    );
+    if (!candidates)
+        return refuse(candidates.error());
 
-    std::vector<SharedData::BulkDownloadEntry> candidates;
-    candidates.reserve(items.size());
-    for (auto const& item : items)
-    {
-        // A name this platform cannot hold is refused before anything is written.
-        auto source = remotePathOf(item);
-        auto destination = source.and_then(
-            [&destinationDirectory](Paths::RemotePath const& path)
-            {
-                return Paths::LocalPathSegment::make(*path.filename())
-                    .transform(
-                        [&destinationDirectory](Paths::LocalPathSegment const& segment)
-                        {
-                            return *destinationDirectory / segment;
-                        }
-                    );
-            }
-        );
-        if (!destination)
-            return refuse(destination.error());
-        candidates.push_back(
-            SharedData::BulkDownloadEntry{
-                .source = *std::move(source),
-                .destination = *std::move(destination),
-                .sizeBytes = item.size,
-                .isDirectory = item.isDirectory(),
-                .mtime = item.mtime,
-                .mtimeNsec = item.mtimeNsec,
-            }
-        );
-    }
-
-    const auto itemsSize = candidates.size();
-    std::string confirmText;
-    if (itemsSize > 1)
-    {
-        confirmText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfMultiple")),
-            itemsSize,
-            destinationDirectory->toUtf8()
-        );
-    }
-    else
-    {
-        confirmText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfSingle")),
-            candidates.front().source.value(),
-            destinationDirectory->toUtf8()
-        );
-    }
-
-    std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    for (const auto& candidate : candidates)
-        listItems.push_back({candidate.source.value(), ""});
-
-    confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
+    confirmTransfer<SharedData::BulkDownloadEntry>(
+        *std::move(candidates),
+        {
             .headerText = language->get("remoteSideModel", "downloadItemsQuestion"),
-            .text = confirmText,
-            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::Yes,
-            .listItems = listItems,
-            .onClose = [this, candidates = std::move(candidates)](std::optional<ConfirmDialog::Button> button) mutable
+            .singleText = language->get("remoteSideModel", "downloadConfirmIfSingle"),
+            .multipleText = language->get("remoteSideModel", "downloadConfirmIfMultiple"),
+            .destinationDirectory = destinationDirectory->toUtf8(),
+            .overwriteHeaderText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
+            .overwriteText = language->get("remoteSideModel", "allowOverwritingFile"),
+        },
+        lifetime_.guarded(
+            [this](std::vector<SharedData::BulkDownloadEntry> accepted)
             {
-                if (!button || *button != ConfirmDialog::Button::Yes)
-                {
-                    Log::info("Download items cancelled");
-                    return;
-                }
-
-                Log::info("Downloading items.");
-
-                // Batched existence probe: one RPC for the whole batch instead of N. The recursion below then walks
-                // the cached result vector with zero further round-trips.
-                std::vector<std::string> destinations;
-                destinations.reserve(candidates.size());
-                for (auto const& candidate : candidates)
-                    destinations.push_back(candidate.destination.toUtf8());
-
-                Nui::RpcClient::callWithBackChannel(
-                    "RpcFilesystem::existsBatch",
-                    [this, candidates = std::move(candidates)](Nui::val response) mutable
-                    {
-                        // An unknown destination is never taken for absent, the batch overwrites what it accepts.
-                        if (!response.hasOwnProperty("success") || !response["success"].as<bool>() ||
-                            !response.hasOwnProperty("exists"))
-                        {
-                            return showExistenceCheckFailed(
-                                response.hasOwnProperty("error") ? language->translate(response["error"].as<std::string>())
-                                                                 : std::string{"RpcFilesystem::existsBatch"}
-                            );
-                        }
-
-                        auto existsResults = std::make_shared<std::vector<bool>>();
-                        auto arr = response["exists"];
-                        const auto length = arr["length"].as<long long>();
-                        existsResults->reserve(static_cast<std::size_t>(length));
-                        for (long long idx = 0; idx < length; ++idx)
-                            existsResults->push_back(arr[static_cast<int>(idx)].as<bool>());
-                        if (existsResults->size() != candidates.size())
-                        {
-                            return showExistenceCheckFailed(
-                                fmt::format("{} of {} answers", existsResults->size(), candidates.size())
-                            );
-                        }
-
-                        downloadItemsConfirmed(std::move(candidates), std::move(existsResults));
-                    },
-                    destinations
-                );
-            }}
+                enqueueDownloads(std::move(accepted));
+            }
+        )
     );
 }
 
