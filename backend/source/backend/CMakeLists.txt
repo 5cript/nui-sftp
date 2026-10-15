@@ -12,6 +12,7 @@ add_library(
         rpc_system.cpp
         theme_finder.cpp
         dropped_entry.cpp
+        opener_risk.cpp
         program_options.cpp
         inspector_environment.cpp
         password/password_prompter.cpp

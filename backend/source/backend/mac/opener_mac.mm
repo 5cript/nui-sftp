@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <backend/opener_risk.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
 #include <utility/localized_message.hpp>
@@ -9,15 +10,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <algorithm>
-#include <cctype>
-#include <iterator>
-#include <string_view>
 #include <string>
 #include <system_error>
 
 namespace
 {
+    /**
+     * @brief @p path with every symlink resolved, so a link is judged and opened as what it points to. @p path itself
+     *        when it cannot be resolved.
+     */
+    std::filesystem::path resolvedPath(std::filesystem::path const& path)
+    {
+        std::error_code resolveError{};
+        const auto resolved = std::filesystem::canonical(path, resolveError);
+        return resolveError ? path : resolved;
+    }
+
     NSURL* fileUrl(std::filesystem::path const& path, bool isDirectory)
     {
         NSString* const pathString = [NSString stringWithUTF8String:path.c_str()];
@@ -75,17 +83,12 @@ namespace
 
 std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) const
 {
+    const auto resolved = resolvedPath(path);
     std::error_code statusError{};
-    const bool isDirectory = std::filesystem::is_directory(path, statusError);
-    if (isExecutable(path, isDirectory))
+    const bool isDirectory = std::filesystem::is_directory(resolved, statusError);
+    if (isExecutable(resolved, isDirectory))
         return std::string{isDirectory ? "backend.opener.risk.application" : "backend.opener.risk.program"};
-    // Types LaunchServices runs or installs instead of showing.
-    static constexpr std::string_view runnable[] = {
-        ".command", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".scpt", ".applescript", ".jar", ".webloc",
-    };
-    auto extension = Paths::nativeToUtf8(path.extension());
-    std::ranges::transform(extension, extension.begin(), [](unsigned char character) { return std::tolower(character); });
-    if (std::ranges::find(runnable, std::string_view{extension}) != std::end(runnable))
+    if (OpenerDetail::hasExtensionIn(resolved, OpenerDetail::macRunnableExtensions))
         return std::string{"backend.opener.risk.dangerousType"};
     return std::nullopt;
 }
@@ -111,12 +114,14 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
     if (!path.is_absolute() || !std::filesystem::exists(path, existsError))
         return std::unexpected{std::string{"backend.opener.mac.fileNotFound"}};
 
-    // Programs, scripts and bundles are judged by riskOf and the user's policy before this is called.
-    const bool isDirectory = std::filesystem::is_directory(path, existsError);
+    // Programs, scripts and bundles are judged by riskOf and the user's policy before this is called, on the same
+    // resolved path.
+    const auto resolved = resolvedPath(path);
+    const bool isDirectory = std::filesystem::is_directory(resolved, existsError);
 
     @autoreleasepool
     {
-        NSURL* const url = fileUrl(path, isDirectory);
+        NSURL* const url = fileUrl(resolved, isDirectory);
         if (openWith)
         {
             chooseApplicationAndOpen(url);

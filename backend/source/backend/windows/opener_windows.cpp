@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <backend/opener_risk.hpp>
 #include <utility/localized_message.hpp>
 
 #include <nui/utility/utf.hpp>
@@ -59,8 +60,10 @@ std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) con
     if (GetBinaryTypeW(path.c_str(), &binaryType))
         return std::string{"backend.opener.risk.program"};
     // The shell's own list of types that run code: scripts, installers, shortcuts and the like.
-    const auto extension = path.extension().wstring();
+    const auto extension = path.extension().native();
     if (!extension.empty() && AssocIsDangerous(extension.c_str()))
+        return std::string{"backend.opener.risk.dangerousType"};
+    if (OpenerDetail::hasExtensionIn(path, OpenerDetail::windowsRunnableExtensions))
         return std::string{"backend.opener.risk.dangerousType"};
     return std::nullopt;
 }
