@@ -210,7 +210,6 @@ void RpcFilesystem::registerRemoveMultiple()
                     return reply.error("Missing required parameter 'paths'.");
                 }
 
-                const bool recursive = parameters.value("recursive", false);
                 const auto pathsUtf8 = parameters["paths"].get<std::vector<std::string>>();
                 const auto removal = removeLocalItems(pathsUtf8, localHomeDirectories());
                 if (!removal)
