@@ -2,6 +2,7 @@
 
 #include <nui-file-explorer/item_with_internals.hpp>
 #include <nui-file-explorer/flavor.hpp>
+#include <nui-file-explorer/side/selection_model.hpp>
 
 #include <nui/frontend/api/mouse_event.hpp>
 #include <nui/frontend/api/keyboard_event.hpp>
@@ -14,48 +15,15 @@
 
 namespace NuiFileExplorer
 {
-    /// Manages item selection for both icon and table flavors.
-    ///
-    /// Two-layer model
-    /// ---------------
-    ///   Layer 1 — Range layer  (anchor_ + flag_)
-    ///     The contiguous shift-selection.  Shift+click and Shift+Arrow only ever
-    ///     touch this layer.  A plain click sets anchor_ and clears flag_ (single-
-    ///     item range).  Everything between anchor_ and flag_ (inclusive, min/max
-    ///     order) is "in range".
-    ///
-    ///   Layer 2 — Ctrl mask  (ctrlAdd_ + ctrlRemove_)
-    ///     An additive/subtractive mask applied on top of the range.
-    ///     ctrlAdd_    – items that are selected regardless of the range.
-    ///     ctrlRemove_ – items that are punched out of the range.
-    ///     Ctrl+click dispatches to one of four cases (see onItemClicked).
-    ///     This layer is NEVER touched by shift or plain-arrow operations.
-    ///
-    ///   Visible selection = (range(anchor_, flag_) − ctrlRemove_) ∪ ctrlAdd_
-    ///
-    /// Box-select (drag rectangle in icon flavor)
-    /// ------------------------------------------
-    ///   Plain drag   → clears both ctrl sets, sets anchor_/flag_ to cover the
-    ///                  bounding-box items.  Call selectRange(begin, end).
-    ///   Ctrl+drag    → leaves anchor_/flag_ alone, inserts intersecting items
-    ///                  into ctrlAdd_.  Call ctrlAddRange(begin, end).
-    ///
-    /// Keyboard navigation — no wrapping, clamped at boundaries
-    /// ---------------------------------------------------------
-    ///   Arrow (no modifier)  → clear both ctrl sets, clear flag_, move anchor_
-    ///                          one step; clamps at 0 / last item.
-    ///   Shift+Arrow          → move flag_ one step; clamps at 0 / last item.
-    ///                          Special boundary fill:
-    ///                            Shift+Down at last row → extend flag_ to the
-    ///                              last item (rightward fill to end of row).
-    ///                            Shift+Up at row 0 → extend flag_ to index 0
-    ///                              (leftward fill to start of row).
-    ///                          Both ctrl sets are untouched.
-    ///   Home / End           → collapse to first selectable / last item;
-    ///                          clear both ctrl sets, clear flag_.
-    ///   Shift+Home / Shift+End → extend flag_ to 0 / last item.
-    ///   Ctrl+A               → select all (clear ctrl sets, anchor_=0,
-    ///                          flag_=last).
+    /**
+     * @brief Selection of the items of one side for both flavors, the model is a @ref SelectionModel.
+     *
+     * Shift+click and Shift+Arrow move the flag, a plain click or arrow collapses to one item, Ctrl+click flips one
+     * item through the mask. Box select: a plain drag replaces the selection (@ref selectRange), a Ctrl+drag adds to
+     * it (@ref ctrlAddRange). Navigation clamps at the first and last item, Shift+Down on the last row and Shift+Up
+     * on the first row extend to the last and first item. Home lands on the first selectable item, Ctrl+A selects
+     * every selectable item.
+     */
     class SelectionManager
     {
       public:
@@ -91,10 +59,11 @@ namespace NuiFileExplorer
         void setPageJumpSize(std::size_t size);
 
         // ------------------------------------------------------------------ scroll
-        /// Register a callback that scrolls the item at the given flat index into
-        /// view.  Called automatically after every user-driven selection change
-        /// (click, keyboard) with the "active index": flag_ if live, else anchor_.
-        /// Not called by selectAll / deselectAll / selectRange / ctrlAddRange.
+        /**
+         * @brief Registers a callback that scrolls the item at a flat index into view. Called after every user
+         *        driven selection change (click, keyboard) with the active index of the model, not by selectAll,
+         *        deselectAll, selectRange or ctrlAddRange.
+         */
         void setScrollIntoViewCallback(std::function<void(std::size_t)> callback);
 
         /**
@@ -104,7 +73,9 @@ namespace NuiFileExplorer
         void setVisibilityPredicate(std::function<bool(std::size_t)> isVisible);
 
         /**
-         * @brief Re-applies the selection model, dropping items that are no longer visible.
+         * @brief Keeps the items selected now as an explicit selection and drops the ones that are no longer
+         *        visible. Call it after the visibility changed, so items hidden while a range or select-all was made
+         *        never become selected when they show again.
          */
         void refreshSelection();
 
@@ -125,7 +96,9 @@ namespace NuiFileExplorer
         /// into view. Used by type-ahead.
         void jumpTo(std::size_t index);
 
-        /// Ctrl+box-drag: add items into ctrlAdd_ without touching the range layer.
+        /**
+         * @brief Ctrl+box-drag: adds the selectable items to the mask without touching the range.
+         */
         void ctrlAddRange(std::size_t begin, std::size_t endInclusive);
 
       private:
@@ -243,14 +216,10 @@ namespace NuiFileExplorer
         // ============================================================= helpers
         Grid makeGrid() const;
 
-        /// Rebuild visual isSelected() for every item from the two-layer model.
-        /// selected[i] = (inRange(i) && !ctrlRemove_.count(i)) || ctrlAdd_.count(i)
+        /**
+         * @brief Sets isSelected of every item from the model, only selectable items can be selected.
+         */
         void rebuildSelection();
-
-        /// Whether index i falls inside [min(anchor_,flag_), max(anchor_,flag_)].
-        bool inRange(std::size_t i) const;
-
-        static void rangeMinMax(std::size_t a, std::size_t b, std::size_t& lo, std::size_t& hi);
 
         std::optional<std::size_t> itemIndex(ItemWithInternals const& item) const;
         std::optional<std::size_t> itemIndex(std::filesystem::path const& path) const;
@@ -260,23 +229,15 @@ namespace NuiFileExplorer
         /// Apply one navigation step to 'from' according to the event key.
         std::size_t navigate(std::size_t from, Nui::WebApi::KeyboardEvent const& event) const;
 
-        /// Returns flag_ if active, else anchor_.  nullopt if nothing is selected.
-        std::optional<std::size_t> activeIndex() const;
-
-        /// Fires scrollIntoView_ for the current activeIndex if it differs from
-        /// lastScrolledIndex_ and scrollIntoView_ is set.
+        /**
+         * @brief Scrolls the active index of the model into view when it changed since the last scroll.
+         */
         void maybeScrollActiveIntoView();
 
       private:
         Nui::Observed<std::vector<ItemWithInternals>>* items_;
 
-        // Layer 1 — range
-        std::optional<std::size_t> anchor_; ///< Fixed end of the shift-range / last plain click.
-        std::optional<std::size_t> flag_; ///< Moving end; nullopt = single-item range at anchor_.
-
-        // Layer 2 — ctrl mask
-        std::set<std::size_t> ctrlAdd_; ///< Selected regardless of the range.
-        std::set<std::size_t> ctrlRemove_; ///< Punched out of the range.
+        SelectionModel selection_{};
 
         // Grid layout (updated by setGrid / setFlavor)
         Flavor currentFlavor_;

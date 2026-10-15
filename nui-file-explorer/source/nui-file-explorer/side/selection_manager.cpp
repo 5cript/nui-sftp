@@ -13,20 +13,11 @@ namespace NuiFileExplorer
         scrollIntoView_ = std::move(callback);
     }
 
-    std::optional<std::size_t> SelectionManager::activeIndex() const
-    {
-        if (flag_.has_value())
-            return flag_;
-        if (anchor_.has_value())
-            return anchor_;
-        return std::nullopt;
-    }
-
     void SelectionManager::maybeScrollActiveIntoView()
     {
         if (!scrollIntoView_)
             return;
-        const auto idx = activeIndex();
+        const auto idx = selection_.activeIndex();
         if (!idx.has_value())
             return;
         if (lastScrolledIndex_ == idx)
@@ -73,34 +64,6 @@ namespace NuiFileExplorer
         return Grid{gridColumns_, gridRows_, items_->value().size(), currentFlavor_};
     }
 
-    void SelectionManager::rangeMinMax(std::size_t a, std::size_t b, std::size_t& lo, std::size_t& hi)
-    {
-        if (a <= b)
-        {
-            lo = a;
-            hi = b;
-        }
-        else
-        {
-            lo = b;
-            hi = a;
-        }
-    }
-
-    bool SelectionManager::inRange(std::size_t i) const
-    {
-        if (!anchor_.has_value())
-            return false;
-
-        std::size_t lo, hi;
-        if (flag_.has_value())
-            rangeMinMax(*anchor_, *flag_, lo, hi);
-        else
-            lo = hi = *anchor_;
-
-        return i >= lo && i <= hi;
-    }
-
     std::optional<std::size_t> SelectionManager::itemIndex(ItemWithInternals const& item) const
     {
         const auto& vec = items_->value();
@@ -134,6 +97,12 @@ namespace NuiFileExplorer
 
     void SelectionManager::refreshSelection()
     {
+        const auto& vec = items_->value();
+        std::set<std::size_t> shown;
+        for (std::size_t index = 0; index < vec.size(); ++index)
+            if (vec[index].isSelected())
+                shown.insert(index);
+        selection_.pin(std::move(shown));
         rebuildSelection();
     }
 
@@ -146,9 +115,7 @@ namespace NuiFileExplorer
         auto& vec = items_->value();
         for (std::size_t i = 0; i < vec.size(); ++i)
         {
-            const bool selected = isSelectablePath(i) &&
-                ((inRange(i) && ctrlRemove_.count(i) == 0) || ctrlAdd_.count(i) > 0);
-            vec[i].isSelected(selected);
+            vec[i].isSelected(isSelectablePath(i) && selection_.contains(i));
         }
         Nui::globalEventContext.sync();
     }
@@ -159,10 +126,7 @@ namespace NuiFileExplorer
 
     void SelectionManager::loseTrackToAllSelections()
     {
-        anchor_.reset();
-        flag_.reset();
-        ctrlAdd_.clear();
-        ctrlRemove_.clear();
+        selection_.clear();
     }
 
     void SelectionManager::deselectAll()
@@ -175,39 +139,21 @@ namespace NuiFileExplorer
 
     void SelectionManager::selectAll()
     {
-        ctrlAdd_.clear();
-        ctrlRemove_.clear();
-        flag_.reset();
-        const auto n = items_->value().size();
-        if (n > 0)
-        {
-            anchor_ = 0;
-            flag_ = n - 1;
-        }
-        else
-        {
-            anchor_.reset();
-        }
+        selection_.selectAll(items_->value().size());
         rebuildSelection();
     }
-
-    // select/deselect/toggle operate on ctrlAdd_ so they compose cleanly with
-    // any existing range layer.
 
     void SelectionManager::select(std::size_t index)
     {
         if (!isSelectablePath(index))
             return;
-        ctrlRemove_.erase(index); // un-punch if it was punched out
-        ctrlAdd_.insert(index);
+        selection_.add(index);
         rebuildSelection();
     }
 
     void SelectionManager::deselect(std::size_t index)
     {
-        ctrlAdd_.erase(index);
-        if (inRange(index))
-            ctrlRemove_.insert(index); // punch it out of the range
+        selection_.remove(index);
         rebuildSelection();
     }
 
@@ -249,11 +195,7 @@ namespace NuiFileExplorer
 
     void SelectionManager::selectRange(std::size_t begin, std::size_t endInclusive)
     {
-        // Plain drag: replace both layers entirely.
-        ctrlAdd_.clear();
-        ctrlRemove_.clear();
-        anchor_ = begin;
-        flag_ = endInclusive;
+        selection_.replaceRange(begin, endInclusive);
         rebuildSelection();
     }
 
@@ -261,25 +203,17 @@ namespace NuiFileExplorer
     {
         if (index >= items_->value().size())
             return;
-        ctrlAdd_.clear();
-        ctrlRemove_.clear();
-        flag_.reset();
-        anchor_ = index;
+        selection_.collapseTo(index);
         rebuildSelection();
         maybeScrollActiveIntoView();
     }
 
     void SelectionManager::ctrlAddRange(std::size_t begin, std::size_t endInclusive)
     {
-        // Ctrl+drag: add items to ctrlAdd_, don't touch the range layer.
-        std::size_t lo, hi;
-        rangeMinMax(begin, endInclusive, lo, hi);
-        for (std::size_t i = lo; i <= hi; ++i)
+        for (std::size_t index = std::min(begin, endInclusive); index <= std::max(begin, endInclusive); ++index)
         {
-            if (!isSelectablePath(i))
-                continue;
-            ctrlRemove_.erase(i); // restore any previously punched-out item
-            ctrlAdd_.insert(i);
+            if (isSelectablePath(index))
+                selection_.add(index);
         }
         rebuildSelection();
     }
@@ -354,74 +288,24 @@ namespace NuiFileExplorer
         const bool ctrl = event.ctrlKey() || event.metaKey();
         const bool shift = event.shiftKey();
 
-        if (shift && !ctrl)
+        if (ctrl && !shift)
         {
-            // ---- Shift+click: move flag, keep anchor, leave ctrl mask alone ----
-            if (!anchor_.has_value())
-                anchor_ = idx;
-            flag_ = idx;
+            selection_.toggleMasked(idx);
             rebuildSelection();
-            maybeScrollActiveIntoView();
-        }
-        else if (ctrl && !shift)
-        {
-            // ---- Ctrl+click: toggle via the ctrl mask; never touch anchor/flag ----
-            //
-            // Four cases:
-            //   1. In ctrlRemove_ (punched out of range) → restore to range:
-            //      remove from ctrlRemove_.
-            //   2. In ctrlAdd_ (explicitly added) → remove from ctrlAdd_.
-            //   3. In range (selected via range, not punched) → punch out:
-            //      insert into ctrlRemove_.
-            //   4. Not selected at all → add to ctrlAdd_.
-            //
-            // After this, anchor_/flag_ are completely unchanged.
-            if (ctrlRemove_.count(idx))
-            {
-                // Case 1: was punched out — restore it.
-                ctrlRemove_.erase(idx);
-            }
-            else if (ctrlAdd_.count(idx))
-            {
-                // Case 2: was explicitly added — remove it.
-                ctrlAdd_.erase(idx);
-            }
-            else if (inRange(idx))
-            {
-                // Case 3: selected via range — punch it out.
-                ctrlRemove_.insert(idx);
-            }
-            else
-            {
-                // Case 4: not selected — add it.
-                ctrlAdd_.insert(idx);
-            }
-            rebuildSelection();
-            // Ctrl+click does not move anchor/flag, so we scroll to the clicked
-            // item directly — it is the one the user just interacted with.
+            // Ctrl+click moves neither end of the range, the clicked item is the one to show.
             lastScrolledIndex_ = idx;
             if (scrollIntoView_)
                 scrollIntoView_(idx);
+            return;
         }
-        else if (ctrl && shift)
-        {
-            // ---- Ctrl+Shift+click: extend the range but keep the ctrl mask ----
-            if (!anchor_.has_value())
-                anchor_ = idx;
-            flag_ = idx;
-            rebuildSelection();
-            maybeScrollActiveIntoView();
-        }
+
+        // Shift+click and Ctrl+Shift+click extend the range and keep the mask, a plain click selects only this item.
+        if (shift)
+            selection_.extendTo(idx);
         else
-        {
-            // ---- Plain click: reset everything, select only this item ----
-            ctrlAdd_.clear();
-            ctrlRemove_.clear();
-            flag_.reset();
-            anchor_ = idx;
-            rebuildSelection();
-            maybeScrollActiveIntoView();
-        }
+            selection_.collapseTo(idx);
+        rebuildSelection();
+        maybeScrollActiveIntoView();
     }
 
     // =========================================================================
@@ -482,22 +366,11 @@ namespace NuiFileExplorer
             };
 
             if (shift)
-            {
-                if (!flag_.has_value())
-                    flag_ = anchor_.value_or(0);
-                flag_ = jump(*flag_);
-                rebuildSelection();
-                maybeScrollActiveIntoView();
-            }
+                selection_.extendTo(jump(selection_.activeIndex().value_or(0)));
             else
-            {
-                ctrlAdd_.clear();
-                ctrlRemove_.clear();
-                flag_.reset();
-                anchor_ = jump(anchor_.value_or(0));
-                rebuildSelection();
-                maybeScrollActiveIntoView();
-            }
+                selection_.collapseTo(jump(selection_.anchor().value_or(0)));
+            rebuildSelection();
+            maybeScrollActiveIntoView();
             return true;
         }
 
@@ -507,63 +380,28 @@ namespace NuiFileExplorer
                 return true;
 
             if (shift)
-            {
-                // Extend flag_ to the boundary; anchor and ctrl mask untouched.
-                if (!flag_.has_value())
-                    flag_ = anchor_.value_or(0);
-                flag_ = isEnd ? (n - 1) : 0;
-                rebuildSelection();
-                maybeScrollActiveIntoView();
-            }
+                selection_.extendTo(isEnd ? n - 1 : 0);
+            else if (isEnd)
+                selection_.collapseTo(n - 1);
             else
             {
-                // Plain Home/End: collapse to a single item at the boundary.
-                ctrlAdd_.clear();
-                ctrlRemove_.clear();
-                flag_.reset();
-                if (isEnd)
-                {
-                    anchor_ = n - 1;
-                }
-                else
-                {
-                    // Home: land on the first selectable item (skip "..").
-                    anchor_ = 0;
-                    while (*anchor_ < n && !isSelectablePath(*anchor_))
-                        anchor_ = *anchor_ + 1;
-                    if (*anchor_ >= n)
-                        anchor_ = 0;
-                }
-                rebuildSelection();
-                maybeScrollActiveIntoView();
+                // Home lands on the first selectable item, past "..".
+                std::size_t first = 0;
+                while (first < n && !isSelectablePath(first))
+                    ++first;
+                selection_.collapseTo(first < n ? first : 0);
             }
+            rebuildSelection();
+            maybeScrollActiveIntoView();
             return true;
         }
 
         if (shift)
-        {
-            // Move flag; anchor and ctrl mask are untouched.
-            // If no range is active yet, start the flag from the anchor (or 0).
-            if (!flag_.has_value())
-                flag_ = anchor_.value_or(0);
-
-            flag_ = navigate(*flag_, event);
-            rebuildSelection();
-            maybeScrollActiveIntoView();
-        }
+            selection_.extendTo(navigate(selection_.activeIndex().value_or(0), event));
         else
-        {
-            // Plain arrow: drop the ctrl mask entirely and collapse to a single item.
-            ctrlAdd_.clear();
-            ctrlRemove_.clear();
-            flag_.reset();
-
-            const std::size_t next = navigate(anchor_.value_or(0), event);
-            anchor_ = next;
-            rebuildSelection();
-            maybeScrollActiveIntoView();
-        }
-
+            selection_.collapseTo(navigate(selection_.anchor().value_or(0), event));
+        rebuildSelection();
+        maybeScrollActiveIntoView();
         return true;
     }
 }
