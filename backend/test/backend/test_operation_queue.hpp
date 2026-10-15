@@ -1154,7 +1154,7 @@ namespace Test
     TEST(SequentialScanProgressTests, CountsOfLaterScansAddToTheFinishedOnes)
     {
         std::vector<std::array<std::uint64_t, 3>> reports;
-        const auto next = Detail::sequentialScanProgress(
+        const auto next = ScanProgressDetail::sequentialScanProgress(
             [&reports](std::uint64_t bytes, std::uint64_t index, std::uint64_t scanned)
             {
                 reports.push_back({bytes, index, scanned});
