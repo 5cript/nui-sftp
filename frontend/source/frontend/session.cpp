@@ -525,6 +525,8 @@ std::optional<nlohmann::json> Session::getLayout() const
 void Session::setupFileGrid()
 {
     impl_->fileExplorerPanel.setup();
+    // Local deletes need no connection, their cards show in this queue from the start.
+    localSideModel().operationQueue(&impl_->operationQueue);
 
     // Sync dialog + progress dialog stay on Session; wire them through the
     // panel's synchronize callback.  Every flow scans and diffs with the

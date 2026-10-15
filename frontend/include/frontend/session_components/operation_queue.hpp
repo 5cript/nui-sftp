@@ -39,6 +39,7 @@
 
 class LocalSideModel;
 class RemoteSideModel;
+class LocalOperationRouter;
 
 class OperationQueue
 {
@@ -60,7 +61,7 @@ class OperationQueue
         RemoteSideModel* remoteModel
     );
 
-    ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
+    ROAR_PIMPL_SPECIAL_FUNCTIONS_NO_MOVE(OperationQueue);
 
     void activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId);
 
@@ -336,6 +337,8 @@ class OperationQueue
     Nui::ElementRenderer operator()();
 
   private:
+    friend class LocalOperationRouter;
+
     template <typename OperationCard>
     void cancelOperation(OperationCard const& operation);
     void cancelAll();
@@ -353,6 +356,7 @@ class OperationQueue
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
+    void onOperationCompleted(SharedData::OperationCompleted completed);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
     void onOperationsReordered(SharedData::OperationsReordered const& evt);
     void requestMoveOperation(Ids::OperationId const& opId, std::size_t newIndex);

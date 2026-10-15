@@ -141,6 +141,7 @@ target_sources(
         session_components/file_tracking.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
+        session_components/local_operation_router.cpp
         session_components/terminal_panel.cpp
         session_components/file_explorer_panel.cpp
         session_components/connection_loss_overlay.cpp
