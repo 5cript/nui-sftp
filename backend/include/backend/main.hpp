@@ -66,6 +66,10 @@ class Main
     Nui::Window window_;
     Nui::RpcHub hub_;
     std::unique_ptr<Opener> opener_;
+    /**
+     * @brief The saved openRiskyFiles setting, written on the thread that saves the state and read by RpcFilesystem.
+     */
+    std::atomic<Persistence::RiskyFilePolicy> riskyFilePolicy_;
     std::unique_ptr<RpcFilesystem> rpcFilesystem_;
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;

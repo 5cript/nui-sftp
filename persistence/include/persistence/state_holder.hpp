@@ -80,11 +80,20 @@ namespace Persistence
          * @return What was changed, empty if nothing was.
          */
         LoadWarnings dataFixer(nlohmann::json const& before, bool migrated = false);
+
+        /**
+         * @brief Calls @p listener with the cache after every successful save, on the thread that saved. Replaces an
+         *        earlier listener.
+         */
+        void onSaved(std::function<void(State const&)> listener);
 #endif
 
       private:
         State stateCache_{};
         std::filesystem::path programDirectory_;
         LoadWarnings cachedWarnings_{};
+#ifdef NUI_BACKEND
+        std::function<void(State const&)> onSaved_{};
+#endif
     };
 } // namespace Persistence

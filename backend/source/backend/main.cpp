@@ -216,6 +216,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
       }
     , hub_{window_}
     , opener_{}
+    , riskyFilePolicy_{Persistence::RiskyFilePolicy::Warn}
     , rpcFilesystem_{}
     , rpcSystem_{}
     , processes_{window_.getExecutor(), window_, hub_, forkPool}
@@ -286,6 +287,18 @@ void Main::registerRpc()
                 initialPersistenceLoadWarnings_ = warnings;
             }
 
+            const auto riskyFilePolicyOf = [](Persistence::State const& state)
+            {
+                return state.localFilesystemOptions.openRiskyFiles.value_or(Persistence::RiskyFilePolicy::Warn);
+            };
+            riskyFilePolicy_.store(riskyFilePolicyOf(holder.stateCache()));
+            stateHolder_.onSaved(
+                [this, riskyFilePolicyOf](Persistence::State const& state)
+                {
+                    riskyFilePolicy_.store(riskyFilePolicyOf(state));
+                }
+            );
+
             opener_ = std::make_unique<Opener>(window_.getNativeWindow());
             rpcSystem_ = std::make_unique<RpcSystem>(window_.getExecutor(), window_, hub_);
             tempDirInstanceManager_ = std::make_unique<FileTracking::TempDirInstanceManager>(
@@ -328,9 +341,7 @@ void Main::registerRpc()
                 *opener_,
                 [this]()
                 {
-                    return stateHolder_.stateCache().localFilesystemOptions.openRiskyFiles.value_or(
-                        Persistence::RiskyFilePolicy::Warn
-                    );
+                    return riskyFilePolicy_.load();
                 }
             );
 
