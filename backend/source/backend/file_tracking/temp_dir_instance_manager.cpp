@@ -292,10 +292,13 @@ namespace FileTracking
                     reply.error("Failed to create instance");
                     return;
                 }
+                // Canonical like the paths of the change events and of fileStates, which the frontend maps.
+                std::error_code canonicalError;
+                const auto canonical = std::filesystem::weakly_canonical(inst->instanceDir(), canonicalError);
                 reply({
                     {"success", true},
                     {"instanceId", inst->instanceId()},
-                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
+                    {"instanceDir", Paths::nativeToUtf8(canonicalError ? inst->instanceDir() : canonical)},
                 });
             }
         );
