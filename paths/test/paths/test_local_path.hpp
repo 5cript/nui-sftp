@@ -171,9 +171,14 @@ namespace Paths::Test
 
     TEST(LocalPathTests, RoundTripsThroughJson)
     {
-        const nlohmann::json json = LocalPath::fromUtf8("/home/t\xC3\xA4st").value();
-        EXPECT_EQ(json.get<std::string>(), "/home/t\xC3\xA4st");
-        EXPECT_EQ(json.get<LocalPath>().toUtf8(), "/home/t\xC3\xA4st");
+#ifdef _WIN32
+        const std::string text = "C:/home/t\xC3\xA4st";
+#else
+        const std::string text = "/home/t\xC3\xA4st";
+#endif
+        const nlohmann::json json = LocalPath::fromUtf8(text).value();
+        EXPECT_EQ(json.get<std::string>(), text);
+        EXPECT_EQ(json.get<LocalPath>().toUtf8(), text);
         EXPECT_THROW(nlohmann::json{"relative"}.at(0).get<LocalPath>(), std::invalid_argument);
     }
 
