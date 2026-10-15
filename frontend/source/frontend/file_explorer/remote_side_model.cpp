@@ -383,14 +383,22 @@ void RemoteSideModel::enqueueDeletes(
     std::vector<Paths::RemotePath> filesAndEmptyDirs
 )
 {
-    // One bulk-delete request and card for the whole user action. Non-empty directories are scanned and deleted
-    // with their content by the backend (isDirectory), files and empty directories are deleted as they are.
+    // The backend deletes an entry marked as directory with its content.
     std::vector<SharedData::BulkDeleteEntry> entries;
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
-    for (auto& path : filesAndEmptyDirs)
-        entries.push_back({.target = std::move(path), .isDirectory = false});
-    for (auto& path : nonEmpties)
-        entries.push_back({.target = std::move(path), .isDirectory = true});
+    const auto append = [&entries](std::vector<Paths::RemotePath>& paths, bool isDirectory)
+    {
+        std::ranges::transform(
+            paths,
+            std::back_inserter(entries),
+            [isDirectory](Paths::RemotePath& path)
+            {
+                return SharedData::BulkDeleteEntry{.target = std::move(path), .isDirectory = isDirectory};
+            }
+        );
+    };
+    append(filesAndEmptyDirs, false);
+    append(nonEmpties, true);
 
     if (entries.empty())
         return;
@@ -823,8 +831,14 @@ void RemoteSideModel::generatePathBoxSuggestions(
         maxSuggestions,
         [onResultsAvailable, path](std::vector<std::filesystem::path> suggestions)
         {
-            for (auto& suggestion : suggestions)
-                suggestion = path.parent_path() / suggestion;
+            std::ranges::transform(
+                suggestions,
+                suggestions.begin(),
+                [directory = path.parent_path()](std::filesystem::path const& suggestion)
+                {
+                    return directory / suggestion;
+                }
+            );
             onResultsAvailable(suggestions);
         }
     );
@@ -1130,11 +1144,17 @@ std::vector<RemoteSideModel::PlaceEntry> RemoteSideModel::defaultPlaceEntries() 
     if (!remotePlaces_)
         return entries;
 
-    for (auto const& [kind, path] : *remotePlaces_)
-    {
-        entries.push_back(
-            {.icon = iconForPlaceKind(kind), .name = placeDisplayName(kind, kind), .path = path.generic_string()}
-        );
-    }
+    std::ranges::transform(
+        *remotePlaces_,
+        std::back_inserter(entries),
+        [](std::pair<std::string, std::filesystem::path> const& place)
+        {
+            return PlaceEntry{
+                .icon = iconForPlaceKind(place.first),
+                .name = placeDisplayName(place.first, place.first),
+                .path = place.second.generic_string(),
+            };
+        }
+    );
     return entries;
 }

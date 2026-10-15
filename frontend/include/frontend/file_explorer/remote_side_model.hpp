@@ -61,10 +61,8 @@ class RemoteSideModel
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
 
     /**
-     * @brief "Transfer as Archive" entry point: opens the archive-transfer dialog
-     * and, on confirm, kicks off a download of the selected items packed into a
-     * single tar archive on the local side. Backend wiring is still pending; for
-     * now the onConfirm just logs the intent.
+     * @brief Asks for the name, codec and level of an archive and queues a download of @p items packed into one
+     *        tar archive in the listed local directory.
      */
     void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
     std::vector<NuiFileExplorer::ContextMenuItem>

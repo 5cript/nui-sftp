@@ -174,14 +174,18 @@ namespace
     {
         std::vector<LocalSideModel::PlaceEntry> entries;
         entries.reserve(places.size());
-        for (auto const& place : places)
-        {
-            entries.push_back({
-                .icon = iconForPlaceKind(place.kind),
-                .name = placeDisplayName(place.kind, place.name),
-                .path = place.path,
-            });
-        }
+        std::ranges::transform(
+            places,
+            std::back_inserter(entries),
+            [](LocalPlace const& place)
+            {
+                return LocalSideModel::PlaceEntry{
+                    .icon = iconForPlaceKind(place.kind),
+                    .name = placeDisplayName(place.kind, place.name),
+                    .path = place.path,
+                };
+            }
+        );
         return entries;
     }
 
@@ -266,14 +270,14 @@ void LocalSideModel::requestDrives(std::function<void(std::vector<PlaceEntry>)> 
                 }
                 std::vector<PlaceEntry> entries;
                 const auto drives = val["drives"];
-                const auto len = drives["length"].as<int>();
-                entries.reserve(len);
-                for (int idx = 0; idx < len; ++idx)
+                const auto length = drives["length"].as<int>();
+                entries.reserve(static_cast<std::size_t>(length));
+                for (int index = 0; index < length; ++index)
                 {
                     entries.push_back({
                         .icon = Ui5Icons::database(),
-                        .name = drives[idx]["name"].as<std::string>(),
-                        .path = drives[idx]["path"].as<std::string>(),
+                        .name = drives[index]["name"].as<std::string>(),
+                        .path = drives[index]["path"].as<std::string>(),
                     });
                 }
                 callback(std::move(entries));
@@ -633,10 +637,9 @@ namespace
 
 void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
-    // listFiles only carries the lean field set; fetch the full entry (atime, birthtime, acl, ...)
-    // on demand so the dialog can display everything without inflating every directory listing.
+    // The listing carries fewer fields than the dialog shows, the full entry is asked for here.
     auto fallback = static_cast<SharedData::DirectoryEntry>(item);
-    auto path = localPathOf(item);
+    const auto path = localPathOf(item);
     if (!path)
     {
         Log::warn("Properties of '{}' use the listed entry: {}", item.name, path.error().toString());
@@ -901,7 +904,7 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
 void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
 {
     Log::info("Open item requested: {}. Open with: {}", item.name, openWith);
-    auto path = localPathOf(item);
+    const auto path = localPathOf(item);
     if (!path)
         return showPathRefused(language->get("localSideModel", "failedToOpenFile"), path.error());
 
@@ -910,7 +913,7 @@ void LocalSideModel::onOpen(NuiFileExplorer::Item const& item, bool openWith)
 
 void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
 {
-    auto path = localPathOf(item);
+    const auto path = localPathOf(item);
     if (!path)
         return showPathRefused(language->get("localSideModel", "openInFileManagerFailed"), path.error());
     const auto absolutePath = path->toUtf8();
@@ -1016,9 +1019,6 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
         return;
     }
 
-    // Files go straight in; directories are flattened on the backend via
-    // std::filesystem::recursive_directory_iterator inside the upload op's
-    // prepareInStrand step.
     std::vector<Paths::LocalPath> localPaths;
     localPaths.reserve(items.size());
     for (auto const& item : items)
