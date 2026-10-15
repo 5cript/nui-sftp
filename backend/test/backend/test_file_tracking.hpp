@@ -533,6 +533,25 @@ namespace Test
         EXPECT_FALSE(watch->isValid());
     }
 
+    TEST_F(TemporaryDirectoryInstanceTest, WatchOutlivingItsInstanceReleasesSafely)
+    {
+        auto inst = makeInstance();
+        auto watch = inst->addWatch(inst->instanceDir());
+        ASSERT_TRUE(watch.has_value());
+        inst.reset();
+        EXPECT_NO_THROW(watch->release());
+        EXPECT_FALSE(watch->isValid());
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, WatchAfterCleanupNowReleasesSafely)
+    {
+        auto inst = makeInstance();
+        auto watch = inst->addWatch(inst->instanceDir());
+        ASSERT_TRUE(watch.has_value());
+        inst->cleanupNow();
+        EXPECT_NO_THROW(watch->release());
+    }
+
     TEST_F(TemporaryDirectoryInstanceTest, MoveFromWatchInvalidatesSource)
     {
         auto inst = makeInstance();
