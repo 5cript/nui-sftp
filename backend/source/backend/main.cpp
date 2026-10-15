@@ -8,6 +8,8 @@
 #else
 #    include <backend/linux/main_linux.hpp>
 #    include <backend/process/fork_pool.hpp>
+
+#    include <glib.h>
 #endif
 
 #include <backend/inspector_environment.hpp>
@@ -476,6 +478,10 @@ int main(int const argc, char const* const* argv)
 
 #ifdef __linux__
     setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+    // GTK 4 does not take it from argv like GTK 3, it names the X11 WM_CLASS and the Wayland app id.
+    // In a flatpak WebKit has to use the app id, the portal refuses to spawn its sandboxed web process otherwise.
+    const char* const flatpakApplicationId = std::getenv("FLATPAK_ID");
+    g_set_prgname(flatpakApplicationId != nullptr && *flatpakApplicationId != '\0' ? flatpakApplicationId : "nui-sftp");
 #endif
 
     ssh_init();
