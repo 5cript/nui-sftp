@@ -1178,6 +1178,11 @@ terminalPanel:
   copyPlain: "Terminal als reinen Text kopieren (ohne ANSI-/Steuerzeichen)"
   saveDialogTitle: "Terminalinhalt speichern"
   saveToFile: "Terminal in Datei speichern"
+  savedTerminals: "Die Terminals wurden in '{}' als {} gespeichert."
+  terminalsNotSaved: "Nicht alle Terminals wurden in '{}' gespeichert.\n\nGespeichert als: {}\n\nNicht gespeichert:\n{}"
+  noTerminalSaved: "Es wurde kein Terminal in '{}' gespeichert.\n\n{}"
+  terminalNoFreeName: "Terminal {}: Alle Namen bis '{}' existieren bereits."
+  terminalWriteFailed: "Terminal {}: Schreiben von '{}' fehlgeschlagen."
 backend:
   deleteGuard:
     noPath: "Es wurde nichts gelöscht. Ein Pfad fehlt."

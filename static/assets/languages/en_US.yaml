@@ -1180,6 +1180,11 @@ terminalPanel:
   copyPlain: "Copy terminal as plain text (strip ANSI/control codes)"
   saveDialogTitle: "Save terminal contents"
   saveToFile: "Save terminal to file"
+  savedTerminals: "Saved the terminals in '{}' as {}."
+  terminalsNotSaved: "Not every terminal was saved in '{}'.\n\nSaved as: {}\n\nNot saved:\n{}"
+  noTerminalSaved: "No terminal was saved in '{}'.\n\n{}"
+  terminalNoFreeName: "Terminal {}: every name up to '{}' already exists."
+  terminalWriteFailed: "Terminal {}: writing '{}' failed."
 backend:
   deleteGuard:
     noPath: "Nothing was deleted. A path is missing."
