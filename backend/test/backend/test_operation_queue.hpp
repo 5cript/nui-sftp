@@ -9,6 +9,7 @@
 
 #include <nui/utility/scope_exit.hpp>
 #include <paths/native.hpp>
+#include <utility/permissions.hpp>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -53,7 +54,7 @@ namespace Test
             localQueue_.reset();
         }
 
-        std::shared_ptr<OperationQueue> makeQueue()
+        std::shared_ptr<OperationQueue> makeQueue(Persistence::SftpOptions options = {})
         {
             auto& env = NuiEnv::instance();
             queue_ = std::make_shared<OperationQueue>(
@@ -61,7 +62,7 @@ namespace Test
                 strand_,
                 *env.window,
                 *env.hub,
-                Persistence::SftpOptions{},
+                std::move(options),
                 sessionId_,
                 2
             );
@@ -186,6 +187,30 @@ namespace Test
                 .paths = std::move(paths),
                 .compared = std::move(compared),
             };
+        }
+
+        /**
+         * @brief The permission bits of @p path on the server, unknown when it cannot be read.
+         */
+        static std::filesystem::perms remoteMode(SecureShell::SftpSession& sftp, std::string const& path)
+        {
+            auto future = sftp.stat(remote(path));
+            if (future.wait_for(5s) != std::future_status::ready)
+                return std::filesystem::perms::unknown;
+            const auto information = future.get();
+            return information ? information->permissions & std::filesystem::perms::mask
+                               : std::filesystem::perms::unknown;
+        }
+
+        /**
+         * @brief Options of a profile that turned inheriting permissions off for both directions.
+         */
+        static Persistence::SftpOptions notInheritingOptions()
+        {
+            Persistence::SftpOptions options{};
+            options.downloadOptions.emplace().inheritPermissions = false;
+            options.uploadOptions.emplace().inheritPermissions = false;
+            return options;
         }
 
         static std::set<std::string> remoteNames(SecureShell::SftpSession& sftp, std::string const& directory)
@@ -429,11 +454,11 @@ namespace Test
     }
 #endif
 
-    TEST_F(OperationQueueTests, DirectoryUploadCreatesDirectoriesWithTheDefaultMode)
+    TEST_F(OperationQueueTests, DirectoryUploadCreatesDirectoriesWithTheDefaultModeWhenNotInheriting)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        auto queue = makeQueue();
+        auto queue = makeQueue(notInheritingOptions());
         setPaused(false);
 
         const auto localPath = localDirectory_.path() / "modes";
@@ -451,18 +476,163 @@ namespace Test
         ASSERT_EQ(completions().size(), 1u);
 
         using std::filesystem::perms;
-        const auto modeOf = [&](std::string const& path) {
-            auto future = sftp->stat(remote(path));
-            if (future.wait_for(5s) != std::future_status::ready)
-                return perms::unknown;
-            const auto information = future.get();
-            return information ? information->permissions & perms::mask : perms::unknown;
-        };
-        // Not inherited by default: owner everything, group read and enter, never world writable.
+        // Owner everything, group read and enter, never world writable.
         const auto expected = perms::owner_all | perms::group_read | perms::group_exec;
-        EXPECT_EQ(modeOf("/home/test/modes"), expected);
-        EXPECT_EQ(modeOf("/home/test/modes/sub"), expected);
+        EXPECT_EQ(remoteMode(*sftp, "/home/test/modes"), expected);
+        EXPECT_EQ(remoteMode(*sftp, "/home/test/modes/sub"), expected);
     }
+
+#ifndef _WIN32
+    TEST_F(OperationQueueTests, FilesKeepTheirModesThroughDownloadEditAndUploadWhenTheProfileDoesNotSetInheriting)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/plain.txt"}, {"content", "plain"}, {"mode", 0644}}
+        ));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/script.sh"}, {"content", "#!/bin/sh\n"}, {"mode", 0755}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        using std::filesystem::perms;
+        const std::vector<std::pair<std::string, perms>> files{
+            {"plain.txt", static_cast<perms>(0644u)},
+            {"script.sh", static_cast<perms>(0755u)},
+        };
+        for (auto const& [name, mode] : files)
+        {
+            ASSERT_TRUE(runOnStrand([&]() {
+                return queue->addDownloadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(localDirectory_.path() / name),
+                    remote(fmt::format("/home/test/{}", name)),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }).has_value());
+        }
+        workUntilCompletions(files.size());
+
+        for (auto const& [name, mode] : files)
+        {
+            const auto localPath = localDirectory_.path() / name;
+            EXPECT_EQ(std::filesystem::status(localPath).permissions(), mode & ~Utility::processUmask()) << name;
+            std::ofstream{localPath, std::ios::app} << "edited\n";
+            ASSERT_TRUE(runOnStrand([&]() {
+                return queue->addUploadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(localPath),
+                    remote(fmt::format("/home/test/{}", name)),
+                    true,
+                    false,
+                    false,
+                    false
+                );
+            }).has_value());
+        }
+        workUntilCompletions(files.size() * 2);
+
+        for (auto const& finished : completions())
+            EXPECT_EQ(finished.reason, SharedData::OperationCompletionReason::Completed);
+        for (auto const& [name, mode] : files)
+            EXPECT_EQ(remoteMode(*sftp, fmt::format("/home/test/{}", name)), mode & ~Utility::processUmask()) << name;
+    }
+
+    TEST_F(OperationQueueTests, DirectoryUploadKeepsTheModesOfItsEntriesWhenTheProfileDoesNotSetInheriting)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        using std::filesystem::perms;
+        const auto localPath = localDirectory_.path() / "tree";
+        std::filesystem::create_directories(localPath / "sub");
+        std::ofstream{localPath / "sub" / "plain.txt"} << "plain";
+        std::ofstream{localPath / "sub" / "script.sh"} << "#!/bin/sh\n";
+        std::filesystem::permissions(localPath / "sub" / "plain.txt", static_cast<perms>(0644u));
+        std::filesystem::permissions(localPath / "sub" / "script.sh", static_cast<perms>(0755u));
+        std::filesystem::permissions(localPath / "sub", static_cast<perms>(0750u));
+
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addUploadOperation(
+                *sftp,
+                Ids::generateOperationId(),
+                toLocal(localPath),
+                remote("/home/test/tree"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+
+        EXPECT_EQ(remoteMode(*sftp, "/home/test/tree/sub"), static_cast<perms>(0750u));
+        EXPECT_EQ(remoteMode(*sftp, "/home/test/tree/sub/plain.txt"), static_cast<perms>(0644u));
+        EXPECT_EQ(remoteMode(*sftp, "/home/test/tree/sub/script.sh"), static_cast<perms>(0755u));
+    }
+
+    TEST_F(OperationQueueTests, TransfersUseTheDefaultModesWhenTheProfileTurnsInheritingOff)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/script.sh"}, {"content", "#!/bin/sh\n"}, {"mode", 0755}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue(notInheritingOptions());
+        setPaused(false);
+
+        using std::filesystem::perms;
+        const auto downloaded = localDirectory_.path() / "script.sh";
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDownloadOperation(
+                *sftp,
+                Ids::generateOperationId(),
+                toLocal(downloaded),
+                remote("/home/test/script.sh"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        workUntilCompletions(1);
+        EXPECT_EQ(std::filesystem::status(downloaded).permissions(), Utility::newFilePermissions());
+
+        const auto uploaded = localDirectory_.path() / "local.sh";
+        std::ofstream{uploaded} << "#!/bin/sh\n";
+        std::filesystem::permissions(uploaded, static_cast<perms>(0755u));
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addUploadOperation(
+                *sftp,
+                Ids::generateOperationId(),
+                toLocal(uploaded),
+                remote("/home/test/local.sh"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        workUntilCompletions(2);
+
+        for (auto const& finished : completions())
+            EXPECT_EQ(finished.reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(
+            remoteMode(*sftp, "/home/test/local.sh"),
+            perms::owner_read | perms::owner_write | perms::group_read | perms::group_write
+        );
+    }
+#endif
 
     TEST_F(OperationQueueTests, BulkDownloadQueuesFilesAsOneCardAndDirectoriesUnderTheirIds)
     {
