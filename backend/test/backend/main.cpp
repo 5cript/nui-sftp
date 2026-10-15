@@ -35,6 +35,7 @@
 #include "test_existence_check.hpp"
 #include "test_opener_risk.hpp"
 #include "test_process.hpp"
+#include "test_program_options.hpp"
 #include "test_rpc_helper.hpp"
 #include "test_rpc_path_parameters.hpp"
 
