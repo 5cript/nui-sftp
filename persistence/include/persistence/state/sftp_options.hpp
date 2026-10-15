@@ -46,6 +46,11 @@ namespace Persistence
         return fmt::format("{}.old", tempFileSuffix);
     }
 
+    /**
+     * @brief Whether a transfer gives the destination the mode of its source when inheritPermissions is not set.
+     */
+    inline constexpr bool defaultInheritPermissions = true;
+
     struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};

@@ -31,7 +31,7 @@ class UploadOperation : public Operation
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
         bool tryContinue{false};
-        bool inheritPermissions{false};
+        bool inheritPermissions{Persistence::defaultInheritPermissions};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};

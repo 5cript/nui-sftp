@@ -332,7 +332,7 @@ namespace Persistence
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
                             .tryContinue = true,
-                            .inheritPermissions = true,
+                            .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
 #else
@@ -349,7 +349,7 @@ namespace Persistence
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
                             .tryContinue = true,
-                            .inheritPermissions = true,
+                            .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
 #else
