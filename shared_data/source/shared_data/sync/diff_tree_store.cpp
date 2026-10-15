@@ -223,9 +223,10 @@ namespace SharedData::Sync
             };
         };
 
-        // Downloaded onto a case folding filesystem, names that differ only in case would meet as one file.
+        // Transferred onto a case folding filesystem, names that differ only in case would meet as one file.
         std::unordered_map<std::string, int> foldedCounts;
-        const bool foldsCase = action == Action::Download && options_.localCaseInsensitive;
+        const bool foldsCase = (action == Action::Download && options_.localCaseInsensitive) ||
+            (action == Action::Upload && options_.remoteCaseInsensitive);
         if (foldsCase)
         {
             for (auto const& child : directory.children)

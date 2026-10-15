@@ -2168,11 +2168,19 @@ void OperationQueue::addSyncScanOperation(
 {
     // Create (or replace) the SyncSession.  A fresh id from the frontend is the
     // norm; re-opening over an existing id is handled as "discard previous state".
+    const auto remoteFoldsCase = [&]()
+    {
+        if (RemoteDeleteGuardDetail::looksCaseFolding(remotePath))
+            return true;
+        const auto home = remoteDeleteGuard(sftp).homeDirectory();
+        return home && RemoteDeleteGuardDetail::looksCaseFolding(*home);
+    }();
     auto session = std::make_shared<SyncSession>(
         SyncSession::Options{
             .sessionId = syncSessionId,
             .localRoot = localPath,
             .remoteRoot = remotePath,
+            .remoteFoldsCase = remoteFoldsCase,
         },
         executor_
     );

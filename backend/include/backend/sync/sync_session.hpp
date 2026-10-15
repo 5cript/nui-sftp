@@ -58,6 +58,14 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
         /// Number of scan entries (sum of both sides) above which
         /// @ref SharedData::Sync::DiffSummary::heavyCompare is set to true.
         std::uint64_t heavyCompareThreshold{5000};
+        /** @brief The local filesystem folds case, the platform default: Windows and macOS do, others do not. */
+#if defined(_WIN32) || defined(__APPLE__)
+        bool localFoldsCase{true};
+#else
+        bool localFoldsCase{false};
+#endif
+        /** @brief The server looks like it folds case, see RemoteDeleteGuardDetail::looksCaseFolding. */
+        bool remoteFoldsCase{false};
     };
 
     SyncSession(Options options, boost::asio::any_io_executor executor);

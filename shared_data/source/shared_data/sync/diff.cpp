@@ -235,6 +235,12 @@ namespace SharedData::Sync
             DiffOptions const& options
         )
         {
+            const bool localDestinationFolds = options.direction != Direction::Upload && options.localCaseInsensitive;
+            const bool remoteDestinationFolds =
+                options.direction != Direction::Download && options.remoteCaseInsensitive;
+            if (!localDestinationFolds && !remoteDestinationFolds)
+                return {};
+
             const auto anyFolds = [](std::vector<ScanNode> const& children)
             {
                 return std::ranges::any_of(
@@ -272,8 +278,9 @@ namespace SharedData::Sync
                         );
                     }
                 );
-                const bool remoteVariants = options.localCaseInsensitive && variants.remote.size() > 1;
-                if (!crossSide && !remoteVariants)
+                const bool remoteVariants = localDestinationFolds && variants.remote.size() > 1;
+                const bool localVariants = remoteDestinationFolds && variants.local.size() > 1;
+                if (!crossSide && !remoteVariants && !localVariants)
                     continue;
                 for (auto const name : variants.local)
                     conflicts.emplace(name);
