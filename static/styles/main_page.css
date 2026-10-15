@@ -13,3 +13,9 @@
     width: 100%;
     height: 100%;
 }
+/* WebKitGTK paints without compositing and repaints whatever lies under an overlay repaint, skip the covered session area */
+.settings-page-background-blocker[style*="display: flex"] ~ .main-page .session-area,
+.licenses-page-background-blocker[style*="display: flex"] ~ .main-page .session-area,
+.notification-log-background-blocker[style*="display: flex"] ~ .main-page .session-area {
+    content-visibility: hidden;
+}
