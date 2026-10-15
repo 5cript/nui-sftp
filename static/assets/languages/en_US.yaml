@@ -141,6 +141,7 @@ syncDialog:
   blockedTitle: "Entries left alone"
   synchronizeUnavailable: "The comparison is running or was cancelled. Compare again to synchronize."
   executionRejected: "These entries were not synchronized: {}"
+  changedSinceCompare: "Changed after the compare, so it was left as it is. Compare again to synchronize it."
   blockReason:
     Unreadable: "unreadable"
     Excluded: "not transferable"

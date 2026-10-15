@@ -52,6 +52,7 @@
 #include <any>
 #include <array>
 #include <chrono>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <string>
@@ -268,6 +269,8 @@ struct SyncDialog::Implementation
         std::vector<SharedData::Sync::SectionChildren> applied{};
         /** @brief What executions reported per row, see setRowState. */
         std::unordered_map<std::string, double> executionStates{};
+        /** @brief Why a failed row failed, for the failures a row explains. */
+        std::unordered_map<std::string, std::string> failureReasons{};
     };
     std::array<SectionState, 3> sections_{};
 
@@ -770,6 +773,13 @@ struct SyncDialog::Implementation
         );
         std::erase_if(
             state.executionStates,
+            [&state](auto const& entry)
+            {
+                return !state.rows.contains(entry.first);
+            }
+        );
+        std::erase_if(
+            state.failureReasons,
             [&state](auto const& entry)
             {
                 return !state.rows.contains(entry.first);
@@ -1399,6 +1409,12 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
         auto progress = progressIter->second;
         return div{
             class_ = rowClass,
+            "title"_attr = Nui::observe(*progress).generate(
+                [this, section, relKey]()
+                {
+                    return failureReasonOf(section, relKey);
+                }
+            ),
             style = Nui::observe(*progress).generate(
                 [progress]() -> std::string
                 {

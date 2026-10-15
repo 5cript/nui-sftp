@@ -204,6 +204,16 @@ class OperationQueue
     bool isActive() const;
 
     void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
+
+    /**
+     * @brief Receives the entries a bulk operation could not transfer or delete with why: by source path and, for a
+     *        prescanned bulk transfer, by entry index.
+     */
+    using FailedEntriesCallback = std::function<void(
+        std::vector<std::pair<std::string, SharedData::OperationError>> const& failedEntries,
+        std::vector<SharedData::IndexedFailure> const& indexedFailures
+    )>;
+
     /** @brief Register a callback that receives the entries a bulk operation could not transfer or
      *         delete. Runs on completion, before the completion callback, because the final BulkProgress
      *         can arrive after the completion and is dropped then.

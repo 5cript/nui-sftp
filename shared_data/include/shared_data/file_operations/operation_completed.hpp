@@ -19,6 +19,16 @@ namespace SharedData
 {
     BOOST_DEFINE_ENUM_CLASS(OperationCompletionReason, Completed, Canceled, Failed)
 
+    /**
+     * @brief A skipped entry of a prescanned bulk up- or download, by its index, and why it was skipped.
+     */
+    struct IndexedFailure
+    {
+        std::uint32_t index{0};
+        OperationErrorType type{OperationErrorType::UnknownError};
+    };
+    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type))
+
     struct OperationCompleted
     {
         OperationCompletionReason reason;

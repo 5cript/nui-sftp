@@ -201,6 +201,7 @@ syncDialog:
   blockedTitle: "Unveränderte Einträge"
   synchronizeUnavailable: "Der Vergleich läuft noch oder wurde abgebrochen. Vergleichen Sie erneut, um zu synchronisieren."
   executionRejected: "Diese Einträge wurden nicht synchronisiert: {}"
+  changedSinceCompare: "Nach dem Vergleich geändert und deshalb unverändert gelassen. Erneut vergleichen, um es zu synchronisieren."
   blockReason:
     Unreadable: "nicht lesbar"
     Excluded: "nicht übertragbar"

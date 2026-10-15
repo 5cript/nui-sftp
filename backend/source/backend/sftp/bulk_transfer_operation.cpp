@@ -4,6 +4,7 @@
 #include <utility/directory_traversal.hpp>
 
 #include <algorithm>
+#include <iterator>
 
 using namespace std::chrono_literals;
 
@@ -238,7 +239,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         {
             Log::warn("{}: Skipping '{}': {}", logName(), displayPath(index), paths.error().toString());
             failedEntries_.emplace_back(failureSource(index), paths.error());
-            failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+            indexedFailures_.push_back({.index = static_cast<std::uint32_t>(index), .type = paths.error().type});
             completedBytes_ += entry.isRegularFile() ? entry.size : 0u;
             ++completedEntries_;
             continue;
@@ -255,7 +256,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
                     return std::unexpected(result.error());
                 Log::warn("{}: Skipping directory '{}': {}", logName(), displayPath(index), result.error().toString());
                 failedEntries_.emplace_back(failureSource(index), result.error());
-                failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+                indexedFailures_.push_back({.index = static_cast<std::uint32_t>(index), .type = result.error().type});
             }
             else
             {
@@ -325,7 +326,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
             failedEntries_.emplace_back(failureSource(slot.paths), error);
-            failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
+            indexedFailures_.push_back({.index = static_cast<std::uint32_t>(slot.entryIndex), .type = error.type});
             finishSlot(slot, false);
             if (common_.failFast)
             {
@@ -399,8 +400,12 @@ void BulkTransferOperation::emitProgress(bool force)
         .bytesTotal = totalBytes_,
         .bytesPerSecond = 0,
         .inFlight = {},
-        .failedEntryIndices = failedEntryIndices_,
+        .failedEntryIndices = {},
     };
+    update.failedEntryIndices.reserve(indexedFailures_.size());
+    std::ranges::transform(
+        indexedFailures_, std::back_inserter(update.failedEntryIndices), &SharedData::IndexedFailure::index
+    );
     update.bytesPerSecond = updateBulkBytesPerSecond(update.bytesCurrent);
     update.inFlight.reserve(slots_.size() + deferred_.size());
     for (auto const& slot : slots_)

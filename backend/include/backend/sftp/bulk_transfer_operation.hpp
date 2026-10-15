@@ -7,6 +7,7 @@
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
+#include <shared_data/file_operations/operation_completed.hpp>
 #include <paths/paths.hpp>
 
 #include <chrono>
@@ -394,7 +395,7 @@ class BulkTransferOperation : public Operation
     /** @brief Per entry: transferred, created or skipped for its type, so a resume leaves it out. */
     std::vector<bool> finishedEntries_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};
-    std::vector<std::uint32_t> failedEntryIndices_{};
+    std::vector<SharedData::IndexedFailure> indexedFailures_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number
     // flicker; sampling the cumulative byte count keeps one coherent rate per bulk.
     std::chrono::steady_clock::time_point lastBpsSampleTime_{};
