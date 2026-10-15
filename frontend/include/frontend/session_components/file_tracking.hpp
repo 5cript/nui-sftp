@@ -48,6 +48,13 @@ class FileTrackingPanel
         Paths::LocalPath const& localPath
     );
 
+    /**
+     * @brief Removes @p localPath, a download of the instance @p instanceId the user decided not to open, and ends
+     *        its watch like Stop does when it has one. Once nothing else is left in the instance, it ends and its
+     *        directory is removed, so it leaves no orphan.
+     */
+    void discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath);
+
     Nui::ElementRenderer operator()();
 
   private:

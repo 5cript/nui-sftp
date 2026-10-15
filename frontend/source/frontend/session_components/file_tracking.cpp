@@ -876,6 +876,7 @@ void FileTrackingPanel::deactivate()
 {
     impl_->fileChangeListeners.clear();
     impl_->table->clear();
+    impl_->rows.clear();
     impl_->entries.clear();
     impl_->entryCount = std::size_t{0};
     impl_->serverChangedQuestions.clear();
@@ -937,6 +938,39 @@ void FileTrackingPanel::startWatching(
 
     // The downloaded files carry the server's modification time, so they tell what the server had.
     impl_->requestFileStates(instanceId, std::nullopt, [] {});
+}
+
+void FileTrackingPanel::discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
+{
+    Log::info("FileTracking: discarding {} of instance {}", localPath.toUtf8(), instanceId.value());
+    impl_->forgetEntry(instanceId);
+    Implementation::syncView();
+    Nui::RpcClient::callWithBackChannel(
+        "FileTracking::discardContent",
+        impl_->lifetime.guarded(
+            [implementation = impl_.get(), instanceId, localPath](Nui::val response)
+            {
+                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                {
+                    Log::error(
+                        "FileTracking: discarding {} of instance {} failed: {}",
+                        localPath.toUtf8(),
+                        instanceId.value(),
+                        response.hasOwnProperty("error") ? response["error"].as<std::string>() : std::string{}
+                    );
+                    return;
+                }
+                Log::info(
+                    "FileTracking: discarded {}{}",
+                    localPath.toUtf8(),
+                    response["instanceDestroyed"].as<bool>() ? ", instance ended" : ""
+                );
+                implementation->refreshOrphanedCount();
+            }
+        ),
+        instanceId.value(),
+        localPath.toUtf8()
+    );
 }
 
 Nui::ElementRenderer FileTrackingPanel::operator()()
