@@ -356,6 +356,24 @@ namespace SharedData::Sync::Test
         );
     }
 
+    TEST(DiffTreeStoreTests, ComparedStateAtNamesWhatTheScanSaw)
+    {
+        const auto tree = makeDir(
+            "", {makeDir("dir", {makeFile("a.txt", 3, 100), makeSymlink("link", "../x", 7)}), makeFile("b", 1, 2)}
+        );
+        EXPECT_EQ(
+            comparedStateAt(tree, "dir/a.txt"),
+            (ComparedState{.exists = true, .type = FileType::Regular, .size = 3, .mtime = 100})
+        );
+        EXPECT_EQ(
+            comparedStateAt(tree, "dir/link"),
+            (ComparedState{.exists = true, .type = FileType::Symlink, .mtime = 7, .linkTarget = "../x"})
+        );
+        EXPECT_EQ(comparedStateAt(tree, "dir").type, FileType::Directory);
+        EXPECT_FALSE(comparedStateAt(tree, "dir/missing").exists);
+        EXPECT_FALSE(comparedStateAt(tree, "b/below").exists);
+    }
+
     TEST(DiffTreeStoreTests, PlanForAPartlySelectedExpandedDirectory)
     {
         DiffStores stores{
