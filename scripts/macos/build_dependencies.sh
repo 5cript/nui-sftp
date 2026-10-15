@@ -290,7 +290,10 @@ JAM
             --with-filesystem --with-iostreams --with-process --with-program_options --with-random \
             --with-serialization --with-system --with-thread \
             install
-        if ! nm "${PREFIX}/lib/libboost_iostreams.a" 2>/dev/null | grep -q zlib_error; then
+        # Captured first: grep -q ends the pipe early and pipefail would count nm's SIGPIPE as a failure.
+        local symbols
+        symbols="$("${LLVM_ROOT}/bin/llvm-nm" "${PREFIX}/lib/libboost_iostreams.a" 2>/dev/null || true)"
+        if ! grep -q zlib_error <<<"${symbols}"; then
             echo "boost iostreams was built without zlib, b2's configuration log:" >&2
             cat bin.v2/config.log >&2 || true
             exit 1
