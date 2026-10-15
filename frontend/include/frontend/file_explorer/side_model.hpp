@@ -4,6 +4,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/file_property_dialog.hpp>
 #include <frontend/dialog/archive_transfer_dialog.hpp>
+#include <frontend/file_explorer/name_rejection.hpp>
 #include <frontend/file_explorer/overwrite_decisions.hpp>
 #include <frontend/file_explorer/side_paths.hpp>
 #include <frontend/terminal/file_engine.hpp>
@@ -180,14 +181,9 @@ class SideModel
     void navigateInto(NuiFileExplorer::Item const& item);
 
     /**
-     * @brief A new name is a single path segment: not empty, not "." or "..", without '/', '\\' or NUL.
+     * @brief Tells the user the name in @p error cannot be used and why.
      */
-    static bool isValidItemName(std::string_view name);
-
-    /**
-     * @brief Tells the user @p name cannot be used as a name.
-     */
-    void showInvalidItemName(std::string const& name);
+    void showInvalidItemName(Paths::PathError const& error);
 
     /**
      * @brief Tells the user an action was refused because of the path in @p error.

@@ -109,11 +109,6 @@ class RemoteSideModel
     std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
 
     /**
-     * @brief @p name directly below the directory the shown items were listed from.
-     */
-    std::expected<Paths::RemotePath, Paths::PathError> childOfCurrentPath(std::string_view name) const;
-
-    /**
      * @brief Queues the downloads the user accepted, a single file as a transfer of its own.
      */
     void enqueueDownloads(std::vector<SharedData::BulkDownloadEntry> accepted);
@@ -130,7 +125,6 @@ class RemoteSideModel
     void
     enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
-    void continueDeletion();
     /**
      * @brief Downloads @p item into a file tracking instance and opens it, with @p watch also uploads it again when
      *        it changes.

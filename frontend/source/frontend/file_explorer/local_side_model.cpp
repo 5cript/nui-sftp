@@ -308,14 +308,12 @@ void LocalSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                     path,
                     language->get("localSideModel", "createDirectoryFailedTitle")
                 );
-                if (!path)
-                    return showPathRefused(language->get("localSideModel", "createItemFailedTitle"), path.error());
-                Log::info("Creating new item: {}", path->toUtf8());
-
-                if (type == NuiFileExplorer::Item::Type::Directory)
-                {
-                    Nui::val args = Nui::val::object();
-                    args.set("path", path->toUtf8());
+            createItem(
+                "RpcFilesystem::createFile", "filePath", path, language->get("localSideModel", "createFileFailedTitle")
+            );
+        }
+    );
+}
 
 void LocalSideModel::createItem(
     char const* function,
@@ -327,67 +325,35 @@ void LocalSideModel::createItem(
     Nui::val args = Nui::val::object();
     args.set(pathArgument, path.toUtf8());
 
-                            Log::info("Directory created successfully");
-                            // Refresh list:
-                            navigateTo(currentPath_.value());
-                        },
-                        args
-                    );
-                }
-                else if (type == NuiFileExplorer::Item::Type::Regular)
+    Nui::RpcClient::callWithBackChannel(
+        function,
+        lifetime_.guarded(
+            [this, function, failedTitle = std::move(failedTitle)](Nui::val val)
+            {
+                const auto error = [&val]() -> std::optional<std::string>
                 {
-                    Nui::val args = Nui::val::object();
-                    args.set("filePath", path->toUtf8());
+                    if (!val.hasOwnProperty("success"))
+                        return language->get("localSideModel", "invalidResponseFromBackend");
+                    if (val["success"].as<bool>())
+                        return std::nullopt;
+                    return language->translate(val["error"].as<std::string>());
+                }();
+                if (!error)
+                    return navigateTo(currentPath_.value());
 
-                    Nui::RpcClient::callWithBackChannel(
-                        "RpcFilesystem::createFile",
-                        [this](Nui::val val)
-                        {
-                            if (!val.hasOwnProperty("success"))
-                            {
-                                Log::error("Invalid response from RpcFilesystem::createFile");
-                                confirmDialog_->open({
-                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                    .headerText = language->get("localSideModel", "createFileFailedTitle"),
-                                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
-
-                            const auto success = val["success"].as<bool>();
-                            if (!success)
-                            {
-                                const auto error = language->translate(val["error"].as<std::string>());
-                                Log::error("Failed to create file: {}", error);
-                                confirmDialog_->open({
-                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                    .headerText = language->get("localSideModel", "createFileFailedTitle"),
-                                    .text = error,
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                                return;
-                            }
-
-                            Log::info("File created successfully");
-                            // Refresh list:
-                            navigateTo(currentPath_.value());
-                        },
-                        args
-                    );
-                }
-                else
-                {
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("localSideModel", "createItemFailedTitle"),
-                        .text = language->get("localSideModel", "unsupportedItemType"),
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                }
-            }}
+                Log::error("{} failed: {}", function, *error);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = failedTitle,
+                    .text = *error,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+            }
+        ),
+        args
     );
 }
+
 void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 {
     if (items.empty())

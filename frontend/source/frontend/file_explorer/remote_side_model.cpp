@@ -235,21 +235,6 @@ std::expected<std::string, Paths::PathError> RemoteSideModel::itemPathText(NuiFi
     );
 }
 
-std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::childOfCurrentPath(std::string_view name) const
-{
-    return currentRemotePath().and_then(
-        [name](Paths::RemotePath const& directory)
-        {
-            return Paths::PathSegment::make(name).transform(
-                [&directory](Paths::PathSegment const& segment)
-                {
-                    return directory / segment;
-                }
-            );
-        }
-    );
-}
-
 bool RemoteSideModel::isComplete() const
 {
     return localModel_ != nullptr && SideModel::isComplete();

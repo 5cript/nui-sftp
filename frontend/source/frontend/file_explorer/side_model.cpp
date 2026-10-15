@@ -143,19 +143,17 @@ void SideModel::navigateInto(NuiFileExplorer::Item const& item)
     navigateTo(std::filesystem::path{*path});
 }
 
-bool SideModel::isValidItemName(std::string_view name)
+void SideModel::showInvalidItemName(Paths::PathError const& error)
 {
-    if (name.empty() || name == "." || name == "..")
-        return false;
-    return name.find_first_of(std::string_view{"/\\\0", 3}) == std::string_view::npos;
-}
-
-void SideModel::showInvalidItemName(std::string const& name)
-{
+    Log::error("Refusing the name {}", error.toString());
     confirmDialog_->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
         .headerText = language->get("fileExplorer", "invalidItemNameHeader"),
-        .text = fmt::format(fmt::runtime(language->get("fileExplorer", "invalidItemName")), name),
+        .text = fmt::format(
+            fmt::runtime(language->get("fileExplorer", "invalidItemName")),
+            error.input,
+            language->get("fileExplorer", "nameRejection", FileExplorer::nameRejectionKey(error.reason))
+        ),
         .buttons = ConfirmDialog::Button::Ok,
     });
 }

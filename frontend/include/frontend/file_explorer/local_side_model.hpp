@@ -123,6 +123,12 @@ class LocalSideModel
     void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
     /**
+     * @brief Creates the item at @p path through the backend @p function, which takes the path as @p pathArgument,
+     *        shows the listing again on success and the failure under @p failedTitle otherwise.
+     */
+    void createItem(char const* function, char const* pathArgument, Paths::LocalPath const& path, std::string failedTitle);
+
+    /**
      * @brief Deletes @p targets through the backend at once, each item by itself, and refreshes the listing.
      */
     void deleteFilesDirectly(std::vector<Paths::LocalPath> const& targets);
