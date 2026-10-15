@@ -467,21 +467,26 @@ int main(int const argc, char const* const* argv)
     // Reading the umask changes it for a moment on macOS, so it is read before any thread creates files.
     static_cast<void>(Utility::processUmask());
 #ifdef _WIN32
-    // A GUI program has no console; help and --console write to the one it was started from.
+    // A GUI program has no console; --console, the help and parse errors write to the one it was started from.
     const auto arguments = std::span{argv, static_cast<std::size_t>(argc)} | std::views::drop(1);
-    const auto console = std::ranges::any_of(
-                             arguments,
-                             [](std::string_view argument)
-                             {
-                                 return argument == "--help" || argument == "--console";
-                             }
-                         )
-        ? attachParentConsole()
-        : ConsoleAttachment{};
+    const bool consoleRequested = std::ranges::any_of(
+        arguments,
+        [](std::string_view argument)
+        {
+            return argument == "--console";
+        }
+    );
+    const auto console = consoleRequested ? attachParentConsole() : ConsoleAttachment{};
 #endif
     auto options = parseProgramOptions(argc, argv);
     if (!options)
-        return 0;
+    {
+#ifdef _WIN32
+        const auto exitConsole = consoleRequested ? ConsoleAttachment{} : attachParentConsole();
+#endif
+        (options.error().isError ? std::cerr : std::cout) << options.error().message << '\n';
+        return options.error().isError ? 1 : 0;
+    }
 
     if (!options->enableDevTools)
         removeRemoteInspectorEnvironment();
