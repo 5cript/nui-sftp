@@ -178,10 +178,8 @@ namespace SecureShell
         std::expected<void, Error> removeDirectoryInStrand(Paths::RemotePath const& path);
 
         /**
-         * @brief Removes everything in the provided paths.
-         *
-         * @param path
-         * @return std::future<std::expected<void, Error>>
+         * @brief Removes each of @p paths without recursing: a directory only when it is empty, anything else is
+         *        unlinked. Stops at the first failure.
          */
         std::future<std::expected<void, Error>> removeAll(std::vector<Paths::RemotePath> paths);
 

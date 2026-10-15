@@ -397,13 +397,13 @@ namespace SecureShell
 
                     if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
                     {
-                        auto result = sftp_rmdir(session_, path.c_str());
+                        const auto result = sftp_rmdir(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }
                     else
                     {
-                        auto result = sftp_unlink(session_, path.c_str());
+                        const auto result = sftp_unlink(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }

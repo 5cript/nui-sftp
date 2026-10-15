@@ -145,6 +145,11 @@ class UploadOperation : public Operation
     std::expected<void, Error>
     ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir);
 
+    /**
+     * @brief The mode the remote file is created with, always with owner write: the sanitized @p localPerms when
+     *        inheriting (0444 when unknown), otherwise the configured file mode or 0660. The server's umask applies
+     *        to it like to any new file.
+     */
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
     /**

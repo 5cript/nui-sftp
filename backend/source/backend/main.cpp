@@ -160,7 +160,7 @@ namespace
 
                 Log::debug("Serving file: '{}'", Paths::nativeToUtf8(file));
 
-                // Stream the file body via bodyFile — avoids loading the whole file into memory
+                // Stream the file body via bodyFile, which avoids loading the whole file into memory
                 // (matters for large assets like DWARF blobs). Empty files yield a 204.
                 std::error_code sizeEc;
                 const auto fileSize = std::filesystem::file_size(file, sizeEc);

@@ -27,7 +27,7 @@ namespace Persistence
         bool preventCreateDirectory{false};
         std::optional<std::filesystem::path> homeOverride{std::nullopt};
         std::optional<std::filesystem::path> temporaryDownloadsDirectory{"%cache_home%/nui-sftp-downloads"};
-        /// Optional so configurations written before it load without a warning; unset means Warn.
+        /** @brief What opening a file that can run code from the explorer does. Unset means Warn. */
         std::optional<RiskyFilePolicy> openRiskyFiles{std::nullopt};
     };
 

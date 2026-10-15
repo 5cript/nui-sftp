@@ -28,9 +28,9 @@ namespace SharedData::Sync
         bool actionUpload{true};
         bool actionDownload{true};
         bool actionDelete{false};
-        /// When false, entries below the root directory are dropped from the diff.
+        /** @brief When false, entries below the root directory are dropped from the diff. */
         bool recursive{true};
-        /// When true, entries with any path segment starting with '.' are dropped.
+        /** @brief When true, entries with any path segment starting with '.' are dropped. */
         bool ignoreHidden{false};
         /**
          * @brief The local filesystem folds case (Windows, macOS), set by the backend. Names that differ only in case

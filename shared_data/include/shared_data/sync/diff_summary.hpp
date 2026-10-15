@@ -30,19 +30,21 @@ namespace SharedData::Sync
      */
     struct SectionSummary
     {
-        /// Total number of actionable entries in the whole section (leaves + directories).
+        /** @brief Total number of actionable entries in the whole section (leaves + directories). */
         std::uint64_t itemCount{0};
-        /// Sum of transfer bytes across the section. Directories contribute their
-        /// subtree total; files contribute their own size.
+        /**
+         * @brief Sum of transfer bytes across the section. Directories contribute their subtree total; files contribute
+         *        their own size.
+         */
         std::uint64_t transferBytes{0};
-        /// Number of top-level rows the frontend should seed into the tree.
+        /** @brief Number of top-level rows the frontend should seed into the tree. */
         std::uint64_t rootChildCount{0};
     };
     BOOST_DESCRIBE_STRUCT(SectionSummary, (), (itemCount, transferBytes, rootChildCount))
 
     /**
-     * @brief Returned synchronously from recomputeSyncDiff; replaces the old
-     *        entries-per-section vectors that used to cross RPC.
+     * @brief Returned synchronously from recomputeSyncDiff: the totals of each section. The rows themselves are
+     *        loaded per directory.
      */
     struct DiffSummary
     {
@@ -50,20 +52,23 @@ namespace SharedData::Sync
         SectionSummary uploads{};
         SectionSummary downloads{};
         SectionSummary deletes{};
-        /// Count of scan-node pairs/singletons visited during the merge walk.
+        /** @brief Count of scan-node pairs/singletons visited during the merge walk. */
         std::uint64_t entriesCompared{0};
-        /// Monotonic token. Frontend passes this back on subsequent loadChildren calls
-        /// so stale requests issued before a new recompute can be rejected.
+        /**
+         * @brief Monotonic token. Frontend passes this back on subsequent loadChildren calls so stale requests issued
+         *        before a new recompute can be rejected.
+         */
         std::uint64_t generation{0};
-        /// Backend-side decision: input was large enough that Comparing-phase progress
-        /// events were emitted. Frontend uses this for telemetry only; rendering the
-        /// Comparing phase is unconditional.
+        /**
+         * @brief Backend-side decision: input was large enough that Comparing-phase progress events were emitted.
+         *        Frontend uses this for telemetry only; rendering the Comparing phase is unconditional.
+         */
         bool heavyCompare{false};
-        /// True when the walk bailed out early because of a cancel request.
+        /** @brief True when the walk bailed out early because of a cancel request. */
         bool cancelled{false};
-        /// Number of entries sync leaves alone because they are unreadable, excluded or conflicting.
+        /** @brief Number of entries sync skips because they are unreadable, excluded or conflicting. */
         std::uint64_t blockedCount{0};
-        /// The first blocked entries, for the dialog to name them.
+        /** @brief The first skipped entries, for the dialog to name them. */
         std::vector<BlockedEntry> blockedSamples{};
     };
     BOOST_DESCRIBE_STRUCT(

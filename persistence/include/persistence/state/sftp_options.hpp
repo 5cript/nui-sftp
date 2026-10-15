@@ -74,7 +74,10 @@ namespace Persistence
     {
         std::optional<bool> reserveSpace{std::nullopt};
         std::optional<bool> doCleanup{std::nullopt};
-        /// Mark downloaded files as coming from the internet (Mark of the Web on Windows, quarantine on macOS).
+        /**
+         * @brief Mark downloaded files as coming from the internet (Mark of the Web on Windows, quarantine on macOS).
+         *        Unset means on.
+         */
         std::optional<bool> markAsDownloaded{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(DownloadOptions, (CommonTransferOptions), (reserveSpace, doCleanup, markAsDownloaded))
