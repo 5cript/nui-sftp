@@ -358,6 +358,7 @@ struct FileTrackingPanel::Implementation
                     }
                     forgetEntry(instanceId);
                     syncView();
+                    refreshOrphanedCount();
                 }
             ),
             instanceId.value()
