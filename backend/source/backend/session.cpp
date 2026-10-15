@@ -1283,6 +1283,7 @@ void Session::registerOperationQueuePauseUnpause()
                 }
 
                 self->operationQueue_->paused(pause);
+                self->localOperationQueue_->hold(self->id_, pause);
                 self->resetQueueThrottle();
                 return reply(SharedData::success());
             }

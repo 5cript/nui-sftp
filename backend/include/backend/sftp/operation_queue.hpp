@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/all_operations.hpp>
+#include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sync/sync_session.hpp>
@@ -248,7 +249,8 @@ class OperationQueue
         SecureShell::SftpSession& sftp,
         SyncSession const& session,
         SyncSession::ResolvedPlan plan,
-        SharedData::Sync::SyncExecutionRequest const& request
+        SharedData::Sync::SyncExecutionRequest const& request,
+        LocalOperationQueue& localDeleteQueue
     );
 
     /**

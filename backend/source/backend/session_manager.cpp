@@ -105,6 +105,7 @@ SessionManager::SessionManager(
 )
     : RpcHelper::StrandRpc{executor, wnd, hub}
     , stateHolder_{&stateHolder}
+    , localOperationQueue_{std::make_shared<LocalOperationQueue>(executor_, strand_, wnd, hub, localDeletionPrevented_)}
 {}
 
 void SessionManager::preventLocalDeletion(bool prevent)
@@ -277,6 +278,7 @@ void SessionManager::registerRpc()
     registerRpcSessionDisconnect();
     registerRpcAdoptBulkResume();
     registerRpcDiscardBulkResume();
+    localOperationQueue_->registerRpc();
 }
 
 void SessionManager::registerRpcSessionConnect()

@@ -4,6 +4,7 @@
 #include <ssh/sftp_session.hpp>
 #include <ids/ids.hpp>
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/rpc_helper.hpp>
 #include <persistence/state_holder.hpp>

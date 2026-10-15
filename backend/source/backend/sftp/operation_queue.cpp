@@ -1650,7 +1650,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     SecureShell::SftpSession& sftp,
     SyncSession const& session,
     SyncSession::ResolvedPlan plan,
-    SharedData::Sync::SyncExecutionRequest const& request
+    SharedData::Sync::SyncExecutionRequest const& request,
+    LocalOperationQueue& localDeleteQueue
 )
 {
     // Assumed in strand
