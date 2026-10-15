@@ -264,6 +264,17 @@ class FileEngine
         std::function<void(bool, std::string const& info)> onComplete
     );
 
+    /**
+     * @brief Renames on this computer, needs no connection. Fails with "backend.rename.targetExists" when
+     *        @p newPath exists and @p overwrite is false.
+     */
+    static void renameLocal(
+        Paths::LocalPath const& oldPath,
+        Paths::LocalPath const& newPath,
+        bool overwrite,
+        std::function<void(bool, std::string const& info)> onComplete
+    );
+
     void addRename(
         Paths::RemotePath const& sourcePath,
         Paths::RemotePath const& destinationPath,

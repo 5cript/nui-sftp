@@ -126,13 +126,6 @@ class LocalSideModel
     ) override;
 
   private:
-    void enqueueRefresh(bool otherModel);
-
-    /**
-     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
-     */
-    void renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite);
-
     /**
      * @brief Where @p item is: a listed item below the directory it was listed from, a dropped one at its own
      *        absolute path. A listed name that is no single path segment, like "..", names no item.

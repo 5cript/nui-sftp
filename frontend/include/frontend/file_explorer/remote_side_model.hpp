@@ -118,13 +118,6 @@ class RemoteSideModel
     ) override;
 
   private:
-    void enqueueRefresh(bool otherModel);
-
-    /**
-     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
-     */
-    void renameItem(Paths::RemotePath const& from, Paths::RemotePath const& to, bool overwrite);
-
     /**
      * @brief Where @p item is on the server, below the directory it was listed from. A listed name that is no
      *        single path segment, like "..", names no item.

@@ -705,95 +705,13 @@ void LocalSideModel::onDropExternal(
         onTransfer(items, subDir);
 }
 
-void LocalSideModel::renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite)
-{
-    Nui::val args = Nui::val::object();
-    args.set("oldPath", from.toUtf8());
-    args.set("newPath", to.toUtf8());
-    args.set("overwrite", overwrite);
-
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::rename",
-        [this, from, to, overwrite](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-            {
-                Log::error("Invalid response from RpcFilesystem::rename");
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "renameFailed"),
-                    .text = language->get("localSideModel", "invalidResponseFromBackend"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-
-            if (!val["success"].as<bool>())
-            {
-                const auto errorKey = val["error"].as<std::string>();
-                if (errorKey == "backend.rename.targetExists" && !overwrite)
-                {
-                    confirmReplaceOnRename(
-                        std::string{to.filename()->view()},
-                        [this, from, to]()
-                        {
-                            renameItem(from, to, true);
-                        }
-                    );
-                    return;
-                }
-                const auto error = language->translate(errorKey);
-                Log::error("Failed to rename item: {}", error);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "renameFailed"),
-                    .text = error,
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-
-            Log::info("Item renamed successfully");
-            onRefresh();
-        },
-        args
-    );
-}
-
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     Log::info("Rename item requested: {}", item.name);
-
     // The item's own path: the explorer may already show another directory.
-    auto from = localPathOf(item);
-    if (!from)
-        return showPathRefused(language->get("localSideModel", "renameFailed"), from.error());
-
-    inputDialog_->open({
-        .whatFor = language->get("remoteSideModel", "rename"),
-        .prompt = fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.name),
-        .headerText =
-            fmt::format(fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.name),
-        .initialValue = item.name,
-        .isPassword = false,
-        .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
-        {
-            if (!name || name->empty())
-                return;
-            if (*name == item.name)
-                return;
-            if (!isValidItemName(*name))
-                return showInvalidItemName(*name);
-            const auto segment = Paths::LocalPathSegment::make(*name);
-            const auto directory = from.parent();
-            if (!segment || !directory)
-                return showInvalidItemName(*name);
-
-            Log::info("Renaming item to: {}", *name);
-            renameItem(from, *directory / *segment, false);
-        },
-    });
+    promptRename(item, localPathOf(item));
 }
+
 void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
     // listFiles only carries the lean field set; fetch the full entry (atime, birthtime, acl, ...)
@@ -818,17 +736,17 @@ void LocalSideModel::onProperties(NuiFileExplorer::Item const& item)
                 filePropertyDialog_->open(fallback, displayPath);
             };
 
-            if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
-            {
-                Log::warn("RpcFilesystem::properties failed; opening dialog with cached entry");
-                useFallback();
-                return;
-            }
-            if (!val.hasOwnProperty("entry") || val["entry"].isNull() || val["entry"].isUndefined())
-            {
-                useFallback();
-                return;
-            }
+                if (!val.hasOwnProperty("success") || !val["success"].as<bool>())
+                {
+                    Log::warn("RpcFilesystem::properties failed; opening dialog with cached entry");
+                    useFallback();
+                    return;
+                }
+                if (!val.hasOwnProperty("entry") || val["entry"].isNull() || val["entry"].isUndefined())
+                {
+                    useFallback();
+                    return;
+                }
 
             const auto extractFull = [](Nui::val const& source) -> SharedData::DirectoryEntry
             {

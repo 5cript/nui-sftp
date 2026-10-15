@@ -205,6 +205,7 @@ remoteSideModel:
   renamePrompt: "Enter the new name for {}"
   renameWithItem: "Rename {}"
   failedToRenameItem: "Failed to rename item '{}' to '{}': {}"
+  renameFailed: "Rename Failed"
   archiveDownloadFailed: "Archive Download Failed"
   downloadItemsQuestion: "Download Items?"
 localSideModel:
@@ -215,6 +216,10 @@ localSideModel:
   invalidResponseFromBackend: "Invalid response from backend"
   fileGridError: "File Grid Error (Local Side)"
   renameFailed: "Rename Failed"
+  rename: "Rename"
+  renamePrompt: "Enter the new name for {}"
+  renameWithItem: "Rename {}"
+  failedToRenameItem: "Failed to rename item '{}' to '{}': {}"
   uploadFailed: "Upload Failed"
   uploadSingleConfirmText: "Are you sure you want to upload this item '{}' to {}?"
   uploadMultipleConfirmText: "Are you sure you want to upload the following {} items to {}?"

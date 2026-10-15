@@ -1091,6 +1091,34 @@ void FileEngine::rename(
     );
 }
 
+void FileEngine::renameLocal(
+    Paths::LocalPath const& oldPath,
+    Paths::LocalPath const& newPath,
+    bool overwrite,
+    std::function<void(bool, std::string const& info)> onComplete
+)
+{
+    Log::info("Requesting to rename local item: {} -> {}", oldPath.toUtf8(), newPath.toUtf8());
+
+    Nui::val args = Nui::val::object();
+    args.set("oldPath", oldPath.toUtf8());
+    args.set("newPath", newPath.toUtf8());
+    args.set("overwrite", overwrite);
+
+    Nui::RpcClient::callWithBackChannel(
+        "RpcFilesystem::rename",
+        [onComplete = std::move(onComplete)](Nui::val val)
+        {
+            if (!val.hasOwnProperty("success"))
+                return onComplete(false, "Invalid response from RpcFilesystem::rename");
+            if (!val["success"].as<bool>())
+                return onComplete(false, val["error"].as<std::string>());
+            onComplete(true, "Success");
+        },
+        args
+    );
+}
+
 void FileEngine::addRename(
     Paths::RemotePath const& sourcePath,
     Paths::RemotePath const& destinationPath,

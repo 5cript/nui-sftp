@@ -107,6 +107,7 @@ remoteSideModel:
   renamePrompt: "Geben Sie den neuen Namen für {} ein"
   renameWithItem: "{} umbenennen"
   failedToRenameItem: "Fehler beim Umbenennen von '{}' in '{}': {}"
+  renameFailed: "Umbenennen fehlgeschlagen"
   archiveDownloadFailed: "Archiv-Download fehlgeschlagen"
   downloadItemsQuestion: "Elemente herunterladen?"
 localSideModel:
@@ -117,6 +118,10 @@ localSideModel:
   invalidResponseFromBackend: "Ungültige Antwort vom Backend"
   fileGridError: "Dateiansicht Fehler (Lokale Seite)"
   renameFailed: "Umbenennen fehlgeschlagen"
+  rename: "Umbenennen"
+  renamePrompt: "Geben Sie den neuen Namen für {} ein"
+  renameWithItem: "{} umbenennen"
+  failedToRenameItem: "Fehler beim Umbenennen von '{}' in '{}': {}"
   uploadFailed: "Hochladen fehlgeschlagen"
   uploadSingleConfirmText: "Sind Sie sicher, dass Sie dieses Element '{}' nach {} hochladen möchten?"
   uploadMultipleConfirmText: "Sind Sie sicher, dass Sie die folgenden {} Elemente nach {} hochladen möchten?"

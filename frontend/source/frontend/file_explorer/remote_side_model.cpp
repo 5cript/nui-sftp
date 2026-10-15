@@ -917,84 +917,13 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
     });
 }
 
-void RemoteSideModel::renameItem(Paths::RemotePath const& from, Paths::RemotePath const& to, bool overwrite)
-{
-    fileEngine_->rename(
-        from,
-        to,
-        overwrite,
-        [this, from, to, overwrite](bool success, std::string const& info)
-        {
-            if (!success)
-            {
-                if (info == "backend.rename.targetExists" && !overwrite)
-                {
-                    confirmReplaceOnRename(
-                        std::string{to.filename()->view()},
-                        [this, from, to]()
-                        {
-                            renameItem(from, to, true);
-                        }
-                    );
-                    return;
-                }
-                Log::error("Failed to rename item '{}' to '{}': {}", from.value(), to.value(), info);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = "",
-                    .text = fmt::format(
-                        fmt::runtime(language->get("remoteSideModel", "failedToRenameItem")),
-                        from.value(),
-                        to.value(),
-                        language->translate(info)
-                    ),
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                return;
-            }
-            Log::info("Renamed item '{}' to '{}'", from.value(), to.value());
-            onRefresh();
-        }
-    );
-}
-
 void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
     Log::info("Rename item requested: {}", item.name);
-
     // The item's own path: the explorer may already show another directory.
-    auto from = remotePathOf(item);
-    if (!from)
-        return showPathRefused(language->get("remoteSideModel", "rename"), from.error());
-
-    inputDialog_->open({
-        .whatFor = language->get("remoteSideModel", "rename"),
-        .prompt =
-            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.name),
-        .headerText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.name
-        ),
-        .initialValue = item.name,
-        .isPassword = false,
-        .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
-        {
-            if (!name || name->empty())
-                return;
-            if (*name == item.name)
-                return;
-            if (!isValidItemName(*name))
-                return showInvalidItemName(*name);
-            const auto segment = Paths::PathSegment::make(*name);
-            const auto directory = from.parent();
-            if (!segment || !directory)
-                return showInvalidItemName(*name);
-
-            Log::info("Renaming item to: {}", *name);
-            renameItem(from, *directory / *segment, false);
-        },
-    });
+    promptRename(item, remotePathOf(item));
 }
 
 void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
