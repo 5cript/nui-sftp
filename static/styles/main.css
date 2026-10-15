@@ -224,6 +224,7 @@
 
     & .nui-file-grid-background {
         background-color: var(--background-color);
+        background-image: var(--background-image, url("data-url:../../../styles/nui-file-explorer/file_grid_background_light.png"));
     }
 
     & .nui-file-grid-item-icons:is(.selected)::after {

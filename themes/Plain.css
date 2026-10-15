@@ -7,5 +7,5 @@
 }
 
 .nui-file-grid-background {
-    --background-image: unset !important;
+    --background-image: none !important;
 }

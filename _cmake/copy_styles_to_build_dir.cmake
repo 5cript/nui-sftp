@@ -2,6 +2,8 @@ if (NOT OMIT_FRONTEND_BUILD)
     add_custom_command(
         OUTPUT
             "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
+            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background.png"
+            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background_light.png"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/color_picker.css"
@@ -27,6 +29,8 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/5cript-nui-components"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background.png" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background.png"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background_light.png" "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background_light.png"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/carousel.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/color_picker.css"
@@ -50,6 +54,8 @@ if (NOT OMIT_FRONTEND_BUILD)
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/themes/light.css" "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/themes/light.css"
         DEPENDS
             "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid.css"
+            "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background.png"
+            "${CMAKE_SOURCE_DIR}/nui-file-explorer/styles/file_grid_background_light.png"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/button.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/carousel.css"
             "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/color_picker.css"
@@ -78,6 +84,8 @@ if (NOT OMIT_FRONTEND_BUILD)
         ALL
         DEPENDS
             "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid.css"
+            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background.png"
+            "${CMAKE_BINARY_DIR}/styles/nui-file-explorer/file_grid_background_light.png"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/button.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/carousel.css"
             "${CMAKE_BINARY_DIR}/styles/5cript-nui-components/color_picker.css"
