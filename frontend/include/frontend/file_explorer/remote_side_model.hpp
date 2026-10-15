@@ -151,6 +151,11 @@ class RemoteSideModel
         Paths::LocalPath const& localPath,
         bool openWith
     );
+    /**
+     * @brief What happens when the user decides not to open the download @p localPath of the instance
+     *        @p instanceId: the download is removed and its watch ends, see FileTrackingPanel::discard.
+     */
+    std::function<void()> discardWhenDeclined(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath);
 
   private:
     void placesFromHomeListing();

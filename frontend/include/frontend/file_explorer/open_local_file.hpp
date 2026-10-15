@@ -4,12 +4,16 @@
 #include <paths/local_path.hpp>
 #include <utility/lifetime_token.hpp>
 
+#include <functional>
+
 namespace FileExplorer
 {
     /**
      * @brief Opens the local file @p path with its application. A file that can run code is opened only after the
      *        user confirmed it, when the settings ask for that; errors are shown in @p dialog. Replies that arrive
      *        after @p owner is gone are dropped.
+     *
+     * @param onDeclined Runs when the user closes that question without opening the file, while @p owner exists.
      */
     void openLocalFile(
         Utility::LifetimeToken const& owner,

@@ -7,8 +7,10 @@
 
 #include <fmt/format.h>
 
+#include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace FileExplorer
 {
