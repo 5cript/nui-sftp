@@ -18,7 +18,6 @@
 #include <paths/native.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
-#include <backend/sync/sync_baseline_store.hpp>
 #include <constants/persistence.hpp>
 #include <utility/permissions.hpp>
 #include <utility/resources.hpp>
@@ -40,11 +39,9 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
-#include <iterator>
 #include <ranges>
 #include <span>
 #include <unordered_map>
-#include <vector>
 #include <cstdlib>
 
 #ifndef _WIN32
@@ -323,13 +320,6 @@ void Main::registerRpc()
             }
 
             sshSessionManager_->preventLocalDeletion(holder.stateCache().localFilesystemOptions.preventDeletion);
-            {
-                auto const& sessions = holder.stateCache().sessions;
-                std::vector<std::string> sessionNames;
-                sessionNames.reserve(sessions.size());
-                std::ranges::copy(std::views::keys(sessions), std::back_inserter(sessionNames));
-                SyncBaselineStore{SyncBaselineStore::defaultDirectory()}.pruneAllBut(sessionNames);
-            }
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
                 window_.getExecutor(),
                 window_,

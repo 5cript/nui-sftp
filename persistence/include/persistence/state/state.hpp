@@ -14,7 +14,6 @@
 #include <persistence/state/localization_options.hpp>
 #include <persistence/state/log_options.hpp>
 
-#include <cstdint>
 #include <map>
 #include <string>
 
@@ -90,7 +89,6 @@ namespace Persistence
             fileTrackingOptions,
             localFilesystemOptions,
             lastDirectConnect,
-            lastDirectConnectInheritables,
-            syncBaselines)
+            lastDirectConnectInheritables)
     )
 }

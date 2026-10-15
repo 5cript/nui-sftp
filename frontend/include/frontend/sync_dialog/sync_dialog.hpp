@@ -9,8 +9,6 @@
 #include <nui/utility/move_detector.hpp>
 
 #include <filesystem>
-#include <cstdint>
-#include <optional>
 #include <functional>
 #include <memory>
 
@@ -54,8 +52,7 @@ class SyncDialog
         SharedData::Sync::DiffSnapshot snapshot,
         std::filesystem::path localPath,
         std::filesystem::path remotePath,
-        ScanSettings scanned,
-        std::optional<std::uint64_t> lastSyncTime
+        ScanSettings scanned
     );
 
     /**

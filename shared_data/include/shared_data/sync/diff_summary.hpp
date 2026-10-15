@@ -13,16 +13,7 @@ namespace SharedData::Sync
     /**
      * @brief Why the diff left an entry alone even though it exists on one or both sides.
      */
-    BOOST_DEFINE_ENUM_CLASS(
-        BlockReason,
-        Unreadable,
-        Excluded,
-        InvalidName,
-        TypeConflict,
-        CaseConflict,
-        ChangedOnBothSides,
-        ChangedOnDestination
-    )
+    BOOST_DEFINE_ENUM_CLASS(BlockReason, Unreadable, Excluded, InvalidName, TypeConflict, CaseConflict)
 
     /**
      * @brief An entry sync does not act on, with the reason.

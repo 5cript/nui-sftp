@@ -8,7 +8,6 @@
 #include <utility/enum_string_convert.hpp>
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -33,19 +32,28 @@ namespace SharedData::Sync
         bool recursive{true};
         /// When true, entries with any path segment starting with '.' are dropped.
         bool ignoreHidden{false};
-        /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
-        /// case would land on one local file then.
+        /**
+         * @brief The local filesystem folds case (Windows, macOS), set by the backend. Names that differ only in case
+         *        or normalization would land on one local file then.
+         */
         bool localCaseInsensitive{false};
         /**
          * @brief The server looks like it folds case (Windows or macOS paths), set by the backend. Names that differ
          *        only in case or normalization would land on one remote file then.
          */
-        std::optional<std::uint64_t> lastSyncTime{};
+        bool remoteCaseInsensitive{false};
     };
     BOOST_DESCRIBE_STRUCT(
         DiffOptions,
         (),
-        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden, localCaseInsensitive, lastSyncTime)
+        (direction,
+         actionUpload,
+         actionDownload,
+         actionDelete,
+         recursive,
+         ignoreHidden,
+         localCaseInsensitive,
+         remoteCaseInsensitive)
     )
 
     /**

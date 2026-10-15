@@ -837,7 +837,6 @@ struct SyncDialog::Implementation
             .actionDelete = actionDelete_.value(),
             .recursive = recursive_.value(),
             .ignoreHidden = ignoreHidden_.value(),
-            .lastSyncTime = lastSyncTime_,
         };
     }
 
@@ -1441,11 +1440,6 @@ SyncDialog::~SyncDialog()
 SyncDialog::SyncDialog(SyncDialog&&) = default;
 SyncDialog& SyncDialog::operator=(SyncDialog&&) = default;
 
-void SyncDialog::setOnSynchronized(std::function<void()> callback)
-{
-    impl_->onSynchronized_ = std::move(callback);
-}
-
 void SyncDialog::setOnRecompareRequested(std::function<void(RecompareRequest)> callback)
 {
     impl_->onRecompareRequested_ = std::move(callback);
@@ -1461,15 +1455,13 @@ void SyncDialog::open(
     SharedData::Sync::DiffSnapshot snapshot,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
-    ScanSettings scanned,
-    std::optional<std::uint64_t> lastSyncTime
+    ScanSettings scanned
 )
 {
     if (impl_->provider_ != provider)
         impl_->dropRegistrations();
     impl_->provider_ = std::move(provider);
     impl_->diffCurrent_ = true;
-    impl_->lastSyncTime_ = lastSyncTime;
     impl_->localPath_ = std::move(localPath);
     impl_->remotePath_ = std::move(remotePath);
     impl_->scanned_ = scanned;

@@ -197,7 +197,7 @@ syncDialog:
   deleteSideLocal: "lokal"
   confirmDeleteRowHeader: "Jetzt löschen"
   confirmDeleteRow: "'{}' {} jetzt löschen?"
-  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden oder sie sich seit der letzten Synchronisation so geändert haben, dass Daten verloren gingen. Zum Anzeigen klicken."
+  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft oder sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden. Zum Anzeigen klicken."
   blockedTitle: "Unveränderte Einträge"
   synchronizeUnavailable: "Der Vergleich läuft noch oder wurde abgebrochen. Vergleichen Sie erneut, um zu synchronisieren."
   executionRejected: "Diese Einträge wurden nicht synchronisiert: {}"
@@ -207,8 +207,6 @@ syncDialog:
     InvalidName: "ungültiger Name"
     TypeConflict: "Verzeichnis gegen symbolischen Link"
     CaseConflict: "Namen unterscheiden sich nur in der Groß- und Kleinschreibung"
-    ChangedOnBothSides: "seit der letzten Synchronisation auf beiden Seiten geändert"
-    ChangedOnDestination: "seit der letzten Synchronisation auf der Seite geändert, die ersetzt oder gelöscht würde"
   tree:
     loading: "Lädt…"
     loadFailed: "Fehlgeschlagen: {}"

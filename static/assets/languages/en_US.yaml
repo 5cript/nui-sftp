@@ -137,7 +137,7 @@ syncDialog:
   deleteSideLocal: "locally"
   confirmDeleteRowHeader: "Delete Now"
   confirmDeleteRow: "Delete '{}' {} now?"
-  blockedNotice: "{} entries are left alone because they cannot be read, cannot be transferred, a directory faces a symlink, their names differ only in case, or they changed since the last sync where that would lose data. Click to see them."
+  blockedNotice: "{} entries are left alone because they cannot be read, cannot be transferred, a directory faces a symlink, or their names differ only in case. Click to see them."
   blockedTitle: "Entries left alone"
   synchronizeUnavailable: "The comparison is running or was cancelled. Compare again to synchronize."
   executionRejected: "These entries were not synchronized: {}"
@@ -147,8 +147,6 @@ syncDialog:
     InvalidName: "invalid name"
     TypeConflict: "directory against symlink"
     CaseConflict: "names differ only in case"
-    ChangedOnBothSides: "changed on both sides since the last sync"
-    ChangedOnDestination: "changed on the side it would replace or delete since the last sync"
   tree:
     loading: "Loading…"
     loadFailed: "Failed: {}"
