@@ -867,6 +867,65 @@ namespace Test
         EXPECT_FALSE(fs::exists(dir));
     }
 
+    TEST_F(TempDirInstanceManagerTest, StartupCleanupRunsOnTheStrand)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "dead-before-start", std::chrono::system_clock::now() - 25h);
+
+        mgr->scheduleStartupCleanup();
+        EXPECT_TRUE(fs::exists(root_ / "dead-before-start"));
+
+        ioc_.poll();
+        EXPECT_FALSE(fs::exists(root_ / "dead-before-start"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, StartupCleanupRemovesOnlyInstancesDeadForTheRetention)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "dead-long-ago", std::chrono::system_clock::now() - 25h);
+        makeDeadInstanceDir(root_, "legacy-dead-long-ago", std::chrono::system_clock::now() - 48h);
+        makeDeadBookkeepingInstanceDir(root_, "dead-recently", std::chrono::system_clock::now() - 23h);
+
+        mgr->scheduleStartupCleanup();
+        ioc_.poll();
+
+        EXPECT_FALSE(fs::exists(root_ / "dead-long-ago"));
+        EXPECT_FALSE(fs::exists(root_ / "legacy-dead-long-ago"));
+        EXPECT_TRUE(fs::exists(root_ / "dead-recently"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, StartupCleanupStampsAnUnstampedInstance)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "never-stamped");
+        const auto before = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+
+        mgr->scheduleStartupCleanup();
+        ioc_.poll();
+
+        ASSERT_TRUE(fs::exists(root_ / "never-stamped"));
+        const auto deadAt = readJson(bookkeepingPaths(root_ / "never-stamped").metadata)["deadAt"];
+        ASSERT_TRUE(deadAt.is_number_integer());
+        EXPECT_GE(deadAt.get<std::int64_t>(), static_cast<std::int64_t>(before));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, StartupCleanupLeavesLiveInstancesAlone)
+    {
+        auto mgr = makeManager(0h);
+        auto* live = mgr->createInstance();
+        ASSERT_NE(live, nullptr);
+        std::ofstream{live->instanceDir() / "content.txt"} << "content";
+        makeDeadBookkeepingInstanceDir(root_, "dead-long-ago", std::chrono::system_clock::now() - 25h);
+
+        mgr->scheduleStartupCleanup();
+        ioc_.poll();
+
+        EXPECT_FALSE(fs::exists(root_ / "dead-long-ago"));
+        EXPECT_TRUE(fs::exists(live->instanceDir() / "content.txt"));
+        EXPECT_TRUE(readJson(bookkeepingPaths(live->instanceDir()).metadata)["deadAt"].is_null());
+        EXPECT_EQ(mgr->findInstance(live->instanceId()), live);
+    }
+
     TEST_F(TempDirInstanceManagerTest, MultipleCleanupRunsAreIdempotent)
     {
         auto mgr = makeManager(1h);
