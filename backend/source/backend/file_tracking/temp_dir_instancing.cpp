@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <backend/file_tracking/instance_bookkeeping.hpp>
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <utility/link_safe_remove.hpp>
@@ -14,7 +15,6 @@
 #include <log/log.hpp>
 
 #include <chrono>
-#include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
@@ -24,10 +24,7 @@ namespace FileTracking
     namespace
     {
         /**
-         * @brief Prepare the instance directory.
-         *
-         * Creates all required parent directories as a side effect so that the
-         * result can be used immediately to construct an InstanceLock inside it.
+         * @brief Creates the instance directory with its bookkeeping directory, so the lock can be created in it.
          *
          * @param dir Path to create.
          * @return The same path that was passed in.
@@ -35,12 +32,8 @@ namespace FileTracking
          */
         std::filesystem::path prepareInstanceDir(std::filesystem::path const& dir)
         {
-            std::error_code err;
-            std::filesystem::create_directories(dir, err);
-            if (err)
-                throw std::runtime_error{
-                    fmt::format("Failed to create instance directory: {}", Utility::errorMessage(err))
-                };
+            if (const auto created = createBookkeepingDirectory(dir); !created)
+                throw std::runtime_error{fmt::format("Failed to create instance directory: {}", created.error())};
             return dir;
         }
 
@@ -62,23 +55,26 @@ namespace FileTracking
         }
     } // namespace
 
-    // -------------------------------------------------------------------------
-    // FileChangeListener — efsw callback, runs on efsw's internal thread
-    // -------------------------------------------------------------------------
+    /**
+     * @brief Receives the efsw events of one instance on efsw's thread and forwards them to the frontend.
+     */
     class FileChangeListener : public efsw::FileWatchListener
     {
       public:
+        /**
+         * @param watchedInstanceDirectory The instance directory spelled like the watch reports it (canonical).
+         */
         FileChangeListener(
-            std::string instanceId,
+            std::string const& instanceId,
+            std::filesystem::path watchedInstanceDirectory,
             boost::asio::strand<boost::asio::any_io_executor> strand,
             Nui::RpcHub* hub,
             std::string downloadTempSuffix
         )
-            : instanceId_{std::move(instanceId)}
+            : watchedInstanceDirectory_{std::move(watchedInstanceDirectory)}
             , strand_{std::move(strand)}
             , hub_{hub}
-            , lockFileName_{instanceId_ + ".lock"}
-            , eventName_{"FileTracking::" + instanceId_ + "::onFileChanged"}
+            , eventName_{fmt::format("FileTracking::{}::onFileChanged", instanceId)}
             , downloadTempSuffix_{Persistence::effectiveTempFileSuffix(downloadTempSuffix)}
         {}
 
@@ -90,14 +86,13 @@ namespace FileTracking
             std::string oldFilename
         ) override
         {
-            if (filename == lockFileName_ || filename == "metadata.json")
+            // efsw reports UTF-8 on every platform.
+            const auto changedPath = Paths::nativeFromUtf8(dir) / Paths::nativeFromUtf8(filename);
+            if (isBookkeepingPath(watchedInstanceDirectory_, changedPath))
                 return;
 
             std::error_code statusError;
-            // efsw reports UTF-8 on every platform.
-            const bool isDirectory = std::filesystem::is_directory(
-                Paths::nativeFromUtf8(dir) / Paths::nativeFromUtf8(filename), statusError
-            );
+            const bool isDirectory = std::filesystem::is_directory(changedPath, statusError);
             const auto change = filterFileChange(
                 {toFileAction(action), filename, std::move(oldFilename)}, isDirectory, downloadTempSuffix_
             );
@@ -109,6 +104,7 @@ namespace FileTracking
                 {"directory", Paths::nativeToUtf8(Paths::nativeFromUtf8(dir))},
                 {"filename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->filename))},
                 {"oldFilename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->oldFilename))},
+                {"isDirectory", isDirectory},
             };
 
             boost::asio::post(
@@ -121,10 +117,9 @@ namespace FileTracking
         }
 
       private:
-        std::string instanceId_;
+        std::filesystem::path watchedInstanceDirectory_;
         boost::asio::strand<boost::asio::any_io_executor> strand_;
         Nui::RpcHub* hub_;
-        std::string lockFileName_;
         std::string eventName_;
         std::string downloadTempSuffix_;
     };
@@ -159,7 +154,7 @@ namespace FileTracking
             : config{std::move(cfg)}
             , instanceId{std::move(instId)}
             , instanceDir{prepareInstanceDir(config.tempRootDir / instanceId)}
-            , lock{std::in_place, instanceDir / (instanceId + ".lock")}
+            , lock{std::in_place, bookkeepingPaths(instanceDir).lock}
             , strand{std::move(strd)}
             , hub{hubPtr}
             , watcher{std::make_shared<efsw::FileWatcher>()}
@@ -241,7 +236,11 @@ namespace FileTracking
         }
 
         impl_->listener = std::make_unique<FileChangeListener>(
-            impl_->instanceId, impl_->strand, impl_->hub, std::move(downloadTempSuffix)
+            impl_->instanceId,
+            fs::weakly_canonical(impl_->instanceDir),
+            impl_->strand,
+            impl_->hub,
+            std::move(downloadTempSuffix)
         );
 
         // efsw takes UTF-8, a narrow string is the ANSI code page on Windows.
@@ -286,36 +285,28 @@ namespace FileTracking
 
     void TemporaryDirectoryInstance::writeMetadata()
     {
-        auto const metaPath = impl_->instanceDir / "metadata.json";
-        nlohmann::json meta = {
+        const nlohmann::json meta = {
             {"instanceId", impl_->instanceId},
             {"createdAt", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
             {"deadAt", nullptr},
         };
-        std::ofstream out{metaPath};
-        out << meta.dump(4);
+        if (const auto written = FileTracking::writeMetadata(impl_->instanceDir, meta); !written)
+            Log::error("writeMetadata: failed for instance '{}': {}", impl_->instanceId, written.error());
     }
 
     void TemporaryDirectoryInstance::writeDeadTimestamp()
     {
-        auto const metaPath = impl_->instanceDir / "metadata.json";
-        try
-        {
-            nlohmann::json meta;
-            if (std::filesystem::exists(metaPath))
-            {
-                std::ifstream metaIn{metaPath};
-                metaIn >> meta;
-            }
-            meta["deadAt"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-            std::ofstream out{metaPath};
-            out << meta.dump(4);
-        }
-        catch (std::exception const& exc)
-        {
-            Log::error(
-                "writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, Utility::errorMessage(exc)
-            );
-        }
+        const auto written =
+            readMetadata(impl_->instanceDir)
+                .and_then(
+                    [this](std::optional<nlohmann::json> meta)
+                    {
+                        auto updated = std::move(meta).value_or(nlohmann::json{{"instanceId", impl_->instanceId}});
+                        updated["deadAt"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                        return FileTracking::writeMetadata(impl_->instanceDir, updated);
+                    }
+                );
+        if (!written)
+            Log::error("writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, written.error());
     }
 }

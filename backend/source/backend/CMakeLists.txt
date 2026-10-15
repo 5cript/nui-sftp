@@ -20,6 +20,7 @@ add_library(
         process/process_store.cpp
         process/environment.cpp
         file_tracking/change_filter.cpp
+        file_tracking/instance_bookkeeping.cpp
         file_tracking/instance_lock.cpp
         file_tracking/instance_watch.cpp
         file_tracking/temp_dir_instancing.cpp
