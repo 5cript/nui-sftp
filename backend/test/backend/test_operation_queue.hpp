@@ -50,6 +50,7 @@ namespace Test
                     queue_->cancelAll();
                 });
             queue_.reset();
+            localQueue_.reset();
         }
 
         std::shared_ptr<OperationQueue> makeQueue()
@@ -61,16 +62,26 @@ namespace Test
                 *env.window,
                 *env.hub,
                 Persistence::SftpOptions{},
-                Ids::makeSessionId("operation-queue-test"),
+                sessionId_,
                 2
             );
-            queue_->setCompletionObserver(
-                [this](SharedData::OperationCompleted const& completed)
-                {
-                    std::scoped_lock lock{completionsMutex_};
-                    completions_.push_back(completed);
-                }
-            );
+            const auto observe = [this](SharedData::OperationCompleted const& completed)
+            {
+                std::scoped_lock lock{completionsMutex_};
+                completions_.push_back(completed);
+            };
+            queue_->setCompletionObserver(observe);
+            if (!localQueue_)
+            {
+                localQueue_ = std::make_shared<LocalOperationQueue>(
+                    queuePool_.get_executor(),
+                    strand_,
+                    *env.window,
+                    *env.hub,
+                    std::make_shared<std::atomic_bool const>(false)
+                );
+                localQueue_->setCompletionObserver(observe);
+            }
             return queue_;
         }
 
@@ -100,10 +111,15 @@ namespace Test
             return future.get();
         }
 
+        /**
+         * @brief Pauses the queue and holds its local deletes, as the session does.
+         */
         void setPaused(bool pause)
         {
             queue_->paused(pause);
-            runOnStrand([]() {});
+            runOnStrand([this, pause]() {
+                localQueue_->hold(sessionId_, pause);
+            });
         }
 
         /**
@@ -269,7 +285,10 @@ namespace Test
         boost::asio::thread_pool queuePool_{2};
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand_{
             std::make_shared<boost::asio::strand<boost::asio::any_io_executor>>(queuePool_.get_executor())};
+        Ids::SessionId sessionId_{Ids::makeSessionId("operation-queue-test")};
         std::shared_ptr<OperationQueue> queue_{};
+        /** @brief Runs the local deletes of sync plans, on the strand of the queue. */
+        std::shared_ptr<LocalOperationQueue> localQueue_{};
         std::mutex completionsMutex_{};
         std::vector<SharedData::OperationCompleted> completions_{};
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
@@ -1280,7 +1299,7 @@ namespace Test
         };
 
         const auto result = runOnStrand([&]() {
-            return queue->executeSyncPlan(*sftp, session, std::move(plan), request);
+            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
         });
         EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt", "emptyA/emptyB"}));
         EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt", "newLocal/dir"}));
@@ -1293,6 +1312,9 @@ namespace Test
         );
         EXPECT_EQ(result.failed, (std::vector<std::string>{"CON"}));
 
+        for (int cycle = 0; cycle < 10; ++cycle)
+            runOnStrand([]() {});
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "localGone.txt")) << "the paused queue holds the local delete";
         setPaused(false);
         workUntilCompletions(4);
         std::set<std::string> finishedIds;
