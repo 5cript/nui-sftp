@@ -926,6 +926,136 @@ namespace Test
         EXPECT_EQ(mgr->findInstance(live->instanceId()), live);
     }
 
+    // ---- discardContent behaviour ----
+
+    TEST_F(TempDirInstanceManagerTest, DiscardingTheOnlyContentRemovesTheInstanceAndItsDirectory)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        auto* other = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        ASSERT_NE(other, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto id = instance->instanceId();
+        std::ofstream{directory / "script.sh"} << "#!/bin/sh";
+        ASSERT_TRUE(instance->addWatch(directory).has_value());
+        makeDeadBookkeepingInstanceDir(root_, "dead-elsewhere", std::chrono::system_clock::now() - 1h);
+
+        const auto outcome = mgr->discardContent(id, directory / "script.sh");
+
+        ASSERT_TRUE(outcome.has_value()) << outcome.error();
+        EXPECT_EQ(*outcome, DiscardOutcome::InstanceDestroyed);
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
+        EXPECT_EQ(mgr->findInstance(id), nullptr);
+        EXPECT_TRUE(fs::exists(other->instanceDir()));
+        EXPECT_TRUE(fs::exists(root_ / "dead-elsewhere"));
+
+        mgr->manualCleanup();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, DestroyingKeepsTheDeadInstanceDirectoryForTheRetention)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        std::ofstream{directory / "content.txt"} << "content";
+
+        mgr->destroyInstance(instance->instanceId());
+        mgr->manualCleanup();
+
+        EXPECT_TRUE(fs::exists(directory / "content.txt"));
+        EXPECT_FALSE(readJson(bookkeepingPaths(directory).metadata)["deadAt"].is_null());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, DiscardingKeepsAnInstanceWithOtherContent)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        std::ofstream{directory / "discarded.sh"} << "#!/bin/sh";
+        std::ofstream{directory / "kept.txt"} << "kept";
+
+        const auto outcome = mgr->discardContent(instance->instanceId(), directory / "discarded.sh");
+
+        ASSERT_TRUE(outcome.has_value()) << outcome.error();
+        EXPECT_EQ(*outcome, DiscardOutcome::InstanceKept);
+        EXPECT_FALSE(fs::exists(directory / "discarded.sh"));
+        EXPECT_TRUE(fs::exists(directory / "kept.txt"));
+        EXPECT_EQ(mgr->findInstance(instance->instanceId()), instance);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, DiscardingADirectoryRemovesItWhole)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        fs::create_directories(directory / "tree" / "below");
+        std::ofstream{directory / "tree" / "below" / "file.txt"} << "content";
+
+        const auto outcome = mgr->discardContent(instance->instanceId(), directory / "tree");
+
+        ASSERT_TRUE(outcome.has_value()) << outcome.error();
+        EXPECT_EQ(*outcome, DiscardOutcome::InstanceDestroyed);
+        EXPECT_FALSE(fs::exists(directory));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, DiscardingALinkKeepsItsTarget)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto outside = root_ / "outside";
+        fs::create_directories(outside);
+        std::ofstream{outside / "target.txt"} << "target";
+        std::error_code linkError;
+        fs::create_directory_symlink(outside, directory / "link", linkError);
+        if (linkError)
+            GTEST_SKIP() << "Cannot create symlinks here: " << linkError.message();
+
+        const auto outcome = mgr->discardContent(instance->instanceId(), directory / "link");
+
+        ASSERT_TRUE(outcome.has_value()) << outcome.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory / "link")));
+        EXPECT_TRUE(fs::exists(outside / "target.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, DiscardingRefusesPathsThatAreNoContent)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto id = instance->instanceId();
+        const auto outside = root_ / "outside";
+        fs::create_directories(outside);
+        std::ofstream{outside / "target.txt"} << "target";
+        std::ofstream{directory / "content.txt"} << "content";
+
+        EXPECT_FALSE(mgr->discardContent(id, directory).has_value());
+        EXPECT_FALSE(mgr->discardContent(id, directory / ".").has_value());
+        EXPECT_FALSE(mgr->discardContent(id, directory / "..").has_value());
+        EXPECT_FALSE(mgr->discardContent(id, directory / ".." / "outside" / "target.txt").has_value());
+        EXPECT_FALSE(mgr->discardContent(id, outside / "target.txt").has_value());
+        EXPECT_FALSE(mgr->discardContent(id, directory / fs::path{bookkeepingDirectoryName}).has_value());
+        EXPECT_FALSE(mgr->discardContent(id, bookkeepingPaths(directory).metadata).has_value());
+        EXPECT_FALSE(mgr->discardContent("nonexistent-id-xyz", directory / "content.txt").has_value());
+
+        std::error_code linkError;
+        fs::create_directory_symlink(outside, directory / "link", linkError);
+        if (!linkError)
+            EXPECT_FALSE(mgr->discardContent(id, directory / "link" / "target.txt").has_value());
+
+        EXPECT_TRUE(fs::exists(outside / "target.txt"));
+        EXPECT_TRUE(fs::exists(directory / "content.txt"));
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(directory).metadata));
+        EXPECT_EQ(mgr->findInstance(id), instance);
+    }
+
     TEST_F(TempDirInstanceManagerTest, MultipleCleanupRunsAreIdempotent)
     {
         auto mgr = makeManager(1h);
