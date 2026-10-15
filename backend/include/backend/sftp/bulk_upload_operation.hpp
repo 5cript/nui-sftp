@@ -44,6 +44,7 @@ class BulkUploadOperation : public BulkTransferOperation
         bool mayOverwrite{false};
         /** @brief A directory created without its content, its missing parents below the bulk's root with it. */
         bool isDirectory{false};
+        std::optional<SharedData::ComparedState> comparedDestination{};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/shared_data.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <utility/describe.hpp>
 #include <paths/paths.hpp>
@@ -33,6 +34,12 @@ namespace SharedData
          *        a destination that appeared after the existence check is not replaced.
          */
         bool mayOverwrite{false};
+        /**
+         * @brief What a sync compare saw at the destination: the entry fails with ChangedSinceCompare instead of
+         *        replacing a destination that no longer holds it. Set by the backend's sync only, it is not part of
+         *        the request the frontend sends.
+         */
+        std::optional<ComparedState> comparedDestination{};
     };
     BOOST_DESCRIBE_STRUCT(
         BulkUploadEntry,
@@ -57,6 +64,8 @@ namespace SharedData
         std::uint32_t mtimeNsec{0};
         /** @brief See @ref BulkUploadEntry::mayOverwrite. */
         bool mayOverwrite{false};
+        /** @brief See @ref BulkUploadEntry::comparedDestination. */
+        std::optional<ComparedState> comparedDestination{};
     };
     BOOST_DESCRIBE_STRUCT(
         BulkDownloadEntry,

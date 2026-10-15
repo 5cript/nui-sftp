@@ -122,6 +122,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     downloadOptions.remotePath = paths.remote;
     downloadOptions.localPath = paths.local;
     downloadOptions.mayOverwrite = downloadOptions.mayOverwrite || paths.mayOverwrite;
+    downloadOptions.comparedDestination = paths.comparedDestination;
     downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     downloadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
@@ -217,7 +218,10 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         entries.push_back(std::move(entry));
         paths.push_back(
             EntryPaths{
-                .remote = std::move(file.source), .local = std::move(file.destination), .mayOverwrite = file.mayOverwrite
+                .remote = std::move(file.source),
+                .local = std::move(file.destination),
+                .mayOverwrite = file.mayOverwrite,
+                .comparedDestination = std::move(file.comparedDestination),
             }
         );
     }

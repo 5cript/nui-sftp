@@ -1657,6 +1657,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     using SharedData::Sync::Action;
     SharedData::Sync::SyncExecutionResult result{.failed = std::move(plan.refused)};
 
+    // An entry replaces only a destination the compare saw, and only while it still holds what the compare saw.
     SharedData::BulkUploadRequest uploads{
         .mode = request.mode,
         .localRoot = session.localRoot(),
@@ -1669,6 +1670,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     };
     SharedData::BulkDeleteRequest remoteDeletes{.mode = request.mode, .listedContentOnly = true};
     std::vector<Paths::LocalPath> localDeletes;
+    std::vector<SharedData::ComparedState> localDeletesCompared;
     const auto localHomes = localHomeDirectories();
     auto remoteGuard = remoteDeleteGuard(sftp);
     remoteGuard.trustScannedBelow(session.remoteRoot());
@@ -1704,6 +1706,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     {
         auto& entry = planned.entry;
         auto& paths = planned.paths;
+        const auto comparedDestination =
+            entry.isDirectory ? std::nullopt : std::optional{planned.compared};
         switch (entry.action)
         {
             case Action::Upload:
@@ -1730,6 +1734,8 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                     .withoutContent = entry.isDirectory,
                     .mtime = entry.mtime,
                     .mtimeNsec = entry.mtimeNsec,
+                    .mayOverwrite = planned.compared.exists,
+                    .comparedDestination = comparedDestination,
                 });
                 result.downloads.push_back(std::move(entry.relKey));
                 break;
@@ -1769,6 +1775,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                 }
                 result.localDeleteSources.push_back(paths.local.toUtf8());
                 localDeletes.push_back(std::move(paths.local));
+                localDeletesCompared.push_back(std::move(planned.compared));
                 result.localDeletes.push_back(std::move(entry.relKey));
                 break;
             }

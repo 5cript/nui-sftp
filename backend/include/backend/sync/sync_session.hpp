@@ -172,6 +172,12 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     {
         SharedData::Sync::EnqueuePlanEntry entry;
         ResolvedPaths paths;
+        /**
+         * @brief What the compare saw at the path the entry replaces (the destination of a transfer) or deletes,
+         *        which it may then only replace or delete while the path still holds it. A changed source is
+         *        transferred as it is.
+         */
+        SharedData::ComparedState compared{};
     };
 
     struct ResolvedPlan

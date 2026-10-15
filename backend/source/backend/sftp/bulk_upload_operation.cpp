@@ -124,6 +124,7 @@ std::unique_ptr<Operation> BulkUploadOperation::makeChild(
     uploadOptions.remotePath = paths.remote;
     uploadOptions.localPath = paths.local;
     uploadOptions.mayOverwrite = uploadOptions.mayOverwrite || paths.mayOverwrite;
+    uploadOptions.comparedDestination = paths.comparedDestination;
     uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
@@ -192,7 +193,10 @@ void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> file
         entries.push_back(std::move(entry));
         paths.push_back(
             EntryPaths{
-                .remote = std::move(file.destination), .local = std::move(file.source), .mayOverwrite = file.mayOverwrite
+                .remote = std::move(file.destination),
+                .local = std::move(file.source),
+                .mayOverwrite = file.mayOverwrite,
+                .comparedDestination = std::move(file.comparedDestination),
             }
         );
     }

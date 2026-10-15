@@ -5,6 +5,7 @@
 #include <backend/sftp/scan_phase.hpp>
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <paths/paths.hpp>
 
@@ -59,6 +60,8 @@ class BulkTransferOperation : public Operation
         Paths::LocalPath local{};
         /** @brief This entry's destination may be replaced even when the bulk's options do not allow it. */
         bool mayOverwrite{false};
+        /** @brief See SharedData::BulkUploadEntry::comparedDestination, kept by a resume. */
+        std::optional<SharedData::ComparedState> comparedDestination{};
     };
 
     ~BulkTransferOperation() override;

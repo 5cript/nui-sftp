@@ -177,6 +177,12 @@ SyncSession::ResolvedPlan
 SyncSession::resolvePlanInStrand(DiffSection section, std::unordered_set<std::string> const& selectedRelKeys) const
 {
     ResolvedPlan result;
+    const auto comparedAt = [this](EnqueuePlanEntry const& entry)
+    {
+        const bool onLocalSide = entry.action == Action::Download || entry.action == Action::DeleteLocal;
+        auto const& tree = onLocalSide ? localTree_ : remoteTree_;
+        return tree ? comparedStateAt(*tree, entry.relKey) : SharedData::ComparedState{};
+    };
     for (auto& entry : buildEnqueuePlanInStrand(section, selectedRelKeys))
     {
         auto paths = Paths::RelativePath::make(entry.relKey).and_then(
@@ -191,7 +197,10 @@ SyncSession::resolvePlanInStrand(DiffSection section, std::unordered_set<std::st
             result.refused.push_back(std::move(entry.relKey));
             continue;
         }
-        result.entries.push_back(ResolvedPlanEntry{.entry = std::move(entry), .paths = *std::move(paths)});
+        auto compared = comparedAt(entry);
+        result.entries.push_back(
+            ResolvedPlanEntry{.entry = std::move(entry), .paths = *std::move(paths), .compared = std::move(compared)}
+        );
     }
     return result;
 }

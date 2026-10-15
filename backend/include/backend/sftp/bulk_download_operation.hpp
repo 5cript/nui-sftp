@@ -55,6 +55,8 @@ class BulkDownloadOperation : public BulkTransferOperation
         bool mayOverwrite{false};
         /** @brief A directory created without its content, with the link check of every local directory. */
         bool isDirectory{false};
+        /** @brief See SharedData::BulkDownloadEntry::comparedDestination. */
+        std::optional<SharedData::ComparedState> comparedDestination{};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 
