@@ -5,6 +5,7 @@
 #include <paths/native.hpp>
 #include <paths/local_path.hpp>
 
+#include <boost/asio/post.hpp>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <log/log.hpp>
@@ -399,15 +400,6 @@ namespace FileTracking
         );
 
         registerOnStrand(
-            "FileTracking::manualCleanup",
-            [this](RpcHelper::RpcOnce&& reply)
-            {
-                manualCleanup();
-                reply({{"success", true}});
-            }
-        );
-
-        registerOnStrand(
             "FileTracking::countOrphaned",
             [this](RpcHelper::RpcOnce&& reply)
             {
@@ -422,6 +414,17 @@ namespace FileTracking
             {
                 const int removed = forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
                 reply({{"success", true}, {"removed", removed}});
+            }
+        );
+    }
+
+    void TempDirInstanceManager::scheduleStartupCleanup()
+    {
+        boost::asio::post(
+            *strand_,
+            [this]()
+            {
+                manualCleanup();
             }
         );
     }

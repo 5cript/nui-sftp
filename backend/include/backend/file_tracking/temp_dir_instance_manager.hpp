@@ -59,8 +59,9 @@ namespace FileTracking
      * @brief Owns and tracks all TemporaryDirectoryInstance objects for a session.
      *
      * Inherits RpcHelper::StrandRpc so that all RPC handlers it registers run on
-     * the shared strand.  The manager also owns the dead-instance cleanup policy
-     * and exposes it both as a C++ API and as RPC endpoints.
+     * the shared strand.  The manager also owns the dead-instance cleanup policy:
+     * the retention scan runs once at start (see scheduleStartupCleanup), the
+     * frontend's Clean Up removes every orphaned directory at once (forceCleanup).
      *
      * ### Registered RPC endpoints
      * All names are prefixed with @c "FileTracking::".
@@ -72,7 +73,6 @@ namespace FileTracking
      * | listInstances           | —                                   | {success, instances: [...]}    |
      * | getInstanceInfo         | instanceId: string                  | {success, instanceId, instanceDir} |
      * | fileStates              | instanceId: string                  | {success, files: [...]}, see InstanceManagerDetail::fileStatesOf |
-     * | manualCleanup           | —                                   | {success}                      |
      * | countOrphaned           | —                                   | {success, count: int}          |
      * | forceCleanup            | —                                   | {success, removed: int}        |
      *
@@ -118,6 +118,13 @@ namespace FileTracking
          * strand starts processing.
          */
         void registerRpc();
+
+        /**
+         * @brief Runs manualCleanup() once on the strand, for the instance directories that earlier runs left.
+         *
+         * Called once at start, after registerRpc(), so the scan runs before the frontend's first request.
+         */
+        void scheduleStartupCleanup();
 
         // ---- C++ API --------------------------------------------------------
 

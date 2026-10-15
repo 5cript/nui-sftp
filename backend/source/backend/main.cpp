@@ -310,6 +310,7 @@ void Main::registerRpc()
                 ))
             );
             tempDirInstanceManager_->registerRpc();
+            tempDirInstanceManager_->scheduleStartupCleanup();
 
             if (error)
             {
