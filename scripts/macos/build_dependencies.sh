@@ -276,17 +276,24 @@ build_boost() {
 using clang : nui : "${CLANGXX}" : <cxxflags>"${LIBCXX_COMPILE_FLAGS}" <linkflags>"${LIBCXX_LINK_FLAGS}" ;
 JAM
         # Only the compiled libraries are listed, the headers of all of boost are installed regardless.
-        # Nui gzips its assets through iostreams, with the zlib of the SDK. The standard matches nui-sftp,
-        # boost's configuration macros change signatures between standards.
+        # Nui gzips its assets through iostreams, with the zlib of the SDK, named explicitly since b2's probe
+        # does not always find it. The standard matches nui-sftp, boost's configuration macros change
+        # signatures between standards.
         ./b2 --user-config=user-config.jam toolset=clang-nui \
             variant=release link=static threading=multi cxxstd=23 cxxstd-dialect=gnu \
             --prefix="${PREFIX}" --layout=system -j "${JOBS}" -d1 \
             -sNO_BZIP2=1 -sNO_ZSTD=1 -sNO_LZMA=1 \
+            -sZLIB_INCLUDE="${SDKROOT}/usr/include" -sZLIB_LIBRARY_PATH="${SDKROOT}/usr/lib" -sZLIB_NAME=z \
             --with-atomic --with-chrono --with-container --with-context --with-date_time --with-exception \
             --with-filesystem --with-iostreams --with-process --with-program_options --with-random \
             --with-serialization --with-system --with-thread \
             install
-    )
+        if ! nm "${PREFIX}/lib/libboost_iostreams.a" 2>/dev/null | grep -q zlib_error; then
+            echo "boost iostreams was built without zlib, b2's configuration log:" >&2
+            cat bin.v2/config.log >&2 || true
+            exit 1
+        fi
+    ) || exit 1
     mark_built boost "${BOOST_VERSION}"
 }
 
