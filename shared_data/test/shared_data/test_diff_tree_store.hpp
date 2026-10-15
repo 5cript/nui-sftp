@@ -342,6 +342,20 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(relKeys(stores.downloads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/b"}));
     }
 
+    TEST(DiffTreeStoreTests, UploadPlanSkipsCaseVariantsOnlyForACaseFoldingServer)
+    {
+        const auto local =
+            makeDir("", {makeDir("new", {makeFile("A.txt", 1, 100), makeFile("a.txt", 1, 100), makeFile("b", 1, 100)})});
+        const DiffStores folding{local, makeDir("", {}), {.direction = Direction::Upload, .remoteCaseInsensitive = true}};
+        EXPECT_EQ(relKeys(folding.uploads.buildPlan({"new"}, folding.trees())), (std::vector<std::string>{"new/b"}));
+
+        const DiffStores sensitive{local, makeDir("", {}), {.direction = Direction::Upload, .localCaseInsensitive = true}};
+        EXPECT_EQ(
+            relKeys(sensitive.uploads.buildPlan({"new"}, sensitive.trees())),
+            (std::vector<std::string>{"new/A.txt", "new/a.txt", "new/b"})
+        );
+    }
+
     TEST(DiffTreeStoreTests, PlanForAPartlySelectedExpandedDirectory)
     {
         DiffStores stores{

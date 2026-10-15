@@ -797,14 +797,14 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(row.descendantByteTotal, 0u);
     }
 
-    TEST(SyncDiffTests, NamesDifferingOnlyInCaseAcrossSidesAreBlocked)
+    TEST(SyncDiffTests, NamesDifferingOnlyInCaseAcrossSidesAreBlockedForACaseFoldingServer)
     {
         // On a case insensitive server "Foo" replaces "foo", the delete of "foo" would then remove the upload.
         CollectingSink sink;
         diffScanTrees(
             makeDir("", {makeFile("Foo", 3, 200), makeFile("other", 1, 100)}),
             makeDir("", {makeFile("foo", 3, 100)}),
-            {.direction = Direction::Upload, .actionDelete = true},
+            {.direction = Direction::Upload, .actionDelete = true, .remoteCaseInsensitive = true},
             sink
         );
         ASSERT_EQ(sink.uploads.size(), 1u);
@@ -873,6 +873,63 @@ namespace SharedData::Sync::Test
             diffScanTrees(local, remote, {.direction = Direction::Download, .localCaseInsensitive = true}, sink);
             EXPECT_TRUE(sink.downloads.empty());
             EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, LocalCaseVariantsAreBlockedOnlyForACaseFoldingServer)
+    {
+        const auto local = makeDir("", {makeFile("Readme", 1, 100), makeFile("readme", 1, 100)});
+        const auto remote = makeDir("", {});
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Upload, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.uploads.size(), 2u) << "only the destination folding case counts";
+            EXPECT_TRUE(sink.blocked.empty());
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Upload, .remoteCaseInsensitive = true}, sink);
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, CaseSensitiveSidesNeverBlockCaseOrNormalizationDifferences)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("Foo", 3, 200), makeFile("cafe\xCC\x81", 1, 100), makeFile("Readme", 1, 100)}),
+            makeDir("", {makeFile("foo", 3, 100), makeFile("caf\xC3\xA9", 2, 100), makeFile("README", 1, 100)}),
+            {.direction = Direction::Both},
+            sink
+        );
+        EXPECT_TRUE(sink.blocked.empty());
+        EXPECT_EQ(sink.uploads.size(), 3u);
+        EXPECT_EQ(sink.downloads.size(), 3u);
+    }
+
+    TEST(SyncDiffTests, CaseVariantsAcrossSidesCountOnlyInTheDirectionsWhoseDestinationFolds)
+    {
+        const auto local = makeDir("", {makeFile("Foo", 3, 200)});
+        const auto remote = makeDir("", {makeFile("foo", 3, 100)});
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download, .remoteCaseInsensitive = true}, sink);
+            EXPECT_TRUE(sink.blocked.empty()) << "a download onto a case sensitive filesystem keeps both";
+            EXPECT_EQ(sink.downloads.size(), 1u);
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.blocked.size(), 2u);
+            EXPECT_TRUE(sink.downloads.empty());
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Both, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.blocked.size(), 2u);
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_TRUE(sink.downloads.empty());
         }
     }
 
