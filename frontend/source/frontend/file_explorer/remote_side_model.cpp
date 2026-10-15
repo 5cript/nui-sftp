@@ -419,8 +419,6 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 {
     CHECK_COMPLETE();
 
-    using namespace std::string_literals;
-
     Log::info("Delete items requested: {}", items.size());
 
     if (items.empty())
@@ -429,20 +427,9 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         return;
     }
 
-    const auto itemSize = items.size();
-    std::string confirmText;
-    if (itemSize > 1)
-        confirmText = fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteMultipleConfirm")), itemSize);
-    else
-        confirmText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().name
-        );
-
-    std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    for (const auto& item : items)
-    {
-        listItems.push_back({item.name, item.fullPath.generic_string()});
-    }
+    const auto confirmText = items.size() > 1
+        ? fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteMultipleConfirm")), items.size())
+        : fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().name);
 
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
@@ -450,7 +437,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::No,
-            .listItems = listItems,
+            .listItems = pathList(items),
             .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
             {
                 if (!button || button != ConfirmDialog::Button::Yes)

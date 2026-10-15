@@ -359,18 +359,6 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
     if (items.empty())
         return;
 
-    std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    listItems.reserve(items.size());
-    std::ranges::transform(
-        items,
-        std::back_inserter(listItems),
-        [](NuiFileExplorer::Item const& item)
-        {
-            return ConfirmDialog::OpenOptions::ListElement{
-                .text = item.name, .description = item.fullPath.generic_string()
-            };
-        }
-    );
     const bool anyDirectory = std::ranges::any_of(
         items,
         [](NuiFileExplorer::Item const& item)
@@ -379,20 +367,20 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         }
     );
     // Local directories go with their content in one step, unlike remote ones there is no second question.
-    auto text = anyDirectory ? fmt::format(
-                                   "{}\n{}",
-                                   language->get("localSideModel", "deleteSelectedConfirm"),
-                                   language->get("localSideModel", "deleteDirectoriesWithContent")
-                               )
-                             : language->get("localSideModel", "deleteSelectedConfirm");
+    const auto text = anyDirectory ? fmt::format(
+                                         "{}\n{}",
+                                         language->get("localSideModel", "deleteSelectedConfirm"),
+                                         language->get("localSideModel", "deleteDirectoriesWithContent")
+                                     )
+                                   : language->get("localSideModel", "deleteSelectedConfirm");
 
     confirmDialog_->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
         .headerText = language->get("localSideModel", "deleteLocalItemsQuestion"),
-        .text = std::move(text),
+        .text = text,
         .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
         .focusButton = ConfirmDialog::Button::No,
-        .listItems = std::move(listItems),
+        .listItems = pathList(items),
         .onClose = lifetime_.guarded(
             [this, items, anyDirectory](std::optional<ConfirmDialog::Button> button)
             {
@@ -717,17 +705,14 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
         lifetime_.guarded(
             [this, directory = currentPath_.value()](Nui::val val)
             {
-                const auto error = language->translate(val["error"].as<std::string>());
-                Log::error("Failed to list files: {}", error);
-                confirmDialog_->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("localSideModel", "failedToListFiles"),
-                    .text = error,
-                    .buttons = ConfirmDialog::Button::Ok,
-                });
-                revertNavigation();
-                return;
-            }
+                if (!val.hasOwnProperty("success"))
+                    return onDirectoryListing(
+                        directory, std::nullopt, language->get("localSideModel", "invalidResponseFromBackend")
+                    );
+                if (!val["success"].as<bool>())
+                    return onDirectoryListing(
+                        directory, std::nullopt, language->translate(val["error"].as<std::string>())
+                    );
 
                 std::vector<SharedData::DirectoryEntry> directoryEntries;
                 const auto files = val["files"];
@@ -736,8 +721,9 @@ void LocalSideModel::navigateTo(std::filesystem::path const& path)
                 for (int index = 0; index < fileCount; ++index)
                     directoryEntries.push_back(directoryEntryOf(files[index]));
 
-            onDirectoryListing(directory, std::move(directoryEntries));
-        },
+                onDirectoryListing(directory, std::move(directoryEntries));
+            }
+        ),
         args
     );
 }

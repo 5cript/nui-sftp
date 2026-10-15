@@ -233,7 +233,6 @@ localSideModel:
   fileAlreadyExistsOverwriteHeader: "File already exists, overwrite?"
   fileAlreadyExistsOverwrite: "Allow overwriting this file? Do note that bulk uploads in subdirectories might cause multiple files to be overwritten."
   failedToEnqueueUpload: "Failed to create upload operation for '{}': {}"
-  failedToListFiles: "Failed to list files"
   invalidResponseFromBackend: "Invalid response from backend"
   fileGridError: "File Grid Error (Local Side)"
   renameFailed: "Rename Failed"

@@ -135,7 +135,6 @@ localSideModel:
   fileAlreadyExistsOverwriteHeader: "Datei existiert bereits, überschreiben?"
   fileAlreadyExistsOverwrite: "Überschreiben dieser Datei erlauben? Beachten Sie, dass Massen-Uploads in Unterverzeichnissen dazu führen können, dass mehrere Dateien überschrieben werden."
   failedToEnqueueUpload: "Upload-Operation für '{}' konnte nicht erstellt werden: {}"
-  failedToListFiles: "Dateien auflisten fehlgeschlagen"
   invalidResponseFromBackend: "Ungültige Antwort vom Backend"
   fileGridError: "Dateiansicht Fehler (Lokale Seite)"
   renameFailed: "Umbenennen fehlgeschlagen"
