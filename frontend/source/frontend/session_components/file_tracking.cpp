@@ -1,10 +1,11 @@
 #include <frontend/session_components/file_tracking.hpp>
+#include <frontend/session_components/file_tracking_state.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 
-#include <nui-file-explorer/item.hpp>
 #include <paths/paths.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <utility/language.hpp>
+#include <utility/lifetime_token.hpp>
 #include <log/log.hpp>
 
 #include <script-nui-components/resizeable_table.hpp>
@@ -15,51 +16,67 @@
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
+#include <nui/event_system/event_context.hpp>
 #include <nui/event_system/listen.hpp>
 #include <nui/rpc.hpp>
 
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <deque>
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace std::string_literals;
 
-struct TrackedEntry
-{
-    Ids::InstanceId instanceId;
-    Paths::LocalPath instanceDirectory;
-    Paths::RemotePath remotePath;
-    Paths::LocalPath localPath;
-    bool autoReupload{true};
-    bool moveRemoteOnLocalMove{false};
-    bool deleteRemote{false};
-    std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
-    /**
-     * @brief Changed files whose upload is being queued, by local path. True when the file changed again meanwhile,
-     *        it is then queued once more. A tracked directory has many files, each is tracked on its own.
-     */
-    std::shared_ptr<std::map<std::string, bool>> uploadsBeingQueued{std::make_shared<std::map<std::string, bool>>()};
-    /** @brief Ask before replacing a server copy that changed since it was opened or last uploaded. */
-    bool checkRemoteChanges{true};
-    struct ServerState
-    {
-        std::uint64_t mtime{0};
-        std::uint64_t size{0};
-    };
-    /**
-     * @brief What the server had for each file, by local path: taken from the download (it keeps the server's
-     *        modification time) and updated after every upload.
-     */
-    std::shared_ptr<std::map<std::string, ServerState>> serverStates{std::make_shared<std::map<std::string, ServerState>>()};
-};
-
 struct FileTrackingPanel::Implementation
 {
+    /**
+     * @brief One downloaded remote file or directory whose local copy is watched.
+     */
+    struct TrackedEntry
+    {
+        Ids::InstanceId instanceId;
+        Paths::LocalPath instanceDirectory;
+        Paths::RemotePath remotePath;
+        Paths::LocalPath localPath;
+        bool autoReupload{true};
+        bool moveRemoteOnLocalMove{false};
+        bool deleteRemote{false};
+        /** @brief Ask before replacing a server copy that changed since it was opened or last uploaded. */
+        bool checkRemoteChanges{true};
+        /** @brief Whether uploads are on their way, shared with the status cell of the entry's row. */
+        std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
+        FileTracking::PendingUploads pendingUploads{};
+        FileTracking::KnownServerContent serverContent{};
+    };
+
+    /**
+     * @brief A changed path of a tracked entry on its way to the server.
+     */
+    struct Upload
+    {
+        Ids::InstanceId instanceId;
+        FileTracking::LocalChange change;
+        Paths::RemotePath destination;
+        /** @brief Compare with the server first, when the entry asks for that. */
+        bool checkServer{true};
+    };
+
+    /**
+     * @brief How the upload of a change ended.
+     */
+    enum class UploadOutcome
+    {
+        Uploaded,
+        NotUploaded,
+    };
+
     Persistence::StateHolder* stateHolder;
     FrontendEvents* events;
     ConfirmDialog* confirmDialog;
@@ -68,8 +85,13 @@ struct FileTrackingPanel::Implementation
     Ids::SessionId sessionId{};
     std::string downloadTempSuffix{Persistence::defaultTempFileSuffix};
 
-    Nui::Observed<std::vector<TrackedEntry>> entries{};
-    std::unordered_map<std::string, Nui::RpcClient::AutoUnregister> fileChangeListeners{};
+    std::map<Ids::InstanceId, TrackedEntry> entries{};
+    FileTracking::RowOrder<Ids::InstanceId> rows{};
+    Nui::Observed<std::size_t> entryCount{std::size_t{0}};
+    std::map<Ids::InstanceId, Nui::RpcClient::AutoUnregister> fileChangeListeners{};
+    /** @brief Server-changed questions waiting for the one on screen, so no question replaces another. */
+    std::deque<Upload> serverChangedQuestions{};
+    bool serverChangedQuestionOpen{false};
 
     Nui::Observed<int> orphanedCount{-1};
     Nui::Observed<bool> cleanupRunning{false};
@@ -120,64 +142,68 @@ struct FileTrackingPanel::Implementation
         std::nullopt
     )};
 
+    Utility::LifetimeToken lifetime{};
+
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog)
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{confirmDialog}
     {}
 
+    /**
+     * @brief Shows what RPC replies and change events changed, they arrive outside of DOM event handlers.
+     */
+    static void syncView()
+    {
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
+    TrackedEntry* findEntry(Ids::InstanceId const& instanceId)
+    {
+        const auto found = entries.find(instanceId);
+        return found == entries.end() ? nullptr : &found->second;
+    }
+
     void refreshOrphanedCount()
     {
-        Log::debug("FileTracking: refreshOrphanedCount() — calling FileTracking::countOrphaned");
         Nui::RpcClient::callWithBackChannel(
             "FileTracking::countOrphaned",
-            [this](Nui::val response)
-            {
-                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+            lifetime.guarded(
+                [this](Nui::val response)
                 {
-                    Log::error("FileTracking: countOrphaned RPC returned failure or no 'success' field");
-                    return;
+                    if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                    {
+                        Log::error("FileTracking: countOrphaned RPC returned failure or no 'success' field");
+                        return;
+                    }
+                    orphanedCount = response["count"].as<int>();
+                    syncView();
                 }
-                const int cnt = response["count"].as<int>();
-                Log::debug(
-                    "FileTracking: countOrphaned returned count={}, current orphanedCount={}",
-                    cnt,
-                    orphanedCount.value()
-                );
-                orphanedCount = cnt;
-                Log::debug("FileTracking: orphanedCount set to {}, notifying observers", orphanedCount.value());
-                orphanedCount.eventContext().sync();
-            }
+            )
         );
     }
 
     void triggerCleanup()
     {
-        Log::debug("FileTracking: triggerCleanup() — setting cleanupRunning=true");
         cleanupRunning = true;
-        Log::debug("FileTracking: cleanupRunning is now {}", cleanupRunning.value());
         Nui::RpcClient::callWithBackChannel(
             "FileTracking::forceCleanup",
-            [this](Nui::val response)
-            {
-                Log::debug("FileTracking: forceCleanup callback fired");
-                if (!response.hasOwnProperty("success"))
+            lifetime.guarded(
+                [this](Nui::val response)
                 {
-                    Log::error("FileTracking: forceCleanup response has no 'success' field");
                     cleanupRunning = false;
-                    return;
+                    const bool succeeded = response.hasOwnProperty("success") && response["success"].as<bool>();
+                    if (!succeeded)
+                        Log::error("FileTracking: forceCleanup failed");
+                    else if (response.hasOwnProperty("removed"))
+                        Log::info(
+                            "FileTracking: forceCleanup removed {} orphaned instance(s)", response["removed"].as<int>()
+                        );
+                    if (succeeded)
+                        refreshOrphanedCount();
+                    syncView();
                 }
-                const bool ok = response["success"].as<bool>();
-                Log::debug("FileTracking: forceCleanup success={}", ok);
-                if (ok && response.hasOwnProperty("removed"))
-                    Log::info(
-                        "FileTracking: forceCleanup removed {} orphaned instance(s)", response["removed"].as<int>()
-                    );
-                cleanupRunning = false;
-                Log::debug("FileTracking: cleanupRunning reset to false");
-                if (ok)
-                    refreshOrphanedCount();
-            }
+            )
         );
     }
 
@@ -198,9 +224,9 @@ struct FileTrackingPanel::Implementation
                         Nui::Elements::text{std::string{language->get("fileTracking", "headerActive")}}()
                     ),
                     span{class_ = "file-tracking-stat-value"}(
-                        Nui::observe(entries).generate([this]() -> Nui::ElementRenderer
+                        Nui::observe(entryCount).generate([this]() -> Nui::ElementRenderer
                         {
-                            return Nui::Elements::text{fmt::format("{}", entries.value().size())}();
+                            return Nui::Elements::text{fmt::format("{}", entryCount.value())}();
                         })
                     )
                 ),
@@ -211,7 +237,6 @@ struct FileTrackingPanel::Implementation
                     span{class_ = "file-tracking-stat-value file-tracking-stat-orphaned"}(
                         Nui::observe(orphanedCount).generate([this]() -> Nui::ElementRenderer
                         {
-                            Log::debug("FileTracking: orphanedCount generate() called, value={}", orphanedCount.value());
                             if (orphanedCount.value() < 0)
                                 return Nui::Elements::text{"-"}();
                             return Nui::Elements::text{fmt::format("{}", orphanedCount.value())}();
@@ -223,18 +248,17 @@ struct FileTrackingPanel::Implementation
                 ScriptNuiComponents::button({
                     .text = Nui::observe(cleanupRunning).generate([](bool running) -> std::string
                     {
-                        Log::debug("FileTracking: cleanupRunning text generate() called, running={}", running);
                         return std::string{language->get("fileTracking", running ? "headerCleanupRunning" : "headerCleanupButton")};
                     }),
                     .attributes =
                         {
-                            Nui::Attributes::class_ = "file-tracking-cleanup-btn",
-                            Nui::Attributes::onClick =
+                            Nui::Attributes::onClick = lifetime.guarded(
                                 [this](Nui::val)
-                            {
-                                if (!cleanupRunning.value())
-                                    triggerCleanup();
-                            },
+                                {
+                                    if (!cleanupRunning.value())
+                                        triggerCleanup();
+                                }
+                            ),
                             disabled = Nui::observe(cleanupRunning).generate([](bool running) { return running; }),
                         },
                     .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
@@ -244,132 +268,73 @@ struct FileTrackingPanel::Implementation
         // clang-format on
     }
 
+    /**
+     * @brief A cell with a switch for the @p option of the entry @p instanceId.
+     */
+    ScriptNuiComponents::ResizableTable::TableCell
+    switchCell(Ids::InstanceId const& instanceId, bool isChecked, bool TrackedEntry::* option)
+    {
+        using namespace ScriptNuiComponents;
+        return ResizableTable::TableCell{
+            [this, instanceId, isChecked, option](std::unique_ptr<ResizableTable::ISelfController>)
+                -> Nui::ElementRenderer
+            {
+                return ScriptNuiComponents::switch_({
+                    .isChecked = isChecked,
+                    .onChange = lifetime.guarded(
+                        [this, instanceId, option](bool checked, Nui::WebApi::MouseEvent const&)
+                        {
+                            if (auto* entry = findEntry(instanceId))
+                                entry->*option = checked;
+                        }
+                    ),
+                });
+            },
+        };
+    }
+
     ScriptNuiComponents::ResizableTable::TableRow buildRowForEntry(TrackedEntry const& entry)
     {
         using namespace ScriptNuiComponents;
-        std::string instanceIdStr = entry.instanceId.value();
-        auto uploadingObs = entry.uploading;
+        const auto& instanceId = entry.instanceId;
 
         return ResizableTable::TableRow{
             entry.localPath.filename() ? std::string{entry.localPath.filename()->view()} : entry.localPath.toUtf8(),
             entry.remotePath.value(),
+            switchCell(instanceId, entry.autoReupload, &TrackedEntry::autoReupload),
+            switchCell(instanceId, entry.moveRemoteOnLocalMove, &TrackedEntry::moveRemoteOnLocalMove),
+            switchCell(instanceId, entry.deleteRemote, &TrackedEntry::deleteRemote),
+            switchCell(instanceId, entry.checkRemoteChanges, &TrackedEntry::checkRemoteChanges),
             ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.autoReupload](std::unique_ptr<ResizableTable::ISelfController>)
-                    -> Nui::ElementRenderer
-                {
-                    return ScriptNuiComponents::switch_({
-                        .isChecked = isChecked,
-                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
-                        {
-                            for (auto& ent : entries.value())
-                            {
-                                if (ent.instanceId.value() == instanceIdStr)
-                                {
-                                    ent.autoReupload = checked;
-                                    break;
-                                }
-                            }
-                        },
-                    });
-                },
-            },
-            ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.moveRemoteOnLocalMove](
-                    std::unique_ptr<ResizableTable::ISelfController>
-                ) -> Nui::ElementRenderer
-                {
-                    return ScriptNuiComponents::switch_({
-                        .isChecked = isChecked,
-                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
-                        {
-                            for (auto& ent : entries.value())
-                            {
-                                if (ent.instanceId.value() == instanceIdStr)
-                                {
-                                    ent.moveRemoteOnLocalMove = checked;
-                                    break;
-                                }
-                            }
-                        },
-                    });
-                },
-            },
-            ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.deleteRemote](std::unique_ptr<ResizableTable::ISelfController>)
-                    -> Nui::ElementRenderer
-                {
-                    return ScriptNuiComponents::switch_({
-                        .isChecked = isChecked,
-                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
-                        {
-                            for (auto& ent : entries.value())
-                            {
-                                if (ent.instanceId.value() == instanceIdStr)
-                                {
-                                    ent.deleteRemote = checked;
-                                    break;
-                                }
-                            }
-                        },
-                    });
-                },
-            },
-            ResizableTable::TableCell{
-                [this, instanceIdStr, isChecked = entry.checkRemoteChanges](
-                    std::unique_ptr<ResizableTable::ISelfController>
-                ) -> Nui::ElementRenderer
-                {
-                    return ScriptNuiComponents::switch_({
-                        .isChecked = isChecked,
-                        .onChange = [this, instanceIdStr](bool checked, Nui::WebApi::MouseEvent const&)
-                        {
-                            for (auto& ent : entries.value())
-                            {
-                                if (ent.instanceId.value() == instanceIdStr)
-                                {
-                                    ent.checkRemoteChanges = checked;
-                                    break;
-                                }
-                            }
-                        },
-                    });
-                },
-            },
-            ResizableTable::TableCell{
-                [uploadingObs](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
+                [uploading = entry.uploading](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
                 {
                     return Nui::Elements::div{
                         Nui::Attributes::class_ = "file-tracking-status",
                         Nui::Attributes::style = "display:contents",
-                    }(Nui::observe(*uploadingObs)
+                    }(Nui::observe(*uploading)
                             .generate(
                                 [](bool isUploading) -> Nui::ElementRenderer
                                 {
-                                    if (isUploading)
-                                        return Nui::Elements::text{
-                                            std::string{language->get("fileTracking", "statusUploading")}
-                                        }();
-                                    return Nui::Elements::text{
-                                        std::string{language->get("fileTracking", "statusWatching")}
-                                    }();
+                                    return Nui::Elements::text{std::string{language->get(
+                                        "fileTracking", isUploading ? "statusUploading" : "statusWatching"
+                                    )}}();
                                 }
                             ));
                 },
             },
             ResizableTable::TableCell{
-                [this,
-                    instanceIdStr](std::unique_ptr<ResizableTable::ISelfController> controller) -> Nui::ElementRenderer
+                [this, instanceId](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
                 {
-                    std::shared_ptr<ResizableTable::ISelfController> sharedCtrl = std::move(controller);
                     return ScriptNuiComponents::button({
                         .text = std::string{language->get("fileTracking", "stopButton")},
                         .attributes =
                             {
-                                Nui::Attributes::onClick =
-                                    [this, instanceIdStr, ctrl = std::move(sharedCtrl)](Nui::val)
-                                {
-                                    stopWatching(instanceIdStr, ctrl.get());
-                                },
+                                Nui::Attributes::onClick = lifetime.guarded(
+                                    [this, instanceId](Nui::val)
+                                    {
+                                        stopWatching(instanceId);
+                                    }
+                                ),
                             },
                         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     });
@@ -378,208 +343,505 @@ struct FileTrackingPanel::Implementation
         };
     }
 
-    void stopWatching(std::string const& instanceIdStr, ScriptNuiComponents::ResizableTable::ISelfController* ctrl)
+    void stopWatching(Ids::InstanceId const& instanceId)
     {
-        Log::info("FileTracking: stopping watch for instance {}", instanceIdStr);
-
-        // Pass instanceId as a positional arg to match backend handler signature: (reply, instanceId: string)
+        Log::info("FileTracking: stopping watch for instance {}", instanceId.value());
         Nui::RpcClient::callWithBackChannel(
             "FileTracking::destroyInstance",
-            [this, instanceIdStr, ctrl](Nui::val response)
-            {
-                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+            lifetime.guarded(
+                [this, instanceId](Nui::val response)
                 {
-                    Log::error("FileTracking: destroyInstance failed for {}", instanceIdStr);
-                    return;
+                    if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                    {
+                        Log::error("FileTracking: destroyInstance failed for {}", instanceId.value());
+                        return;
+                    }
+                    forgetEntry(instanceId);
+                    syncView();
                 }
-                fileChangeListeners.erase(instanceIdStr);
-                auto& vec = entries.value();
-                vec.erase(
-                    std::remove_if(
-                        vec.begin(),
-                        vec.end(),
-                        [&instanceIdStr](TrackedEntry const& ent)
-                        {
-                            return ent.instanceId.value() == instanceIdStr;
-                        }
-                    ),
-                    vec.end()
-                );
-                if (ctrl)
-                    ctrl->remove();
-                entries.modifyNow();
-            },
-            instanceIdStr
+            ),
+            instanceId.value()
         );
     }
 
-    /**
-     * @brief Queues the upload of the changed @p source of the tracked item @p instanceId. A change that arrives while
-     *        the same file is being queued is not dropped, the file is queued again afterwards.
-     */
-    void queueReupload(Ids::InstanceId const& instanceId, Paths::LocalPath const& source, Paths::RemotePath const& destination)
+    void forgetEntry(Ids::InstanceId const& instanceId)
     {
-        auto entry = std::find_if(
-            entries.value().begin(),
-            entries.value().end(),
-            [&instanceId](TrackedEntry const& tracked)
+        fileChangeListeners.erase(instanceId);
+        entries.erase(instanceId);
+        if (const auto row = rows.remove(instanceId))
+            table->remove(*row);
+        std::erase_if(
+            serverChangedQuestions,
+            [&instanceId](Upload const& upload)
             {
-                return tracked.instanceId.value() == instanceId.value();
+                return upload.instanceId == instanceId;
             }
         );
-        if (entry == entries.value().end() || !operationQueue)
+        entryCount = entries.size();
+    }
+
+    std::expected<Paths::RemotePath, Paths::PathError>
+    remotePathOf(TrackedEntry const& entry, Paths::LocalPath const& local) const
+    {
+        return FileTracking::remotePathOfChange(local, entry.instanceDirectory, entry.remotePath);
+    }
+
+    /**
+     * @brief Records the states of a FileTracking::fileStates reply, only those below @p below when given.
+     */
+    static void rememberFileStates(TrackedEntry& entry, Nui::val const& files, std::optional<Paths::LocalPath> const& below)
+    {
+        const auto count = files["length"].as<int>();
+        for (int index = 0; index < count; ++index)
+        {
+            const auto file = files[index];
+            const auto path = Paths::LocalPath::fromUtf8(file["path"].as<std::string>());
+            if (!path || (below && !path->isWithin(*below)))
+                continue;
+            if (file.hasOwnProperty("directory"))
+            {
+                entry.serverContent.rememberDirectory(*path);
+                continue;
+            }
+            entry.serverContent.rememberFile(
+                *path,
+                FileTracking::ServerState{
+                    .mtime = static_cast<std::uint64_t>(file["mtime"].as<double>()),
+                    .size = static_cast<std::uint64_t>(file["size"].as<double>()),
+                }
+            );
+        }
+    }
+
+    /**
+     * @brief Asks the backend for the files of @p instanceId: they carry the server's modification time after a
+     *        download or an upload. @p onDone runs afterwards, also when the reply failed.
+     */
+    void requestFileStates(
+        Ids::InstanceId const& instanceId,
+        std::optional<Paths::LocalPath> below,
+        std::function<void()> onDone
+    )
+    {
+        Nui::RpcClient::callWithBackChannel(
+            "FileTracking::fileStates",
+            lifetime.guarded(
+                [this, instanceId, below = std::move(below), onDone = std::move(onDone)](Nui::val reply)
+                {
+                    if (auto* entry = findEntry(instanceId); entry && reply.hasOwnProperty("files"))
+                        rememberFileStates(*entry, reply["files"], below);
+                    else if (entry)
+                        Log::warn("FileTracking: no file states for instance {}, re-uploads will ask.", instanceId.value());
+                    onDone();
+                }
+            ),
+            instanceId.value()
+        );
+    }
+
+    void onFileChanged(Ids::InstanceId const& instanceId, Nui::val const& payload)
+    {
+        auto* entry = findEntry(instanceId);
+        if (!entry)
             return;
 
-        auto queued = entry->uploadsBeingQueued;
-        const auto key = source.toUtf8();
-        if (auto found = queued->find(key); found != queued->end())
+        const auto action = payload["action"].as<std::string>();
+        const auto directory = payload["directory"].as<std::string>();
+        const auto filename = payload["filename"].as<std::string>();
+        Log::debug("FileTracking: file changed in instance {}: {} {}", instanceId.value(), action, filename);
+
+        const auto localPathOfChange = [&directory](std::string const& name)
         {
-            found->second = true;
+            return Paths::LocalPath::fromUtf8(fmt::format("{}/{}", directory, name));
+        };
+        // Only the tracked file or directory maps to the remote side, anything else in the instance
+        // directory (Finder's .DS_Store for one) would land next to it on the server.
+        const auto isTracked = [entry](std::expected<Paths::LocalPath, Paths::PathError> const& changed)
+        {
+            return changed && changed->isWithin(entry->localPath);
+        };
+        const auto changedPath = localPathOfChange(filename);
+        if (!isTracked(changedPath))
+        {
+            Log::debug("FileTracking: ignoring change outside the tracked item: {}", filename);
             return;
         }
-        queued->emplace(key, false);
-        (*entry->uploading) = true;
-
-        Reupload reupload{
-            .instanceId = instanceId,
-            .source = source,
-            .destination = destination,
-            .queued = queued,
-            .uploading = entry->uploading,
-            .serverStates = entry->serverStates,
+        const FileTracking::LocalChange change{
+            .path = *changedPath,
+            .isDirectory = payload.hasOwnProperty("isDirectory") && payload["isDirectory"].as<bool>(),
         };
-        auto fileEngine = operationQueue->fileEngine();
-        if (!entry->checkRemoteChanges || !fileEngine)
-            return enqueueReupload(std::move(reupload));
 
-        fileEngine->stat(
-            std::filesystem::path{destination.value()},
-            [this, reupload](
-                std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const& info
-            ) mutable
-            {
-                const auto known = reupload.serverStates->find(reupload.source.toUtf8());
-                // A file the server has but nobody saw here, a vanished one and one with another size or time all
-                // changed on the server. An unanswered check counts as changed.
-                bool changed = true;
-                if (result)
-                {
-                    auto const& [exists, stat] = *result;
-                    if (known == reupload.serverStates->end())
-                        changed = exists;
-                    else
-                        changed = !exists || stat.mtime != known->second.mtime || stat.size != known->second.size;
-                }
-                else
-                {
-                    Log::warn("FileTracking: cannot check '{}' on the server: {}", reupload.destination.value(), info);
-                }
-                if (!changed)
-                    return enqueueReupload(std::move(reupload));
+        if (action == "Deleted")
+            return onDeleted(*entry, change.path);
 
-                confirmDialog->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                    .headerText = language->get("fileTracking", "serverChangedHeader"),
-                    .text = fmt::format(
-                        fmt::runtime(language->get("fileTracking", "serverChangedText")), reupload.destination.value()
-                    ),
-                    .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-                    .focusButton = ConfirmDialog::Button::No,
-                    .onClose =
-                        [this, reupload](std::optional<ConfirmDialog::Button> button) mutable
-                    {
-                        if (button == ConfirmDialog::Button::Yes)
-                            return enqueueReupload(std::move(reupload));
-                        Log::info("FileTracking: kept the server's version of '{}'.", reupload.destination.value());
-                        finishQueueing(reupload);
-                    },
-                });
-            }
-        );
+        // A move from outside the tracked item into it (an atomic save renaming a temporary over it) is a change.
+        const auto oldPath = localPathOfChange(payload["oldFilename"].as<std::string>());
+        if (action == "Moved" && isTracked(oldPath))
+            return onMoved(*entry, *oldPath, change);
+
+        onContentChanged(*entry, change);
     }
 
     /**
-     * @brief A changed tracked file on its way to the server.
+     * @param checkServer Compare with the server first, when the entry asks for that. Changes below a directory
+     *        that was just uploaded skip it, the states recorded after that upload may already be newer.
      */
-    struct Reupload
+    void onContentChanged(TrackedEntry& entry, FileTracking::LocalChange const& change, bool checkServer = true)
     {
-        Ids::InstanceId instanceId;
-        Paths::LocalPath source;
-        Paths::RemotePath destination;
-        std::shared_ptr<std::map<std::string, bool>> queued;
-        std::shared_ptr<Nui::Observed<bool>> uploading;
-        std::shared_ptr<std::map<std::string, TrackedEntry::ServerState>> serverStates;
-    };
+        if (!entry.autoReupload || !operationQueue)
+            return;
+        const auto destination = remotePathOf(entry, change.path);
+        if (!destination)
+        {
+            Log::warn(
+                "FileTracking: not uploading the change in instance {}: {}",
+                entry.instanceId.value(),
+                destination.error().toString()
+            );
+            return;
+        }
+        queueUpload(Upload{
+            .instanceId = entry.instanceId,
+            .change = change,
+            .destination = *destination,
+            .checkServer = checkServer,
+        });
+    }
 
-    void enqueueReupload(Reupload reupload)
+    void onDeleted(TrackedEntry& entry, Paths::LocalPath const& path)
+    {
+        if (!entry.deleteRemote || !operationQueue)
+            return;
+        if (entry.pendingUploads.removeRemoteWhenDone(path))
+            return;
+        if (!entry.serverContent.has(path))
+        {
+            Log::debug("FileTracking: '{}' is not on the server, nothing to delete there.", path.toUtf8());
+            return;
+        }
+        // Never recursive: a directory deleted entry by entry reports its content first, so only one moved away as a
+        // whole (to the trash) still has known content, and its server copy keeps it.
+        if (entry.serverContent.hasBelow(path))
+        {
+            Log::info(
+                "FileTracking: not deleting the server's copy of directory '{}', it was removed with its content.",
+                path.toUtf8()
+            );
+            return;
+        }
+        const auto remotePath = remotePathOf(entry, path);
+        if (!remotePath)
+        {
+            Log::error(
+                "FileTracking: not mirroring the deletion of '{}': {}", path.toUtf8(), remotePath.error().toString()
+            );
+            return;
+        }
+        removeRemote(entry, path, *remotePath);
+    }
+
+    void onMoved(TrackedEntry& entry, Paths::LocalPath const& oldPath, FileTracking::LocalChange const& change)
+    {
+        const auto oldRemotePath = remotePathOf(entry, oldPath);
+        const auto newRemotePath = remotePathOf(entry, change.path);
+        if (!oldRemotePath || !newRemotePath)
+        {
+            Log::warn(
+                "FileTracking: not mirroring the move in instance {}: {}",
+                entry.instanceId.value(),
+                (oldRemotePath ? newRemotePath.error() : oldRemotePath.error()).toString()
+            );
+            return;
+        }
+
+        const auto meaning =
+            FileTracking::meaningOfMove(entry.serverContent.has(change.path), entry.serverContent.has(oldPath));
+        if (meaning == FileTracking::MoveMeaning::Rename)
+        {
+            if (!entry.moveRemoteOnLocalMove || !operationQueue)
+                return;
+            operationQueue->enqueueRename(
+                *oldRemotePath,
+                *newRemotePath,
+                [instanceId = entry.instanceId](std::optional<Ids::OperationId> const& operationId, std::string const& info)
+                {
+                    if (!operationId)
+                        Log::error(
+                            "FileTracking: failed to enqueue remote rename for instance {}: {}", instanceId.value(), info
+                        );
+                },
+                SharedData::OperationMode::PriorityQueued
+            );
+            entry.serverContent.move(oldPath, change.path);
+            return;
+        }
+
+        Log::info("FileTracking: '{}' replaced '{}', uploading it.", oldPath.toUtf8(), change.path.toUtf8());
+        if (entry.moveRemoteOnLocalMove && operationQueue && !entry.pendingUploads.removeRemoteWhenDone(oldPath) &&
+            entry.serverContent.has(oldPath) && !entry.serverContent.hasBelow(oldPath))
+            removeRemote(entry, oldPath, *oldRemotePath);
+        onContentChanged(entry, change);
+    }
+
+    void removeRemote(TrackedEntry& entry, Paths::LocalPath const& local, Paths::RemotePath const& remote)
     {
         if (!operationQueue)
-            return finishQueueing(reupload);
-        operationQueue->enqueueUpload(
-            reupload.source,
-            reupload.destination,
-            /*sizeBytes=*/0,
-            [this, reupload](std::optional<Ids::OperationId> const& opId, std::string const& info)
+            return;
+        Log::info(
+            "FileTracking: enqueueing remote delete for instance {} due to local deletion: {}",
+            entry.instanceId.value(),
+            remote.value()
+        );
+        operationQueue->enqueueDelete(
+            {remote},
+            /*recursive=*/false,
+            [instanceId = entry.instanceId](
+                std::optional<std::vector<Ids::OperationId>> const& operationIds, std::string const& info
+            )
             {
-                if (!opId)
+                if (!operationIds)
                     Log::error(
-                        "FileTracking: failed to enqueue upload for instance {}: {}", reupload.instanceId.value(), info
+                        "FileTracking: failed to enqueue remote delete for instance {}: {}", instanceId.value(), info
                     );
-                else
-                    rememberServerStateAfter(*opId, reupload);
-                finishQueueing(reupload);
             },
-            true, // allowOverwrite: the tracked file replaces its remote original, checked above
-            false, // insertRefresh
-            false, // createMissingDirectories
+            SharedData::OperationMode::PriorityQueued
+        );
+        entry.serverContent.forget(local);
+    }
+
+    static void showUploading(TrackedEntry& entry)
+    {
+        *entry.uploading = !entry.pendingUploads.empty();
+    }
+
+    /**
+     * @brief Uploads a change unless the same path, or a directory above it, is already on its way; the change then
+     *        goes once that upload ended.
+     */
+    void queueUpload(Upload upload)
+    {
+        auto* entry = findEntry(upload.instanceId);
+        if (!entry || !operationQueue || !entry->pendingUploads.start(upload.change))
+            return;
+        showUploading(*entry);
+        checkServerThenUpload(std::move(upload));
+    }
+
+    void checkServerThenUpload(Upload upload)
+    {
+        const auto* entry = findEntry(upload.instanceId);
+        const auto fileEngine = operationQueue ? operationQueue->fileEngine() : nullptr;
+        if (!entry || !entry->checkRemoteChanges || !upload.checkServer || !fileEngine)
+            return enqueueUpload(std::move(upload));
+
+        fileEngine->stat(
+            std::filesystem::path{upload.destination.value()},
+            lifetime.guarded(
+                [this, upload](
+                    std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const& info
+                )
+                {
+                    const auto* entry = findEntry(upload.instanceId);
+                    if (!entry)
+                        return;
+                    if (!result)
+                        Log::warn("FileTracking: cannot check '{}' on the server: {}", upload.destination.value(), info);
+                    // An unanswered check counts as changed.
+                    const bool changed = !result || [&]()
+                    {
+                        auto const& [exists, stat] = *result;
+                        if (upload.change.isDirectory)
+                            return exists && !entry->serverContent.has(upload.change.path);
+                        return FileTracking::serverChanged(
+                            entry->serverContent.fileState(upload.change.path),
+                            exists ? std::optional{FileTracking::ServerState{.mtime = stat.mtime, .size = stat.size}}
+                                   : std::nullopt
+                        );
+                    }();
+                    if (changed)
+                        askServerChanged(upload);
+                    else
+                        enqueueUpload(upload);
+                    syncView();
+                }
+            )
+        );
+    }
+
+    void askServerChanged(Upload upload)
+    {
+        serverChangedQuestions.push_back(std::move(upload));
+        if (!serverChangedQuestionOpen)
+            askNextServerChanged();
+    }
+
+    void askNextServerChanged()
+    {
+        while (!serverChangedQuestions.empty())
+        {
+            auto upload = std::move(serverChangedQuestions.front());
+            serverChangedQuestions.pop_front();
+            if (!findEntry(upload.instanceId))
+                continue;
+
+            serverChangedQuestionOpen = true;
+            confirmDialog->open({
+                .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                .headerText = language->get("fileTracking", "serverChangedHeader"),
+                .text = fmt::format(
+                    fmt::runtime(language->get("fileTracking", "serverChangedText")), upload.destination.value()
+                ),
+                .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+                .focusButton = ConfirmDialog::Button::No,
+                .onClose = lifetime.guarded(
+                    [this, upload](std::optional<ConfirmDialog::Button> button)
+                    {
+                        serverChangedQuestionOpen = false;
+                        if (!button)
+                            return abandonServerChangedQuestions(upload);
+                        if (*button == ConfirmDialog::Button::Yes)
+                            enqueueUpload(upload);
+                        else
+                        {
+                            Log::info("FileTracking: kept the server's version of '{}'.", upload.destination.value());
+                            declineUpload(upload);
+                        }
+                        askNextServerChanged();
+                    }
+                ),
+            });
+            return;
+        }
+    }
+
+    /**
+     * @brief Another dialog replaced the question for @p upload: it and the waiting questions are asked again on the
+     *        next save, nothing opens now over the dialog that replaced it.
+     */
+    void abandonServerChangedQuestions(Upload const& upload)
+    {
+        Log::info("FileTracking: the question about '{}' was replaced by another dialog.", upload.destination.value());
+        declineUpload(upload);
+        for (auto const& waiting : std::exchange(serverChangedQuestions, {}))
+            declineUpload(waiting);
+    }
+
+    /**
+     * @brief The change is not uploaded, and the changes that arrived while it was asked about wait for the next
+     *        save.
+     */
+    void declineUpload(Upload const& upload)
+    {
+        if (auto* entry = findEntry(upload.instanceId))
+            entry->pendingUploads.changesHandled(upload.change.path);
+        finishUpload(upload, UploadOutcome::NotUploaded);
+    }
+
+    void enqueueUpload(Upload upload)
+    {
+        auto* entry = findEntry(upload.instanceId);
+        if (!entry || !operationQueue)
+            return finishUpload(upload, UploadOutcome::NotUploaded);
+        // The upload reads the file when it runs, the changes until now are in it.
+        entry->pendingUploads.changesHandled(upload.change.path);
+        // allowOverwrite: the tracked file replaces its remote original, checked above.
+        operationQueue->enqueueUpload(
+            upload.change.path,
+            upload.destination,
+            /*sizeBytes=*/0,
+            lifetime.guarded(
+                [this, upload](std::optional<Ids::OperationId> const& operationId, std::string const& info)
+                {
+                    if (!operationId || !operationQueue)
+                    {
+                        // A temporary file an editor already renamed or removed ends up here.
+                        Log::warn("FileTracking: did not upload '{}': {}", upload.change.path.toUtf8(), info);
+                        finishUpload(upload, UploadOutcome::NotUploaded);
+                        syncView();
+                        return;
+                    }
+                    operationQueue->addCompletionCallback(
+                        *operationId,
+                        lifetime.guarded(
+                            [this, upload](bool success)
+                            {
+                                onUploadEnded(upload, success);
+                            }
+                        )
+                    );
+                }
+            ),
+            /*allowOverwrite=*/true,
+            /*insertRefresh=*/false,
+            /*createMissingDirectories=*/false,
             SharedData::OperationMode::PriorityQueued
         );
     }
 
     /**
-     * @brief Once the upload finished, what the server has now is the state the next check compares with.
+     * @brief Once an upload ended, what the server has now is the state the next check compares with. The upload
+     *        stays on its way until that state is known.
      */
-    void rememberServerStateAfter(Ids::OperationId const& operationId, Reupload const& reupload)
+    void onUploadEnded(Upload const& upload, bool success)
     {
-        operationQueue->addCompletionCallback(
-            operationId,
-            [this, reupload](bool success)
-            {
-                auto fileEngine = operationQueue ? operationQueue->fileEngine() : nullptr;
-                if (!success || !fileEngine)
-                    return;
-                fileEngine->stat(
-                    std::filesystem::path{reupload.destination.value()},
-                    [reupload](
-                        std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const&
-                    )
-                    {
-                        if (result && result->first)
-                        {
-                            (*reupload.serverStates)[reupload.source.toUtf8()] = TrackedEntry::ServerState{
-                                .mtime = result->second.mtime,
-                                .size = result->second.size,
-                            };
-                        }
-                    }
-                );
-            }
+        if (!success)
+            return finishUpload(upload, UploadOutcome::NotUploaded);
+
+        // Uploads carry the local modification time, so the local states are what the server has now.
+        if (upload.change.isDirectory)
+            return requestFileStates(
+                upload.instanceId,
+                upload.change.path,
+                [this, upload]()
+                {
+                    finishUpload(upload, UploadOutcome::Uploaded);
+                    syncView();
+                }
+            );
+
+        const auto fileEngine = operationQueue ? operationQueue->fileEngine() : nullptr;
+        if (!fileEngine)
+            return finishUpload(upload, UploadOutcome::Uploaded);
+        fileEngine->stat(
+            std::filesystem::path{upload.destination.value()},
+            lifetime.guarded(
+                [this, upload](
+                    std::optional<std::pair<bool, SharedData::DirectoryEntry>> const& result, std::string const&
+                )
+                {
+                    if (auto* entry = findEntry(upload.instanceId); entry && result && result->first)
+                        entry->serverContent.rememberFile(
+                            upload.change.path,
+                            FileTracking::ServerState{.mtime = result->second.mtime, .size = result->second.size}
+                        );
+                    finishUpload(upload, UploadOutcome::Uploaded);
+                    syncView();
+                }
+            )
         );
     }
 
     /**
-     * @brief The file is no longer being queued; when it changed again meanwhile it goes through once more.
+     * @brief The upload of @p upload is no longer on its way. What changed meanwhile goes now: the path itself
+     *        once more, the changes below an uploaded directory, or the removal of a path that went away.
      */
-    void finishQueueing(Reupload const& reupload)
+    void finishUpload(Upload const& upload, UploadOutcome outcome)
     {
-        const auto key = reupload.source.toUtf8();
-        const auto found = reupload.queued->find(key);
-        const bool changedAgain = found != reupload.queued->end() && found->second;
-        if (found != reupload.queued->end())
-            reupload.queued->erase(found);
-        (*reupload.uploading) = !reupload.queued->empty();
-        if (changedAgain)
-            queueReupload(reupload.instanceId, reupload.source, reupload.destination);
+        auto* entry = findEntry(upload.instanceId);
+        if (!entry)
+            return;
+        auto finished = entry->pendingUploads.finish(upload.change.path);
+        showUploading(*entry);
+        if (finished.removeRemote)
+        {
+            if (outcome == UploadOutcome::Uploaded || entry->serverContent.has(upload.change.path))
+                removeRemote(*entry, upload.change.path, upload.destination);
+            return;
+        }
+        if (finished.changedAgain)
+            queueUpload(upload);
+        for (auto const& change : finished.changedBelow)
+            onContentChanged(*entry, change, /*checkServer=*/false);
     }
 };
 
@@ -602,7 +864,6 @@ void FileTrackingPanel::activate(
     impl_->operationQueue = operationQueue;
     impl_->sessionId = std::move(sessionId);
     impl_->downloadTempSuffix = std::move(downloadTempSuffix);
-    Log::debug("FileTracking: activate() — triggering initial orphaned count refresh");
     impl_->refreshOrphanedCount();
 }
 
@@ -615,40 +876,13 @@ void FileTrackingPanel::deactivate()
 {
     impl_->fileChangeListeners.clear();
     impl_->table->clear();
-    impl_->entries.value().clear();
+    impl_->entries.clear();
+    impl_->entryCount = std::size_t{0};
+    impl_->serverChangedQuestions.clear();
     impl_->operationQueue = nullptr;
     impl_->sessionId = {};
     impl_->orphanedCount = -1;
     impl_->cleanupRunning = false;
-}
-
-namespace
-{
-    /**
-     * @brief The remote path a change at @p changed maps to. The instance directory stands for the directory of
-     *        @p remotePath, a change outside it or of the instance directory itself maps to nothing.
-     */
-    std::expected<Paths::RemotePath, Paths::PathError> remotePathOfChange(
-        Paths::LocalPath const& changed,
-        Paths::LocalPath const& instanceDirectory,
-        Paths::RemotePath const& remotePath
-    )
-    {
-        const auto remoteDirectory = remotePath.parent();
-        if (!remoteDirectory)
-            return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::EscapesRoot, .input = remotePath.value()});
-        return changed.relativeTo(instanceDirectory)
-            .and_then(
-                [&changed, &remoteDirectory](
-                    Paths::RelativePath const& relative
-                ) -> std::expected<Paths::RemotePath, Paths::PathError>
-                {
-                    if (relative.empty())
-                        return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::Empty, .input = changed.toUtf8()});
-                    return *remoteDirectory / relative;
-                }
-            );
-    }
 }
 
 void FileTrackingPanel::startWatching(
@@ -665,191 +899,44 @@ void FileTrackingPanel::startWatching(
         localPath.toUtf8()
     );
 
-    impl_->fileChangeListeners[instanceId.value()] = Nui::RpcClient::autoRegisterFunction(
-        fmt::format("FileTracking::{}::onFileChanged", instanceId.value()),
-        [this, instanceId, remotePath, localPath, instanceDirectory](Nui::val payload)
-        {
-            const auto action = payload["action"].as<std::string>();
-            const auto directory = payload["directory"].as<std::string>();
-            const auto filename = payload["filename"].as<std::string>();
-
-            Log::debug("FileTracking: file changed in instance {}: {} {}", instanceId.value(), action, filename);
-
-            const auto localPathOfChange = [&directory](std::string const& name)
-            {
-                return Paths::LocalPath::fromUtf8(fmt::format("{}/{}", directory, name));
-            };
-            // Only the tracked file or directory maps to the remote side, anything else in the instance
-            // directory (Finder's .DS_Store for one) would land next to it on the server.
-            const auto isTracked = [&localPath](std::expected<Paths::LocalPath, Paths::PathError> const& changed)
-            {
-                return changed && changed->isWithin(localPath);
-            };
-            const auto changedLocalPath = localPathOfChange(filename);
-            if (!isTracked(changedLocalPath))
-            {
-                Log::debug("FileTracking: ignoring change outside the tracked item: {}", filename);
-                return;
-            }
-
-            auto& vec = impl_->entries.value();
-            auto it = std::find_if(
-                vec.begin(),
-                vec.end(),
-                [&instanceId](TrackedEntry const& ent)
+    impl_->fileChangeListeners.insert_or_assign(
+        instanceId,
+        Nui::RpcClient::autoRegisterFunction(
+            fmt::format("FileTracking::{}::onFileChanged", instanceId.value()),
+            impl_->lifetime.guarded(
+                [implementation = impl_.get(), instanceId](Nui::val payload)
                 {
-                    return ent.instanceId.value() == instanceId.value();
+                    implementation->onFileChanged(instanceId, payload);
+                    Implementation::syncView();
                 }
-            );
-            if (it == vec.end())
-                return;
-
-            if (action == "Deleted")
-            {
-                if (it->deleteRemote && impl_->operationQueue)
-                {
-                    // The deleted item must map to a path below the tracked remote directory, never next to it.
-                    const auto remoteOfChange = remotePathOfChange(*changedLocalPath, instanceDirectory, remotePath);
-                    if (!remoteOfChange)
-                    {
-                        Log::error(
-                            "FileTracking: not mirroring the deletion of '{}': {}",
-                            changedLocalPath->toUtf8(),
-                            remoteOfChange.error().toString()
-                        );
-                        return;
-                    }
-                    const auto changedRemotePath = *remoteOfChange;
-
-                    Log::info(
-                        "FileTracking: enqueueing remote delete for instance {} due to local deletion: {}",
-                        instanceId.value(),
-                        changedRemotePath.value()
-                    );
-
-                    // Never recursive: the event does not say whether a file or a directory went, and a deleted
-                    // local file must not take a remote directory of that name with it. A deleted local directory
-                    // reports its content first, so its remote copy is empty by the time it is removed; anything
-                    // only the server has keeps it.
-                    impl_->operationQueue->enqueueDelete(
-                        {changedRemotePath},
-                        /*recursive=*/false,
-                        [instanceId](std::optional<std::vector<Ids::OperationId>> const& opIds, std::string const& info)
-                        {
-                            if (!opIds)
-                                Log::error(
-                                    "FileTracking: failed to enqueue remote delete for instance {}: {}",
-                                    instanceId.value(),
-                                    info
-                                );
-                        },
-                        SharedData::OperationMode::PriorityQueued
-                    );
-                }
-                return;
-            }
-
-            const auto oldLocalPath = localPathOfChange(payload["oldFilename"].as<std::string>());
-            // An atomic save renames a temporary from outside the tracked item over it, a change of its content.
-            if (action == "Moved" && isTracked(oldLocalPath))
-            {
-                if (!it->moveRemoteOnLocalMove || !impl_->operationQueue)
-                    return;
-
-                // Both ends must lie inside the instance directory to avoid arbitrary remote renames.
-                auto oldRemotePath = remotePathOfChange(*oldLocalPath, instanceDirectory, remotePath);
-                auto newRemotePath = remotePathOfChange(*changedLocalPath, instanceDirectory, remotePath);
-                if (!oldRemotePath || !newRemotePath)
-                {
-                    Log::warn(
-                        "FileTracking: not mirroring the move in instance {}: {}",
-                        instanceId.value(),
-                        (oldRemotePath ? newRemotePath.error() : oldRemotePath.error()).toString()
-                    );
-                    return;
-                }
-
-                impl_->operationQueue->enqueueRename(
-                    *oldRemotePath,
-                    *newRemotePath,
-                    [instanceId](std::optional<Ids::OperationId> const& opId, std::string const& info)
-                    {
-                        if (!opId)
-                            Log::error(
-                                "FileTracking: failed to enqueue remote rename for instance {}: {}",
-                                instanceId.value(),
-                                info
-                            );
-                    },
-                    SharedData::OperationMode::PriorityQueued
-                );
-                return;
-            }
-
-            if (!it->autoReupload)
-                return;
-
-            if (!impl_->operationQueue)
-                return;
-
-            const auto source = *changedLocalPath;
-            const auto destination = remotePathOfChange(source, instanceDirectory, remotePath);
-            if (!destination)
-            {
-                Log::warn(
-                    "FileTracking: not uploading the change in instance {}: {}",
-                    instanceId.value(),
-                    destination.error().toString()
-                );
-                return;
-            }
-
-            impl_->queueReupload(instanceId, source, *destination);
-        }
+            )
+        )
     );
 
-    auto const& ftOpts = impl_->stateHolder->stateCache().fileTrackingOptions;
-    impl_->entries.value().push_back(
-        TrackedEntry{
+    auto const& options = impl_->stateHolder->stateCache().fileTrackingOptions;
+    const auto [entry, inserted] = impl_->entries.insert_or_assign(
+        instanceId,
+        Implementation::TrackedEntry{
             .instanceId = instanceId,
             .instanceDirectory = instanceDirectory,
             .remotePath = remotePath,
             .localPath = localPath,
-            .autoReupload = ftOpts.autoReupload,
-            .moveRemoteOnLocalMove = ftOpts.moveRemoteOnLocalMove,
-            .deleteRemote = ftOpts.deleteRemoteOnLocalDelete,
-            .checkRemoteChanges = ftOpts.checkRemoteChanges.value_or(true),
+            .autoReupload = options.autoReupload,
+            .moveRemoteOnLocalMove = options.moveRemoteOnLocalMove,
+            .deleteRemote = options.deleteRemoteOnLocalDelete,
+            .checkRemoteChanges = options.checkRemoteChanges.value_or(true),
         }
     );
-    impl_->table->addRow(impl_->buildRowForEntry(impl_->entries.value().back()));
-    impl_->entries.modifyNow();
+    if (inserted)
+    {
+        impl_->table->addRow(impl_->buildRowForEntry(entry->second));
+        impl_->rows.add(instanceId);
+    }
+    impl_->entryCount = impl_->entries.size();
+    Implementation::syncView();
 
     // The downloaded files carry the server's modification time, so they tell what the server had.
-    Nui::RpcClient::callWithBackChannel(
-        "FileTracking::fileStates",
-        [serverStates = impl_->entries.value().back().serverStates, instanceId](Nui::val reply)
-        {
-            if (!reply.hasOwnProperty("files"))
-            {
-                Log::warn("FileTracking: no file states for instance {}, every re-upload will ask.", instanceId.value());
-                return;
-            }
-            const auto files = reply["files"];
-            const auto count = files["length"].as<int>();
-            for (int index = 0; index < count; ++index)
-            {
-                const auto file = files[index];
-                serverStates->insert_or_assign(
-                    file["path"].as<std::string>(),
-                    TrackedEntry::ServerState{
-                        .mtime = static_cast<std::uint64_t>(file["mtime"].as<double>()),
-                        .size = static_cast<std::uint64_t>(file["size"].as<double>()),
-                    }
-                );
-            }
-        },
-        instanceId.value()
-    );
+    impl_->requestFileStates(instanceId, std::nullopt, [] {});
 }
 
 Nui::ElementRenderer FileTrackingPanel::operator()()

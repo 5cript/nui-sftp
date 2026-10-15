@@ -11,8 +11,7 @@ namespace Persistence
         bool autoReupload{true};
         bool moveRemoteOnLocalMove{true};
         bool deleteRemoteOnLocalDelete{true};
-        /// Before a re-upload, ask when the server's copy changed since it was opened. Unset means true, optional so
-        /// configurations written before it load without a warning.
+        /** @brief Before a re-upload, ask when the server's copy changed since it was opened or last uploaded. Unset means true. */
         std::optional<bool> checkRemoteChanges{std::nullopt};
     };
 
