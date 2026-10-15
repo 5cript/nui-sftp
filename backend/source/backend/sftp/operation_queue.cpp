@@ -1973,7 +1973,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     };
     // The roots are scanned one after another, their counts add up on the card.
     const auto scanProgressOfNextRoot =
-        Detail::sequentialScanProgress(makeScanProgressCallback("onScanProgress", bulkOperationId));
+        ScanProgressDetail::sequentialScanProgress(makeScanProgressCallback("onScanProgress", bulkOperationId));
     for (auto const& entry : request.entries)
     {
         if (auto allowed = guard.check(entry.target); !allowed)

@@ -230,7 +230,7 @@ class BulkTransferOperation : public Operation
 
     /**
      * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots
-     *        with @ref Detail::treeEntryPaths.
+     *        with @ref BulkTransferDetail::treeEntryPaths.
      */
     std::expected<EntryPaths, Error> entryPaths(std::size_t entryIndex) const;
 
@@ -404,7 +404,7 @@ class BulkTransferOperation : public Operation
     std::chrono::steady_clock::time_point lastEmit_{};
 };
 
-namespace Detail
+namespace BulkTransferDetail
 {
     /**
      * @brief Both ends of the entry @p entryIndex of a scanned tree: its names on the way from the root joined below

@@ -585,10 +585,10 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
 {
     if (prescanned())
         return prescannedPaths_[entryIndex];
-    return Detail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
+    return BulkTransferDetail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
 }
 
-namespace Detail
+namespace BulkTransferDetail
 {
     std::expected<BulkTransferOperation::EntryPaths, Operation::Error> treeEntryPaths(
         std::vector<SharedData::DirectoryEntry> const& entries,

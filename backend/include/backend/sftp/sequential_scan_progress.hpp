@@ -6,7 +6,7 @@
 #include <functional>
 #include <memory>
 
-namespace Detail
+namespace ScanProgressDetail
 {
     using ScanProgressFunction = std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>;
 
