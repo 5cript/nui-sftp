@@ -10,9 +10,10 @@ namespace FileTracking
     /**
      * @brief Move-only RAII handle representing one efsw directory watch.
      *
-     * Destroying or moving-from an InstanceWatch automatically removes the
-     * underlying efsw watch via efsw::FileWatcher::removeWatch().
-     * Instances of this type are produced by
+     * Destroying an InstanceWatch or assigning another one to it removes the
+     * underlying efsw watch via efsw::FileWatcher::removeWatch(). It does not keep
+     * the watcher alive: once its instance destroyed the watcher there is nothing
+     * left to remove. Instances of this type are produced by
      * TemporaryDirectoryInstance::addWatch().
      */
     class InstanceWatch
@@ -26,13 +27,12 @@ namespace FileTracking
         /**
          * @brief Construct a valid watch handle.
          *
-         * @param watcher  Shared owning pointer to the efsw::FileWatcher that
-         *                 registered this watch.
+         * @param watcher  The efsw::FileWatcher that registered this watch.
          * @param watchId  The watch ID returned by efsw::FileWatcher::addWatch().
          * @param path     The directory path being watched.
          */
         InstanceWatch(
-            std::shared_ptr<efsw::FileWatcher> watcher,
+            std::weak_ptr<efsw::FileWatcher> watcher,
             efsw::WatchID watchId,
             std::filesystem::path path
         );

@@ -249,6 +249,14 @@
     user-select: text;
 }
 
+.snc-toast-message {
+    white-space: pre-line;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 8;
+    overflow: hidden;
+}
+
 .notification-log-entry-meta {
     display: flex;
     gap: 8px;

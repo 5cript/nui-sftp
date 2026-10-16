@@ -331,8 +331,8 @@ namespace Persistence
                         CommonTransferOptions{
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
-                            .tryContinue = true,
-                            .inheritPermissions = true,
+                            .tryContinue = defaultTryContinue,
+                            .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
 #else
@@ -348,8 +348,8 @@ namespace Persistence
                         CommonTransferOptions{
                             .tempFileSuffix = ".filepart",
                             .mayOverwrite = false,
-                            .tryContinue = true,
-                            .inheritPermissions = true,
+                            .tryContinue = defaultTryContinue,
+                            .inheritPermissions = defaultInheritPermissions,
 #ifdef _WIN32
                             .symlinkHandling = SymlinkHandling::FollowSymlink,
 #else
@@ -460,6 +460,8 @@ namespace Persistence
             stateCache_.writeLegacyUsers();
             std::ofstream writer{path, std::ios_base::binary};
             writer << nlohmann::json(stateCache_).dump(4);
+            if (onSaved_)
+                onSaved_(stateCache_);
             onSaveComplete(std::nullopt);
         }
         catch (std::exception const& e)
@@ -467,6 +469,11 @@ namespace Persistence
             Log::error("Failed to save config file: {}", Utility::errorMessage(e));
             throw;
         }
+    }
+
+    void StateHolder::onSaved(std::function<void(State const&)> listener)
+    {
+        onSaved_ = std::move(listener);
     }
 
     void StateHolder::registerRpc(Nui::RpcHub& hub)

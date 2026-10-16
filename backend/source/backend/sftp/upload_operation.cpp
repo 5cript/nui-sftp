@@ -854,7 +854,7 @@ std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms lo
         {
             if (options_.filePermissions)
                 return options_.filePermissions.value();
-            // inherit execute permissions anyway:
+            // Without a configured mode: 0660, no execute bits, whatever the local file has.
             return (
                 std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
                 std::filesystem::perms::group_read | std::filesystem::perms::group_write
@@ -862,6 +862,6 @@ std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms lo
         }
     }();
 
-    // Owner has to write obviously for the upload:
+    // The upload writes the file as its owner.
     return raw | std::filesystem::perms::owner_write;
 }

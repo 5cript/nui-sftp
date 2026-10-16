@@ -143,7 +143,18 @@ class Setting
             this->value(*value);
             return;
         }
-        state_ = ValueType{};
+        state_ = fallback_.value_or(ValueType{});
+        updateStateWithInheritance();
+    }
+    /**
+     * @brief The value an unset setting stands for. It is shown while the setting is not set and nothing is
+     *        inherited, and it is the value the setting starts with when it is engaged.
+     */
+    void fallback(ValueType value)
+    {
+        fallback_ = std::move(value);
+        if (!engaged_.value())
+            state_ = *fallback_;
         updateStateWithInheritance();
     }
     void updateStateWithInheritance()
@@ -346,6 +357,7 @@ class Setting
     Nui::Observed<std::optional<ValueType>> inheritedState_;
     Nui::Observed<ValueType> stateWithInheritance_;
     Nui::Observed<bool> engaged_{!Disengageable};
+    std::optional<ValueType> fallback_{};
     std::function<void()> onChange_;
     std::function<void()> resetAction_;
     Nui::Observed<bool>* externalDisengage_;

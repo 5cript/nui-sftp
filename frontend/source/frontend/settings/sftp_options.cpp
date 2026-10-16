@@ -189,7 +189,13 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
         nulloptReset(readUserDirectories, onChange),
     },
     onChange_{onChange}
-{}
+{
+    downloadOptions.inheritPermissions.fallback(Persistence::defaultInheritPermissions);
+    uploadOptions.inheritPermissions.fallback(Persistence::defaultInheritPermissions);
+    downloadOptions.tryContinue.fallback(Persistence::defaultTryContinue);
+    uploadOptions.tryContinue.fallback(Persistence::defaultTryContinue);
+    downloadOptions.markAsDownloaded.fallback(Persistence::defaultMarkAsDownloaded);
+}
 
 void SftpOptions::applyToState(Persistence::SftpOptions& state) const
 {

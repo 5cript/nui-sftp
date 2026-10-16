@@ -12,6 +12,7 @@ namespace NuiFileExplorer
         bool delegatedToBackend = false;
         std::optional<std::vector<Item>> externDroppedItems = std::nullopt;
         std::optional<bool> isInternalDropFromLeftSide = std::nullopt;
+        /** @brief Where the items go below the directory of the side they were dropped on, see transferTargetOf. */
         std::optional<std::string> internalDropSubdir = std::nullopt;
         bool issueWebkitWarning = false;
     };

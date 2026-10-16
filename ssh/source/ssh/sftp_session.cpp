@@ -162,7 +162,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_mkdir(
+        const auto result = sftp_mkdir(
             session_, path.c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
         );
         if (result != SSH_OK)
@@ -193,7 +193,7 @@ namespace SecureShell
         };
         if (!attributes)
         {
-            auto result = sftp_mkdir(
+            const auto result = sftp_mkdir(
                 session_, path.c_str(), static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             );
             if (result != SSH_OK)
@@ -269,7 +269,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_unlink(session_, path.c_str());
+        const auto result = sftp_unlink(session_, path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -289,7 +289,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_rmdir(session_, path.c_str());
+        const auto result = sftp_rmdir(session_, path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -397,13 +397,13 @@ namespace SecureShell
 
                     if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
                     {
-                        auto result = sftp_rmdir(session_, path.c_str());
+                        const auto result = sftp_rmdir(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }
                     else
                     {
-                        auto result = sftp_unlink(session_, path.c_str());
+                        const auto result = sftp_unlink(session_, path.c_str());
                         if (result != SSH_OK)
                             return std::unexpected(lastError());
                     }
@@ -469,7 +469,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_setstat(session_, path.c_str(), attributes);
+        const auto result = sftp_setstat(session_, path.c_str(), attributes);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -491,7 +491,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(source, destination); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_rename(session_, source.c_str(), destination.c_str());
+        const auto result = sftp_rename(session_, source.c_str(), destination.c_str());
         if (result != SSH_OK)
         {
             return std::unexpected(lastError());
@@ -690,7 +690,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_chown(session_, path.c_str(), owner, group);
+        const auto result = sftp_chown(session_, path.c_str(), owner, group);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -712,7 +712,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        auto result = sftp_chmod(session_, path.c_str(), static_cast<mode_t>(perms));
+        const auto result = sftp_chmod(session_, path.c_str(), static_cast<mode_t>(perms));
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};

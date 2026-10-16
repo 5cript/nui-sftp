@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <backend/opener_risk.hpp>
 #include <paths/native.hpp>
 #include <backend/process/environment.hpp>
 #include <utility/localized_message.hpp>
@@ -33,10 +34,6 @@
 #include <fcntl.h>
 
 #include <map>
-#include <algorithm>
-#include <cctype>
-#include <iterator>
-#include <string_view>
 #include <string>
 
 namespace
@@ -411,20 +408,7 @@ Opener& Opener::operator=(Opener&&) noexcept = default;
 
 std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) const
 {
-    std::error_code statusError{};
-    const auto status = std::filesystem::status(path, statusError);
-    if (statusError || !std::filesystem::is_regular_file(status))
-        return std::nullopt;
-    using std::filesystem::perms;
-    if ((status.permissions() & (perms::owner_exec | perms::group_exec | perms::others_exec)) != perms::none)
-        return std::string{"backend.opener.risk.program"};
-    // Types a desktop starts as programs instead of showing them.
-    static constexpr std::string_view runnable[] = {".desktop", ".appimage", ".run", ".jar"};
-    auto extension = Paths::nativeToUtf8(path.extension());
-    std::ranges::transform(extension, extension.begin(), [](unsigned char character) { return std::tolower(character); });
-    if (std::ranges::find(runnable, std::string_view{extension}) != std::end(runnable))
-        return std::string{"backend.opener.risk.dangerousType"};
-    return std::nullopt;
+    return OpenerDetail::linuxRiskOf(path);
 }
 
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)

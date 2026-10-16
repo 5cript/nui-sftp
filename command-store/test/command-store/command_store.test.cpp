@@ -35,6 +35,16 @@ namespace
     using CommandStore::SortOrder;
     using CommandStore::Store;
 
+    /** @brief Root ignores file permissions, Windows has no root. */
+    bool runningAsRoot()
+    {
+#ifdef _WIN32
+        return false;
+#else
+        return geteuid() == 0;
+#endif
+    }
+
     class CommandStoreTests : public ::testing::Test
     {
       protected:
@@ -774,7 +784,7 @@ namespace
 
     TEST_F(CommandStoreTests, ReadOnlyDatabaseFileFailsToOpen)
     {
-        if (geteuid() == 0)
+        if (runningAsRoot())
             GTEST_SKIP() << "root ignores file permissions";
         openStore();
         closeStore();
@@ -790,7 +800,7 @@ namespace
 
     TEST_F(CommandStoreTests, ReadOnlySharedMemoryFileFailsToOpen)
     {
-        if (geteuid() == 0)
+        if (runningAsRoot())
             GTEST_SKIP() << "root ignores file permissions";
         openStore();
         closeStore();

@@ -22,10 +22,9 @@ namespace SharedData::Sync
     /**
      * @brief Directory walker that produces a sorted @ref ScanNode tree directly.
      *
-     * Mirrors the scanner contract of @ref Utility::DeepDirectoryWalker — the caller
-     * supplies a scanner that returns a batch of @ref DirectoryEntry for one directory, given
-     * relative to the root —
-     * but internally stitches results into a nested ScanNode tree with:
+     * Mirrors the scanner contract of @ref Utility::DeepDirectoryWalker (the caller supplies a scanner that returns
+     * a batch of @ref DirectoryEntry for one directory, given relative to the root), but stitches the results into a
+     * nested ScanNode tree with:
      *
      *  - sibling sort by name applied per directory as entries arrive, and
      *  - @ref ScanNode::subtreeFileCount / @ref ScanNode::subtreeByteTotal accumulated

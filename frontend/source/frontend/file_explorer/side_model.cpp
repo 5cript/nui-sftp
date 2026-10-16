@@ -1,6 +1,13 @@
 #include <frontend/file_explorer/side_model.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <script-nui-components/popup_menu.hpp>
+
+#include <ui5-sap-icons/icons/add-favorite.hpp>
+#include <ui5-sap-icons/icons/unfavorite.hpp>
+
+#include <algorithm>
+#include <iterator>
 
 void SideModel::operationQueue(OperationQueue* operationQueue)
 {
@@ -21,19 +28,132 @@ std::shared_ptr<FileEngine> SideModel::engine()
     return fileEngine_;
 }
 
-bool SideModel::isValidItemName(std::string_view name)
+void SideModel::setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback)
 {
-    if (name.empty() || name == "." || name == "..")
-        return false;
-    return name.find_first_of(std::string_view{"/\\\0", 3}) == std::string_view::npos;
+    onFavoritesChanged_ = std::move(callback);
 }
 
-void SideModel::showInvalidItemName(std::string const& name)
+std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> SideModel::favorites() const
 {
+    return favorites_;
+}
+
+void SideModel::setFavorites(std::vector<std::string> const& favorites)
+{
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(favorites.size());
+    std::ranges::transform(
+        favorites,
+        std::back_inserter(paths),
+        [](std::string const& favorite)
+        {
+            return std::filesystem::path{favorite};
+        }
+    );
+    *favorites_ = std::move(paths);
+}
+
+void SideModel::addFavorite(std::filesystem::path const& path)
+{
+    if (std::ranges::contains(favorites_->value(), path))
+        return;
+    favorites_->push_back(path);
+    notifyFavoritesChanged();
+}
+
+void SideModel::removeFavorite(std::filesystem::path const& path)
+{
+    if (std::erase(favorites_->value(), path) == 0)
+        return;
+    favorites_->modifyNow();
+    notifyFavoritesChanged();
+}
+
+void SideModel::notifyFavoritesChanged()
+{
+    if (!onFavoritesChanged_)
+        return;
+    std::vector<std::string> favorites;
+    favorites.reserve(favorites_->value().size());
+    std::ranges::transform(
+        favorites_->value(),
+        std::back_inserter(favorites),
+        [](std::filesystem::path const& favorite)
+        {
+            return favorite.generic_string();
+        }
+    );
+    onFavoritesChanged_(std::move(favorites));
+}
+
+std::vector<NuiFileExplorer::ContextMenuItem>
+SideModel::favoriteMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
+{
+    if (selectedItems.size() != 1 || !selectedItems.front().isDirectoryLike())
+        return {};
+    const auto pathText = itemPathText(selectedItems.front());
+    if (!pathText)
+        return {};
+
+    const auto path = std::filesystem::path{*pathText};
+    const bool isFavorite = std::ranges::contains(favorites_->value(), path);
+    return {
+        ScriptNuiComponents::PopupMenu::item(
+            language->get("fileExplorer", "contextMenu", isFavorite ? "removeFromFavorites" : "addToFavorites"),
+            isFavorite ? Ui5Icons::unfavorite() : Ui5Icons::add_favorite(),
+            lifetime_.guarded(
+                [this, path, isFavorite]()
+                {
+                    if (isFavorite)
+                        removeFavorite(path);
+                    else
+                        addFavorite(path);
+                }
+            )
+        ),
+        ScriptNuiComponents::PopupMenu::separator(),
+    };
+}
+
+std::vector<ConfirmDialog::OpenOptions::ListElement>
+SideModel::pathList(std::vector<NuiFileExplorer::Item> const& items) const
+{
+    std::vector<ConfirmDialog::OpenOptions::ListElement> list;
+    list.reserve(items.size());
+    std::ranges::transform(
+        items,
+        std::back_inserter(list),
+        [this](NuiFileExplorer::Item const& item)
+        {
+            return ConfirmDialog::OpenOptions::ListElement{
+                .text = itemPathText(item).value_or(item.fullPath.generic_string()),
+            };
+        }
+    );
+    return list;
+}
+
+void SideModel::navigateInto(NuiFileExplorer::Item const& item)
+{
+    if (item.isParentLink)
+        return navigateTo(item.fullPath);
+    const auto path = itemPathText(item);
+    if (!path)
+        return showPathRefused(language->get("sideModel", "failedToListDirectory"), path.error());
+    navigateTo(std::filesystem::path{*path});
+}
+
+void SideModel::showInvalidItemName(Paths::PathError const& error)
+{
+    Log::error("Refusing the name {}", error.toString());
     confirmDialog_->open({
         .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
         .headerText = language->get("fileExplorer", "invalidItemNameHeader"),
-        .text = fmt::format(fmt::runtime(language->get("fileExplorer", "invalidItemName")), name),
+        .text = fmt::format(
+            fmt::runtime(language->get("fileExplorer", "invalidItemName")),
+            error.input,
+            language->get("fileExplorer", "nameRejection", FileExplorer::nameRejectionKey(error.reason))
+        ),
         .buttons = ConfirmDialog::Button::Ok,
     });
 }
@@ -77,6 +197,19 @@ void SideModel::confirmReplaceOnRename(std::string const& name, std::function<vo
     });
 }
 
+FileExplorer::OverwriteAnswer SideModel::overwriteAnswerOf(std::optional<ConfirmDialog::Button> button)
+{
+    if (button == ConfirmDialog::Button::Yes)
+        return FileExplorer::OverwriteAnswer::Yes;
+    if (button == ConfirmDialog::Button::No)
+        return FileExplorer::OverwriteAnswer::No;
+    if (button == ConfirmDialog::Button::All)
+        return FileExplorer::OverwriteAnswer::All;
+    if (button == ConfirmDialog::Button::None)
+        return FileExplorer::OverwriteAnswer::None;
+    return FileExplorer::OverwriteAnswer::Cancel;
+}
+
 bool SideModel::isComplete() const
 {
     return operationQueue_ != nullptr && fileEngine_ != nullptr;
@@ -89,6 +222,32 @@ void SideModel::setItemUpdateFunction(std::function<void(bool, bool)> doUpdate)
 const std::vector<NuiFileExplorer::Item>& SideModel::items() const
 {
     return items_;
+}
+
+std::string SideModel::iconOf(SharedData::DirectoryEntry const& entry) const
+{
+    if (entry.isDirectoryLike())
+        return "nui://app.example/icons/folder.svg";
+    if (entry.type == SharedData::DirectoryEntry::FileType::BlockDevice)
+        return "nui://app.example/icons/hard-drive.svg";
+
+    const auto extension = std::filesystem::path{entry.name}.extension().generic_string();
+    if (const auto icon = uiOptions_.fileGridExtensionIcons.find(extension);
+        icon != uiOptions_.fileGridExtensionIcons.end())
+        return fmt::format("nui://app.example/{}", icon->second);
+    return "nui://app.example/icons/file.svg";
+}
+
+void SideModel::revertNavigation()
+{
+    if (currentPath_.value() != listedPath_)
+    {
+        currentPath_ = listedPath_;
+        currentPath_.modifyNow();
+    }
+    // Showing the listed items again, sorted and with their selection, also ends the side's loading state.
+    if (refreshCallback_)
+        refreshCallback_(true, true);
 }
 
 void SideModel::onDirectoryListing(
@@ -116,15 +275,7 @@ void SideModel::onDirectoryListing(
             .text = std::move(text),
             .buttons = ConfirmDialog::Button::Ok,
         });
-        // undo the navigation, an initial navigation has nowhere to go back to:
-        if (preNavigatePath_.empty())
-            currentPath_ = preNavigatePath_;
-        else if (currentPath_.value() != preNavigatePath_)
-        {
-            currentPath_ = preNavigatePath_;
-            navigateTo(currentPath_.value());
-        }
-        return;
+        return revertNavigation();
     }
 
     // Servers send "." and "..", the parent link below stands for the parent instead.
@@ -138,32 +289,18 @@ void SideModel::onDirectoryListing(
     listedPath_ = directory;
 
     std::vector<NuiFileExplorer::Item> items{};
-    if (hasParent(directory))
-        items.push_back(NuiFileExplorer::Item::parentLink(directory.parent_path(), "nui://app.example/icons/folder.svg"));
-    std::transform(
-        begin(*directoryEntries),
-        end(*directoryEntries),
+    items.reserve(directoryEntries->size() + 1);
+    if (auto parent = parentOf(directory); parent)
+        items.push_back(NuiFileExplorer::Item::parentLink(*std::move(parent), "nui://app.example/icons/folder.svg"));
+    std::ranges::transform(
+        *directoryEntries,
         std::back_inserter(items),
-        [this, &directory](auto const& entry)
+        [this, &directory](SharedData::DirectoryEntry& entry)
         {
-            auto item = NuiFileExplorer::Item{
-                entry,
-                [&entry, this]() -> std::string
-                {
-                    const auto type = static_cast<NuiFileExplorer::Item::Type>(entry.type);
-                    if (entry.isDirectoryLike())
-                        return "nui://app.example/icons/folder.svg";
-                    if (type == NuiFileExplorer::Item::Type::BlockDevice)
-                        return "nui://app.example/icons/hard-drive.svg";
-
-                    const auto extension = std::filesystem::path{entry.name}.extension().string();
-                    if (uiOptions_.fileGridExtensionIcons.contains(extension))
-                        return "nui://app.example/" + uiOptions_.fileGridExtensionIcons.at(extension);
-
-                    return "nui://app.example/icons/file.svg";
-                }()
-            };
-            item.fullPath = directory / entry.name;
+            auto fullPath = directory / entry.name;
+            auto icon = iconOf(entry);
+            auto item = NuiFileExplorer::Item{std::move(entry), std::move(icon)};
+            item.fullPath = std::move(fullPath);
             return item;
         }
     );

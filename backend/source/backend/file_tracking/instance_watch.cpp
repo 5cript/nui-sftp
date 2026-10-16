@@ -6,7 +6,7 @@ namespace FileTracking
 {
     struct InstanceWatch::Implementation
     {
-        std::shared_ptr<efsw::FileWatcher> watcher;
+        std::weak_ptr<efsw::FileWatcher> watcher;
         efsw::WatchID watchId;
         std::filesystem::path path;
     };
@@ -14,7 +14,7 @@ namespace FileTracking
     InstanceWatch::InstanceWatch() = default;
 
     InstanceWatch::InstanceWatch(
-        std::shared_ptr<efsw::FileWatcher> watcher,
+        std::weak_ptr<efsw::FileWatcher> watcher,
         efsw::WatchID watchId,
         std::filesystem::path path
     )
@@ -31,7 +31,15 @@ namespace FileTracking
     }
 
     InstanceWatch::InstanceWatch(InstanceWatch&&) noexcept = default;
-    InstanceWatch& InstanceWatch::operator=(InstanceWatch&&) noexcept = default;
+    InstanceWatch& InstanceWatch::operator=(InstanceWatch&& other) noexcept
+    {
+        if (this != &other)
+        {
+            release();
+            impl_ = std::move(other.impl_);
+        }
+        return *this;
+    }
 
     std::filesystem::path const& InstanceWatch::path() const
     {
@@ -57,8 +65,8 @@ namespace FileTracking
     {
         if (!impl_)
             return;
-        if (impl_->watcher && impl_->watchId >= 0)
-            impl_->watcher->removeWatch(impl_->watchId);
+        if (const auto watcher = impl_->watcher.lock(); watcher && impl_->watchId >= 0)
+            watcher->removeWatch(impl_->watchId);
         impl_.reset();
     }
 }

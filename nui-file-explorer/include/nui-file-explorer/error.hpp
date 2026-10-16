@@ -15,6 +15,11 @@ namespace NuiFileExplorer
         DropOnSameSide,
         /// The drag and drop payload could not be read. The detail holds the parser error.
         DropDataUnreadable,
+        /**
+         * @brief Items were dropped or pasted onto a directory whose name is not valid UTF-8. The detail holds the
+         *        name as shown.
+         */
+        DropTargetNameInvalid,
     };
 
     struct Error

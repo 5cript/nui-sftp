@@ -32,29 +32,29 @@ namespace Test
         const auto remoteRoot = remote("/home/test/tree");
         const auto localRoot = toLocal(temporaryRoot / "tree");
 
-        const auto root = Detail::treeEntryPaths(entries, 0, remoteRoot, localRoot);
+        const auto root = BulkTransferDetail::treeEntryPaths(entries, 0, remoteRoot, localRoot);
         ASSERT_TRUE(root.has_value()) << root.error().toString();
         EXPECT_EQ(root->remote, remoteRoot);
         EXPECT_EQ(root->local, localRoot);
 
-        const auto file = Detail::treeEntryPaths(entries, 2, remoteRoot, localRoot);
+        const auto file = BulkTransferDetail::treeEntryPaths(entries, 2, remoteRoot, localRoot);
         ASSERT_TRUE(file.has_value()) << file.error().toString();
         EXPECT_EQ(file->remote.value(), "/home/test/tree/sub/file.txt");
         EXPECT_EQ(file->local.native(), (temporaryRoot / "tree" / "sub" / "file.txt"));
 
-        const auto invalid = Detail::treeEntryPaths(entries, 3, remoteRoot, localRoot);
+        const auto invalid = BulkTransferDetail::treeEntryPaths(entries, 3, remoteRoot, localRoot);
         ASSERT_FALSE(invalid.has_value());
         EXPECT_EQ(invalid.error().type, Operation::ErrorType::InvalidName);
 
-        const auto lost = Detail::treeEntryPaths(entries, 4, remoteRoot, localRoot);
+        const auto lost = BulkTransferDetail::treeEntryPaths(entries, 4, remoteRoot, localRoot);
         ASSERT_FALSE(lost.has_value());
         EXPECT_EQ(lost.error().type, Operation::ErrorType::ImplementationError);
 
-        const auto outside = Detail::treeEntryPaths(entries, 5, remoteRoot, localRoot);
+        const auto outside = BulkTransferDetail::treeEntryPaths(entries, 5, remoteRoot, localRoot);
         ASSERT_FALSE(outside.has_value());
         EXPECT_EQ(outside.error().type, Operation::ErrorType::ImplementationError);
 
-        const auto noRoot = Detail::treeEntryPaths(entries, 2, Paths::RemotePath{}, localRoot);
+        const auto noRoot = BulkTransferDetail::treeEntryPaths(entries, 2, Paths::RemotePath{}, localRoot);
         ASSERT_FALSE(noRoot.has_value());
         EXPECT_EQ(noRoot.error().type, Operation::ErrorType::ImplementationError);
     }
@@ -1151,7 +1151,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        // The scan root carries no permissions, applying "unknown" used to chmod it to 07777.
+        // The scan root carries no permissions, applying "unknown" must not chmod it to 07777.
         const auto localRoot = downloadDir_.path() / "inherited";
         BulkDownloadOperation operation{
             sftp,

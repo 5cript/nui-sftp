@@ -37,6 +37,12 @@ std::string archiveCodecExtension(ArchiveCodec codec);
 ArchiveCodec archiveCodecFromExtension(std::string const& extension);
 
 /**
+ * @brief The value of TarArchive::Compression the backend expects for @p codec: None=1, Gzip=2, Bzip2=3, Zstd=4,
+ *        Xz=5 (Auto=0 is never sent).
+ */
+int backendCompressionCode(ArchiveCodec codec);
+
+/**
  * @brief Structured result handed to the caller when the dialog is confirmed.
  *
  * @c fileStem is the user-entered filename without any `.tar[.ext]` suffix; the

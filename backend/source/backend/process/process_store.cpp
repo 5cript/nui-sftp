@@ -9,6 +9,8 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <log/log.hpp>
 
+#include <fmt/format.h>
+
 #ifdef _WIN32
 #    include <backend/pty/windows/conpty.hpp>
 #else
@@ -202,7 +204,9 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
         wnd_->runInJavascriptThread(
             [this, procId]()
             {
-                RpcHelper::callRemoteSafely(*hub_, "execTerminalExit_" + procId, nlohmann::json{{"id", procId}});
+                RpcHelper::callRemoteSafely(
+                    *hub_, fmt::format("execTerminalExit_{}", procId), nlohmann::json{{"id", procId}}
+                );
             }
         );
     }
@@ -272,7 +276,7 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, std::string const& id)
 
     process->second->exit();
     processes_.erase(process);
-    RpcHelper::callRemoteSafely(hub, "execTerminalExit_" + id, nlohmann::json{{"id", id}});
+    RpcHelper::callRemoteSafely(hub, fmt::format("execTerminalExit_{}", id), nlohmann::json{{"id", id}});
 }
 
 void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
@@ -285,7 +289,7 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
             const auto idCopy = id;
             processes_.erase(id);
             RpcHelper::callRemoteSafely(
-                hub, "execTerminalExit_" + idCopy, nlohmann::json{{"id", idCopy}, {"pid", pid}}
+                hub, fmt::format("execTerminalExit_{}", idCopy), nlohmann::json{{"id", idCopy}, {"pid", pid}}
             );
             return;
         }

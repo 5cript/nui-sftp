@@ -12,6 +12,7 @@
 #include <shared_data/sync/sync_execution.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
+#include <utility/lifetime_token.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 #include <nui/utility/move_detector.hpp>
 
@@ -29,9 +30,14 @@ class FileEngine
 
     std::optional<Ids::ChannelId> release();
 
+    /**
+     * @brief Lists the remote directory @p path.
+     *
+     * @param onComplete Receives the entries, or std::nullopt and the reason on failure.
+     */
     void listDirectory(
         std::filesystem::path const& path,
-        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> const&, std::string const& info)>
+        std::function<void(std::optional<std::vector<SharedData::DirectoryEntry>> entries, std::string const& info)>
             onComplete
     );
 
@@ -96,8 +102,8 @@ class FileEngine
 
     /**
      * @brief Loads direct children of @p parentRelKey in @p section.  @p generation
-     *        must match the most recent @ref recomputeSyncDiff reply or the server
-     *        rejects as stale — the caller then discards.
+     *        must match the most recent @ref recomputeSyncDiff reply, else the server
+     *        rejects it as stale and the caller discards it.
      */
     void loadSyncDiffChildren(
         Ids::SyncSessionId syncSessionId,
@@ -204,7 +210,7 @@ class FileEngine
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
     );
 
-    /** @brief Upload analogue of addBulkDownload — see its docs. */
+    /** @brief Upload analogue of addBulkDownload, see its docs. */
     void addBulkUpload(
         std::vector<SharedData::BulkUploadEntry> entries,
         std::vector<Ids::OperationId> operationIds,
@@ -264,6 +270,17 @@ class FileEngine
         std::function<void(bool, std::string const& info)> onComplete
     );
 
+    /**
+     * @brief Renames on this computer, needs no connection. Fails with "backend.rename.targetExists" when
+     *        @p newPath exists and @p overwrite is false.
+     */
+    static void renameLocal(
+        Paths::LocalPath const& oldPath,
+        Paths::LocalPath const& newPath,
+        bool overwrite,
+        std::function<void(bool, std::string const& info)> onComplete
+    );
+
     void addRename(
         Paths::RemotePath const& sourcePath,
         Paths::RemotePath const& destinationPath,
@@ -279,9 +296,7 @@ class FileEngine
     );
 
     /**
-     * @brief Batched remote-existence probe.  Replaces N per-file `sftp::stat`
-     *        round-trips with a single one — used to gate bulk uploads on
-     *        per-file conflict prompts without the latency cost.
+     * @brief Asks the server in one request which of @p paths exist.
      *
      * @param paths       Remote paths to probe.
      * @param onComplete  Receives a vector<bool> aligned with @p paths.  On
@@ -290,6 +305,16 @@ class FileEngine
      */
     void existsBatchRemote(
         std::vector<Paths::RemotePath> const& paths,
+        std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
+    );
+
+    /**
+     * @brief Asks the backend in one request which of the local @p paths exist, needs no connection.
+     *
+     * @param onComplete Same as for @ref existsBatchRemote.
+     */
+    static void existsBatchLocal(
+        std::vector<Paths::LocalPath> const& paths,
         std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
     );
 
@@ -302,4 +327,6 @@ class FileEngine
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
     Nui::MoveDetector moveDetector_;
+    /** @brief Drops the reply of the channel creation when this engine is gone. */
+    Utility::LifetimeToken lifetime_{};
 };

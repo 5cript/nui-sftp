@@ -68,6 +68,10 @@ std::string fileExplorerErrorText(NuiFileExplorer::Error const& error)
             return language->get("fileExplorer", "errors", "dropOnSameSide");
         case DropDataUnreadable:
             return fmt::format(fmt::runtime(language->get("fileExplorer", "errors", "dropDataUnreadable")), error.detail);
+        case DropTargetNameInvalid:
+            return fmt::format(
+                fmt::runtime(language->get("fileExplorer", "errors", "dropTargetNameInvalid")), error.detail
+            );
     }
     return error.detail;
 }

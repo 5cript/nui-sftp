@@ -4,8 +4,10 @@
 #include <backend/rpc_helper.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -29,14 +31,47 @@ namespace FileTracking
         std::filesystem::path instanceDir;
     };
 
-    // -------------------------------------------------------------------------
+    namespace InstanceManagerDetail
+    {
+        /**
+         * @brief What the reply of FileTracking::fileStates lists: every regular file below @p instanceDirectory as
+         *        {path, size, mtime} (seconds) and every directory as {path, directory: true}, paths canonical and
+         *        UTF-8. Symbolic links and the bookkeeping directory are left out.
+         */
+        nlohmann::json fileStatesOf(std::filesystem::path const& instanceDirectory);
+
+        /**
+         * @brief @p path as content of @p instanceDirectory that may be removed: its parent directory resolved,
+         *        its last component kept as it is, so a link there is removed itself.
+         * @return An error when @p path is not below @p instanceDirectory once its parent is resolved, is the
+         *         instance directory itself or lies in the bookkeeping directory.
+         */
+        std::expected<std::filesystem::path, std::string>
+        removableContentPath(std::filesystem::path const& instanceDirectory, std::filesystem::path const& path);
+
+        /**
+         * @brief Whether @p instanceDirectory holds anything besides its bookkeeping directory. A directory that
+         *        cannot be read counts as holding content.
+         */
+        bool hasContent(std::filesystem::path const& instanceDirectory);
+    }
+
+    /**
+     * @brief What TempDirInstanceManager::discardContent did with the instance after removing the content.
+     */
+    enum class DiscardOutcome
+    {
+        InstanceKept,
+        InstanceDestroyed,
+    };
 
     /**
      * @brief Owns and tracks all TemporaryDirectoryInstance objects for a session.
      *
      * Inherits RpcHelper::StrandRpc so that all RPC handlers it registers run on
-     * the shared strand.  The manager also owns the dead-instance cleanup policy
-     * and exposes it both as a C++ API and as RPC endpoints.
+     * the shared strand.  The manager also owns the dead-instance cleanup policy:
+     * the retention scan runs once at start (see scheduleStartupCleanup), the
+     * frontend's Clean Up removes every orphaned directory at once (forceCleanup).
      *
      * ### Registered RPC endpoints
      * All names are prefixed with @c "FileTracking::".
@@ -47,7 +82,8 @@ namespace FileTracking
      * | destroyInstance         | instanceId: string                  | {success}                      |
      * | listInstances           | —                                   | {success, instances: [...]}    |
      * | getInstanceInfo         | instanceId: string                  | {success, instanceId, instanceDir} |
-     * | manualCleanup           | —                                   | {success}                      |
+     * | fileStates              | instanceId: string                  | {success, files: [...]}, see InstanceManagerDetail::fileStatesOf |
+     * | discardContent          | instanceId: string, path: string    | {success, instanceDestroyed: bool}, see discardContent |
      * | countOrphaned           | —                                   | {success, count: int}          |
      * | forceCleanup            | —                                   | {success, removed: int}        |
      *
@@ -94,6 +130,13 @@ namespace FileTracking
          */
         void registerRpc();
 
+        /**
+         * @brief Runs manualCleanup() once on the strand, for the instance directories that earlier runs left.
+         *
+         * Called once at start, after registerRpc(), so the scan runs before the frontend's first request.
+         */
+        void scheduleStartupCleanup();
+
         // ---- C++ API --------------------------------------------------------
 
         /**
@@ -106,13 +149,26 @@ namespace FileTracking
         TemporaryDirectoryInstance* createInstance();
 
         /**
-         * @brief Destroy and remove the instance with the given ID.
+         * @brief Remove the watches of the instance with the given ID, then destroy it.
          *
          * If the instance does not exist this is a no-op.
          *
          * @param instanceId ID returned by TemporaryDirectoryInstance::instanceId().
          */
         void destroyInstance(std::string const& instanceId);
+
+        /**
+         * @brief Removes @p path, content of the instance @p instanceId that the user decided not to keep, after
+         *        ending the instance's watches, so the removal is reported as no change. A link is removed itself,
+         *        never followed. When nothing else is left in the instance directory, the instance is destroyed
+         *        and, unlike destroyInstance(), its directory is removed as well (bookkeeping included, after its
+         *        lock is released), so no orphan stays behind.
+         *
+         * @return An error when the instance does not exist, @p path is no content of it (see
+         *         InstanceManagerDetail::removableContentPath) or cannot be removed.
+         */
+        std::expected<DiscardOutcome, std::string>
+        discardContent(std::string const& instanceId, std::filesystem::path const& path);
 
         /**
          * @brief Look up an instance by ID.

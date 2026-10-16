@@ -33,6 +33,7 @@
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/element_renderer.hpp>
+#include <utility/lifetime_token.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <chrono>
@@ -372,4 +373,6 @@ class OperationQueue
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
+    /** @brief Drops RPC replies and dialog answers that arrive after the queue is gone. */
+    Utility::LifetimeToken lifetime_{};
 };

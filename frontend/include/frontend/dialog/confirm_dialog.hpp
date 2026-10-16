@@ -54,6 +54,10 @@ class ConfirmDialog
         std::function<void(std::optional<Button> buttonPressed)> onClose = [](auto) {};
     };
 
+    /**
+     * @brief Shows the dialog. A dialog still on screen is replaced, its onClose runs first without a button, so
+     *        every onClose runs exactly once.
+     */
     void open(OpenOptions const& options);
 
   private:

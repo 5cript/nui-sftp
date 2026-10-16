@@ -9,7 +9,6 @@
 #include <persistence/state_holder.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
-#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
@@ -30,7 +29,6 @@ class LocalSideModel;
 class RemoteSideModel
     : public SideModel
     , public NuiFileExplorer::IPlacesProvider
-    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     RemoteSideModel(
@@ -41,14 +39,6 @@ class RemoteSideModel
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog
     );
-
-    /**
-     * @brief Sets the callback invoked whenever the favorites list changes. The callback
-     *        receives the updated list as strings so the caller can persist it.
-     *
-     * @param callback Invoked on every add/remove.
-     */
-    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
 
     // --- IPlacesProvider ---
     NuiFileExplorer::IPlacesProvider* placesProvider() override
@@ -65,25 +55,14 @@ class RemoteSideModel
      */
     void setRemoteHome(std::filesystem::path home, bool readUserDirectories);
 
-    // --- IFavoritesProvider ---
-    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
-    {
-        return this;
-    }
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
-    void addFavorite(std::filesystem::path const& path) override;
-    void removeFavorite(std::filesystem::path const& path) override;
-
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
 
     /**
-     * @brief "Transfer as Archive" entry point: opens the archive-transfer dialog
-     * and, on confirm, kicks off a download of the selected items packed into a
-     * single tar archive on the local side. Backend wiring is still pending; for
-     * now the onConfirm just logs the intent.
+     * @brief Asks for the name, codec and level of an archive and queues a download of @p items packed into one
+     *        tar archive in the listed local directory.
      */
     void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
     std::vector<NuiFileExplorer::ContextMenuItem>
@@ -103,6 +82,7 @@ class RemoteSideModel
     }
     void navigateTo(std::filesystem::path const& path) override;
     void setLocalModel(LocalSideModel* model);
+    std::optional<std::filesystem::path> parentOf(std::filesystem::path const& directory) const override;
 
     /**
      * @brief The directory the shown items were listed from, an error before the first listing.
@@ -118,35 +98,18 @@ class RemoteSideModel
     ) override;
 
   private:
-    void enqueueRefresh(bool otherModel);
-
-    /**
-     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
-     */
-    void renameItem(Paths::RemotePath const& from, Paths::RemotePath const& to, bool overwrite);
-
     /**
      * @brief Where @p item is on the server, below the directory it was listed from. A listed name that is no
      *        single path segment, like "..", names no item.
      */
     std::expected<Paths::RemotePath, Paths::PathError> remotePathOf(NuiFileExplorer::Item const& item) const;
 
-    /**
-     * @brief @p name directly below the directory the shown items were listed from.
-     */
-    std::expected<Paths::RemotePath, Paths::PathError> childOfCurrentPath(std::string_view name) const;
+    std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
 
     /**
-     * @brief Downloads @p candidates, asking per existing destination whether to overwrite it.
+     * @brief Queues the downloads the user accepted, a single file as a transfer of its own.
      */
-    void downloadItemsConfirmed(
-        std::vector<SharedData::BulkDownloadEntry> candidates,
-        std::shared_ptr<std::vector<bool>> existsResults,
-        std::size_t index = 0,
-        bool overwriteNever = false,
-        bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted = nullptr
-    );
+    void enqueueDownloads(std::vector<SharedData::BulkDownloadEntry> accepted);
 
     void enqueueSingleDownload(SharedData::BulkDownloadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
@@ -160,9 +123,11 @@ class RemoteSideModel
     void
     enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
-    void continueDeletion();
-    void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
-    void onWatchDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
+    /**
+     * @brief Downloads @p item into a file tracking instance and opens it, with @p watch also uploads it again when
+     *        it changes.
+     */
+    void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith, bool watch);
     void onFileTrackingInstanceCreated(
         NuiFileExplorer::Item const& item,
         bool openWith,
@@ -186,6 +151,11 @@ class RemoteSideModel
         Paths::LocalPath const& localPath,
         bool openWith
     );
+    /**
+     * @brief What happens when the user decides not to open the download @p localPath of the instance
+     *        @p instanceId: the download is removed and its watch ends, see FileTrackingPanel::discard.
+     */
+    std::function<void()> discardWhenDeclined(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath);
 
   private:
     void placesFromHomeListing();
@@ -210,6 +180,4 @@ class RemoteSideModel
     LocalSideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
-    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
 };

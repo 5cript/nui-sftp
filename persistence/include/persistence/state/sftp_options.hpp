@@ -46,6 +46,21 @@ namespace Persistence
         return fmt::format("{}.old", tempFileSuffix);
     }
 
+    /**
+     * @brief Whether a transfer gives the destination the mode of its source when inheritPermissions is not set.
+     */
+    inline constexpr bool defaultInheritPermissions = true;
+
+    /**
+     * @brief Whether a transfer continues a partial temp file of an earlier attempt when tryContinue is not set.
+     */
+    inline constexpr bool defaultTryContinue = true;
+
+    /**
+     * @brief Whether a download marks its file as downloaded from the internet when markAsDownloaded is not set.
+     */
+    inline constexpr bool defaultMarkAsDownloaded = true;
+
     struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};
@@ -74,7 +89,10 @@ namespace Persistence
     {
         std::optional<bool> reserveSpace{std::nullopt};
         std::optional<bool> doCleanup{std::nullopt};
-        /// Mark downloaded files as coming from the internet (Mark of the Web on Windows, quarantine on macOS).
+        /**
+         * @brief Mark downloaded files as coming from the internet (Mark of the Web on Windows, quarantine on macOS).
+         *        Unset means on.
+         */
         std::optional<bool> markAsDownloaded{std::nullopt};
     };
     BOOST_DESCRIBE_STRUCT(DownloadOptions, (CommonTransferOptions), (reserveSpace, doCleanup, markAsDownloaded))

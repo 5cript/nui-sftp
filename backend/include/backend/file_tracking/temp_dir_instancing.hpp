@@ -40,8 +40,9 @@ namespace FileTracking
      * @brief Manages one temporary directory instance used for file-change tracking.
      *
      * On construction a UUID-named subdirectory is created under @p tempRootDir,
-     * an exclusive instance lock file is acquired inside it, and a metadata file is
-     * written.
+     * and an exclusive instance lock file is acquired and a metadata file written
+     * in its bookkeeping directory (see bookkeepingPaths()). Events inside the
+     * bookkeeping directory are not forwarded.
      *
      * On destruction the instance does **not** delete its directory.  It writes a
      * "no longer alive" timestamp into the metadata file so a future scan (performed
@@ -56,7 +57,8 @@ namespace FileTracking
      *   "action":      "Added" | "Modified" | "Deleted" | "Moved",
      *   "directory":   "/abs/path/to/dir/",
      *   "filename":    "changed-file.txt",
-     *   "oldFilename": "previous-name.txt"   // only populated for Moved
+     *   "oldFilename": "previous-name.txt",  // only populated for Moved
+     *   "isDirectory": false                 // the changed path is a directory now
      * }
      * @endcode
      *

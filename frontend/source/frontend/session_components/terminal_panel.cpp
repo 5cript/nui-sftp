@@ -3,6 +3,7 @@
 #include <frontend/session/session_helpers.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
+#include <frontend/notifications.hpp>
 #include <persistence/state_holder.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
@@ -14,6 +15,7 @@
 #include <ui5-sap-icons/icons/document-text.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <nui/event_system/event_context.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
@@ -27,6 +29,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -139,56 +142,72 @@ namespace
     }
 
     /**
-     * @brief Writes contents[i] to "{stem}_{i}{ext}" alongside @p file for each
-     *        entry.  Used by the locked-mode S-key save-all path.
+     * @brief A save of all terminals: what is left to write and what was written.
      */
-    /**
-     * @brief Writes each channel's content to {stem}_{index}{extension} next to @p file, skipping names that exist.
-     */
-    void saveTerminalContents(
-        std::filesystem::path const& file,
-        std::vector<std::string> const& contents
-    )
+    struct TerminalSave
     {
-        struct SaveState
+        std::filesystem::path directory;
+        std::vector<std::string> contents;
+        SessionInternal::NumberedSaves plan;
+    };
+
+    void reportTerminalSave(TerminalSave const& save)
+    {
+        const auto directory = save.directory.generic_string();
+        const auto failureLine = [](SessionInternal::NumberedSaves::Failure const& failure)
         {
-            std::filesystem::path directory;
-            std::string stem;
-            std::string extension;
-            std::vector<std::string> contents;
-            std::size_t next{0};
-            int index{0};
-            /// Bounds the search for a free name.
-            int attemptsLeft{1000};
-        };
-        auto state = std::make_shared<SaveState>(SaveState{
-            .directory = file.parent_path(),
-            .stem = file.stem().string(),
-            .extension = file.extension().string(),
-            .contents = contents,
-        });
-        // Each pending reply owns the chain, it ends with the last one.
-        auto writeNext = std::make_shared<std::function<void()>>();
-        *writeNext = [state, weakWriteNext = std::weak_ptr{writeNext}]()
-        {
-            auto self = weakWriteNext.lock();
-            if (!self || state->next >= state->contents.size() || state->attemptsLeft-- <= 0)
-                return;
-            const auto filePath =
-                state->directory / fmt::format("{}_{}{}", state->stem, state->index++, state->extension);
-            SessionInternal::writeChannelContentToNewFile(
-                filePath,
-                state->contents[state->next],
-                [state, self](SessionInternal::WriteOutcome outcome)
-                {
-                    // A taken name is skipped, the same content goes to the next one.
-                    if (outcome != SessionInternal::WriteOutcome::Exists)
-                        ++state->next;
-                    (*self)();
-                }
+            const auto key = failure.noFreeName ? "terminalNoFreeName" : "terminalWriteFailed";
+            return formatWithArguments(
+                language->get("terminalPanel", key), {std::to_string(failure.content + 1), failure.name}
             );
         };
-        (*writeNext)();
+        const auto failures =
+            fmt::format("{}", fmt::join(save.plan.failures() | std::views::transform(failureLine), "\n"));
+        const auto written = fmt::format("{}", fmt::join(save.plan.written(), ", "));
+
+        if (save.plan.failures().empty())
+            return Notifications::success(
+                formatWithArguments(language->get("terminalPanel", "savedTerminals"), {directory, written})
+            );
+        if (save.plan.written().empty())
+            return Notifications::error(
+                formatWithArguments(language->get("terminalPanel", "noTerminalSaved"), {directory, failures})
+            );
+        Notifications::error(
+            formatWithArguments(language->get("terminalPanel", "terminalsNotSaved"), {directory, written, failures})
+        );
+    }
+
+    void writeNextTerminal(std::shared_ptr<TerminalSave> save)
+    {
+        const auto attempt = save->plan.next();
+        if (!attempt)
+            return reportTerminalSave(*save);
+        SessionInternal::writeChannelContentToNewFile(
+            save->directory / attempt->name,
+            save->contents[attempt->content],
+            [save](SessionInternal::WriteOutcome outcome)
+            {
+                save->plan.record(outcome);
+                writeNextTerminal(save);
+            }
+        );
+    }
+
+    /**
+     * @brief Writes each channel's content to {stem}_{index}{extension} next to @p file, skipping names that exist,
+     *        and tells the user which names were written and which contents were not saved.
+     */
+    void saveTerminalContents(std::filesystem::path const& file, std::vector<std::string> contents)
+    {
+        if (contents.empty())
+            return;
+        const auto contentCount = contents.size();
+        writeNextTerminal(std::make_shared<TerminalSave>(TerminalSave{
+            .directory = file.parent_path(),
+            .contents = std::move(contents),
+            .plan = SessionInternal::NumberedSaves{file.stem().string(), file.extension().string(), contentCount},
+        }));
     }
 }
 
@@ -597,7 +616,7 @@ void TerminalPanel::onLockedModeUserInput(Ids::ChannelId channelId, std::string 
                 .forcePath = false,
                 .forceOverwrite = false,
             },
-            [this](std::optional<std::filesystem::path> const& result)
+            [contents = impl_->savedTerminalContents](std::optional<std::filesystem::path> const& result) mutable
             {
                 if (!result.has_value())
                 {
@@ -605,7 +624,7 @@ void TerminalPanel::onLockedModeUserInput(Ids::ChannelId channelId, std::string 
                     return;
                 }
 
-                saveTerminalContents(result.value(), impl_->savedTerminalContents);
+                saveTerminalContents(result.value(), std::move(contents));
             }
         );
         return;

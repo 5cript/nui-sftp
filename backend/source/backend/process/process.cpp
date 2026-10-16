@@ -140,6 +140,39 @@ struct Process::Implementation
     {
         return child && child->running();
     }
+
+    /**
+     * @brief Starts @p executable with its standard streams on the pipes of this process.
+     */
+    std::unique_ptr<bp2::process> launchWithPipes(
+        boost::filesystem::path const& executable,
+        std::vector<std::string> const& arguments,
+        std::unordered_map<bp2::environment::key, bp2::environment::value> const& environment
+    )
+    {
+        bp2::default_process_launcher systemLauncher{};
+#ifdef _WIN32
+        // The app is a GUI program without a console, a console child would open a window of its own.
+        systemLauncher.creation_flags |= CREATE_NO_WINDOW;
+        const auto launchArguments = arguments |
+            std::views::transform(
+                [](std::string const& argument)
+                {
+                    return Paths::utf8ToWide(argument);
+                }
+            ) |
+            std::ranges::to<std::vector>();
+#else
+        auto const& launchArguments = arguments;
+#endif
+        return std::make_unique<bp2::process>(systemLauncher(
+            executor,
+            executable,
+            launchArguments,
+            bp2::process_environment{environment},
+            bp2::process_stdio(stdinPipe, stdoutPipe, stderrPipe)
+        ));
+    }
 };
 
 Process::Process(boost::asio::any_io_executor executor, std::function<void()> onExit)
@@ -317,63 +350,34 @@ void Process::spawn(
     }
 
     const boost::filesystem::path name{Paths::nativeFromUtf8(processName).native()};
-    auto executable = bp2::environment::find_executable(name, env);
-    if (executable.empty())
-        executable = name;
+    const auto executable = [&name, &env]()
+    {
+        auto found = bp2::environment::find_executable(name, env);
+        if (found.empty())
+            found = name;
 #ifdef _WIN32
-    // cmd.exe reads its own path as given: in "C:/Windows/System32/cmd.exe" it takes "/c" as a switch and runs
-    // "md.exe" instead of starting a shell.
-    executable.make_preferred();
+        // cmd.exe takes a '/' in its own path on the command line for the start of a switch.
+        found.make_preferred();
 #endif
+        return found;
+    }();
 
     {
         std::scoped_lock lock{impl_->awaitExit};
         impl_->exited = false;
     }
 
-    if (!launcher)
-    {
-#ifdef _WIN32
-        // The app is a GUI program without a console, a console child would open a window of its own.
-        bp2::windows::default_launcher windowlessLauncher{};
-        windowlessLauncher.creation_flags |= CREATE_NO_WINDOW;
-        const auto wideArguments = arguments |
-            std::views::transform(
-                [](std::string const& argument)
-                {
-                    return Paths::utf8ToWide(argument);
-                }
-            ) |
-            std::ranges::to<std::vector>();
-        impl_->child = std::make_unique<bp2::process>(windowlessLauncher(
-            impl_->executor,
-            executable,
-            wideArguments,
-            bp2::process_environment{env},
-            bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
-        ));
-#else
-        impl_->child = std::make_unique<bp2::process>(
-            impl_->executor,
-            executable,
-            arguments,
-            bp2::process_environment{env},
-            bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
-        );
-#endif
-    }
-    else
-    {
-        impl_->child = launcher(impl_->executor, executable, arguments, env);
-    }
+    impl_->child = launcher ? launcher(impl_->executor, executable, arguments, env)
+                            : impl_->launchWithPipes(executable, arguments, env);
 
 #ifdef _WIN32
     if (impl_->child->running())
     {
         impl_->child->async_wait(
-            [self = shared_from_this()](auto ec, auto code)
+            [weak = weak_from_this()](auto ec, auto code)
             {
-                if (ec)
+                auto self = weak.lock();
+                if (ec || !self)
                     return;
 
                 self->impl_->exitCode = code;

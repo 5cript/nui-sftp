@@ -1,4 +1,5 @@
 #include <nui-file-explorer/side.hpp>
+#include <nui-file-explorer/transfer_target.hpp>
 
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
@@ -183,13 +184,15 @@ namespace NuiFileExplorer
                 const auto& copiedFiles = impl_->otherSide->impl_->copiedFiles;
                 if (!copiedFiles.empty())
                 {
-                    // If only a single item is selected and its a directory, set that as the target subdir for the
-                    // transfer. Otherwise, transfer to the current directory.
-                    std::optional<std::string> targetSubdir = std::nullopt;
-                    auto selectedItems = this->selectedItems();
-                    if (selectedItems.size() == 1 && selectedItems.front().isDirectory())
-                        targetSubdir = selectedItems.front().name;
-                    impl_->otherSide->model().onTransfer(copiedFiles, targetSubdir);
+                    // A single selected directory takes the items, else the directory this side shows.
+                    const auto selectedItems = this->selectedItems();
+                    const auto target = selectedItems.size() == 1
+                        ? transferTargetOf(selectedItems.front())
+                        : std::expected<std::optional<std::string>, Error>{std::nullopt};
+                    if (!target)
+                        impl_->model->onError(target.error());
+                    else
+                        impl_->otherSide->model().onTransfer(copiedFiles, *target);
                 }
             }
         }
@@ -599,7 +602,7 @@ namespace NuiFileExplorer
 
         if (item != nullptr)
         {
-            Nui::WebApi::Console::log("Context menu item: ", item->item.displayName());
+            Nui::WebApi::Console::log("Context menu item: ", std::string{item->item.displayName()});
             auto selected = selectedItems();
 
             if (std::find_if(
@@ -647,9 +650,14 @@ namespace NuiFileExplorer
         {
             namespace Snc = ScriptNuiComponents;
 
-            const bool thisSideOk = clickItems.size() == 1 && clickItems[0].isDirectoryLike();
+            // A directory whose name is not valid UTF-8 has no path to synchronize.
+            const auto isSyncRoot = [](std::vector<Item> const& items)
+            {
+                return items.size() == 1 && items[0].isDirectoryLike() && items[0].nameIsValidUtf8;
+            };
+            const bool thisSideOk = isSyncRoot(clickItems);
             const auto otherSelected = impl_->otherSide->selectedItems();
-            const bool otherSideOk = otherSelected.size() == 1 && otherSelected[0].isDirectoryLike();
+            const bool otherSideOk = isSyncRoot(otherSelected);
 
             menuItems.push_back(Snc::PopupMenu::separator());
             if (thisSideOk && otherSideOk)
@@ -1079,7 +1087,7 @@ namespace NuiFileExplorer
          * (highlight) and applyFilter (hide non-matches) so the two modes agree on what counts as a match.
          */
         bool matchesQuery(
-            std::string const& itemText,
+            std::string_view itemText,
             std::u32string const& normalizedQuery,
             std::vector<std::u32string> const& queryTokens
         )

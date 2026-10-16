@@ -1,5 +1,7 @@
 #pragma once
 
+#include <frontend/session_components/numbered_saves.hpp>
+
 #include <nui/frontend/element_renderer.hpp>
 
 #include <filesystem>
@@ -19,14 +21,6 @@ namespace SessionInternal
      * @brief Writes @p content to @p filePath, which the user picked in a save dialog that confirmed replacing it.
      */
     void writeChannelContentToFile(std::filesystem::path const& filePath, std::string const& content);
-
-    enum class WriteOutcome
-    {
-        Written,
-        /// The file existed and was left alone.
-        Exists,
-        Failed,
-    };
 
     /**
      * @brief Writes @p content to the new file @p filePath, an existing file is never replaced.

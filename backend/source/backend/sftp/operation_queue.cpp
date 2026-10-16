@@ -3,7 +3,6 @@
 #include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/common_parent.hpp>
-#include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
@@ -216,8 +215,8 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
         auto self = weak.lock();
         if (!self)
             return;
-        // May be invoked from the SFTP processing strand (batched umbrella) — marshal the
-        // RPC call back onto the asio strand that owns the hub.
+        // May be invoked from the SFTP processing strand (batched umbrella), so the RPC call goes back onto the asio
+        // strand that owns the hub.
         self->within_strand_do(
             [weak, name, operationId, totalBytes, currentIndex, totalScanned]()
             {
@@ -340,7 +339,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
 
             // Pessimistic resolution: every exit path emits onOperationsReordered
             // so the frontend always gets a definitive "this move was/was not
-            // applied" — never silently dropped. The frontend's listener relies
+            // applied", never silently dropped. The frontend's listener relies
             // on this to apply or discard the user's intended reorder.
             auto emitResolution = [&self, &operationId](std::size_t resolvedIndex, bool applied)
             {
@@ -360,7 +359,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             // and reordering would alter the indices it iterates.
             if (!self->paused_)
             {
-                Log::warn("OperationQueue::moveOperation refused — queue not paused (op '{}')", operationId.value());
+                Log::warn("OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value());
                 return emitResolution(newIndex, false);
             }
 
@@ -369,7 +368,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             {
                 if (pid == operationId)
                 {
-                    Log::warn("OperationQueue::moveOperation refused — '{}' is a priority op", operationId.value());
+                    Log::warn("OperationQueue::moveOperation refused, '{}' is a priority op", operationId.value());
                     return emitResolution(newIndex, false);
                 }
             }
@@ -388,7 +387,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
             }
             if (!found)
             {
-                // Op completed/canceled between click and strand tick — silent
+                // Op completed/canceled between click and strand tick: silent
                 // resolution; the frontend already removed the card via
                 // onOperationCompleted, so applied=false is purely informational.
                 return emitResolution(newIndex, false);
@@ -430,7 +429,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             if (operationCompleted.error)
                 Log::error("Operation failed: {}", operationCompleted.error->toString());
 
-            // Drop any resume backup tied to this operation — it has run to
+            // Drop any resume backup tied to this operation, it has run to
             // completion (success, failure, or cancel) and no longer needs
             // a backup for reconnect adoption.
             self->bulkResumeStash_.erase(operationCompleted.operationId);
@@ -1095,7 +1094,9 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     opts.compression = compression;
     opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
     opts.mayOverwrite = mayOverwrite;
-    opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(true);
+    opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(
+        Persistence::defaultMarkAsDownloaded
+    );
     opts.createMissingDirectories = true;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveDownloadProgress")](
@@ -1207,7 +1208,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 
     // Local directory roots get a visible LocalScanOperation each; the
     // archive op itself never recurses and instead consumes each scan's
-    // output via setScanResultForRoot — keyed by the root's local path.
+    // output via setScanResultForRoot, keyed by the root's local path.
     std::vector<Paths::LocalPath> directoryRootPaths;
     for (auto const& localPath : localPaths)
     {
@@ -1437,7 +1438,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
     // Symlinks always go through the single-file UploadOperation path so handleSymlink() can
-    // recreate them on the remote — regardless of whether the target exists or is a directory.
+    // recreate them on the remote, whether or not the target exists or is a directory.
     if (isSymlink || stat.type() == std::filesystem::file_type::regular)
     {
         auto opts = resolveUploadOptions(transferOptions, resolvedTimeout);
@@ -1973,7 +1974,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     };
     // The roots are scanned one after another, their counts add up on the card.
     const auto scanProgressOfNextRoot =
-        Detail::sequentialScanProgress(makeScanProgressCallback("onScanProgress", bulkOperationId));
+        ScanProgressDetail::sequentialScanProgress(makeScanProgressCallback("onScanProgress", bulkOperationId));
     for (auto const& entry : request.entries)
     {
         if (auto allowed = guard.check(entry.target); !allowed)
@@ -2126,7 +2127,7 @@ void OperationQueue::addSyncScanOperation(
         syncSessionId, session, remoteScanId, /*isLocal=*/true, &SyncSession::setLocalTreeInStrand
     );
 
-    // Queue remote scan — build-tree mode.
+    // Queue remote scan in build-tree mode.
     // Temp files of transfers on either side and the asides of replaced destinations, a sync neither copies nor
     // deletes them.
     const auto uploadSuffix = Persistence::effectiveTempFileSuffix(
@@ -2168,7 +2169,7 @@ void OperationQueue::addSyncScanOperation(
         }
     );
 
-    // Queue local scan — build-tree mode.
+    // Queue local scan in build-tree mode.
     auto localScan = std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
         .progressCallback = makeScanProgressCallback("onLocalScanProgress", localScanId),
         .localPath = localPath,

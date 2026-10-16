@@ -52,7 +52,7 @@ namespace Utility
         {
             std::error_code error;
 
-            // Never through a link or Windows junction a test left inside.
+            // Never follows a link or Windows junction inside.
             if (!path_.empty())
                 removeAllNoFollow(path_, error);
         }

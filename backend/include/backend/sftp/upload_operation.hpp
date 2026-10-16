@@ -30,8 +30,8 @@ class UploadOperation : public Operation
         Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
-        bool tryContinue{false};
-        bool inheritPermissions{false};
+        bool tryContinue{Persistence::defaultTryContinue};
+        bool inheritPermissions{Persistence::defaultInheritPermissions};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
@@ -145,6 +145,11 @@ class UploadOperation : public Operation
     std::expected<void, Error>
     ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir);
 
+    /**
+     * @brief The mode the remote file is created with, always with owner write: the sanitized @p localPerms when
+     *        inheriting (0444 when unknown), otherwise the configured file mode or 0660. The server's umask applies
+     *        to it like to any new file.
+     */
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
     /**

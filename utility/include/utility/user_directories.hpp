@@ -18,7 +18,7 @@ namespace Utility
          */
         std::string name;
 
-        /** @brief The absolute remote path as UTF-8. */
+        /** @brief The absolute path as UTF-8, on whichever machine the file was read from. */
         std::string path;
     };
 

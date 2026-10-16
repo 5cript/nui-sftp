@@ -11,7 +11,6 @@
 
 #include <nui-file-explorer/side_model_interface.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
-#include <nui-file-explorer/favorites_provider_interface.hpp>
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
 #include <nui/event_system/observed_value.hpp>
@@ -30,7 +29,6 @@ class LocalSideModel
     : public SideModel
     , public NuiFileExplorer::IPlacesProvider
     , public NuiFileExplorer::IDrivesProvider
-    , public NuiFileExplorer::IFavoritesProvider
 {
   public:
     LocalSideModel(
@@ -40,14 +38,6 @@ class LocalSideModel
         FilePropertyDialog* filePropertyDialog,
         ArchiveTransferDialog* archiveTransferDialog
     );
-
-    /**
-     * @brief Sets the callback invoked whenever the favorites list changes. The callback
-     *        receives the updated list as strings so the caller can persist it.
-     *
-     * @param callback Invoked on every add/remove.
-     */
-    void setOnFavoritesChanged(std::function<void(std::vector<std::string>)> callback);
 
     // --- IPlacesProvider ---
     NuiFileExplorer::IPlacesProvider* placesProvider() override
@@ -62,25 +52,14 @@ class LocalSideModel
     NuiFileExplorer::IDrivesProvider* drivesProvider() override;
     void requestDrives(std::function<void(std::vector<PlaceEntry>)> callback) override;
 
-    // --- IFavoritesProvider ---
-    NuiFileExplorer::IFavoritesProvider* favoritesProvider() override
-    {
-        return this;
-    }
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites() const override;
-    void addFavorite(std::filesystem::path const& path) override;
-    void removeFavorite(std::filesystem::path const& path) override;
-
     void onActivateItem(NuiFileExplorer::Item const& item) override;
     void onNewItem(NuiFileExplorer::Item::Type type) override;
     void onDelete(std::vector<NuiFileExplorer::Item> const& items) override;
     void onTransfer(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) override;
 
     /**
-     * @brief "Transfer as Archive" entry point: opens the archive-transfer dialog
-     * and, on confirm, kicks off an upload of the selected items packed into a
-     * single tar archive on the remote side. Backend wiring is still pending; for
-     * now the onConfirm just logs the intent.
+     * @brief Asks for the name, codec and level of an archive and queues an upload of @p items packed into one
+     *        tar archive in the listed remote directory.
      */
     void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
     std::vector<NuiFileExplorer::ContextMenuItem>
@@ -117,7 +96,7 @@ class LocalSideModel
     std::expected<Paths::LocalPath, Paths::PathError> currentLocalPath() const;
     bool isComplete() const override;
     void navigateTo(std::filesystem::path const& path) override;
-    bool hasParent(std::filesystem::path const& directory) const override;
+    std::optional<std::filesystem::path> parentOf(std::filesystem::path const& directory) const override;
 
     void generatePathBoxSuggestions(
         std::filesystem::path const& path,
@@ -126,32 +105,26 @@ class LocalSideModel
     ) override;
 
   private:
-    void enqueueRefresh(bool otherModel);
-
-    /**
-     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
-     */
-    void renameItem(Paths::LocalPath const& from, Paths::LocalPath const& to, bool overwrite);
-
     /**
      * @brief Where @p item is: a listed item below the directory it was listed from, a dropped one at its own
      *        absolute path. A listed name that is no single path segment, like "..", names no item.
      */
     std::expected<Paths::LocalPath, Paths::PathError> localPathOf(NuiFileExplorer::Item const& item) const;
 
+    std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
+
     /**
-     * @brief Uploads @p candidates, asking per existing destination whether to overwrite it.
+     * @brief Queues the uploads the user accepted, a single file as a transfer of its own.
      */
-    void uploadItemsConfirmed(
-        std::vector<SharedData::BulkUploadEntry> candidates,
-        std::shared_ptr<std::vector<bool>> existsResults,
-        std::size_t index = 0,
-        bool overwriteNever = false,
-        bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkUploadEntry>> accepted = nullptr
-    );
+    void enqueueUploads(std::vector<SharedData::BulkUploadEntry> accepted);
 
     void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
+
+    /**
+     * @brief Creates the item at @p path through the backend @p function, which takes the path as @p pathArgument,
+     *        shows the listing again on success and the failure under @p failedTitle otherwise.
+     */
+    void createItem(char const* function, char const* pathArgument, Paths::LocalPath const& path, std::string failedTitle);
 
     /**
      * @brief Deletes @p targets through the backend at once, each item by itself, and refreshes the listing.
@@ -174,7 +147,5 @@ class LocalSideModel
 
     RemoteSideModel* remoteModel_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
-    std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;
-    std::function<void(std::vector<std::string>)> onFavoritesChanged_;
     SharedData::OpenerCapabilities openerCaps_{};
 };
