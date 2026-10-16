@@ -1,4 +1,5 @@
 #include <backend/main.hpp>
+#include <backend/rpc_helper.hpp>
 
 #ifdef _WIN32
 #    include <backend/windows/main_windows.hpp>
@@ -14,9 +15,11 @@
 
 #include <backend/inspector_environment.hpp>
 #include <paths/local_path_segment.hpp>
+#include <paths/native.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/program_options.hpp>
 #include <constants/persistence.hpp>
+#include <utility/permissions.hpp>
 #include <utility/resources.hpp>
 #include <version.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
@@ -35,6 +38,9 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <algorithm>
+#include <ranges>
+#include <span>
 #include <unordered_map>
 #include <cstdlib>
 
@@ -138,7 +144,7 @@ namespace
                 // Check if file exists and return 404 if not
                 if (!std::filesystem::exists(file))
                 {
-                    Log::error("File not found: '{}'", file.string());
+                    Log::error("File not found: '{}'", Paths::nativeToUtf8(file));
                     return CustomSchemeResponse{
                         .statusCode = 404,
                         .reasonPhrase = "Not Found",
@@ -148,11 +154,11 @@ namespace
                                 // Do not forget to allow CORS
                                 {"Access-Control-Allow-Origin"s, "*"s},
                             },
-                        .body = "Not Found: "s + file.string(),
+                        .body = fmt::format("Not Found: {}", Paths::nativeToUtf8(file)),
                     };
                 }
 
-                Log::debug("Serving file: '{}'", file.string());
+                Log::debug("Serving file: '{}'", Paths::nativeToUtf8(file));
 
                 // Stream the file body via bodyFile — avoids loading the whole file into memory
                 // (matters for large assets like DWARF blobs). Empty files yield a 204.
@@ -163,7 +169,7 @@ namespace
                 // Roar's MIME table has no entry for .wasm; emit application/wasm explicitly so that
                 // WebAssembly.instantiateStreaming() accepts the response and compiles the module as
                 // bytes arrive (otherwise the browser falls back to buffering the full binary first).
-                const auto ext = file.extension().string();
+                const auto ext = Paths::nativeToUtf8(file.extension());
                 const auto mime = (ext == ".wasm")
                     ? std::string{"application/wasm"}
                     : Roar::extensionToMime(ext).value_or("application/octet-stream");
@@ -309,9 +315,11 @@ void Main::registerRpc()
                     },
                     *opener_
                 );
+                sshSessionManager_->preventLocalDeletion(true);
                 return;
             }
 
+            sshSessionManager_->preventLocalDeletion(holder.stateCache().localFilesystemOptions.preventDeletion);
             rpcFilesystem_ = std::make_unique<RpcFilesystem>(
                 window_.getExecutor(),
                 window_,
@@ -377,7 +385,8 @@ void Main::registerInitialWarningGetter()
                 false;
 #endif
 
-            hub_.callRemote(
+            RpcHelper::callRemoteSafely(
+                hub_,
                 responseId,
                 nlohmann::json{
                     {"warnings", initialPersistenceLoadWarnings_},
@@ -394,7 +403,8 @@ void Main::registerVersionGetter()
         "Main::getVersion",
         [this](std::string responseId)
         {
-            hub_.callRemote(
+            RpcHelper::callRemoteSafely(
+                hub_,
                 responseId,
                 nlohmann::json{
                     {"version", VERSION},
@@ -443,17 +453,20 @@ void Main::startChildSignalTimer()
 
 int main(int const argc, char const* const* argv)
 {
+    // Reading the umask changes it for a moment on macOS, so it is read before any thread creates files.
+    static_cast<void>(Utility::processUmask());
 #ifdef _WIN32
     // A GUI program has no console; help and --console write to the one it was started from.
-    for (int index = 1; index < argc; ++index)
-    {
-        const std::string_view argument{argv[index]};
-        if (argument == "--help" || argument == "--console")
-        {
-            attachParentConsole();
-            break;
-        }
-    }
+    const auto arguments = std::span{argv, static_cast<std::size_t>(argc)} | std::views::drop(1);
+    const auto console = std::ranges::any_of(
+                             arguments,
+                             [](std::string_view argument)
+                             {
+                                 return argument == "--help" || argument == "--console";
+                             }
+                         )
+        ? attachParentConsole()
+        : ConsoleAttachment{};
 #endif
     auto options = parseProgramOptions(argc, argv);
     if (!options)

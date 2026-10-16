@@ -1,14 +1,15 @@
 #pragma once
 
 #include <utility/link_safe_remove.hpp>
-
-#include <filesystem>
+#include <paths/native.hpp>
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <fmt/format.h>
 
+#include <filesystem>
+#include <stdexcept>
 #include <string>
 
 namespace Utility
@@ -29,7 +30,9 @@ namespace Utility
             }
             else if (!std::filesystem::is_directory(path_))
             {
-                throw std::runtime_error(std::string{"Given path exists and is not a directory: "} + path_.string());
+                throw std::runtime_error(
+                    fmt::format("Given path exists and is not a directory: {}", Paths::nativeToUtf8(path_))
+                );
             }
             if (valid && randomSubFolder)
             {
@@ -40,7 +43,9 @@ namespace Utility
             }
             if (!valid)
             {
-                throw std::runtime_error(std::string{"Could not setup temporary directory: "} + path_.string());
+                throw std::runtime_error(
+                    fmt::format("Could not setup temporary directory: {}", Paths::nativeToUtf8(path_))
+                );
             }
         }
         ~TemporaryDirectory()

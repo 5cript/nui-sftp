@@ -6,6 +6,9 @@ project(nui-sftp VERSION "${PROJECT_VERSION}" LANGUAGES CXX)
 
 set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "Use an external fmt library (provide it manually)" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Dont build shared spdlog" FORCE)
+if (WIN32)
+    set(SPDLOG_WCHAR_FILENAMES ON CACHE BOOL "Open log files by their wide name" FORCE)
+endif()
 set(NUI_FILE_EXPLORER_MEMORY64 ON CACHE BOOL "Enable MEMORY64 for nui-file-explorer" FORCE)
 set(JSON_Diagnostics ON CACHE BOOL "Enable json diagnostics" FORCE)
 set(NUI_JSON_DIAGNOSTICS ON CACHE BOOL "Enable json diagnostics for nlohmann_json through nui" FORCE)
@@ -88,6 +91,9 @@ if (WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
     include("${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/icon.cmake")
     file(TO_CMAKE_PATH "${NUI_SFTP_ICO}" NUI_SFTP_ICO_FORWARD)
+    # activeCodePage UTF-8: narrow Windows APIs in third-party code (libssh, yaml-cpp, spdlog) read UTF-8.
+    set(NUI_SFTP_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/nui-sftp.manifest")
+    file(TO_CMAKE_PATH "${NUI_SFTP_MANIFEST}" NUI_SFTP_MANIFEST_FORWARD)
     configure_file(
         "${CMAKE_CURRENT_LIST_DIR}/_cmake/windows/nui-sftp.rc.in"
         "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
@@ -96,7 +102,7 @@ if (WIN32)
     target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc")
     set_source_files_properties(
         "${CMAKE_BINARY_DIR}/generated/nui-sftp.rc"
-        PROPERTIES OBJECT_DEPENDS "${NUI_SFTP_ICO}"
+        PROPERTIES OBJECT_DEPENDS "${NUI_SFTP_ICO};${NUI_SFTP_MANIFEST}"
     )
     add_dependencies(${PROJECT_NAME} nui-sftp-icon)
 elseif (APPLE AND NOT EMSCRIPTEN)
@@ -199,6 +205,10 @@ else()
         add_subdirectory(shared_data/benchmark/shared_data)
         add_subdirectory(tar-archive/test/tar_archive)
         add_subdirectory(command-store/test/command-store)
+        add_test(
+            NAME NarrowPathConversions
+            COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}" -P "${CMAKE_SOURCE_DIR}/_cmake/check_narrow_path_text.cmake"
+        )
     endif()
 
     if (NUI_SFT_ENABLE_LANGUAGE_TOOLING)

@@ -2,7 +2,9 @@
 
 #include <paths/relative_path.hpp>
 
-#include <cassert>
+#include <fmt/format.h>
+
+#include <algorithm>
 #include <compare>
 #include <expected>
 #include <optional>
@@ -19,6 +21,7 @@ namespace Paths
      * platform. ".." is refused instead of resolved: the server decides what it means.
      *
      * A default constructed RemotePath is unset (@ref empty), every operation that touches the server must refuse it.
+     * Joining onto an unset path gives an unset path.
      */
     class RemotePath
     {
@@ -44,42 +47,37 @@ namespace Paths
             if (utf8.front() != '/')
                 return refuse(PathRejection::NotAbsolute);
 
-            auto result = root();
-            std::size_t start = 1;
-            while (start <= utf8.size())
+            std::string value;
+            value.reserve(utf8.size());
+            for (auto const name : Detail::splitAtSlashes(utf8))
             {
-                const auto end = std::min(utf8.find('/', start), utf8.size());
-                const auto name = utf8.substr(start, end - start);
-                start = end + 1;
                 if (name.empty() || name == ".")
                     continue;
-                auto segment = PathSegment::make(name);
-                if (!segment)
-                    return refuse(segment.error().reason);
-                result = result / *segment;
+                if (const auto rejection = PathSegment::rejectionOf(name); rejection)
+                    return refuse(*rejection);
+                value.push_back('/');
+                value.append(name);
             }
-            return result;
+            if (value.empty())
+                return root();
+            return RemotePath{std::move(value)};
         }
 
         RemotePath operator/(PathSegment const& segment) const
         {
-            assert(!empty());
+            if (empty())
+                return {};
             RemotePath result{*this};
-            if (result.value_.back() != '/')
-                result.value_.push_back('/');
-            result.value_ += segment.value();
+            Detail::appendSegment(result.value_, segment.value());
             return result;
         }
 
         RemotePath operator/(RelativePath const& relative) const
         {
-            if (relative.empty())
+            if (empty() || relative.empty())
                 return *this;
-            assert(!empty());
             RemotePath result{*this};
-            if (result.value_.back() != '/')
-                result.value_.push_back('/');
-            result.value_ += relative.value();
+            Detail::appendSegment(result.value_, relative.value());
             return result;
         }
 
@@ -91,7 +89,7 @@ namespace Paths
             const auto name = filename();
             if (!name)
                 return std::unexpected(PathError{.reason = PathRejection::Empty, .input = value_});
-            return PathSegment::make(name->value() + std::string{suffix})
+            return PathSegment::make(fmt::format("{}{}", name->view(), suffix))
                 .transform(
                     [this](PathSegment const& segment)
                     {
@@ -117,26 +115,26 @@ namespace Paths
             if (empty())
                 return refuse(PathRejection::NotAbsolute);
 
-            auto result = linkContent.front() == '/' ? root() : parent().value_or(root());
-            std::size_t start = 0;
-            while (start <= linkContent.size())
+            std::string value = linkContent.front() == '/' ? std::string{} : parent().value_or(root()).value_;
+            if (value == "/")
+                value.clear();
+            for (auto const name : Detail::splitAtSlashes(linkContent))
             {
-                const auto end = std::min(linkContent.find('/', start), linkContent.size());
-                const auto name = linkContent.substr(start, end - start);
-                start = end + 1;
                 if (name.empty() || name == ".")
                     continue;
                 if (name == "..")
                 {
-                    result = result.parent().value_or(root());
+                    value.erase(std::min(value.rfind('/'), value.size()));
                     continue;
                 }
-                auto segment = PathSegment::make(name);
-                if (!segment)
-                    return refuse(segment.error().reason);
-                result = result / *segment;
+                if (const auto rejection = PathSegment::rejectionOf(name); rejection)
+                    return refuse(*rejection);
+                value.push_back('/');
+                value.append(name);
             }
-            return result;
+            if (value.empty())
+                return root();
+            return RemotePath{std::move(value)};
         }
 
         bool empty() const noexcept
@@ -161,7 +159,7 @@ namespace Paths
         {
             if (empty() || isRoot())
                 return std::nullopt;
-            return *PathSegment::make(std::string_view{value_}.substr(value_.rfind('/') + 1));
+            return PathSegment{std::string{Detail::lastSegment(value_)}};
         }
 
         /**

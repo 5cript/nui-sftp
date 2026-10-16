@@ -2,6 +2,7 @@
 #include "test_remote_path.hpp"
 #include "test_local_path.hpp"
 #include "test_native.hpp"
+#include "test_utf8.hpp"
 
 #include <gtest/gtest.h>
 

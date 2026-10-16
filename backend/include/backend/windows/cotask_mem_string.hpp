@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nui/utility/utf.hpp>
+#include <paths/utf8.hpp>
 
 #include <combaseapi.h>
 #include <utility>
@@ -55,7 +55,7 @@ class CoTaskMemString
 
     std::string toUtf8String() const
     {
-        return Nui::utf16ToUtf8<std::wstring, std::string>(toStandardString());
+        return Paths::wideToUtf8(toStandardString());
     }
 
   private:

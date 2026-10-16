@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shared_data/sync/case_fold.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -796,84 +797,63 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(row.descendantByteTotal, 0u);
     }
 
-    TEST(SyncDiffTests, WithoutALastSyncTheNewestSideWins)
-    {
-        CollectingSink sink;
-        diffScanTrees(
-            makeDir("", {makeFile("a.txt", 1, 300)}),
-            makeDir("", {makeFile("a.txt", 2, 200)}),
-            {.direction = Direction::Both},
-            sink
-        );
-        EXPECT_EQ(sink.uploads.size(), 1u);
-        EXPECT_TRUE(sink.blocked.empty());
-    }
-
-    TEST(SyncDiffTests, BothSidesChangedSinceTheLastSyncIsBlocked)
-    {
-        CollectingSink sink;
-        diffScanTrees(
-            makeDir("", {makeFile("both.txt", 1, 300), makeFile("local.txt", 1, 300)}),
-            makeDir("", {makeFile("both.txt", 2, 250), makeFile("local.txt", 2, 50)}),
-            {.direction = Direction::Both, .lastSyncTime = 100},
-            sink
-        );
-        ASSERT_EQ(sink.blocked.size(), 1u);
-        EXPECT_EQ(sink.blocked.front().relKey, "both.txt");
-        EXPECT_EQ(sink.blocked.front().reason, BlockReason::ChangedOnBothSides);
-        ASSERT_EQ(sink.uploads.size(), 1u) << "only the local side changed, it wins";
-        EXPECT_EQ(sink.uploads.front().node.relKey, "local.txt");
-    }
-
-    TEST(SyncDiffTests, UploadNeverReplacesWhatChangedOnTheServerSinceTheLastSync)
-    {
-        CollectingSink sink;
-        diffScanTrees(
-            makeDir("", {makeFile("a.txt", 1, 50), makeFile("b.txt", 1, 300)}),
-            makeDir("", {makeFile("a.txt", 2, 200), makeFile("b.txt", 2, 50)}),
-            {.direction = Direction::Upload, .lastSyncTime = 100},
-            sink
-        );
-        ASSERT_EQ(sink.blocked.size(), 1u);
-        EXPECT_EQ(sink.blocked.front().relKey, "a.txt");
-        EXPECT_EQ(sink.blocked.front().reason, BlockReason::ChangedOnDestination);
-        ASSERT_EQ(sink.uploads.size(), 1u);
-        EXPECT_EQ(sink.uploads.front().node.relKey, "b.txt");
-    }
-
-    TEST(SyncDiffTests, DeleteNeverRemovesWhatAppearedSinceTheLastSync)
-    {
-        CollectingSink sink;
-        diffScanTrees(
-            makeDir("", {}),
-            makeDir(
-                "",
-                {makeFile("old.txt", 1, 50),
-                 makeFile("new.txt", 1, 200),
-                 makeDir("dir", {makeFile("old", 1, 50), makeFile("fresh", 1, 200)})}
-            ),
-            {.direction = Direction::Upload, .actionDelete = true, .lastSyncTime = 100},
-            sink
-        );
-        ASSERT_EQ(sink.deletes.size(), 1u);
-        EXPECT_EQ(sink.deletes.front().node.relKey, "old.txt");
-        EXPECT_EQ(sink.blocked.size(), 2u) << "new.txt and the directory holding a new file";
-    }
-
-    TEST(SyncDiffTests, NamesDifferingOnlyInCaseAcrossSidesAreBlocked)
+    TEST(SyncDiffTests, NamesDifferingOnlyInCaseAcrossSidesAreBlockedForACaseFoldingServer)
     {
         // On a case insensitive server "Foo" replaces "foo", the delete of "foo" would then remove the upload.
         CollectingSink sink;
         diffScanTrees(
             makeDir("", {makeFile("Foo", 3, 200), makeFile("other", 1, 100)}),
             makeDir("", {makeFile("foo", 3, 100)}),
-            {.direction = Direction::Upload, .actionDelete = true},
+            {.direction = Direction::Upload, .actionDelete = true, .remoteCaseInsensitive = true},
             sink
         );
         ASSERT_EQ(sink.uploads.size(), 1u);
         EXPECT_EQ(sink.uploads.front().node.relKey, "other");
         EXPECT_TRUE(sink.deletes.empty());
         ASSERT_EQ(sink.blocked.size(), 2u);
+        for (auto const& blocked : sink.blocked)
+            EXPECT_EQ(blocked.reason, BlockReason::CaseConflict) << blocked.relKey;
+    }
+
+    TEST(SyncCaseFoldTests, LettersOfEveryCoveredScriptFoldToOneKey)
+    {
+        EXPECT_EQ(caseFoldedName("README.md"), "readme.md");
+        EXPECT_EQ(caseFoldedName("\xC3\x84PFEL"), caseFoldedName("\xC3\xA4pfel")) << "Ä and ä";
+        EXPECT_EQ(caseFoldedName("ŁÓDŹ"), caseFoldedName("łódź")) << "Latin Extended-A";
+        EXPECT_EQ(
+            caseFoldedName("\xCE\xA3\xCE\x9F\xCE\xA6\xCE\x9F\xCE\xA3"),
+            caseFoldedName("\xCF\x83\xCE\xBF\xCF\x86\xCE\xBF\xCF\x82")
+        ) << "ΣΟΦΟΣ and σοφος with a final sigma";
+        EXPECT_EQ(caseFoldedName("\xD0\x81\xD0\x96"), caseFoldedName("\xD1\x91\xD0\xB6")) << "ЁЖ and ёж";
+        EXPECT_NE(caseFoldedName("a"), caseFoldedName("b"));
+        EXPECT_EQ(caseFoldedName("caf\xFF"), "caf\xFF") << "text that is not UTF-8 is its own key";
+    }
+
+    TEST(SyncCaseFoldTests, ComposedAndDecomposedSpellingsFoldToOneKey)
+    {
+        EXPECT_EQ(caseFoldedName("caf\xC3\xA9"), caseFoldedName("cafe\xCC\x81")) << "é as NFC and NFD";
+        EXPECT_EQ(caseFoldedName("CAF\xC3\x89"), caseFoldedName("cafe\xCC\x81")) << "É folds to e and the accent";
+        EXPECT_EQ(caseFoldedName("\xCE\x90"), caseFoldedName("\xCE\xB9\xCC\x88\xCC\x81")) << "ΐ decomposes twice";
+        EXPECT_FALSE(foldingChanges("plain-name_1.txt"));
+        EXPECT_TRUE(foldingChanges("Name"));
+        EXPECT_TRUE(foldingChanges("caf\xC3\xA9"));
+    }
+
+    TEST(SyncDiffTests, NonAsciiNamesDifferingOnlyInCaseOrNormalizationAreBlocked)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir(
+                "", {makeFile("\xC3\x84pfel.txt", 1, 100), makeFile("cafe\xCC\x81", 1, 100), makeFile("other", 1, 100)}
+            ),
+            makeDir("", {makeFile("\xC3\xA4pfel.txt", 2, 100), makeFile("caf\xC3\xA9", 2, 100)}),
+            {.direction = Direction::Upload, .actionDelete = true, .remoteCaseInsensitive = true},
+            sink
+        );
+        ASSERT_EQ(sink.uploads.size(), 1u);
+        EXPECT_EQ(sink.uploads.front().node.relKey, "other");
+        EXPECT_TRUE(sink.deletes.empty());
+        EXPECT_EQ(sink.blocked.size(), 4u);
         for (auto const& blocked : sink.blocked)
             EXPECT_EQ(blocked.reason, BlockReason::CaseConflict) << blocked.relKey;
     }
@@ -893,6 +873,63 @@ namespace SharedData::Sync::Test
             diffScanTrees(local, remote, {.direction = Direction::Download, .localCaseInsensitive = true}, sink);
             EXPECT_TRUE(sink.downloads.empty());
             EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, LocalCaseVariantsAreBlockedOnlyForACaseFoldingServer)
+    {
+        const auto local = makeDir("", {makeFile("Readme", 1, 100), makeFile("readme", 1, 100)});
+        const auto remote = makeDir("", {});
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Upload, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.uploads.size(), 2u) << "only the destination folding case counts";
+            EXPECT_TRUE(sink.blocked.empty());
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Upload, .remoteCaseInsensitive = true}, sink);
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_EQ(sink.blocked.size(), 2u);
+        }
+    }
+
+    TEST(SyncDiffTests, CaseSensitiveSidesNeverBlockCaseOrNormalizationDifferences)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("Foo", 3, 200), makeFile("cafe\xCC\x81", 1, 100), makeFile("Readme", 1, 100)}),
+            makeDir("", {makeFile("foo", 3, 100), makeFile("caf\xC3\xA9", 2, 100), makeFile("README", 1, 100)}),
+            {.direction = Direction::Both},
+            sink
+        );
+        EXPECT_TRUE(sink.blocked.empty());
+        EXPECT_EQ(sink.uploads.size(), 3u);
+        EXPECT_EQ(sink.downloads.size(), 3u);
+    }
+
+    TEST(SyncDiffTests, CaseVariantsAcrossSidesCountOnlyInTheDirectionsWhoseDestinationFolds)
+    {
+        const auto local = makeDir("", {makeFile("Foo", 3, 200)});
+        const auto remote = makeDir("", {makeFile("foo", 3, 100)});
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download, .remoteCaseInsensitive = true}, sink);
+            EXPECT_TRUE(sink.blocked.empty()) << "a download onto a case sensitive filesystem keeps both";
+            EXPECT_EQ(sink.downloads.size(), 1u);
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Download, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.blocked.size(), 2u);
+            EXPECT_TRUE(sink.downloads.empty());
+        }
+        {
+            CollectingSink sink;
+            diffScanTrees(local, remote, {.direction = Direction::Both, .localCaseInsensitive = true}, sink);
+            EXPECT_EQ(sink.blocked.size(), 2u);
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_TRUE(sink.downloads.empty());
         }
     }
 

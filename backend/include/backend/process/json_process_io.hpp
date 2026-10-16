@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <utility/error_message.hpp>
 #include <boost/asio.hpp>
 #include <spdlog/spdlog.h>
 
@@ -90,7 +91,7 @@ class JsonFraming
             }
             catch (std::exception const& exc)
             {
-                onResult(std::unexpected(std::string{"JSON parse error: "} + exc.what()));
+                onResult(std::unexpected(fmt::format("JSON parse error: {}", Utility::errorMessage(exc))));
                 return false;
             }
         }
@@ -168,7 +169,7 @@ class JsonProcessIo : public JsonFraming
             boost::asio::buffer(*frame),
             [this, frame](boost::system::error_code err, std::size_t bytes)
             {
-                spdlog::debug("Sent {} byte(s), error: {}", bytes, err ? err.message() : "none");
+                spdlog::debug("Sent {} byte(s), error: {}", bytes, err ? Utility::errorMessage(err) : "none");
                 if (err)
                 {
                     // The callbacks may own this object, so nothing here is touched after they ran.
@@ -194,8 +195,8 @@ class JsonProcessIo : public JsonFraming
             {
                 if (ec)
                 {
-                    spdlog::error("Error reading from input: {}", ec.message());
-                    onResult_(std::unexpected(ec.message()));
+                    spdlog::error("Error reading from input: {}", Utility::errorMessage(ec));
+                    onResult_(std::unexpected(Utility::errorMessage(ec)));
                     return;
                 }
                 readBufferAccum_.append(readBufferCurrent_, 0, bytes_transferred);

@@ -1,11 +1,35 @@
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/delete_operation.hpp>
 #include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
 
-DeleteOperation::DeleteOperation(SecureShell::SftpSession& sftp, DeleteOperationOptions options)
+namespace
+{
+    /**
+     * @brief Removes @p path by itself, a directory only when it is empty. Its type is looked up unless given.
+     */
+    std::expected<void, SecureShell::SftpError> removeOneInStrand(
+        SecureShell::SftpSession& sftp,
+        Paths::RemotePath const& path,
+        std::optional<SharedData::FileType> type
+    )
+    {
+        if (!type)
+        {
+            const auto information = sftp.lstatInStrand(path);
+            if (!information)
+                return std::unexpected(information.error());
+            type = information->type;
+        }
+        return *type == SharedData::FileType::Directory ? sftp.removeDirectoryInStrand(path)
+                                                        : sftp.removeFileInStrand(path);
+    }
+}
+
+DeleteOperation::DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , remotePath_{std::move(options.remotePath)}
     , filesRemovedProgress_{std::move(options.filesRemovedProgress)}
     , futureTimeout_{options.futureTimeout}
@@ -16,7 +40,7 @@ DeleteOperation::~DeleteOperation()
 
 SecureShell::ProcessingStrand* DeleteOperation::strand() const
 {
-    return sftp_->strand();
+    return strandOf(sftp_);
 }
 
 std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperation::work()
@@ -47,7 +71,7 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                     Log::error("DeleteOperation: Refusing to delete '{}'.", remotePath_.value());
                     return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath, .extraInfo = remotePath_.value()});
                 }
-                targets_ = {remotePath_};
+                targets_ = {Target{.path = remotePath_}};
                 totalToDelete_ = 1;
                 filesRemovedProgress_ = {};
             }
@@ -86,7 +110,7 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
                     return WorkStatus::MoreWork;
             }
             // Nothing deleted at all is a failure, some items left behind a partial success.
-            if (totalToDelete_ > 0 && failedEntries_.size() == totalToDelete_)
+            if (!failedEntries_.empty() && removalFailures_ == totalToDelete_)
                 return enterErrorState<WorkStatus>(failedEntries_.back().second);
             state_ = Completed;
             return WorkStatus::Complete;
@@ -125,20 +149,49 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Paths::RemotePath const& path)
+std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Target const& target)
 {
-    auto fut = sftp_->removeAll({path});
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<void>(channelClosedError());
+    auto const& path = target.path;
+    auto fut = sftp->performPromise(
+        [weak = std::weak_ptr{sftp}, path, compared = target.compared]() -> std::expected<void, Error>
+        {
+            const auto session = weak.lock();
+            if (!session)
+                return std::unexpected(channelClosedError());
+            return ComparedStateCheck::requireUnchangedRemoteInStrand(*session, path, compared)
+                .and_then(
+                    [&]() -> std::expected<void, Error>
+                    {
+                        const auto knownType = compared ? std::optional{compared->type} : std::nullopt;
+                        // An item that is already gone, after a resume for one, counts as deleted.
+                        if (auto removed = removeOneInStrand(*session, path, knownType);
+                            !removed && removed.error().sftpError != SSH_FX_NO_SUCH_FILE)
+                        {
+                            return std::unexpected(
+                                Error{
+                                    .type = ErrorType::DeleteFailed,
+                                    .sftpError = std::move(removed).error(),
+                                    .extraInfo = path.value(),
+                                }
+                            );
+                        }
+                        return {};
+                    }
+                );
+        }
+    );
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<void>({.type = ErrorType::FutureTimeout});
 
-    // One item that cannot be deleted does not keep the others, its directories then stay as well. An item that is
-    // already gone, after a resume for one, counts as deleted.
-    if (const auto result = fut.get(); !result.has_value() && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+    // One item that cannot be deleted does not keep the others, its directories then stay as well.
+    if (auto result = fut.get(); !result.has_value())
     {
         Log::error("DeleteOperation: Failed to delete '{}': {}", path.value(), result.error().toString());
-        failedEntries_.emplace_back(
-            path.value(), Error{.type = ErrorType::DeleteFailed, .sftpError = result.error(), .extraInfo = path.value()}
-        );
+        ++removalFailures_;
+        failedEntries_.emplace_back(path.value(), std::move(result).error());
     }
 
     ++deletedThusFar_;
@@ -176,21 +229,21 @@ void DeleteOperation::appendScanResult(Paths::RemotePath const& root, std::vecto
             invalidScanEntry_ = target.value();
             break;
         }
-        targets_.push_back(std::move(target));
+        targets_.push_back(Target{.path = std::move(target)});
     }
     if (invalidScanEntry_)
         targets_.clear();
     totalToDelete_ = targets_.size();
 }
 
-void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
+void DeleteOperation::setTargets(std::vector<Target> targets)
 {
     scanDelivered_ = true;
     for (auto& target : targets)
     {
-        if (target.empty() || target.isRoot())
+        if (target.path.empty() || target.path.isRoot())
         {
-            invalidScanEntry_ = target.value();
+            invalidScanEntry_ = target.path.value();
             break;
         }
         targets_.push_back(std::move(target));
@@ -198,11 +251,6 @@ void DeleteOperation::setTargets(std::vector<Paths::RemotePath> targets)
     if (invalidScanEntry_)
         targets_.clear();
     totalToDelete_ = targets_.size();
-}
-
-void DeleteOperation::scanFirst(std::unique_ptr<ScanOperation> scan)
-{
-    addScanRoot(std::move(scan));
 }
 
 void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
@@ -213,10 +261,28 @@ void DeleteOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
             [this](ScanOperation& finished)
             {
                 appendScanResult(finished.remotePath(), finished.ejectEntries());
+            },
+            [this](ScanOperation& failed, Error const& error)
+            {
+                Log::error(
+                    "DeleteOperation: Scan of '{}' failed, nothing of it is deleted: {}",
+                    failed.remotePath().value(),
+                    error.toString()
+                );
+                // The other roots are still deleted, the failure alone does not mean the scans are incomplete.
+                scanDelivered_ = true;
+                addFailedTarget(failed.remotePath(), error);
             }
         );
     }
     scanPhase_->addRoot(std::move(scan));
+}
+
+void DeleteOperation::addFailedTarget(Paths::RemotePath const& target, Error error)
+{
+    if (!error.extraInfo)
+        error.extraInfo = target.value();
+    failedEntries_.emplace_back(target.value(), std::move(error));
 }
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::cancel(bool adoptCancelState)

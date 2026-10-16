@@ -1,7 +1,9 @@
 #pragma once
 
 #include <backend/local_delete_guard.hpp>
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/sftp/sequential_scan_progress.hpp>
 #include "nui_env.hpp"
 #include "real_server_tests.hpp"
 
@@ -11,6 +13,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <future>
@@ -19,6 +22,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #ifndef _WIN32
@@ -46,6 +50,7 @@ namespace Test
                     queue_->cancelAll();
                 });
             queue_.reset();
+            localQueue_.reset();
         }
 
         std::shared_ptr<OperationQueue> makeQueue()
@@ -57,16 +62,26 @@ namespace Test
                 *env.window,
                 *env.hub,
                 Persistence::SftpOptions{},
-                Ids::makeSessionId("operation-queue-test"),
+                sessionId_,
                 2
             );
-            queue_->setCompletionObserver(
-                [this](SharedData::OperationCompleted const& completed)
-                {
-                    std::scoped_lock lock{completionsMutex_};
-                    completions_.push_back(completed);
-                }
-            );
+            const auto observe = [this](SharedData::OperationCompleted const& completed)
+            {
+                std::scoped_lock lock{completionsMutex_};
+                completions_.push_back(completed);
+            };
+            queue_->setCompletionObserver(observe);
+            if (!localQueue_)
+            {
+                localQueue_ = std::make_shared<LocalOperationQueue>(
+                    queuePool_.get_executor(),
+                    strand_,
+                    *env.window,
+                    *env.hub,
+                    std::make_shared<std::atomic_bool const>(false)
+                );
+                localQueue_->setCompletionObserver(observe);
+            }
             return queue_;
         }
 
@@ -96,10 +111,15 @@ namespace Test
             return future.get();
         }
 
+        /**
+         * @brief Pauses the queue and holds its local deletes, as the session does.
+         */
         void setPaused(bool pause)
         {
             queue_->paused(pause);
-            runOnStrand([]() {});
+            runOnStrand([this, pause]() {
+                localQueue_->hold(sessionId_, pause);
+            });
         }
 
         /**
@@ -130,9 +150,47 @@ namespace Test
             return completions_;
         }
 
-        static std::set<std::string> remoteNames(SecureShell::SftpSession& sftp, std::filesystem::path const& directory)
+        /**
+         * @brief What is at @p path on the server now, as a compare that ran right now would have seen it.
+         */
+        static SharedData::ComparedState remoteStateNow(SecureShell::SftpSession& sftp, std::string const& path)
         {
-            auto future = sftp.listDirectory(remote(directory.generic_string()));
+            auto future = sftp.performPromise(
+                [&sftp, path = remote(path)]()
+                {
+                    return ComparedStateCheck::remoteStateOfInStrand(sftp, path);
+                }
+            );
+            return future.get().value();
+        }
+
+        /**
+         * @brief The resolved plan entry @p relKey of @p session, which the compare saw as what is at its target now.
+         */
+        static SyncSession::ResolvedPlanEntry plannedNow(
+            SyncSession const& session,
+            SecureShell::SftpSession& sftp,
+            std::string relKey,
+            SharedData::Sync::Action action,
+            bool isDirectory,
+            std::uint64_t size = 0
+        )
+        {
+            using SharedData::Sync::Action;
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            const bool onLocalSide = action == Action::Download || action == Action::DeleteLocal;
+            auto compared = onLocalSide ? ComparedStateCheck::localStateOf(paths.local.native()).value()
+                                        : remoteStateNow(sftp, paths.remote.value());
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size, .isDirectory = isDirectory},
+                .paths = std::move(paths),
+                .compared = std::move(compared),
+            };
+        }
+
+        static std::set<std::string> remoteNames(SecureShell::SftpSession& sftp, std::string const& directory)
+        {
+            auto future = sftp.listDirectory(remote(directory));
             if (future.wait_for(5s) != std::future_status::ready)
                 return {"<timeout>"};
             auto result = future.get();
@@ -219,7 +277,7 @@ namespace Test
             std::set<std::string> names;
             std::error_code errorCode{};
             for (auto const& entry : std::filesystem::directory_iterator{directory, errorCode})
-                names.insert(entry.path().filename().generic_string());
+                names.insert(Paths::nativeToUtf8(entry.path().filename()));
             return names;
         }
 
@@ -227,7 +285,10 @@ namespace Test
         boost::asio::thread_pool queuePool_{2};
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand_{
             std::make_shared<boost::asio::strand<boost::asio::any_io_executor>>(queuePool_.get_executor())};
+        Ids::SessionId sessionId_{Ids::makeSessionId("operation-queue-test")};
         std::shared_ptr<OperationQueue> queue_{};
+        /** @brief Runs the local deletes of sync plans, on the strand of the queue. */
+        std::shared_ptr<LocalOperationQueue> localQueue_{};
         std::mutex completionsMutex_{};
         std::vector<SharedData::OperationCompleted> completions_{};
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
@@ -325,7 +386,8 @@ namespace Test
         ASSERT_EQ(finished.front().failedEntries.size(), 1u) << "an unreadable directory is never a silent success";
         EXPECT_EQ(finished.front().failedEntries.front().first, Paths::nativeToUtf8(localPath / "locked"));
         EXPECT_EQ(finished.front().failedEntries.front().second.type, SharedData::OperationErrorType::DirectoryUnreadable);
-        EXPECT_TRUE(remoteNames(*sftp, "/home/test/withLocked").contains("a.txt"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/withLocked"), (std::set<std::string>{"a.txt"}))
+            << "the unreadable directory is not created empty";
     }
 
     TEST_F(OperationQueueTests, ArchiveUploadOfAnUnreadableSubdirectoryFails)
@@ -523,6 +585,227 @@ namespace Test
         const auto names = remoteNames(*sftp, "/home/test");
         EXPECT_TRUE(names.contains("adopted_a.txt"));
         EXPECT_TRUE(names.contains("adopted_b.txt"));
+    }
+
+    TEST_F(OperationQueueTests, AResumedBulkUploadLeavesOutTheFilesItFinished)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "partly";
+        std::filesystem::create_directories(localPath);
+        SharedData::BulkUploadRequest request{};
+        for (auto const* name : {"partly_a.txt", "partly_b.txt", "partly_c.txt"})
+        {
+            std::ofstream{localPath / name} << name;
+            request.entries.push_back(
+                {.source = toLocal(localPath / name),
+                    .destination = remote(fmt::format("/home/test/{}", name)),
+                    .sizeBytes = std::string_view{name}.size()}
+            );
+        }
+        const auto card = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+            }
+        );
+
+        for (int step = 0; step < 50 && !remoteNames(*sftp, "/home/test").contains("partly_a.txt"); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("partly_a.txt"));
+        ASSERT_FALSE(remoteNames(*sftp, "/home/test").contains("partly_c.txt")) << "the bulk ran to its end";
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(card);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkUploadRequest>(backup->request);
+        ASSERT_FALSE(resumed.entries.empty());
+        EXPECT_LT(resumed.entries.size(), 3u);
+        for (auto const& entry : resumed.entries)
+            EXPECT_NE(entry.destination.value(), "/home/test/partly_a.txt");
+        EXPECT_EQ(backup->finished.entries, 3u - resumed.entries.size()) << "the card counts them as done";
+        EXPECT_GE(backup->finished.bytes, std::string_view{"partly_a.txt"}.size());
+        registry.store(card, *std::move(backup));
+
+        adoptInto(*sftp, registry, {card});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().operationId, card);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty()) << finished.front().failedEntries.front().first;
+        const auto names = remoteNames(*sftp, "/home/test");
+        for (auto const* name : {"partly_a.txt", "partly_b.txt", "partly_c.txt"})
+            EXPECT_TRUE(names.contains(name)) << name;
+    }
+
+    TEST_F(OperationQueueTests, AResumedSyncUploadKeepsWhatTheCompareSawAtItsDestinations)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "compared";
+        std::filesystem::create_directories(localPath);
+        SharedData::BulkUploadRequest request{};
+        for (auto const* name : {"compared_a.txt", "compared_b.txt", "compared_c.txt"})
+        {
+            std::ofstream{localPath / name} << name;
+            request.entries.push_back(
+                {.source = toLocal(localPath / name),
+                    .destination = remote(fmt::format("/home/test/{}", name)),
+                    .sizeBytes = std::string_view{name}.size(),
+                    .mayOverwrite = true,
+                    .comparedDestination = SharedData::ComparedState{}}
+            );
+        }
+        const auto card = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+            }
+        );
+        for (int step = 0; step < 50 && !remoteNames(*sftp, "/home/test").contains("compared_a.txt"); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("compared_a.txt"));
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(card);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkUploadRequest>(backup->request);
+        ASSERT_FALSE(resumed.entries.empty());
+        for (auto const& entry : resumed.entries)
+        {
+            EXPECT_EQ(entry.comparedDestination, SharedData::ComparedState{}) << entry.destination.value();
+            ASSERT_TRUE(serverStartResult->command(
+                "createFile", {{"path", entry.destination.value()}, {"content", "appeared meanwhile"}}
+            ));
+        }
+        const auto appeared = resumed.entries.size();
+        registry.store(card, *std::move(backup));
+
+        adoptInto(*sftp, registry, {card});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        ASSERT_EQ(finished.front().failedEntries.size(), appeared) << "the resumed entries replace nothing";
+        for (auto const& [path, error] : finished.front().failedEntries)
+            EXPECT_EQ(error.type, Operation::ErrorType::ChangedSinceCompare) << path;
+    }
+
+    TEST_F(OperationQueueTests, AResumedDirectoryDownloadLeavesOutTheFilesItFinished)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "Documents";
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                );
+            }
+        ).has_value());
+        for (int step = 0; step < 100 && localNames(localPath).empty(); ++step)
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        ASSERT_EQ(localNames(localPath).size(), 1u);
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+        auto backup = registry.take(operationId);
+        ASSERT_TRUE(backup.has_value());
+        auto const& resumed = std::get<SharedData::BulkDownloadRequest>(backup->request);
+        ASSERT_EQ(resumed.entries.size(), 1u) << "only the file that is not there yet, as a flat list";
+        EXPECT_FALSE(resumed.entries.front().isDirectory);
+        EXPECT_FALSE(
+            localNames(localPath).contains(Paths::nativeToUtf8(resumed.entries.front().destination.native().filename()))
+        );
+        ASSERT_TRUE(resumed.localRoot.has_value());
+        EXPECT_EQ(resumed.localRoot->native(), localPath);
+        EXPECT_EQ(backup->finished.entries, 1u);
+        registry.store(operationId, *std::move(backup));
+
+        adoptInto(*sftp, registry, {operationId});
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().operationId, operationId);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty()) << finished.front().failedEntries.front().first;
+        EXPECT_EQ(localNames(localPath), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
+    }
+
+    TEST_F(OperationQueueTests, ABackupOfSeveralDirectoriesIsRefused)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        makeQueue();
+        setPaused(false);
+
+        BulkResumeEntry backup{
+            .request = SharedData::BulkDownloadRequest{
+                .entries = {
+                    {.source = remote("/home/test/Documents"),
+                        .destination = toLocal(localDirectory_.path() / "Documents"),
+                        .isDirectory = true},
+                    {.source = remote("/home/test/Pictures"),
+                        .destination = toLocal(localDirectory_.path() / "Pictures"),
+                        .isDirectory = true},
+                },
+            },
+        };
+        const auto operationId = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                queue_->adoptBulkResume(*sftp, operationId, std::move(backup));
+            }
+        );
+        EXPECT_TRUE(completedIdsAfterSettling().empty());
+        EXPECT_TRUE(localNames(localDirectory_.path()).empty());
     }
 
     TEST_F(OperationQueueTests, QueuedRenameMovesTheFileButNeverReplacesTheDestination)
@@ -780,6 +1063,112 @@ namespace Test
         EXPECT_EQ(finished.front().error->type, SharedData::OperationErrorType::FileExists);
     }
 
+    TEST_F(OperationQueueTests, QueuedOperationsOfAClosedChannelFailWithChannelClosed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto download = Ids::generateOperationId();
+        const auto rename = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp,
+                    download,
+                    toLocal(localDirectory_.path() / "large.txt"),
+                    remote("/home/test/large.txt"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addRenameOperation(
+                    *sftp, rename, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                );
+            }
+        ).has_value());
+
+        sftp->close();
+        sftp.reset();
+        setPaused(false);
+        workUntilCompletions(2);
+
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 2u);
+        for (auto const& completed : finished)
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Failed) << completed.operationId.value();
+            ASSERT_TRUE(completed.error.has_value()) << completed.operationId.value();
+            EXPECT_EQ(completed.error->type, SharedData::OperationErrorType::ChannelClosed);
+        }
+        EXPECT_FALSE(std::filesystem::exists(localDirectory_.path() / "large.txt"));
+    }
+
+    TEST_F(OperationQueueTests, BulkDeleteGoesOnPastARootItCannotScan)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/doomed"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/doomed/a.txt"}, {"content", "a"}}));
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto bulk = Ids::generateOperationId();
+        const SharedData::BulkDeleteRequest request{
+            .entries = {
+                {.target = remote("/home/test/Documents"), .isDirectory = true},
+                {.target = remote("/home/test/doomed"), .isDirectory = true},
+                {.target = remote("/home/test/file2.txt")},
+            },
+        };
+        EXPECT_EQ(
+            runOnStrand(
+                [&]()
+                {
+                    return queue->addBulkDeleteOperation(*sftp, request, bulk);
+                }
+            ),
+            3u
+        );
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        ASSERT_EQ(finished.front().failedEntries.size(), 1u);
+        EXPECT_EQ(finished.front().failedEntries.front().first, "/home/test/Documents");
+        const auto home = remoteNames(*sftp, "/home/test");
+        EXPECT_TRUE(home.contains("Documents"));
+        EXPECT_FALSE(home.contains("doomed"));
+        EXPECT_FALSE(home.contains("file2.txt"));
+    }
+
+    TEST(SequentialScanProgressTests, CountsOfLaterScansAddToTheFinishedOnes)
+    {
+        std::vector<std::array<std::uint64_t, 3>> reports;
+        const auto next = Detail::sequentialScanProgress(
+            [&reports](std::uint64_t bytes, std::uint64_t index, std::uint64_t scanned)
+            {
+                reports.push_back({bytes, index, scanned});
+            }
+        );
+        auto first = next();
+        auto second = next();
+        first(10, 1, 1);
+        first(30, 2, 2);
+        second(5, 1, 1);
+        second(7, 3, 3);
+        EXPECT_EQ(reports.back(), (std::array<std::uint64_t, 3>{37, 5, 5}));
+    }
+
     TEST_F(OperationQueueTests, BulkDeleteOfAnAlreadyDeletedItemSucceeds)
     {
         // A resumed bulk delete meets the items it deleted before the interruption.
@@ -863,91 +1252,6 @@ namespace Test
         EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("file2.txt")) << "a failure does not stop the rest";
     }
 
-    TEST_F(OperationQueueTests, LocalDeleteIsOneQueuedUnit)
-    {
-        const auto root = localDirectory_.path() / "localDelete";
-        std::filesystem::create_directories(root / "directory" / "inner");
-        std::ofstream{root / "directory" / "inner" / "a.txt"} << "a";
-        std::ofstream{root / "file.txt"} << "file";
-        std::ofstream{root / "keep.txt"} << "keep";
-        auto queue = makeQueue();
-
-        const auto remove = Ids::generateOperationId();
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addLocalDeleteOperation(
-                remove,
-                {Paths::LocalPath::make(root / "directory").value(),
-                 Paths::LocalPath::make(root / "directory" / "inner").value(),
-                 Paths::LocalPath::make(root / "directory" / "inner" / "a.txt").value(),
-                 Paths::LocalPath::make(root / "file.txt").value()}
-            );
-        }).has_value());
-
-        // Paused queues hold local deletes like any other operation.
-        EXPECT_TRUE(std::filesystem::exists(root / "file.txt"));
-        setPaused(false);
-        workUntilCompletions(1);
-        ASSERT_EQ(completions().size(), 1u);
-        EXPECT_EQ(completions().front().operationId, remove);
-        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
-        EXPECT_FALSE(std::filesystem::exists(root / "directory"));
-        EXPECT_FALSE(std::filesystem::exists(root / "file.txt"));
-        EXPECT_TRUE(std::filesystem::exists(root / "keep.txt"));
-    }
-
-    TEST_F(OperationQueueTests, LocalDeleteKeepsUnlistedContentAndItsDirectories)
-    {
-        const auto root = localDirectory_.path() / "localDeleteUnlisted";
-        std::filesystem::create_directories(root / "directory" / "inner");
-        std::ofstream{root / "directory" / "listed.txt"} << "listed";
-        std::ofstream{root / "directory" / "inner" / "unlisted.txt"} << "unlisted";
-        std::ofstream{root / "other.txt"} << "other";
-        auto queue = makeQueue();
-
-        const auto remove = Ids::generateOperationId();
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addLocalDeleteOperation(
-                remove,
-                {Paths::LocalPath::make(root / "directory").value(),
-                 Paths::LocalPath::make(root / "directory" / "inner").value(),
-                 Paths::LocalPath::make(root / "directory" / "listed.txt").value(),
-                 Paths::LocalPath::make(root / "other.txt").value()}
-            );
-        }).has_value());
-        setPaused(false);
-        workUntilCompletions(1);
-
-        ASSERT_EQ(completions().size(), 1u);
-        const auto completion = completions().front();
-        EXPECT_EQ(completion.reason, SharedData::OperationCompletionReason::Completed);
-        EXPECT_EQ(completion.failedEntries.size(), 2u) << "inner and directory are not empty";
-        EXPECT_TRUE(std::filesystem::exists(root / "directory" / "inner" / "unlisted.txt"));
-        EXPECT_FALSE(std::filesystem::exists(root / "directory" / "listed.txt"));
-        EXPECT_FALSE(std::filesystem::exists(root / "other.txt")) << "a failure does not stop the rest";
-    }
-
-    TEST_F(OperationQueueTests, LocalDeleteOfARootOrTheHomeDirectoryIsRefused)
-    {
-        auto queue = makeQueue();
-        const auto file = localDirectory_.path() / "survivor.txt";
-        std::ofstream{file} << "survivor";
-        const auto root = Paths::LocalPath::make(std::filesystem::path{file}.root_path()).value();
-        const auto home = localHomeDirectory();
-        ASSERT_TRUE(home.has_value());
-
-        for (auto const& target : {root, *home})
-        {
-            const auto result = runOnStrand([&]() {
-                return queue->addLocalDeleteOperation(
-                    Ids::generateOperationId(), {Paths::LocalPath::make(file).value(), target}
-                );
-            });
-            ASSERT_FALSE(result.has_value()) << target.toUtf8();
-            EXPECT_EQ(result.error().type, Operation::ErrorType::InvalidPath);
-        }
-        EXPECT_TRUE(std::filesystem::exists(file));
-    }
-
     TEST_F(OperationQueueTests, SyncPlanQueuesEveryPartUnderTheFrontendIds)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -971,13 +1275,9 @@ namespace Test
             context.get_executor()
         };
         using SharedData::Sync::Action;
-        const auto entry = [&session](std::string relKey, Action action, bool isDirectory, std::uint64_t size = 0)
+        const auto entry = [&session, &sftp](std::string relKey, Action action, bool isDirectory, std::uint64_t size = 0)
         {
-            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
-            return SyncSession::ResolvedPlanEntry{
-                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size, .isDirectory = isDirectory},
-                .paths = std::move(paths),
-            };
+            return plannedNow(session, *sftp, std::move(relKey), action, isDirectory, size);
         };
         SyncSession::ResolvedPlan plan{
             .entries =
@@ -999,10 +1299,10 @@ namespace Test
         };
 
         const auto result = runOnStrand([&]() {
-            return queue->executeSyncPlan(*sftp, session, std::move(plan), request);
+            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
         });
-        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt"}));
-        EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt"}));
+        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt", "emptyA/emptyB"}));
+        EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt", "newLocal/dir"}));
         EXPECT_EQ(result.remoteDeletes, (std::vector<std::string>{"gone.txt"}));
         EXPECT_EQ(result.localDeletes, (std::vector<std::string>{"localGone.txt"}));
         EXPECT_EQ(result.remoteDeleteSources, (std::vector<std::string>{"/home/test/syncRemote/gone.txt"}));
@@ -1010,9 +1310,11 @@ namespace Test
             result.localDeleteSources,
             (std::vector<std::string>{Paths::LocalPath::make(localRoot / "localGone.txt").value().toUtf8()})
         );
-        EXPECT_EQ(result.createdDirectories, (std::vector<std::string>{"emptyA/emptyB", "newLocal/dir"}));
         EXPECT_EQ(result.failed, (std::vector<std::string>{"CON"}));
 
+        for (int cycle = 0; cycle < 10; ++cycle)
+            runOnStrand([]() {});
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "localGone.txt")) << "the paused queue holds the local delete";
         setPaused(false);
         workUntilCompletions(4);
         std::set<std::string> finishedIds;
@@ -1036,6 +1338,436 @@ namespace Test
         EXPECT_TRUE(std::filesystem::is_directory(localRoot / "newLocal" / "dir"));
         EXPECT_FALSE(std::filesystem::exists(localRoot / "localGone.txt"));
     }
+
+    TEST_F(OperationQueueTests, SyncTransfersFilesOfSiblingDirectoriesBelowTheRoots)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/siblings"}}));
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/siblings/src"}}));
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/siblings/src/a.cpp"}, {"content", "a"}})
+        );
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/siblings/README.md"}, {"content", "readme"}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "siblings";
+        std::filesystem::create_directories(localRoot / "lib");
+        std::ofstream{localRoot / "lib" / "b.cpp"} << "b";
+        std::ofstream{localRoot / "NOTES.md"} << "notes";
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/siblings"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session](std::string relKey, Action action, std::uint64_t size)
+        {
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size},
+                .paths = std::move(paths),
+            };
+        };
+        // The first file of each direction lies in a subdirectory, its parent is not the root of the others.
+        SyncSession::ResolvedPlan plan{
+            .entries = {
+                entry("src/a.cpp", Action::Download, 1),
+                entry("README.md", Action::Download, 6),
+                entry("lib/b.cpp", Action::Upload, 1),
+                entry("NOTES.md", Action::Upload, 5),
+            },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        runOnStrand(
+            [&]()
+            {
+                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            }
+        );
+
+        setPaused(false);
+        workUntilCompletions(2);
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            EXPECT_TRUE(completed.failedEntries.empty()) << completed.operationId.value();
+        }
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "src" / "a.cpp"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "README.md"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/siblings/lib"), (std::set<std::string>{"b.cpp"}));
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test/siblings").contains("NOTES.md"));
+    }
+
+#ifndef _WIN32
+    TEST_F(OperationQueueTests, SyncCreatesEmptyDirectoriesInItsBulksButNeverThroughALink)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/emptyDirs"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "emptyDirs";
+        const auto outside = localDirectory_.path() / "emptyDirsOutside";
+        std::filesystem::create_directories(localRoot);
+        std::filesystem::create_directories(outside);
+        std::filesystem::create_directory_symlink(outside, localRoot / "linked");
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/emptyDirs"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session](std::string relKey, Action action)
+        {
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .isDirectory = true},
+                .paths = std::move(paths),
+            };
+        };
+        SyncSession::ResolvedPlan plan{
+            .entries = {
+                entry("linked/inside", Action::Download),
+                entry("fresh/deep", Action::Download),
+                entry("up/deep", Action::Upload),
+            },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        const auto result = runOnStrand(
+            [&]()
+            {
+                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            }
+        );
+        EXPECT_EQ(result.downloads, (std::vector<std::string>{"linked/inside", "fresh/deep"}));
+        EXPECT_EQ(result.uploads, (std::vector<std::string>{"up/deep"}));
+
+        setPaused(false);
+        workUntilCompletions(2);
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            if (completed.operationId == request.downloadId)
+                EXPECT_EQ(completed.failedEntries.size(), 1u);
+            else
+                EXPECT_TRUE(completed.failedEntries.empty());
+        }
+        EXPECT_FALSE(std::filesystem::exists(outside / "inside"));
+        EXPECT_TRUE(std::filesystem::is_directory(localRoot / "fresh" / "deep"));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/emptyDirs/up"), (std::set<std::string>{"deep"}));
+    }
+#endif
+
+    TEST_F(OperationQueueTests, SyncLeavesWhatChangedBetweenTheCompareAndItsExecution)
+    {
+        using namespace SharedData::Sync;
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/changing"}}));
+        for (auto const& [name, content] :
+             {std::pair{"edited.txt", "old"}, std::pair{"gone.txt", "gone"}, std::pair{"kept.txt", "kept"}})
+        {
+            ASSERT_TRUE(serverStartResult->command(
+                "createFile", {{"path", fmt::format("/home/test/changing/{}", name)}, {"content", content}}
+            ));
+        }
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "changing";
+        std::filesystem::create_directories(localRoot);
+        std::ofstream{localRoot / "edited.txt"} << "new local content";
+        std::ofstream{localRoot / "up.txt"} << "up";
+        std::ofstream{localRoot / "appears.txt"} << "local";
+
+        // The compare sees both sides as they are now.
+        const auto nodeOf = [](std::string name, SharedData::ComparedState const& state)
+        {
+            return ScanNode{.name = std::move(name), .type = state.type, .size = state.size, .mtime = state.mtime};
+        };
+        const auto treeOf = [&](std::vector<std::string> const& names, auto const& stateOf)
+        {
+            std::vector<ScanNode> children;
+            for (auto const& name : names)
+                children.push_back(nodeOf(name, stateOf(name)));
+            std::ranges::sort(children, {}, &ScanNode::name);
+            return ScanNode{.name = "", .type = SharedData::FileType::Directory, .children = std::move(children)};
+        };
+        const auto localTree = [&]()
+        {
+            return treeOf(
+                {"appears.txt", "edited.txt", "up.txt"},
+                [&](std::string const& name)
+                {
+                    return ComparedStateCheck::localStateOf(localRoot / name).value();
+                }
+            );
+        };
+        const auto remoteTree = [&](std::vector<std::string> const& names)
+        {
+            return treeOf(
+                names,
+                [&](std::string const& name)
+                {
+                    return remoteStateNow(*sftp, fmt::format("/home/test/changing/{}", name));
+                }
+            );
+        };
+
+        boost::asio::io_context context{};
+        SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/changing"),
+            },
+            context.get_executor()
+        };
+        const DiffOptions options{.direction = Direction::Upload, .actionDelete = true};
+        session.setLocalTreeInStrand(localTree());
+        session.setRemoteTreeInStrand(remoteTree({"edited.txt", "gone.txt", "kept.txt"}));
+        const auto summary = session.recomputeDiffInStrand(options, {});
+        EXPECT_EQ(summary.uploads.itemCount, 3u);
+        EXPECT_EQ(summary.deletes.itemCount, 2u);
+
+        const auto planOf = [&](DiffSection section, std::unordered_set<std::string> const& selected)
+        {
+            return session.resolvePlanInStrand(section, selected);
+        };
+        auto uploadPlan = planOf(DiffSection::Upload, {"appears.txt", "edited.txt", "up.txt"});
+        auto deletePlan = planOf(DiffSection::Delete, {"gone.txt", "kept.txt"});
+
+        // Meanwhile on the server: one destination is edited, one appears and one delete target changes.
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/edited.txt"}, {"content", "edited on the server"}}
+        ));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/appears.txt"}, {"content", "remote"}}
+        ));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/changing/kept.txt"}, {"content", "kept and edited"}}
+        ));
+
+        const auto execute = [&](DiffSection section, SyncSession::ResolvedPlan plan)
+        {
+            const SyncExecutionRequest request{
+                .section = section,
+                .uploadId = Ids::generateOperationId(),
+                .downloadId = Ids::generateOperationId(),
+                .remoteDeleteId = Ids::generateOperationId(),
+                .localDeleteId = Ids::generateOperationId(),
+            };
+            return runOnStrand(
+                [&]()
+                {
+                    return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+                }
+            );
+        };
+        const auto uploads = execute(DiffSection::Upload, std::move(uploadPlan));
+        EXPECT_EQ(uploads.uploads.size(), 3u);
+        const auto deletes = execute(DiffSection::Delete, std::move(deletePlan));
+        EXPECT_EQ(deletes.remoteDeletes.size(), 2u);
+
+        setPaused(false);
+        workUntilCompletions(2);
+        std::map<std::string, Operation::ErrorType> failures;
+        for (auto const& completed : completions())
+        {
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << completed.operationId.value();
+            for (auto const& [path, error] : completed.failedEntries)
+                failures.emplace(path.substr(path.rfind('/') + 1), error.type);
+        }
+        EXPECT_EQ(
+            failures,
+            (std::map<std::string, Operation::ErrorType>{
+                {"appears.txt", Operation::ErrorType::FileExists},
+                {"edited.txt", Operation::ErrorType::ChangedSinceCompare},
+                {"kept.txt", Operation::ErrorType::ChangedSinceCompare},
+            })
+        );
+        EXPECT_EQ(
+            remoteNames(*sftp, "/home/test/changing"),
+            (std::set<std::string>{"appears.txt", "edited.txt", "kept.txt", "up.txt"})
+        );
+        EXPECT_EQ(remoteStateNow(*sftp, "/home/test/changing/edited.txt").size, std::string{"edited on the server"}.size());
+        EXPECT_EQ(remoteStateNow(*sftp, "/home/test/changing/appears.txt").size, std::string{"remote"}.size());
+
+        // A recompare offers the entries that were left alone again.
+        session.setRemoteTreeInStrand(remoteTree({"appears.txt", "edited.txt", "kept.txt", "up.txt"}));
+        const auto again = session.recomputeDiffInStrand(options, {});
+        EXPECT_EQ(again.uploads.itemCount, 2u);
+        EXPECT_EQ(again.deletes.itemCount, 1u);
+    }
+
+    TEST_F(OperationQueueTests, SyncTransfersNonAsciiNames)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/Größe"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/Größe/東京.txt"}, {"content", "down"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / Paths::nativeFromUtf8("Jürgen");
+        std::filesystem::create_directories(localRoot / Paths::nativeFromUtf8("Ärger"));
+        std::ofstream{localRoot / Paths::nativeFromUtf8("Ärger") / Paths::nativeFromUtf8("Ölung.txt")} << "up";
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home/test/Größe"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session](std::string relKey, Action action, std::uint64_t size)
+        {
+            auto paths = session.resolve(Paths::RelativePath::make(relKey).value()).value();
+            return SyncSession::ResolvedPlanEntry{
+                .entry = {.relKey = std::move(relKey), .action = action, .sizeBytes = size, .isDirectory = false},
+                .paths = std::move(paths),
+            };
+        };
+        SyncSession::ResolvedPlan plan{
+            .entries =
+                {
+                    entry("Ärger/Ölung.txt", Action::Upload, 2),
+                    entry("東京.txt", Action::Download, 4),
+                },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+
+        const auto result = runOnStrand([&]() {
+            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+        });
+        EXPECT_EQ(result.uploads, (std::vector<std::string>{"Ärger/Ölung.txt"}));
+        EXPECT_EQ(result.downloads, (std::vector<std::string>{"東京.txt"}));
+
+        setPaused(false);
+        workUntilCompletions(2);
+        for (auto const& completed : completions())
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed) << completed.operationId.value();
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/Größe/Ärger"), (std::set<std::string>{"Ölung.txt"}));
+        EXPECT_EQ(localNames(localRoot), (std::set<std::string>{"Ärger", "東京.txt"}));
+    }
+
+#ifndef _WIN32
+    TEST_F(OperationQueueTests, SyncRefusesEveryDeleteBelowAProtectedDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/other.txt"}, {"content", "other"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "syncProtected";
+        std::filesystem::create_directories(localRoot / "home" / "inner");
+        std::ofstream{localRoot / "home" / "keep.txt"} << "keep";
+        std::ofstream{localRoot / "home" / "inner" / "keep.txt"} << "keep";
+        std::ofstream{localRoot / "loose.txt"} << "loose";
+
+        auto const* previousHome = std::getenv("HOME");
+        const std::optional<std::string> savedHome =
+            previousHome ? std::optional<std::string>{previousHome} : std::nullopt;
+        ASSERT_EQ(setenv("HOME", (localRoot / "home").c_str(), 1), 0);
+        const auto restoreHome = Nui::ScopeExit{[&savedHome]() noexcept
+            {
+                if (savedHome)
+                    setenv("HOME", savedHome->c_str(), 1);
+                else
+                    unsetenv("HOME");
+            }};
+
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::make(localRoot).value(),
+                .remoteRoot = remote("/home"),
+            },
+            context.get_executor()
+        };
+        using SharedData::Sync::Action;
+        const auto entry = [&session, &sftp](std::string relKey, Action action, bool isDirectory)
+        {
+            return plannedNow(session, *sftp, std::move(relKey), action, isDirectory);
+        };
+        SyncSession::ResolvedPlan plan{
+            .entries =
+                {
+                    entry("test", Action::DeleteRemote, true),
+                    entry("test/file2.txt", Action::DeleteRemote, false),
+                    entry("test/Documents", Action::DeleteRemote, true),
+                    entry("test/Documents/doc1.txt", Action::DeleteRemote, false),
+                    entry("other.txt", Action::DeleteRemote, false),
+                    entry("home", Action::DeleteLocal, true),
+                    entry("home/inner", Action::DeleteLocal, true),
+                    entry("home/inner/keep.txt", Action::DeleteLocal, false),
+                    entry("home/keep.txt", Action::DeleteLocal, false),
+                    entry("loose.txt", Action::DeleteLocal, false),
+                },
+        };
+        const SharedData::Sync::SyncExecutionRequest request{
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+
+        const auto result = runOnStrand([&]() {
+            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+        });
+        EXPECT_EQ(result.remoteDeletes, (std::vector<std::string>{"other.txt"}));
+        EXPECT_EQ(result.localDeletes, (std::vector<std::string>{"loose.txt"}));
+        EXPECT_EQ(
+            result.failed,
+            (std::vector<std::string>{
+                "test",
+                "test/file2.txt",
+                "test/Documents",
+                "test/Documents/doc1.txt",
+                "home",
+                "home/inner",
+                "home/inner/keep.txt",
+                "home/keep.txt",
+            })
+        );
+
+        setPaused(false);
+        workUntilCompletions(2);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("file2.txt"));
+        EXPECT_FALSE(remoteNames(*sftp, "/home").contains("other.txt"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "home" / "keep.txt"));
+        EXPECT_TRUE(std::filesystem::exists(localRoot / "home" / "inner" / "keep.txt"));
+        EXPECT_FALSE(std::filesystem::exists(localRoot / "loose.txt"));
+    }
+#endif
 
     TEST_F(OperationQueueTests, CancelledDirectoryDownloadDuringScanLeavesNextUnitIntact)
     {
@@ -1241,11 +1973,12 @@ namespace Test
         for (auto& entries : hostileScans)
         {
             DeleteOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/Documents"),
                     .recursive = true,
-                }};
+                }
+            };
             operation.setScanResult(std::move(entries), 0);
 
             const auto result = operation.work();
@@ -1314,6 +2047,108 @@ namespace Test
         );
     }
 
+    TEST_F(OperationQueueTests, SyncScansExcludeTempFilesAndTheirAsides)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto suffix = Persistence::effectiveTempFileSuffix(std::nullopt);
+        const auto localRoot = localDirectory_.path() / "syncAsides";
+        std::filesystem::create_directories(localRoot);
+        std::ofstream{localRoot / "keep.txt"} << "keep";
+        std::ofstream{localRoot / fmt::format("part.txt{}", suffix)} << "part";
+        std::ofstream{localRoot / fmt::format("old.txt{}", Persistence::asideFileSuffix(suffix))} << "old";
+
+        const auto syncSessionId = Ids::generateSyncSessionId();
+        runOnStrand(
+            [&]()
+            {
+                queue->addSyncScanOperation(
+                    *sftp,
+                    syncSessionId,
+                    Ids::generateOperationId(),
+                    Ids::generateOperationId(),
+                    remote("/home/test/Music"),
+                    Paths::LocalPath::make(localRoot).value(),
+                    false,
+                    true,
+                    false
+                );
+            }
+        );
+        workUntilCompletions(2);
+        auto session = queue->syncSession(syncSessionId);
+        ASSERT_TRUE(session);
+        std::promise<SharedData::Sync::DiffSummary> summary;
+        boost::asio::post(
+            session->strand(),
+            [&]()
+            {
+                summary.set_value(
+                    session->recomputeDiffInStrand({.direction = SharedData::Sync::Direction::Upload}, {})
+                );
+            }
+        );
+        const auto result = summary.get_future().get();
+        std::set<std::string> excluded;
+        for (auto const& blocked : result.blockedSamples)
+        {
+            if (blocked.reason == SharedData::Sync::BlockReason::Excluded)
+                excluded.insert(blocked.relKey);
+        }
+        EXPECT_EQ(
+            excluded,
+            (std::set<std::string>{
+                fmt::format("part.txt{}", suffix), fmt::format("old.txt{}", Persistence::asideFileSuffix(suffix))
+            })
+        );
+        EXPECT_EQ(result.uploads.itemCount, 1u) << "keep.txt";
+    }
+
+    TEST_F(OperationQueueTests, AFailedSyncScanCancelsTheOtherOne)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto localRoot = localDirectory_.path() / "syncSibling";
+        for (int directory = 0; directory < 50; ++directory)
+        {
+            const auto path = localRoot / fmt::format("d{}", directory);
+            std::filesystem::create_directories(path);
+            for (int file = 0; file < 20; ++file)
+                std::ofstream{path / fmt::format("f{}", file)} << "x";
+        }
+
+        const auto remoteScan = Ids::generateOperationId();
+        const auto localScan = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                queue->addSyncScanOperation(
+                    *sftp,
+                    Ids::generateSyncSessionId(),
+                    remoteScan,
+                    localScan,
+                    remote("/home/test/Documents"),
+                    Paths::LocalPath::make(localRoot).value(),
+                    false,
+                    true,
+                    false
+                );
+            }
+        );
+        workUntilCompletions(2);
+        std::map<std::string, SharedData::OperationCompletionReason> reasons;
+        for (auto const& completed : completions())
+            reasons.emplace(completed.operationId.value(), completed.reason);
+        EXPECT_EQ(reasons.at(remoteScan.value()), SharedData::OperationCompletionReason::Failed);
+        EXPECT_EQ(reasons.at(localScan.value()), SharedData::OperationCompletionReason::Canceled);
+    }
+
     TEST_F(OperationQueueTests, HostileNamesNeverBecomeLocalPaths)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -1362,6 +2197,99 @@ namespace Test
 #else
         EXPECT_EQ(localNames(localPath), (std::set<std::string>{"a\\b", "doc1.txt", "doc2.txt"}));
 #endif
+    }
+
+    TEST_F(OperationQueueTests, NamesThatAreNotUtf8AreRefusedAndTheCompletionStillSerializes)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command(
+            "rawName", {{"directory", "/home/test/Documents"}, {"nameHex", "4672616ee76f6973"}, {"content", "latin1"}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "Documents";
+        const auto download = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp, download, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                );
+            }
+        ).has_value());
+
+        workUntilCompletions(1);
+        const auto finished = completions().front();
+        ASSERT_EQ(finished.failedEntries.size(), 1u);
+        for (auto const& [path, error] : finished.failedEntries)
+        {
+            EXPECT_EQ(error.type, SharedData::OperationErrorType::InvalidName) << path;
+            EXPECT_TRUE(Paths::isValidUtf8(path));
+            EXPECT_NE(path.find("Fran\xEF\xBF\xBDois"), std::string::npos) << path;
+        }
+        const nlohmann::json serialized = finished;
+        EXPECT_NO_THROW(std::ignore = serialized.dump());
+        EXPECT_EQ(localNames(localPath), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
+    }
+
+    TEST_F(OperationQueueTests, NonAsciiNamesSurviveDownloadAndUpload)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/Grüße"}}));
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/Grüße/東京 \xF0\x9F\x9A\x80.txt"}, {"content", "tokyo"}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto downloaded = localDirectory_.path() / Paths::nativeFromUtf8("Grüße");
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(downloaded),
+                    remote("/home/test/Grüße"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        workUntilCompletions(1);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(localNames(downloaded), (std::set<std::string>{"東京 \xF0\x9F\x9A\x80.txt"}));
+        std::ifstream downloadedFile{downloaded / Paths::nativeFromUtf8("東京 \xF0\x9F\x9A\x80.txt")};
+        const std::string downloadedContent{std::istreambuf_iterator<char>{downloadedFile}, {}};
+        EXPECT_EQ(downloadedContent, "tokyo");
+
+        const auto toUpload = localDirectory_.path() / Paths::nativeFromUtf8("Jürgen");
+        std::filesystem::create_directories(toUpload / Paths::nativeFromUtf8("Ärger"));
+        std::ofstream{toUpload / Paths::nativeFromUtf8("Ärger") / Paths::nativeFromUtf8("Größe.txt")} << "size";
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(toUpload),
+                    remote("/home/test/Jürgen"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        workUntilCompletions(2);
+        EXPECT_EQ(completions().back().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/Jürgen"), (std::set<std::string>{"Ärger"}));
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/Jürgen/Ärger"), (std::set<std::string>{"Größe.txt"}));
     }
 
     TEST_F(OperationQueueTests, RecursiveDeleteNeverFollowsHostileNamesOut)

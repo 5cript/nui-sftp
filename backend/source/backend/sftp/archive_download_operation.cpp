@@ -1,4 +1,5 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <utility/error_message.hpp>
 #include <utility/download_mark.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
@@ -118,9 +119,9 @@ bool ArchiveDownloadOperation::isPayloadEntry(ResolvedEntry const& entry) const 
     return isRegularFile(entry.header);
 }
 
-ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sftp, Options options)
+ArchiveDownloadOperation::ArchiveDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options)
     : Operation{}
-    , sftp_{&sftp}
+    , sftp_{std::move(sftp)}
     , options_{std::move(options)}
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
@@ -136,11 +137,7 @@ ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sft
 ArchiveDownloadOperation::~ArchiveDownloadOperation()
 {
     std::ignore = cancel(false);
-
-    if (auto stream = currentStream_.lock(); stream)
-    {
-        stream->strand()->pushPromiseTask([]() {}).get();
-    }
+    waitForStrandTasks(strand());
 }
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation::work()
@@ -153,7 +150,15 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation:
         return result;
     }
 
-    auto future = sftp_->performPromise([this]() { return workInStrand(); });
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return enterErrorState<WorkStatus>(channelClosedError());
+    auto future = sftp->performPromise(
+        [this]()
+        {
+            return workInStrand();
+        }
+    );
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
         Log::error("ArchiveDownloadOperation: work umbrella timed out.");
@@ -175,6 +180,10 @@ ArchiveDownloadOperation::workInStrand()
         );
     }
 
+    const auto sftp = openSession(sftp_);
+    if (!sftp && !hasEnded())
+        return enterErrorState<WorkStatus>(channelClosedError());
+
     switch (state_)
     {
         case NotStarted:
@@ -190,10 +199,10 @@ ArchiveDownloadOperation::workInStrand()
                 return enterErrorState<WorkStatus>(
                     {.type = ErrorType::ImplementationError, .extraInfo = "archive has no roots"}
                 );
-            if (std::filesystem::exists(localArchiveNativePath_) && !options_.mayOverwrite)
+            if (std::error_code existsError{}; std::filesystem::exists(localArchiveNativePath_, existsError) && !options_.mayOverwrite)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
 
-            const auto prepareResult = prepareInStrand();
+            const auto prepareResult = prepareInStrand(*sftp);
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -222,7 +231,7 @@ ArchiveDownloadOperation::workInStrand()
                 }
                 else
                 {
-                    const auto openResult = openNextEntryInStrand();
+                    const auto openResult = openNextEntryInStrand(*sftp);
                     if (!openResult.has_value())
                         return enterErrorState<WorkStatus>(openResult.error());
                     return WorkStatus::MoreWork;
@@ -265,7 +274,7 @@ ArchiveDownloadOperation::workInStrand()
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
     if (options_.createMissingDirectories)
     {
@@ -275,14 +284,14 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
         {
             Log::error(
                 "ArchiveDownloadOperation: cannot create parents of '{}': {}",
-                tempPath_.generic_string(),
-                mkErr.message()
+                Paths::nativeToUtf8(tempPath_),
+                Utility::errorMessage(mkErr)
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
 
-    const auto flattenResult = flattenRootsInStrand();
+    const auto flattenResult = flattenRootsInStrand(sftp);
     if (!flattenResult.has_value())
         return std::unexpected(flattenResult.error());
 
@@ -295,7 +304,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     // Opening for writing follows a symlink planted at the temp path, out of the target directory.
     if (std::error_code linkError{}; std::filesystem::is_symlink(std::filesystem::symlink_status(tempPath_, linkError)))
     {
-        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", tempPath_.generic_string());
+        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", Paths::nativeToUtf8(tempPath_));
         return std::unexpected(Error{.type = ErrorType::OpenFailure, .extraInfo = "The temporary file path is a symlink"});
     }
 
@@ -311,7 +320,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     }
     writer_ = TarArchive::Writer::makeFromSink(std::move(*sinkOrError));
 
-    buffer_ = sftp_->bufferProvider().lease(totalPayloadBytes_);
+    buffer_ = sftp.bufferProvider().lease(totalPayloadBytes_);
     if (buffer_.empty())
     {
         Log::error("ArchiveDownloadOperation: No transfer buffer available from pool.");
@@ -326,7 +335,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     return {};
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInStrand(SecureShell::SftpSession& sftp)
 {
     for (auto const& root : options_.roots)
     {
@@ -343,8 +352,30 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
 
         if (root.entry.type == SharedData::FileType::Regular)
         {
+            // The listing the root came from may be old, the header must carry the size that is read.
+            const auto current = sftp.lstatInStrand(root.path);
+            if (!current)
+            {
+                Log::error(
+                    "ArchiveDownloadOperation: cannot look up root '{}': {}",
+                    root.path.value(),
+                    current.error().toString()
+                );
+                return std::unexpected(
+                    Error{
+                        .type = ErrorType::FileStatFailed,
+                        .sftpError = current.error(),
+                        .extraInfo = root.path.value(),
+                    }
+                );
+            }
+            if (!current->isRegularFile())
+            {
+                Log::error("ArchiveDownloadOperation: root '{}' is no longer a regular file", root.path.value());
+                return std::unexpected(Error{.type = ErrorType::NotAFile, .extraInfo = root.path.value()});
+            }
             ResolvedEntry resolved{
-                .header = TarArchive::memberHeaderOf(archivePrefix.value(), root.entry),
+                .header = TarArchive::memberHeaderOf(archivePrefix.value(), *current),
                 .source = root.path,
             };
             totalPayloadBytes_ += resolved.header.size;
@@ -432,7 +463,7 @@ void ArchiveDownloadOperation::appendPrescannedInStrand(
     }
 }
 
-std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInStrand()
+std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInStrand(SecureShell::SftpSession& sftp)
 {
     if (!writer_)
         return std::unexpected(Error{
@@ -463,10 +494,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
         return {};
     }
 
-    const auto streamOpenResult = sftp_->openFileInStrand(
-        resolved.source,
-        SecureShell::SftpSession::OpenType::Read,
-        std::filesystem::perms::unknown
+    const auto streamOpenResult = sftp.openFileInStrand(
+        resolved.source, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
     );
     if (!streamOpenResult.has_value())
     {
@@ -662,21 +691,17 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
     if (options_.markAsDownloaded)
     {
         if (const auto marked = Utility::markAsDownloaded(tempPath_); marked)
-            Log::warn("ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", marked.message());
+            Log::warn(
+                "ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", Utility::errorMessage(marked)
+            );
     }
 
-    // Without permission to overwrite, the rename itself refuses an existing archive: no check-then-rename race.
-    std::error_code renameErr{};
-    if (options_.mayOverwrite)
-        std::filesystem::rename(tempPath_, localArchiveNativePath_, renameErr);
-    else if (auto renamed = Utility::renameNoReplace(tempPath_, localArchiveNativePath_); !renamed.has_value())
-        renameErr = renamed.error();
-    if (renameErr == std::errc::file_exists)
-        return std::unexpected(Error{.type = ErrorType::FileExists});
-    if (renameErr)
+    if (const auto moved = Utility::moveIntoPlace(tempPath_, localArchiveNativePath_, options_.mayOverwrite); !moved)
     {
-        Log::error("ArchiveDownloadOperation: rename failed: {}", renameErr.message());
-        return std::unexpected(Error{.type = ErrorType::RenameFailure});
+        Log::error(
+            "ArchiveDownloadOperation: Failed to move the archive into place: {}", Utility::errorMessage(moved.error())
+        );
+        return std::unexpected(localMoveError(moved.error()));
     }
     return {};
 }
@@ -717,10 +742,16 @@ void ArchiveDownloadOperation::cleanup()
     currentStream_.reset();
     writer_.reset();
 
-    if (!tempPath_.empty() && std::filesystem::exists(tempPath_))
+    if (!tempPath_.empty())
     {
-        std::error_code removeErr{};
-        std::filesystem::remove(tempPath_, removeErr);
+        std::error_code removeError{};
+        std::filesystem::remove(tempPath_, removeError);
+        if (removeError)
+            Log::warn(
+                "ArchiveDownloadOperation: Cannot remove '{}': {}",
+                Paths::nativeToUtf8(tempPath_),
+                Utility::errorMessage(removeError)
+            );
     }
 }
 

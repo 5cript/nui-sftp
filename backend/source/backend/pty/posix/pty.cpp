@@ -1,4 +1,5 @@
 #include <backend/pty/posix/pty.hpp>
+#include <utility/error_message.hpp>
 
 #include <log/log.hpp>
 
@@ -347,7 +348,7 @@ namespace PTY
         const boost::system::error_code& error
     )
     {
-        Log::error("Failed to launch the process on the pty: {}", error.message());
+        Log::error("Failed to launch the process on the pty: {}", Utility::errorMessage(error));
 
         terminal_->impl_->closeInput();
         close(terminal_->impl_->master);

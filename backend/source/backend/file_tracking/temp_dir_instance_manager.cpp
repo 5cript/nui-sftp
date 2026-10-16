@@ -1,4 +1,5 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
+#include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
 #include <paths/local_path.hpp>
@@ -63,7 +64,7 @@ namespace FileTracking
         {
             namespace fs = std::filesystem;
 
-            auto const dirName = dirPath.filename().string();
+            auto const dirName = Paths::nativeToUtf8(dirPath.filename());
             for (auto const& sid : skipIds)
                 if (sid == dirName)
                     return false;
@@ -151,11 +152,18 @@ namespace FileTracking
                 if (!isOrphanedDir(dirPath, skipIds))
                     continue;
 
-                Log::info("forceCleanOrphanedInstanceDirs: removing orphaned instance '{}'", dirPath.filename().string());
+                Log::info(
+                    "forceCleanOrphanedInstanceDirs: removing orphaned instance '{}'",
+                    Paths::nativeToUtf8(dirPath.filename())
+                );
                 std::error_code rmErr;
                 Utility::removeAllNoFollow(dirPath, rmErr);
                 if (rmErr)
-                    Log::warn("forceCleanOrphanedInstanceDirs: failed to remove '{}': {}", dirPath.filename().string(), rmErr.message());
+                    Log::warn(
+                        "forceCleanOrphanedInstanceDirs: failed to remove '{}': {}",
+                        Paths::nativeToUtf8(dirPath.filename()),
+                        Utility::errorMessage(rmErr)
+                    );
                 else
                     ++removed;
             }
@@ -182,7 +190,7 @@ namespace FileTracking
                     continue;
 
                 auto const& dirPath = entry.path();
-                auto const dirName = dirPath.filename().string();
+                auto const dirName = Paths::nativeToUtf8(dirPath.filename());
 
                 bool skip = false;
                 for (auto const& sid : skipIds)
@@ -228,7 +236,7 @@ namespace FileTracking
                         Log::warn(
                             "scanAndCleanDeadInstanceDirs: could not write deadAt for '{}': {}",
                             dirName,
-                            exc.what()
+                            Utility::errorMessage(exc)
                         );
                     }
                 };
@@ -254,7 +262,7 @@ namespace FileTracking
                     Log::warn(
                         "scanAndCleanDeadInstanceDirs: error reading metadata for '{}': {}",
                         dirName,
-                        exc.what()
+                        Utility::errorMessage(exc)
                     );
                 }
 
@@ -272,7 +280,7 @@ namespace FileTracking
                 std::error_code rmErr;
                 Utility::removeAllNoFollow(dirPath, rmErr);
                 if (rmErr)
-                    Log::warn("Failed to remove dead instance '{}': {}", dirName, rmErr.message());
+                    Log::warn("Failed to remove dead instance '{}': {}", dirName, Utility::errorMessage(rmErr));
             }
         }
     } // namespace
@@ -434,7 +442,11 @@ namespace FileTracking
                     });
                 }
                 if (walkError)
-                    Log::warn("FileTracking::fileStates: walking '{}' failed: {}", instanceId, walkError.message());
+                    Log::warn(
+                        "FileTracking::fileStates: walking '{}' failed: {}",
+                        instanceId,
+                        Utility::errorMessage(walkError)
+                    );
                 reply({{"success", true}, {"files", std::move(files)}});
             }
         );
@@ -483,7 +495,7 @@ namespace FileTracking
         }
         catch (std::exception const& exc)
         {
-            Log::error("TempDirInstanceManager::createInstance failed: {}", exc.what());
+            Log::error("TempDirInstanceManager::createInstance failed: {}", Utility::errorMessage(exc));
             return nullptr;
         }
     }

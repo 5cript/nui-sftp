@@ -688,8 +688,7 @@ void FileEngine::addBulkDownload(
 {
     Log::info("Requesting bulk download for {} entries", entries.size());
 
-    // operationIds carries one id per entry plus one dedicated aggregate-bulk-card id
-    // at the back — see OperationQueue::addBulkDownloadOperation for rationale.
+    // One operation id per entry and, at the back, the id of the card of the files.
     if (entries.size() + 1 != operationIds.size())
     {
         Log::error("addBulkDownload: entries and operationIds size mismatch");
@@ -704,7 +703,7 @@ void FileEngine::addBulkDownload(
             allowOverwrite,
             insertRefresh,
             mode,
-            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
@@ -719,7 +718,7 @@ void FileEngine::addBulkDownload(
                 operationIdStrings.push_back(id.value());
 
             SharedData::BulkDownloadRequest request{
-                .entries = entries,
+                .entries = std::move(entries),
                 .allowOverwrite = allowOverwrite,
                 .insertRefresh = insertRefresh,
                 .mode = mode,
@@ -757,8 +756,7 @@ void FileEngine::addBulkUpload(
 {
     Log::info("Requesting bulk upload for {} entries", entries.size());
 
-    // operationIds carries one id per entry plus one dedicated aggregate-bulk-card id
-    // at the back — see OperationQueue::addBulkUploadOperation for rationale.
+    // One operation id per entry and, at the back, the id of the card of the files.
     if (entries.size() + 1 != operationIds.size())
     {
         Log::error("addBulkUpload: entries and operationIds size mismatch");
@@ -773,7 +771,7 @@ void FileEngine::addBulkUpload(
             allowOverwrite,
             insertRefresh,
             mode,
-            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
@@ -788,7 +786,7 @@ void FileEngine::addBulkUpload(
                 operationIdStrings.push_back(id.value());
 
             SharedData::BulkUploadRequest request{
-                .entries = entries,
+                .entries = std::move(entries),
                 .allowOverwrite = allowOverwrite,
                 .insertRefresh = insertRefresh,
                 .mode = mode,
@@ -831,7 +829,7 @@ void FileEngine::addBulkDelete(
             bulkOperationId,
             insertRefresh,
             mode,
-            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info)
+            onBulkCreated = std::move(onBulkCreated)](auto const& channelId, std::string const& info) mutable
         {
             if (!channelId)
             {
@@ -841,7 +839,7 @@ void FileEngine::addBulkDelete(
             }
 
             SharedData::BulkDeleteRequest request{
-                .entries = entries,
+                .entries = std::move(entries),
                 .insertRefresh = insertRefresh,
                 .mode = mode,
             };

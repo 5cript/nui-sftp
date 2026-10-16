@@ -5,6 +5,7 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include "real_server_tests.hpp"
 #include "archive_test_helpers.hpp"
+#include <paths/native.hpp>
 
 #include <tar_archive/compression.hpp>
 
@@ -101,7 +102,7 @@ namespace Test
         {
             const auto localPath = pulledDir_.path() / localFilename;
             DownloadOperation download{
-                sftp,
+                sftp.weak_from_this(),
                 {
                     .remotePath = remote(remotePath.generic_string()),
                     .localPath = toLocal(localPath),
@@ -130,7 +131,7 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        ArchiveUploadOperation operation{*sftp, {}};
+        ArchiveUploadOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::ArchiveUpload);
     }
 
@@ -140,7 +141,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = {},
@@ -157,7 +158,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {},
                 .remoteArchivePath = remote("/home/test/nothing.tar"),
@@ -175,7 +176,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/single.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -192,6 +193,36 @@ namespace Test
         EXPECT_EQ(entries[0].contents, "alpha payload");
     }
 
+    TEST_F(ArchiveUploadOperationTests, NonAsciiNamesRoundTrip)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto source = srcDir_.path() / Paths::nativeFromUtf8("Grüße");
+        std::filesystem::create_directories(source);
+        std::ofstream{source / Paths::nativeFromUtf8("東京.txt"), std::ios::binary} << "tokyo";
+        auto scan = runLocalScan(source);
+
+        const std::filesystem::path remoteArchive = "/home/test/nonascii.tar";
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(source)},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+        operation.setScanResultForRoot(toLocal(source), std::move(scan.entries), scan.totalBytes);
+        ASSERT_TRUE(runToCompletion(operation).has_value());
+
+        const auto pulled = pullRemoteArchive(*sftp, remoteArchive, "nonascii.tar");
+        const auto entries = recoverArchiveEntries(pulled);
+        const auto* file = findEntry(entries, "Grüße/東京.txt");
+        ASSERT_NE(file, nullptr);
+        EXPECT_EQ(file->contents, "tokyo");
+    }
+
     TEST_F(ArchiveUploadOperationTests, SingleFileGzipRoundTrip)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -199,7 +230,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/alpha.tar.gz";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -221,7 +252,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/alpha.tar.zst";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -243,7 +274,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/pair.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths =
                     {
@@ -277,7 +308,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/tree.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path())},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -301,13 +332,58 @@ namespace Test
         EXPECT_EQ(deep->contents, "deep payload");
     }
 
+#ifndef _WIN32
+    TEST_F(ArchiveUploadOperationTests, SpecialPermissionBitsNeverTravel)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        using std::filesystem::perms;
+        const auto executable = perms::owner_all | perms::group_read | perms::group_exec | perms::others_read |
+            perms::others_exec;
+        std::filesystem::permissions(srcDir_.path() / "alpha.txt", executable | perms::set_uid);
+        std::filesystem::permissions(srcDir_.path() / "nested" / "deep.txt", executable | perms::set_gid);
+        auto restore = Nui::ScopeExit{[this]() noexcept {
+            std::error_code error{};
+            std::filesystem::permissions(srcDir_.path() / "alpha.txt", perms::owner_read | perms::owner_write, error);
+            std::filesystem::permissions(
+                srcDir_.path() / "nested" / "deep.txt", perms::owner_read | perms::owner_write, error
+            );
+        }};
+        if ((std::filesystem::status(srcDir_.path() / "alpha.txt").permissions() & perms::set_uid) == perms::none)
+            GTEST_SKIP() << "the filesystem drops setuid";
+
+        auto scan = runLocalScan(srcDir_.path() / "nested");
+        const std::filesystem::path remoteArchive = "/home/test/special.tar";
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(srcDir_.path() / "alpha.txt"), toLocal(srcDir_.path() / "nested")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+        operation.setScanResultForRoot(toLocal(srcDir_.path() / "nested"), std::move(scan.entries), scan.totalBytes);
+        ASSERT_TRUE(runToCompletion(operation).has_value());
+
+        const auto entries = recoverArchiveEntries(pullRemoteArchive(*sftp, remoteArchive, "special.tar"));
+        const auto* alpha = findEntry(entries, "alpha.txt");
+        ASSERT_NE(alpha, nullptr);
+        EXPECT_EQ(alpha->permissions, executable);
+        const auto* deep = findEntry(entries, "nested/deep.txt");
+        ASSERT_NE(deep, nullptr);
+        EXPECT_EQ(deep->permissions, executable);
+    }
+#endif
+
     TEST_F(ArchiveUploadOperationTests, DirectoryRootWithoutPrescanErrors)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path())},
                 .remoteArchivePath = remote("/home/test/missing_scan.tar"),
@@ -335,7 +411,7 @@ namespace Test
         auto otherScan = runLocalScan(otherDir.path());
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path())},
                 .remoteArchivePath = remote("/home/test/wrong_key.tar"),
@@ -366,7 +442,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/two_roots_up.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(firstDir.path()), toLocal(secondDir.path())},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -400,7 +476,7 @@ namespace Test
         const std::filesystem::path topFile = srcDir_.path() / "alpha.txt";
         const std::filesystem::path remoteArchive = "/home/test/mixed_up.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 // A regular-file root (no scan needed) alongside a directory
                 // root (which does need a scan) — the op must succeed and
@@ -434,7 +510,7 @@ namespace Test
 
         const std::filesystem::path remoteArchive = "/home/test/nested_up.tar";
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path())},
                 .remoteArchivePath = remote(remoteArchive.generic_string()),
@@ -460,7 +536,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(srcDir_.path() / "alpha.txt")},
                 .remoteArchivePath = remote("/home/test/done.tar"),
@@ -484,7 +560,7 @@ namespace Test
         std::uint64_t lastMax{0u};
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .progressCallback =
                     [&](std::uint64_t, std::uint64_t max, std::uint64_t current, std::make_signed_t<std::size_t>)

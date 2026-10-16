@@ -1,4 +1,6 @@
 #include <persistence/state_holder.hpp>
+#include <utility/error_message.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/state.hpp>
 #include <persistence/legacy_migration.hpp>
 #include <utility/resources.hpp>
@@ -26,7 +28,7 @@ namespace Persistence
         void setupPersistence()
         {
             const auto path = Nui::resolvePath(Constants::persistencePath);
-            const auto parentPath = std::filesystem::path{path}.parent_path().string();
+            const auto parentPath = std::filesystem::path{path}.parent_path();
 
             if (!std::filesystem::exists(parentPath))
                 std::filesystem::create_directories(parentPath);
@@ -39,7 +41,8 @@ namespace Persistence
                 const auto now = std::chrono::system_clock::now();
                 const auto time = fmt::format("{:%Y-%m-%d_%H-%M-%S}", now);
 
-                return path.parent_path() / (path.filename().string() + ".backup_" + time);
+                return path.parent_path() /
+                    Paths::nativeFromUtf8(fmt::format("{}.backup_{}", Paths::nativeToUtf8(path.filename()), time));
             }();
 
             {
@@ -48,16 +51,16 @@ namespace Persistence
 
                 writer << reader.rdbuf();
             }
-            Log::info("Copied config file to backup: {}", backupFileName.string());
+            Log::info("Copied config file to backup: {}", Paths::nativeToUtf8(backupFileName));
             return backupFileName;
         }
 
         LoadWarning unreadableConfig(std::filesystem::path const& path, std::exception const& exception)
         {
-            Log::error("Failed to parse config file: {}", exception.what());
+            Log::error("Failed to parse config file: {}", Utility::errorMessage(exception));
             return LoadWarning{
                 .kind = LoadWarningKind::ConfigUnreadable,
-                .arguments = {makeBackup(path).string(), exception.what()},
+                .arguments = {Paths::nativeToUtf8(makeBackup(path)), Utility::errorMessage(exception)},
             };
         }
     }
@@ -134,8 +137,8 @@ namespace Persistence
         }
         catch (std::exception const& e)
         {
-            Log::error("Failed to load config file: {}", e.what());
-            error = e.what();
+            Log::error("Failed to load config file: {}", Utility::errorMessage(e));
+            error = Utility::errorMessage(e);
         }
 
         onLoad(error, *this, cachedWarnings_);
@@ -461,7 +464,7 @@ namespace Persistence
         }
         catch (std::exception const& e)
         {
-            Log::error("Failed to save config file: {}", e.what());
+            Log::error("Failed to save config file: {}", Utility::errorMessage(e));
             throw;
         }
     }
@@ -527,7 +530,8 @@ namespace Persistence
                     hub.callRemote(
                         responseId,
                         nlohmann::json{
-                            {"error", Utility::localizedMessage("backend.persistence.saveFailed", e.what())},
+                            {"error",
+                                Utility::localizedMessage("backend.persistence.saveFailed", Utility::errorMessage(e))},
                         }
                     );
                 }
@@ -583,7 +587,14 @@ namespace Persistence
 
         try
         {
-            YAML::Node config = YAML::LoadFile(filePath.generic_string());
+            std::ifstream file{filePath, std::ios::binary};
+            if (!file)
+            {
+                Log::error("Cannot open the language file '{}'.", Paths::nativeToUtf8(filePath));
+                onLoadComplete(std::nullopt);
+                return;
+            }
+            YAML::Node config = YAML::Load(file);
             auto translateNode = [&](this const auto& translateNode, YAML::Node const& node) -> nlohmann::json
             {
                 if (node.IsScalar())
@@ -605,7 +616,7 @@ namespace Persistence
         }
         catch (std::exception const& e)
         {
-            Log::error("Failed to parse language file: {}", e.what());
+            Log::error("Failed to parse language file: {}", Utility::errorMessage(e));
             onLoadComplete(std::nullopt);
             return;
         }
@@ -635,11 +646,11 @@ namespace Persistence
             );
             if (!content)
             {
-                Log::error("Failed to load language file: {}", file.string());
+                Log::error("Failed to load language file: {}", Paths::nativeToUtf8(file));
                 onLoadComplete(std::nullopt);
                 return;
             }
-            assembled[file.stem().string()] = *content;
+            assembled[Paths::nativeToUtf8(file.stem())] = *content;
         }
         onLoadComplete(std::move(assembled));
     }

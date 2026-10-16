@@ -1,5 +1,6 @@
 #include <nui-file-explorer/support/default_places.hpp>
 #include <utility/user_directories.hpp>
+#include <paths/native.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -71,7 +72,7 @@ namespace NuiFileExplorer
             if (home.empty())
                 return result;
 
-            result.push_back({{"kind", "home"}, {"name", "Home"}, {"path", home.generic_string()}});
+            result.push_back({{"kind", "home"}, {"name", "Home"}, {"path", Paths::nativeToUtf8(home)}});
 
             const auto userDirectories = readUserDirectories(home);
             for (auto const& definition : Utility::defaultPlaces)
@@ -83,7 +84,7 @@ namespace NuiFileExplorer
                 result.push_back(
                     {{"kind", std::string{definition.kind}},
                         {"name", std::string{definition.name}},
-                        {"path", path.generic_string()}}
+                        {"path", Paths::nativeToUtf8(path)}}
                 );
             }
             return result;

@@ -5,6 +5,10 @@
 #include "test_upload_operation.hpp"
 #include "test_scan_operation.hpp"
 #include "test_local_delete_guard.hpp"
+#include "test_local_delete_operation.hpp"
+#include "test_local_removal.hpp"
+#include "test_local_operation_queue.hpp"
+#include "test_remote_delete_guard.hpp"
 #include "test_local_scan_operation.hpp"
 #include "test_bulk_download_operation.hpp"
 #include "test_bulk_upload_operation.hpp"
@@ -23,10 +27,14 @@
 #include "test_file_change_filter.hpp"
 #include "test_password_request.hpp"
 #include "test_sync_session.hpp"
+#include "test_dropped_entry.hpp"
 #include "test_transfer_failures.hpp"
+#include "test_compared_state_check.hpp"
 #include "test_operation_queue.hpp"
 #include "test_existence_check.hpp"
 #include "test_opener_risk.hpp"
+#include "test_rpc_helper.hpp"
+#include "test_rpc_path_parameters.hpp"
 
 #include <log/log.hpp>
 

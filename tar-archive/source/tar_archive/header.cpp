@@ -1,4 +1,5 @@
 #include <tar_archive/header.hpp>
+#include <paths/utf8.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -227,6 +228,17 @@ namespace TarArchive
             return std::nullopt;
         }
 
+        bool hasNonAsciiByte(std::string_view text)
+        {
+            return std::ranges::any_of(
+                text,
+                [](char character)
+                {
+                    return static_cast<unsigned char>(character) >= 0x80u;
+                }
+            );
+        }
+
         std::string normaliseArchivePath(std::string value)
         {
             while (!value.empty() && value.front() == '/')
@@ -266,6 +278,21 @@ namespace TarArchive
             return payload;
         }
 
+        /**
+         * @brief The mode field: the permission bits, or what a newly created member of this type commonly gets
+         *        when they are unknown.
+         */
+        std::uint32_t modeOf(std::filesystem::perms permissions, TypeFlag typeflag)
+        {
+            if (permissions != std::filesystem::perms::unknown)
+                return static_cast<std::uint32_t>(permissions) & 07777u;
+            if (typeflag == TypeFlag::Directory)
+                return 0755u;
+            if (typeflag == TypeFlag::SymbolicLink)
+                return 0777u;
+            return 0644u;
+        }
+
         void populateUstarHeader(
             RawRecord& record,
             std::string const& name,
@@ -279,7 +306,7 @@ namespace TarArchive
             record.fill(std::byte{0u});
             writeString(record, fieldName, name);
             writeString(record, fieldPrefix, prefix);
-            writeNumeric(record, fieldMode, static_cast<std::uint32_t>(meta.permissions) & 07777u);
+            writeNumeric(record, fieldMode, modeOf(meta.permissions, typeflag));
             writeNumeric(record, fieldUid, meta.uid);
             writeNumeric(record, fieldGid, meta.gid);
             writeNumeric(record, fieldSize, payloadSize);
@@ -632,20 +659,21 @@ namespace TarArchive
         std::string truncatedPath = normalisedPath;
         std::string truncatedLink = linkTargetText;
 
+        // A name with non-ASCII bytes also gets a PAX record, which readers take as UTF-8, the ustar fields have no
+        // encoding of their own.
         auto split = trySplitUstarPath(normalisedPath, isDirectory);
-        const bool pathNeedsPax = !split.has_value();
-        if (pathNeedsPax)
-        {
+        if (!split.has_value() || hasNonAsciiByte(normalisedPath))
             paxEntries.emplace_back("path", normalisedPath);
-            truncatedPath = normalisedPath.substr(0u, fieldName.length);
+        if (!split.has_value())
+        {
+            truncatedPath = std::string{Paths::truncatedUtf8(normalisedPath, fieldName.length)};
             split = std::pair<std::string, std::string>{std::string{}, truncatedPath};
         }
 
-        const bool linkNeedsPax = linkTargetText.size() > fieldLinkName.length;
-        if (linkNeedsPax)
+        if (linkTargetText.size() > fieldLinkName.length || hasNonAsciiByte(linkTargetText))
         {
             paxEntries.emplace_back("linkpath", linkTargetText);
-            truncatedLink = linkTargetText.substr(0u, fieldLinkName.length);
+            truncatedLink = std::string{Paths::truncatedUtf8(linkTargetText, fieldLinkName.length)};
         }
 
         if (sizeExceedsOctal)
@@ -668,9 +696,8 @@ namespace TarArchive
             const std::string paxName =
                 "PaxHeaders/" + (truncatedPath.empty() ? std::string{"entry"} : truncatedPath);
             const auto paxSplit = trySplitUstarPath(paxName, false);
-            const std::string paxNameField = paxSplit
-                ? paxSplit->second
-                : paxName.substr(0u, fieldName.length);
+            const std::string paxNameField =
+                paxSplit ? paxSplit->second : std::string{Paths::truncatedUtf8(paxName, fieldName.length)};
             const std::string paxPrefixField = paxSplit ? paxSplit->first : std::string{};
 
             RawRecord paxRecord;

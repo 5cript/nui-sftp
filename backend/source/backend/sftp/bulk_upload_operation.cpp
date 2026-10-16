@@ -4,6 +4,9 @@
 #include <log/log.hpp>
 #include <utility/permissions.hpp>
 
+#include <ranges>
+#include <vector>
+
 namespace
 {
     BulkTransferOperation::CommonOptions toCommon(BulkUploadOperation::BulkUploadOperationOptions const& options)
@@ -20,8 +23,11 @@ namespace
     }
 }
 
-BulkUploadOperation::BulkUploadOperation(SecureShell::SftpSession& sftp, BulkUploadOperationOptions options)
-    : BulkTransferOperation{sftp, toCommon(options)}
+BulkUploadOperation::BulkUploadOperation(
+    std::weak_ptr<SecureShell::SftpSession> sftp,
+    BulkUploadOperationOptions options
+)
+    : BulkTransferOperation{std::move(sftp), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {}
 
@@ -33,24 +39,65 @@ SharedData::OperationType BulkUploadOperation::type() const
 }
 
 std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
+BulkUploadOperation::prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root)
 {
     // Base directory of the upload, everything after this will be relative to this:
-    return createRemoteDirectoryInStrand(common().remotePath, root);
+    return createRemoteDirectoryInStrand(sftp, common().remotePath, root);
+}
+
+std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createDirectoryInStrand(
+    SecureShell::SftpSession& sftp,
+    std::size_t entryIndex,
+    EntryPaths const& paths
+)
+{
+    // A scanned directory comes after its parent, a prescanned one may be the first entry below it.
+    if (prescanned() && individualOptions_.createMissingDirectories)
+    {
+        if (auto parents = createMissingParentsInStrand(sftp, paths.remote); !parents)
+            return parents;
+    }
+    return createRemoteDirectoryInStrand(sftp, paths.remote, entries()[entryIndex]);
 }
 
 std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
+BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
 {
-    return createRemoteDirectoryInStrand(paths.remote, entries()[entryIndex]);
+    auto const& root = common().remotePath;
+    std::vector<Paths::RemotePath> missing;
+    for (auto parent = path.parent(); parent && *parent != root && parent->isWithin(root); parent = parent->parent())
+    {
+        const auto stat = sftp.lstatInStrand(*parent);
+        if (stat)
+            break;
+        if (stat.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        {
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::SftpError,
+                    .sftpError = stat.error(),
+                    .extraInfo = fmt::format("Inspecting remote directory: {}", parent->value())
+                }
+            );
+        }
+        missing.push_back(*parent);
+    }
+    const SharedData::DirectoryEntry directory{.type = SharedData::FileType::Directory};
+    for (auto const& parent : missing | std::views::reverse)
+    {
+        if (auto created = createRemoteDirectoryInStrand(sftp, parent, directory); !created)
+            return created;
+    }
+    return {};
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemoteDirectoryInStrand(
+    SecureShell::SftpSession& sftp,
     Paths::RemotePath const& path,
     SharedData::DirectoryEntry const& entry
 )
 {
-    const auto result = sftp().createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
+    const auto result = sftp.createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
     if (!result.has_value())
     {
         Log::error("BulkUploadOperation: Failed to create remote sftp directory: {}.", result.error().message);
@@ -77,6 +124,7 @@ std::unique_ptr<Operation> BulkUploadOperation::makeChild(
     uploadOptions.remotePath = paths.remote;
     uploadOptions.localPath = paths.local;
     uploadOptions.mayOverwrite = uploadOptions.mayOverwrite || paths.mayOverwrite;
+    uploadOptions.comparedDestination = paths.comparedDestination;
     uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
@@ -139,15 +187,46 @@ void BulkUploadOperation::setPrescannedFileList(std::vector<PrescannedFile> file
         // Flat entries carry their name only, the paths come from the prescanned paths.
         if (const auto name = file.source.filename(); name)
             entry.name = name->value();
-        entry.type = SharedData::FileType::Regular;
-        entry.size = file.sizeBytes;
-        totalBytes += file.sizeBytes;
+        entry.type = file.isDirectory ? SharedData::FileType::Directory : SharedData::FileType::Regular;
+        entry.size = file.isDirectory ? 0u : file.sizeBytes;
+        totalBytes += entry.size;
         entries.push_back(std::move(entry));
         paths.push_back(
             EntryPaths{
-                .remote = std::move(file.destination), .local = std::move(file.source), .mayOverwrite = file.mayOverwrite
+                .remote = std::move(file.destination),
+                .local = std::move(file.source),
+                .mayOverwrite = file.mayOverwrite,
+                .comparedDestination = std::move(file.comparedDestination),
             }
         );
     }
     setPrescannedEntries(std::move(entries), std::move(paths), totalBytes);
+}
+
+std::optional<SharedData::BulkUploadRequest>
+BulkUploadOperation::resumeRequest(SharedData::BulkUploadRequest request) const
+{
+    if (!hasEntries())
+        return std::nullopt;
+
+    request.entries.clear();
+    for (const auto index : unfinishedEntryIndices())
+    {
+        auto const& entry = entries()[index];
+        const auto paths = entryPaths(index);
+        if (!paths || (!entry.isRegularFile() && !entry.isSymlink() && !entry.isDirectory()))
+            continue;
+        request.entries.push_back({
+            .source = paths->local,
+            .destination = paths->remote,
+            .sizeBytes = entry.isDirectory() ? 0u : entry.size,
+            .isDirectory = entry.isDirectory(),
+            .withoutContent = entry.isDirectory(),
+            .mayOverwrite = paths->mayOverwrite,
+            .comparedDestination = paths->comparedDestination,
+        });
+    }
+    request.remoteRoot = common().remotePath;
+    request.localRoot = common().localPath;
+    return request;
 }

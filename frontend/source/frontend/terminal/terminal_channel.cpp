@@ -235,7 +235,7 @@ namespace
             {
                 debugPrint += "\\n";
             }
-            else if (std::isprint(c))
+            else if (std::isprint(static_cast<unsigned char>(c)))
             {
                 debugPrint += c;
             }

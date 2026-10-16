@@ -19,7 +19,12 @@ namespace Utility
       public:
         explicit ProcessTemporaryDirectory(std::filesystem::path const& base)
         {
-            if (char const* inherited = std::getenv(environmentName); inherited != nullptr && *inherited != '\0')
+#ifdef _WIN32
+            auto const* inherited = ::_wgetenv(environmentName);
+#else
+            auto const* inherited = std::getenv(environmentName);
+#endif
+            if (inherited != nullptr && *inherited != 0)
             {
                 path_ = std::filesystem::path{inherited};
                 std::filesystem::create_directories(path_);
@@ -28,7 +33,7 @@ namespace Utility
             owned_.emplace(base, true);
             path_ = owned_->path();
 #ifdef _WIN32
-            ::_putenv_s(environmentName, path_.string().c_str());
+            ::_wputenv_s(environmentName, path_.c_str());
 #else
             ::setenv(environmentName, path_.c_str(), 1);
 #endif
@@ -40,7 +45,11 @@ namespace Utility
         }
 
       private:
+#ifdef _WIN32
+        static constexpr wchar_t const* environmentName = L"NUI_SFTP_TEST_PROCESS_TEMPORARY";
+#else
         static constexpr char const* environmentName = "NUI_SFTP_TEST_PROCESS_TEMPORARY";
+#endif
 
         std::optional<TemporaryDirectory> owned_{};
         std::filesystem::path path_{};

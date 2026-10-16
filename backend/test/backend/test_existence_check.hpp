@@ -131,19 +131,65 @@ namespace Test
         EXPECT_EQ(*result, expected);
     }
 
-    TEST_F(ExistenceCheckTests, RemoteListingFailureFailsTheCheck)
+    TEST_F(ExistenceCheckTests, RemoteDirectoryThatCannotBeListedIsCheckedPathByPath)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
+        // A drop box: writable, but not listable.
         ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
 
-        std::vector<std::string> paths;
+        std::vector<std::string> paths{"/home/test/Documents/doc1.txt"};
+        std::vector<bool> expected{true};
         for (int index = 0; index < 12; ++index)
+        {
             paths.push_back("/home/test/Documents/new" + std::to_string(index) + ".txt");
+            expected.push_back(false);
+        }
 
         const auto result = remotePathsExist(*sftp, paths, timeout);
 
-        EXPECT_FALSE(result.has_value()) << "an unknown destination must never count as absent";
+        ASSERT_TRUE(result.has_value()) << result.error();
+        EXPECT_EQ(*result, expected);
+    }
+
+    TEST_F(ExistenceCheckTests, RemoteNameListedOnlyInAnotherCaseIsLookedUp)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        // The lookup of the variant fails here, which shows it happens: a listed exact name needs none.
+        ASSERT_TRUE(serverStartResult->command("denyStat", {{"path", "/home/test/FILE1.txt"}}));
+
+        std::vector<std::string> paths{"/home/test/file1.txt"};
+        for (int index = 0; index < 10; ++index)
+            paths.push_back("/home/test/new" + std::to_string(index) + ".txt");
+        const auto exact = remotePathsExist(*sftp, paths, timeout);
+        ASSERT_TRUE(exact.has_value()) << exact.error();
+        EXPECT_TRUE(exact->front());
+
+        paths.front() = "/home/test/FILE1.txt";
+        EXPECT_FALSE(remotePathsExist(*sftp, paths, timeout).has_value())
+            << "the server may fold case, so the variant is looked up instead of taken for absent";
+    }
+
+    TEST_F(ExistenceCheckTests, RemoteFewChildrenOfAParentAreStatEvenAmongManyPaths)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        // Listing it would fail, a stat of its one queried child does not.
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Pictures"}}));
+
+        std::vector<std::string> paths{"/home/test/Pictures/image1.png"};
+        std::vector<bool> expected{true};
+        for (int index = 0; index < 12; ++index)
+        {
+            paths.push_back("/home/test/new" + std::to_string(index) + ".txt");
+            expected.push_back(false);
+        }
+
+        const auto result = remotePathsExist(*sftp, paths, timeout);
+
+        ASSERT_TRUE(result.has_value()) << result.error();
+        EXPECT_EQ(*result, expected);
     }
 
     TEST_F(ExistenceCheckTests, RemoteInvalidPathFailsTheCheck)

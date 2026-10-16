@@ -1,4 +1,5 @@
 #include <frontend/session_components/operation_queue.hpp>
+#include <frontend/session_components/local_operation_router.hpp>
 #include <frontend/observed_random_access_map.hpp>
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
@@ -38,6 +39,7 @@
 #include <chrono>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <string_view>
 #include <unordered_map>
@@ -58,6 +60,8 @@ struct OperationQueue::Implementation
 
     std::vector<Nui::RpcClient::AutoUnregister> onUpdate;
     Nui::Observed<bool> paused{true};
+    /** @brief The profile starts the queue of every connection paused, the backend creates it paused. */
+    bool startsPaused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
@@ -86,8 +90,7 @@ struct OperationQueue::Implementation
 
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
-    std::unordered_map<std::string, std::function<void(std::vector<std::string> const&)>>
-        failedEntriesCallbacks;
+    std::unordered_map<std::string, OperationQueue::FailedEntriesCallback> failedEntriesCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
     // Keyed by the aggregate bulk operation id (first pre-generated opId for
     // bulk up/download, or the aggregate id for bulk delete).  Auto-erased on
@@ -311,7 +314,8 @@ OperationQueue::OperationQueue(
           ),
       }
 {
-    impl_->paused = queueOptions.startInPausedState.value_or(true);
+    impl_->startsPaused = queueOptions.startInPausedState.value_or(true);
+    impl_->paused = impl_->startsPaused;
     *impl_->autoClean = queueOptions.autoRemoveCompletedOperations.value_or(false);
     impl_->liveQueuePageSize = std::clamp(queueOptions.liveQueuePageSize.value_or(200), 1, 1000);
 
@@ -376,11 +380,17 @@ OperationQueue::OperationQueue(
             impl_->autoCleanTimer = std::move(handle);
         }
     );
+    LocalOperationRouter::instance().attach(*this);
 }
-ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(OperationQueue);
+
+OperationQueue::~OperationQueue()
+{
+    LocalOperationRouter::instance().detach(*this);
+}
 
 void OperationQueue::cancelAll()
 {
+    LocalOperationRouter::instance().cancelHostedBy(*this);
     impl_->operations.clear();
     impl_->priorityOperations.clear();
     impl_->history.clear();
@@ -402,10 +412,14 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
         return;
     }
 
-    auto doCancel = [this, operationId = operation.operationId()]()
+    auto doCancel = [this,
+                        operationId = operation.operationId(),
+                        cancelName = operation.type() == SharedData::OperationType::LocalDelete
+                            ? std::string{"LocalOperationQueue::cancel"}
+                            : fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value())]()
     {
         Nui::RpcClient::callWithBackChannel(
-            fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value()),
+            cancelName,
             [this, operationId](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (!result)
@@ -802,7 +816,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                std::function<void()>{}
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
@@ -956,7 +971,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     // Kick-to-top is meaningful only for the regular queue. Priority cards do
     // not get a handler — even though the button is rendered, CSS hides it
     // when the parent is the priority list (see .opq-priority-list rule).
-    if (added.mode != SharedData::OperationMode::PriorityQueued)
+    if (added.mode != SharedData::OperationMode::PriorityQueued && added.type != SharedData::OperationType::LocalDelete)
     {
         card->setKickToTopHandler(
             [this, opId = added.operationId]()
@@ -1082,6 +1097,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
         }
         case SharedData::OperationType::Delete:
         case SharedData::OperationType::BulkDelete:
+        case SharedData::OperationType::LocalDelete:
         {
             if (auto* card = operation->getCardSpecifically<DisplayedDeleteOperation>(); card)
                 card->setScanProgress(progress.totalBytes, progress.totalScanned);
@@ -1279,7 +1295,11 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         Log::error("Failed to convert OperationCompleted: {}", e.what());
         return;
     }
+    onOperationCompleted(std::move(completed));
+}
 
+void OperationQueue::onOperationCompleted(SharedData::OperationCompleted completed)
+{
     Log::info("Received operation completed for operation id: {}", completed.operationId.value());
     auto* operation = impl_->findOperation(completed.operationId);
     if (!operation)
@@ -1293,14 +1313,8 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     {
         auto callback = std::move(failedIt->second);
         impl_->failedEntriesCallbacks.erase(failedIt);
-        if (!completed.failedEntries.empty())
-        {
-            std::vector<std::string> failedPaths;
-            failedPaths.reserve(completed.failedEntries.size());
-            for (auto const& entry : completed.failedEntries)
-                failedPaths.push_back(entry.first);
-            callback(failedPaths);
-        }
+        if (!completed.failedEntries.empty() || !completed.indexedFailures.empty())
+            callback(completed.failedEntries, completed.indexedFailures);
     }
 
     bool partial = false;
@@ -1363,15 +1377,48 @@ void OperationQueue::onOperationCompleted(Nui::val val)
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
+void OperationQueue::enqueueLocalDelete(
+    std::vector<Paths::LocalPath> const& targets,
+    std::function<void(std::optional<std::string> const& error)> onAck
+)
+{
+    std::vector<std::string> paths;
+    paths.reserve(targets.size());
+    std::ranges::transform(targets, std::back_inserter(paths), &Paths::LocalPath::toUtf8);
+    Log::info("Frontend Operation Queue local delete: {} items", paths.size());
+
+    const auto operationId = Ids::generateOperationId();
+    LocalOperationRouter::instance().host(operationId, *this);
+    // With a connection the delete is held while the queue of the connection is paused.
+    const auto rpcName = isActive() ? fmt::format("Session::{}::addLocalDelete", impl_->sessionId.value())
+                                    : std::string{"LocalOperationQueue::addDelete"};
+    Nui::RpcClient::callWithBackChannel(
+        rpcName,
+        [onAck = std::move(onAck), operationId](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (!result)
+            {
+                LocalOperationRouter::instance().forget(operationId);
+                return onAck(result.error);
+            }
+            onAck(std::nullopt);
+        },
+        operationId.value(),
+        paths
+    );
+}
+
+bool OperationQueue::isActive() const
+{
+    return impl_->sessionId.isValid();
+}
+
 void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback)
 {
     impl_->completionCallbacks[opId.value()] = std::move(callback);
 }
 
-void OperationQueue::addFailedEntriesCallback(
-    Ids::OperationId const& opId,
-    std::function<void(std::vector<std::string> const&)> callback
-)
+void OperationQueue::addFailedEntriesCallback(Ids::OperationId const& opId, FailedEntriesCallback callback)
 {
     impl_->failedEntriesCallbacks[opId.value()] = std::move(callback);
 }
@@ -1561,7 +1608,22 @@ void OperationQueue::executeSyncSelection(
 {
     if (!impl_->fileEngine)
         return onRejected("No file engine set");
-    impl_->fileEngine->executeSyncSelection(std::move(request), std::move(onResolved), std::move(onRejected));
+    const auto localDeleteId = request.localDeleteId;
+    LocalOperationRouter::instance().host(localDeleteId, *this);
+    impl_->fileEngine->executeSyncSelection(
+        std::move(request),
+        [onResolved = std::move(onResolved), localDeleteId](SharedData::Sync::SyncExecutionResult result)
+        {
+            if (result.localDeletes.empty())
+                LocalOperationRouter::instance().forget(localDeleteId);
+            onResolved(std::move(result));
+        },
+        [onRejected = std::move(onRejected), localDeleteId](std::string const& reason)
+        {
+            LocalOperationRouter::instance().forget(localDeleteId);
+            onRejected(reason);
+        }
+    );
 }
 
 void OperationQueue::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
@@ -1622,6 +1684,10 @@ void OperationQueue::requestMoveOperation(Ids::OperationId const& opId, std::siz
         // avoids a wasted round trip and a refused log on the backend side.
         return;
     }
+    // Local operations run in the backend's local operation queue, which keeps its own order.
+    if (const auto* operation = impl_->findOperation(opId);
+        !isActive() || (operation && operation->type() == SharedData::OperationType::LocalDelete))
+        return;
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::moveOperation", impl_->sessionId.value()),
         [opId](SharedData::ErrorOrSuccess<> const& result)
@@ -1641,6 +1707,8 @@ void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused>
         Log::info("Initial pause state of operation queue is: {}", result.paused ? "paused" : "running");
         impl_->paused = result.paused;
         Nui::globalEventContext.executeActiveEventsImmediately();
+        if (result.paused && !impl_->startsPaused)
+            unpause();
     }
     else
     {
@@ -1673,6 +1741,11 @@ void OperationQueue::togglePause()
 
 void OperationQueue::askBackendToCancelAll()
 {
+    if (!isActive())
+    {
+        cancelAll();
+        return;
+    }
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         [this](SharedData::ErrorOrSuccess<> const& result)

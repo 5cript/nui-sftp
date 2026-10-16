@@ -53,12 +53,10 @@ namespace SharedData::Sync::Test
         };
     }
 
-    template <bool IncludesDots = false>
     inline std::expected<ScanNode, std::string> walkFake(FakeFilesystem& filesystem, bool recursive = true)
     {
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), IncludesDots> walker{std::move(scanner), recursive
-        };
+        TreeDirectoryWalker<std::string, decltype(scanner)> walker{std::move(scanner), recursive};
         auto result = walker.walkAll();
         if (!result)
             return std::unexpected(result.error());
@@ -117,7 +115,7 @@ namespace SharedData::Sync::Test
         filesystem.addFile("/root", ".hidden", 1);
         filesystem.addFile("/root", "file", 1);
 
-        const auto tree = walkFake<true>(filesystem);
+        const auto tree = walkFake(filesystem);
         ASSERT_TRUE(tree.has_value());
         EXPECT_EQ(childNames(*tree), (std::vector<std::string>{".hidden", "file"}));
     }
@@ -156,6 +154,23 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(tree->children[0].children[0].children[0].children[0].name, "deep.txt");
     }
 
+    TEST(TreeDirectoryWalkerTests, NamesThatWereNotUtf8AreInvalidAndNeverEntered)
+    {
+        FakeFilesystem filesystem;
+        filesystem.directories["/root"].push_back(
+            DirectoryEntry{.name = "Fran\xEF\xBF\xBDois", .nameIsValidUtf8 = false, .type = FileType::Directory}
+        );
+        filesystem.directories["/root"].push_back(
+            DirectoryEntry{.name = "x\xEF\xBF\xBD", .nameIsValidUtf8 = false, .type = FileType::Regular, .size = 3}
+        );
+        const auto tree = walkFake(filesystem);
+        ASSERT_TRUE(tree.has_value()) << tree.error();
+        ASSERT_EQ(tree->children.size(), 2u);
+        for (auto const& child : tree->children)
+            EXPECT_EQ(child.availability, Availability::InvalidName) << child.name;
+        EXPECT_EQ(filesystem.listed, (std::vector<std::string>{"/root"}));
+    }
+
     TEST(TreeDirectoryWalkerTests, ScannerErrorsAbortTheWalk)
     {
         FakeFilesystem filesystem;
@@ -174,7 +189,7 @@ namespace SharedData::Sync::Test
         filesystem.addFile("/root/dir", "b", 50);
 
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), false> walker{std::move(scanner)};
+        TreeDirectoryWalker<std::string, decltype(scanner)> walker{std::move(scanner)};
         ASSERT_TRUE(walker.walkAll().has_value());
         EXPECT_TRUE(walker.completed());
         EXPECT_EQ(walker.totalEntries(), 4u) << "root, a, dir, b";

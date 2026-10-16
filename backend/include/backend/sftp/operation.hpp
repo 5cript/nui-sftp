@@ -8,12 +8,17 @@
 #include <shared_data/file_operations/operation_state.hpp>
 #include <ssh/async/processing_strand.hpp>
 #include <ssh/async/transfer_context.hpp>
+#include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
 
 #include <ids/ids.hpp>
 
-#include <optional>
+#include <libssh/sftp.h>
+
 #include <expected>
+#include <memory>
+#include <optional>
+#include <system_error>
 
 class Operation
 {
@@ -159,10 +164,82 @@ class Operation
         return std::unexpected(error_.value());
     }
 
+  public:
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error remoteMoveError(SecureShell::SftpError error)
+    {
+        if (error.sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+    }
+
+    /**
+     * @brief The error of a finished transfer that could not be moved into place on this machine: FileExists when the
+     *        destination exists and may not be replaced.
+     */
+    static Error localMoveError(std::error_code error)
+    {
+        if (error == std::errc::file_exists)
+            return Error{.type = ErrorType::FileExists};
+        return Error{.type = ErrorType::RenameFailure};
+    }
+
   protected:
     void enterState(OperationState newState)
     {
         state_ = newState;
+    }
+
+    /**
+     * @brief The operation completed, failed or was canceled.
+     */
+    bool hasEnded() const noexcept
+    {
+        return state_ >= OperationState::Completed;
+    }
+
+    /**
+     * @brief The session behind @p session for one work step, none once its channel was closed or is closing.
+     *        Operations hold their session weakly and lock it per step, so a closed channel ends them instead of
+     *        leaving them a dangling session.
+     */
+    static std::shared_ptr<SecureShell::SftpSession> openSession(std::weak_ptr<SecureShell::SftpSession> const& session)
+    {
+        auto locked = session.lock();
+        if (!locked || !locked->strand() || locked->strand()->isFinalized())
+            return nullptr;
+        return locked;
+    }
+
+    /**
+     * @brief The processing strand of @p session, none once its channel was closed or is closing. It stays valid
+     *        until the channel is closed, which happens on the queue's strand.
+     */
+    static SecureShell::ProcessingStrand* strandOf(std::weak_ptr<SecureShell::SftpSession> const& session)
+    {
+        const auto locked = openSession(session);
+        return locked ? locked->strand() : nullptr;
+    }
+
+    /**
+     * @brief The error of an operation whose SFTP channel was closed before it ended.
+     */
+    static Error channelClosedError()
+    {
+        return Error{.type = ErrorType::ChannelClosed, .extraInfo = "The SFTP channel was closed"};
+    }
+
+    /**
+     * @brief Waits until every task queued on @p strand so far has run, so none of them outlives the operation that
+     *        queued it. Returns at once on the processing thread itself and on a finalized strand.
+     */
+    static void waitForStrandTasks(SecureShell::ProcessingStrand* strand)
+    {
+        if (strand && !strand->withinProcessingThread())
+            strand->pushPromiseTask([]() {}).wait();
     }
 
     /**

@@ -1,9 +1,13 @@
 #include <utility/process_temporary_directory.hpp>
+#include "test_case_convert.hpp"
 #include "test_command_template.hpp"
 #include "test_directory_traversal.hpp"
 #include "test_echo_suppressor.hpp"
+#include "test_error_message.hpp"
 #include "test_fuzzy_search.hpp"
+#include "test_json_utf8.hpp"
 #include "test_keyed_diff.hpp"
+#include "test_lifetime_token.hpp"
 #include "test_localized_message.hpp"
 #include "test_move_to_front.hpp"
 #include "test_permissions.hpp"

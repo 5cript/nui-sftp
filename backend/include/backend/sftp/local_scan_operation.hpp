@@ -2,6 +2,7 @@
 
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_walkers.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -13,6 +14,7 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <unordered_set>
 #include <vector>
 #include <memory>
 
@@ -79,14 +81,7 @@ class LocalScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(std::move(scan));
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withFlatWalkerDo(*this, walker_, std::forward<decltype(fn)>(fn));
     }
 
     /**
@@ -95,37 +90,26 @@ class LocalScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(
-                std::move(scan),
-                recursive_,
-                [](Error const& error)
-                {
-                    return error.type == ErrorType::DirectoryUnreadable;
-                },
-                /*requireLocalNames=*/false,
-                excludedSuffixes_
-            );
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withTreeWalkerDo(
+            *this, walker_, recursive_, /*requireLocalNames=*/false, excludedSuffixes_, std::forward<decltype(fn)>(fn)
+        );
     }
 
     /**
      * @brief Eject the scanned directory entries. Careful!: The internal list is moved out.
-     *        Only valid when @ref buildsTree() is false.
+     *        Only valid when @ref buildsTree() is false. A directory that could not be listed is kept as an entry
+     *        of unknown type, which no consumer creates, see @ref unreadableDirectories.
      */
     std::vector<SharedData::DirectoryEntry> ejectEntries()
     {
-        return withWalkerDo(
+        auto entries = withWalkerDo(
             [](auto& walker)
             {
                 return std::move(walker).ejectEntries();
             }
         );
+        markUnreadable(entries);
+        return entries;
     }
 
     /**
@@ -137,24 +121,26 @@ class LocalScanOperation : public Operation
         return withWalkerDo(
             [this](auto& walker)
             {
-                std::vector<std::string> paths;
-                auto root = localPath_.toUtf8();
-                if (!root.ends_with('/'))
-                    root.push_back('/');
-                for (auto const& entry : walker.rejectedEntries())
-                    paths.push_back(root + walker.describeRejected(entry));
-                return paths;
+                return ScanWalkers::rejectedPaths(walker, localPath_.toUtf8());
             }
         );
     }
 
     /**
-     * @brief Full paths of directories below the root that could not be listed. Flat scans only, they are left out
-     *        of the entries; the tree of a sync scan keeps them as unreadable nodes.
+     * @brief Full paths of directories below the root that could not be listed. Flat scans only, their entries are
+     *        never created; the tree of a sync scan keeps them as unreadable nodes.
      */
     std::vector<std::string> const& unreadableDirectories() const noexcept
     {
         return unreadableDirectories_;
+    }
+
+    /**
+     * @brief Full paths of links and junctions a flat scan on Windows leaves out, they are not uploaded from there.
+     */
+    std::vector<std::string> const& skippedLinks() const noexcept
+    {
+        return skippedLinks_;
     }
 
     /**
@@ -193,8 +179,16 @@ class LocalScanOperation : public Operation
         std::error_code const& errorCode
     );
 
+    /**
+     * @brief Gives the entries of @ref unreadableDirectories an unknown type.
+     */
+    void markUnreadable(std::vector<SharedData::DirectoryEntry>& entries) const;
+
   private:
     std::vector<std::string> unreadableDirectories_{};
+    /** @brief The unreadable directories below the root, as relative paths. */
+    std::unordered_set<std::string> unreadableRelatives_{};
+    std::vector<std::string> skippedLinks_{};
     Paths::LocalPath localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

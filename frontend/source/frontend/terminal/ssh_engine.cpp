@@ -99,6 +99,8 @@ void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool byLo
     Log::info("Disconnecting session: {}", impl_->sshSessionId.value());
     if (!byLossOfConnection)
     {
+        Nui::val parameters = Nui::val::object();
+        parameters.set("sessionId", impl_->sshSessionId.value());
         Nui::RpcClient::callWithBackChannel(
             "SessionManager::disconnect",
             [onDisconnect = std::move(onDisconnect)](Nui::val)
@@ -107,7 +109,7 @@ void SshTerminalEngine::disconnect(std::function<void()> onDisconnect, bool byLo
                 Log::info("Frontend SshEngine: Disconnected");
                 onDisconnect();
             },
-            impl_->sshSessionId.value()
+            parameters
         );
     }
     else

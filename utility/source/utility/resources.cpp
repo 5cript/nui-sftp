@@ -1,6 +1,7 @@
 #include <utility/resources.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
 #include <constants/persistence.hpp>
+#include <paths/native.hpp>
 #ifndef NDEBUG
 #    include <build_environment.hpp>
 #endif
@@ -59,10 +60,11 @@ namespace
         const auto& seg = segments[index];
         if (!hasGlobChars(seg))
         {
-            const auto next = currentDir / seg;
+            const auto nativeSegment = Paths::nativeFromUtf8(seg);
+            const auto next = currentDir / nativeSegment;
             std::error_code ec;
             if (std::filesystem::exists(next, ec))
-                matchPatternInDirImpl(next, segments, index + 1, relative / seg, results);
+                matchPatternInDirImpl(next, segments, index + 1, relative / nativeSegment, results);
         }
         else
         {
@@ -71,9 +73,11 @@ namespace
                 return;
             for (const auto& entry : std::filesystem::directory_iterator(currentDir, ec))
             {
-                const auto name = entry.path().filename().string();
+                const auto name = Paths::nativeToUtf8(entry.path().filename());
                 if (segmentMatchesPattern(name, seg))
-                    matchPatternInDirImpl(entry.path(), segments, index + 1, relative / name, results);
+                    matchPatternInDirImpl(
+                        entry.path(), segments, index + 1, relative / entry.path().filename(), results
+                    );
             }
         }
     }
@@ -83,8 +87,8 @@ namespace
         std::vector<std::filesystem::path> searchPaths;
 
 #ifndef NDEBUG
-        searchPaths.push_back(std::filesystem::path{SOURCE_DIR});
-        searchPaths.push_back(std::filesystem::path{SOURCE_DIR} / "static");
+        searchPaths.push_back(Paths::nativeFromUtf8(SOURCE_DIR));
+        searchPaths.push_back(Paths::nativeFromUtf8(SOURCE_DIR) / "static");
 #endif
         searchPaths.push_back(relativeRoot);
         searchPaths.push_back(
@@ -161,7 +165,7 @@ bool pointsToWithinDir(std::filesystem::path const& relativeRoot, std::filesyste
 {
     // make absolute and check if it starts with relativeRoot
     const auto absPath = std::filesystem::absolute(path);
-    return absPath.string().starts_with(relativeRoot.string());
+    return Paths::nativeToUtf8(absPath).starts_with(Paths::nativeToUtf8(relativeRoot));
 }
 
 std::vector<std::filesystem::path> getThemeDirs(std::filesystem::path const& relativeRoot)
@@ -175,12 +179,12 @@ matchPatternInDir(std::filesystem::path const& baseDir, std::filesystem::path co
     std::vector<std::string> segments;
     for (auto const& part : relativePattern)
     {
-        const auto s = part.string();
+        const auto s = Paths::nativeToUtf8(part);
         if (!s.empty() && s != "." && s != "/" && s != "\\")
             segments.push_back(s);
     }
     std::vector<std::filesystem::path> results;
-    matchPatternInDirImpl(baseDir.generic_string(), segments, 0, {}, results);
+    matchPatternInDirImpl(baseDir, segments, 0, {}, results);
     return results;
 }
 
@@ -195,7 +199,7 @@ std::vector<std::filesystem::path> findFilesInSearchPaths(
     {
         for (auto const& relPath : matchPatternInDir(searchPath, relativePattern))
         {
-            if (seen.insert(relPath.generic_string()).second)
+            if (seen.insert(Paths::nativeToUtf8(relPath)).second)
                 result.push_back(searchPath / relPath);
         }
     }
@@ -231,7 +235,7 @@ mapUrlToFile(std::filesystem::path const& resourceDir, std::string const& urlPat
     const auto path = [&]() -> std::optional<std::filesystem::path>
     {
         // make path relative to / to avoid directory traversal
-        const auto relative = std::filesystem::relative(urlPathString, "/");
+        const auto relative = std::filesystem::relative(Paths::nativeFromUtf8(urlPathString), "/");
 
         if (endsWith(".css") && relative.parent_path().filename() == "themes")
             return firstOf(findFilesInSearchPaths(getThemeDirs(resourceDir), relative.filename()));

@@ -19,7 +19,6 @@ class RpcFilesystem : public RpcHelper::StrandRpc
     );
 
   private:
-    void registerRemove();
     void registerRemoveMultiple();
     void registerRename();
     void registerListFiles();

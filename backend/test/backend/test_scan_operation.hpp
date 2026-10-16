@@ -62,14 +62,14 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        ScanOperation operation{*sftp, {}};
+        ScanOperation operation{sftp, {}};
     }
 
     TEST_F(ScanOperationTests, ScanOperationTypeIsScan)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        ScanOperation operation{*sftp, {}};
+        ScanOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::Scan);
     }
 
@@ -77,7 +77,7 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        ScanOperation operation{*sftp, {}};
+        ScanOperation operation{sftp, {}};
         EXPECT_TRUE(operation.isBarrier());
     }
 
@@ -87,11 +87,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -106,11 +107,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test"),
                 .recursive = false,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -128,11 +130,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test"),
                 .recursive = true,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -151,11 +154,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test"),
                 .recursive = false,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -186,11 +190,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/Documents"),
                 .recursive = true,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -207,15 +212,17 @@ namespace Test
 
         int callbackInvocations = 0;
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .progressCallback =
-                    [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t) {
-                        ++callbackInvocations;
-                    },
+                    [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t)
+                {
+                    ++callbackInvocations;
+                },
                 .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
         EXPECT_GT(callbackInvocations, 0);
@@ -227,11 +234,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
-            }};
+            }
+        };
 
         std::expected<ScanOperation::WorkStatus, ScanOperation::Error> workResult{ScanOperation::WorkStatus::MoreWork};
         for (int iteration = 0; iteration < 100; ++iteration)
@@ -255,11 +263,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .recursive = false,
-            }};
+            }
+        };
 
         std::expected<ScanOperation::WorkStatus, ScanOperation::Error> workResult{ScanOperation::WorkStatus::MoreWork};
         for (int iteration = 0; iteration < 100; ++iteration)
@@ -281,11 +290,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -300,11 +310,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
-            }};
+            }
+        };
 
         // Drive the state machine until it fails.
         for (int iteration = 0; iteration < 10; ++iteration)
@@ -325,11 +336,12 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test"),
                 .recursive = true,
-            }};
+            }
+        };
 
         // Kick into Running state.
         auto firstWork = operation.work();
@@ -350,12 +362,13 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         ScanOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
                 .ignoreHidden = true,
-            }};
+            }
+        };
 
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
@@ -370,7 +383,7 @@ namespace Test
         ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        ScanOperation operation{*sftp, {.remotePath = remote("/home/test"), .buildTree = true}};
+        ScanOperation operation{sftp, {.remotePath = remote("/home/test"), .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
 
         const auto tree = operation.ejectScanTree();
@@ -390,7 +403,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         // Transfers and deletes use flat scans, an incomplete listing must fail them.
-        ScanOperation operation{*sftp, {.remotePath = remote("/home/test")}};
+        ScanOperation operation{sftp, {.remotePath = remote("/home/test")}};
         std::expected<ScanOperation::WorkStatus, ScanOperation::Error> result{};
         for (int iteration = 0; iteration < 100 && result.has_value() &&
              result.value() != ScanOperation::WorkStatus::Complete;
@@ -406,7 +419,7 @@ namespace Test
         ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test/Documents"}, {"name", ".."}}));
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        ScanOperation flat{*sftp, {.remotePath = remote("/home/test/Documents")}};
+        ScanOperation flat{sftp, {.remotePath = remote("/home/test/Documents")}};
         ASSERT_EQ(runScanToCompletion(flat), ScanOperation::WorkStatus::Complete);
         const auto rejected = flat.rejectedPaths();
         ASSERT_EQ(rejected.size(), 1u);
@@ -414,7 +427,7 @@ namespace Test
         for (auto const& entry : flat.ejectEntries())
             EXPECT_NE(entry.name, "x/..");
 
-        ScanOperation tree{*sftp, {.remotePath = remote("/home/test/Documents"), .buildTree = true}};
+        ScanOperation tree{sftp, {.remotePath = remote("/home/test/Documents"), .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(tree), ScanOperation::WorkStatus::Complete);
         const auto root = tree.ejectScanTree();
         const auto hostile = std::ranges::find_if(root.children, [](auto const& child) {

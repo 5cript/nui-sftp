@@ -1,6 +1,9 @@
 #include <backend/process/process.hpp>
 
 #include <backend/process/boost_process.hpp>
+#include <paths/native.hpp>
+#include <paths/utf8.hpp>
+
 #include <boost/asio.hpp>
 
 #include <mutex>
@@ -8,6 +11,9 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <ranges>
+#include <string>
+#include <vector>
 
 namespace bp2 = boost::process::v2;
 
@@ -303,12 +309,17 @@ void Process::spawn(
     {
         if (key.empty() || value.empty())
             continue;
+#ifdef _WIN32
+        env.emplace(Paths::utf8ToWide(key), Paths::utf8ToWide(value));
+#else
         env.emplace(key, value);
+#endif
     }
 
-    auto executable = bp2::environment::find_executable(processName, env);
+    const boost::filesystem::path name{Paths::nativeFromUtf8(processName).native()};
+    auto executable = bp2::environment::find_executable(name, env);
     if (executable.empty())
-        executable = processName;
+        executable = name;
 #ifdef _WIN32
     // cmd.exe reads its own path as given: in "C:/Windows/System32/cmd.exe" it takes "/c" as a switch and runs
     // "md.exe" instead of starting a shell.
@@ -326,10 +337,18 @@ void Process::spawn(
         // The app is a GUI program without a console, a console child would open a window of its own.
         bp2::windows::default_launcher windowlessLauncher{};
         windowlessLauncher.creation_flags |= CREATE_NO_WINDOW;
+        const auto wideArguments = arguments |
+            std::views::transform(
+                [](std::string const& argument)
+                {
+                    return Paths::utf8ToWide(argument);
+                }
+            ) |
+            std::ranges::to<std::vector>();
         impl_->child = std::make_unique<bp2::process>(windowlessLauncher(
             impl_->executor,
             executable,
-            arguments,
+            wideArguments,
             bp2::process_environment{env},
             bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
         ));

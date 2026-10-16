@@ -14,7 +14,6 @@
 #include <persistence/state/localization_options.hpp>
 #include <persistence/state/log_options.hpp>
 
-#include <cstdint>
 #include <map>
 #include <string>
 
@@ -59,11 +58,6 @@ namespace Persistence
         LocalizationOptions localizationOptions{};
         std::optional<SshSessionOptions> lastDirectConnect{};
         std::optional<InheritableReferences> lastDirectConnectInheritables{};
-        /**
-         * @brief When each sync pair (session, local root and remote root) was last synchronized, in seconds since
-         *        the epoch. Sync compares modification times against it to see which side changed since.
-         */
-        std::optional<std::map<std::string, std::uint64_t>> syncBaselines{};
 
         State fullyResolve() const;
 
@@ -95,7 +89,6 @@ namespace Persistence
             fileTrackingOptions,
             localFilesystemOptions,
             lastDirectConnect,
-            lastDirectConnectInheritables,
-            syncBaselines)
+            lastDirectConnectInheritables)
     )
 }

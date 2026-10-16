@@ -1,32 +1,36 @@
 #include <backend/existence_check.hpp>
+#include <backend/rpc_path_parameters.hpp>
+#include <shared_data/sync/case_fold.hpp>
+#include <utility/error_message.hpp>
 #include <paths/paths.hpp>
 
 #include <fmt/format.h>
 #include <libssh/sftp.h>
 
 #include <filesystem>
+#include <optional>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 
 std::expected<std::vector<bool>, std::string> localPathsExist(std::vector<std::string> const& paths)
 {
+    const auto localPaths = RpcHelper::parseLocalPaths(paths);
+    if (!localPaths)
+        return std::unexpected(localPaths.error());
     std::vector<bool> results;
-    results.reserve(paths.size());
-    for (auto const& pathUtf8 : paths)
+    results.reserve(localPaths->size());
+    for (auto const& path : *localPaths)
     {
-        const auto path = Paths::LocalPath::fromUtf8(pathUtf8);
-        if (!path)
-            return std::unexpected(path.error().toString());
         std::error_code ec;
-        const auto status = std::filesystem::symlink_status(path->native(), ec);
+        const auto status = std::filesystem::symlink_status(path.native(), ec);
         if (status.type() == std::filesystem::file_type::not_found)
         {
             results.push_back(false);
             continue;
         }
         if (ec)
-            return std::unexpected(fmt::format("'{}': {}", pathUtf8, ec.message()));
+            return std::unexpected(fmt::format("'{}': {}", path.toUtf8(), Utility::errorMessage(ec)));
         results.push_back(true);
     }
     return results;
@@ -34,79 +38,104 @@ std::expected<std::vector<bool>, std::string> localPathsExist(std::vector<std::s
 
 namespace
 {
-    // Below this many paths a stat per path is cheaper than reading a potentially huge directory in full.
-    constexpr std::size_t listingThreshold = 10;
-
-    std::expected<std::vector<bool>, std::string> remotePathsExistByStat(
+    /**
+     * @brief Whether @p path exists, nothing but "no such file" counts as absent.
+     */
+    std::expected<bool, std::string> remotePathExists(
         SecureShell::SftpSession& session,
-        std::vector<Paths::RemotePath> const& paths,
+        Paths::RemotePath const& path,
         std::chrono::milliseconds timeout
     )
     {
-        std::vector<bool> results;
-        results.reserve(paths.size());
-        for (auto const& path : paths)
-        {
-            auto future = session.lstat(path);
-            if (future.wait_for(timeout) != std::future_status::ready)
-                return std::unexpected(fmt::format("'{}': stat timed out", path.value()));
-            const auto result = future.get();
-            if (!result && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
-                return std::unexpected(fmt::format("'{}': {}", path.value(), result.error().toString()));
-            results.push_back(result.has_value());
-        }
-        return results;
+        auto future = session.lstat(path);
+        if (future.wait_for(timeout) != std::future_status::ready)
+            return std::unexpected(fmt::format("'{}': stat timed out", path.value()));
+        const auto result = future.get();
+        if (!result && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+            return std::unexpected(fmt::format("'{}': {}", path.value(), result.error().toString()));
+        return result.has_value();
     }
 
     /**
-     * @brief One listing per parent directory instead of a stat per path. A parent that does not exist yet holds
-     *        nothing.
+     * @brief The names in @p parent, without resolving symlinks. Nothing for a directory that cannot be listed
+     *        because of its permissions, like a drop box; an empty set for one that does not exist yet.
      */
-    std::expected<std::vector<bool>, std::string> remotePathsExistByListing(
+    std::expected<std::optional<std::unordered_set<std::string>>, std::string>
+    listNames(SecureShell::SftpSession& session, Paths::RemotePath const& parent, std::chrono::milliseconds timeout)
+    {
+        auto future = session.listDirectory(parent, /*resolveLinks=*/false);
+        if (future.wait_for(timeout) != std::future_status::ready)
+            return std::unexpected(fmt::format("'{}': listing timed out", parent.value()));
+        const auto result = future.get();
+        if (!result)
+        {
+            if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+                return std::unordered_set<std::string>{};
+            if (result.error().sftpError == SSH_FX_PERMISSION_DENIED)
+                return std::nullopt;
+            return std::unexpected(fmt::format("'{}': {}", parent.value(), result.error().toString()));
+        }
+        std::unordered_set<std::string> names;
+        names.reserve(result->size());
+        for (auto const& entry : *result)
+            names.insert(entry.name);
+        return names;
+    }
+
+    /**
+     * @brief Whether the queried children of one parent exist, from one listing of it. A name the listing lacks
+     *        while it holds a case or normalization variant is looked up, since the server may fold names.
+     */
+    std::expected<void, std::string> checkByListing(
         SecureShell::SftpSession& session,
+        Paths::RemotePath const& parent,
         std::vector<Paths::RemotePath> const& paths,
-        std::chrono::milliseconds timeout
+        std::vector<std::size_t> const& indices,
+        std::chrono::milliseconds timeout,
+        std::vector<bool>& results
     )
     {
-        const auto listParent =
-            [&session, timeout](Paths::RemotePath const& parent) -> std::expected<std::unordered_set<std::string>, std::string>
+        auto names = listNames(session, parent, timeout);
+        if (!names)
+            return std::unexpected(names.error());
+        if (!*names)
         {
-            auto future = session.listDirectory(parent);
-            if (future.wait_for(timeout) != std::future_status::ready)
-                return std::unexpected(fmt::format("'{}': listing timed out", parent.value()));
-            const auto result = future.get();
-            if (!result)
+            for (const auto index : indices)
             {
-                if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
-                    return std::unordered_set<std::string>{};
-                return std::unexpected(fmt::format("'{}': {}", parent.value(), result.error().toString()));
+                auto exists = remotePathExists(session, paths[index], timeout);
+                if (!exists)
+                    return std::unexpected(exists.error());
+                results[index] = *exists;
             }
-            std::unordered_set<std::string> names;
-            names.reserve(result->size());
-            for (auto const& entry : *result)
-                names.insert(entry.name);
-            return names;
-        };
-
-        std::unordered_map<std::string, std::unordered_set<std::string>> listingByParent;
-        std::vector<bool> results;
-        results.reserve(paths.size());
-        for (auto const& path : paths)
-        {
-            const auto parent = path.parent();
-            if (!parent)
-                return std::unexpected(fmt::format("'{}' has no parent directory", path.value()));
-            auto iter = listingByParent.find(parent->value());
-            if (iter == listingByParent.end())
-            {
-                auto listing = listParent(*parent);
-                if (!listing)
-                    return std::unexpected(listing.error());
-                iter = listingByParent.emplace(parent->value(), *std::move(listing)).first;
-            }
-            results.push_back(iter->second.contains(std::string{path.filename()->view()}));
+            return {};
         }
-        return results;
+
+        std::optional<std::unordered_set<std::string>> foldedNames{};
+        for (const auto index : indices)
+        {
+            const auto name = std::string{paths[index].filename()->view()};
+            if ((*names)->contains(name))
+            {
+                results[index] = true;
+                continue;
+            }
+            if (!foldedNames)
+            {
+                foldedNames.emplace();
+                for (auto const& listed : **names)
+                    foldedNames->insert(SharedData::Sync::caseFoldedName(listed));
+            }
+            if (!foldedNames->contains(SharedData::Sync::caseFoldedName(name)))
+            {
+                results[index] = false;
+                continue;
+            }
+            auto exists = remotePathExists(session, paths[index], timeout);
+            if (!exists)
+                return std::unexpected(exists.error());
+            results[index] = *exists;
+        }
+        return {};
     }
 }
 
@@ -116,16 +145,40 @@ std::expected<std::vector<bool>, std::string> remotePathsExist(
     std::chrono::milliseconds timeout
 )
 {
-    std::vector<Paths::RemotePath> remotePaths;
-    remotePaths.reserve(paths.size());
-    for (auto const& path : paths)
+    const auto parsed = RpcHelper::parseRemotePaths(paths);
+    if (!parsed)
+        return std::unexpected(parsed.error());
+    auto const& remotePaths = *parsed;
+    // Parents in the order they first appear, with the indices of their queried children.
+    std::vector<std::pair<Paths::RemotePath, std::vector<std::size_t>>> byParent;
+    std::unordered_map<std::string, std::size_t> parentIndex;
+    for (std::size_t index = 0; index < remotePaths.size(); ++index)
     {
-        auto remotePath = Paths::RemotePath::make(path);
-        if (!remotePath)
-            return std::unexpected(remotePath.error().toString());
-        remotePaths.push_back(*std::move(remotePath));
+        const auto parent = remotePaths[index].parent();
+        if (!parent)
+            return std::unexpected(fmt::format("'{}' has no parent directory", remotePaths[index].value()));
+        const auto [found, inserted] = parentIndex.try_emplace(parent->value(), byParent.size());
+        if (inserted)
+            byParent.emplace_back(*parent, std::vector<std::size_t>{});
+        byParent[found->second].second.push_back(index);
     }
-    if (remotePaths.size() < listingThreshold)
-        return remotePathsExistByStat(session, remotePaths, timeout);
-    return remotePathsExistByListing(session, remotePaths, timeout);
+
+    std::vector<bool> results(remotePaths.size(), false);
+    for (auto const& [parent, indices] : byParent)
+    {
+        if (indices.size() >= remoteListingThreshold)
+        {
+            if (auto checked = checkByListing(session, parent, remotePaths, indices, timeout, results); !checked)
+                return std::unexpected(checked.error());
+            continue;
+        }
+        for (const auto index : indices)
+        {
+            auto exists = remotePathExists(session, remotePaths[index], timeout);
+            if (!exists)
+                return std::unexpected(exists.error());
+            results[index] = *exists;
+        }
+    }
+    return results;
 }

@@ -8,6 +8,7 @@
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -42,11 +43,17 @@ class UploadOperation : public Operation
          *         subtrees whose remote structure may not exist yet.
          */
         bool createMissingDirectories{false};
+        /**
+         * @brief What a sync compare saw at the destination. The transfer then fails with ChangedSinceCompare
+         *        instead of replacing a destination that no longer holds it. A source that changed since is still
+         *        transferred as it is now. Unset outside of sync.
+         */
+        std::optional<SharedData::ComparedState> comparedDestination{std::nullopt};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
 
-    UploadOperation(SecureShell::SftpSession& sftp, UploadOperationOptions options);
+    UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options);
     ~UploadOperation() override;
     UploadOperation(UploadOperation const&) = delete;
     UploadOperation(UploadOperation&&) = delete;
@@ -107,20 +114,26 @@ class UploadOperation : public Operation
     SecureShell::IFileStream::SignedSizeType commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes);
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand();
+    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
 
-    std::expected<void, Error> openOrAdoptFileInStrand();
+    /**
+     * @brief Checks the local source and opens it, or for a link that is not followed only notes it is one: a
+     *        regular file or a link, no other type, that exists.
+     */
+    std::expected<void, Error> openLocalSource();
+
+    std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
-    std::expected<void, Error> finalizeInStrand();
+    std::expected<void, Error> finalizeInStrand(SecureShell::SftpSession& sftp);
 
     /**
      * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
      */
-    bool tempBelongsToSourceInStrand(std::uint64_t tempSize);
+    bool tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize);
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
@@ -129,14 +142,20 @@ class UploadOperation : public Operation
      *  the parent, so deeply-nested missing paths are created in one pass.
      *  Must be called from within the processing thread.
      */
-    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir);
+    std::expected<void, Error>
+    ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
+
+    /**
+     * @brief Gives the remote temp file the modification time of the local file. A failure is only logged.
+     */
+    void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
 
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     UploadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */

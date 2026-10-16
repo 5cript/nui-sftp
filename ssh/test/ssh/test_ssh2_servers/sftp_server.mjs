@@ -169,6 +169,10 @@ const faults = {
     failRenames: false,
     // Renames that still succeed before failRenames applies, null for none.
     renamesBeforeFailure: null,
+    // Renames that fail before renames succeed again, null for all.
+    renamesFailing: null,
+    failHardlinks: false,
+    failRemoves: false,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
     bytesRead: 0,
@@ -184,6 +188,11 @@ const renameFails = () => {
     if (faults.renamesBeforeFailure !== null && faults.renamesBeforeFailure > 0) {
         --faults.renamesBeforeFailure;
         return false;
+    }
+    if (faults.renamesFailing !== null) {
+        if (faults.renamesFailing === 0)
+            return false;
+        --faults.renamesFailing;
     }
     return true;
 };
@@ -233,6 +242,31 @@ const advertiseExtensions = (sftpStream) => {
         }
         return originalChannelData.call(protocol, id, data);
     };
+};
+
+// Resolves every symlink on the way like realpath, undefined when a component does not exist.
+const canonicalize = (path, depth = 0) => {
+    if (depth > 40)
+        return undefined;
+    const parts = path.split('/').filter(part => part.length > 0 && part !== '.');
+    let current = '/';
+    for (let index = 0; index < parts.length; ++index) {
+        if (parts[index] === '..') {
+            current = pathUtil.posix.dirname(current);
+            continue;
+        }
+        const candidate = pathUtil.posix.join(current, parts[index]);
+        const entry = fakeFilesystem.find(candidate);
+        if (entry === undefined)
+            return undefined;
+        if (entry.type === 'symlink') {
+            const target = entry.target.startsWith('/') ? entry.target : pathUtil.posix.join(current, entry.target);
+            const rest = parts.slice(index + 1).join('/');
+            return canonicalize(rest.length > 0 ? `${target}/${rest}` : target, depth + 1);
+        }
+        current = candidate;
+    }
+    return current;
 };
 
 const resolveFileName = (path) => {
@@ -472,19 +506,18 @@ const server = new Server({
                         return sftpStream.name(reqid, [{ filename, longname: filename, attrs: {} }]);
                     }
 
-                    path = resolveFileName(path);
-
-                    const result = fakeFilesystem.find(path);
+                    path = canonicalize(resolveFileName(path));
+                    const result = path === undefined ? undefined : fakeFilesystem.find(path);
 
                     if (result === undefined) {
                         logMessage(`Path not found: ${path}`);
                         return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                     }
 
-                    logMessage('REALPATH', result.path(), result);
+                    logMessage('REALPATH', path, result);
 
                     const name = [{
-                        filename: result.path(),
+                        filename: path,
                         longname: makeLongName(result),
                         attrs: result.stat
                     }];
@@ -567,7 +600,8 @@ const server = new Server({
                             return {
                                 filename: child.name,
                                 longname: makeLongName(child),
-                                attrs: child.stat
+                                attrs: child.stat,
+                                rawName: child.rawName
                             };
                         });
                     }
@@ -577,7 +611,7 @@ const server = new Server({
                         logMessage(`Sending ${entries.length} entries`);
                         logMessage(entries);
                         logMessage(`Remaining entries: ${handle.remainingReadDirEntries.length}`);
-                        sftpStream.name(reqid, entries);
+                        sendNames(sftpStream, reqid, entries);
                         return;
                     }
 
@@ -597,6 +631,10 @@ const server = new Server({
                     if (result.type === 'directory') {
                         logMessage('Cannot remove directories');
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+                    if (faults.failRemoves) {
+                        logMessage('Fault: failing REMOVE');
+                        return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
                     }
 
                     result.parent.removeChild(result.name);
@@ -663,6 +701,10 @@ const server = new Server({
                     }
 
                     if (name === 'hardlink@openssh.com') {
+                        if (faults.failHardlinks) {
+                            logMessage('Fault: failing hardlink');
+                            return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                        }
                         if (newResult !== undefined || oldResult.type !== 'file')
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                         const parent = fakeFilesystem.find(pathUtil.dirname(newPath));
@@ -919,6 +961,14 @@ cli.on('dropAfterBytes', (command) => {
 cli.on('failRenames', (command) => {
     faults.failRenames = command.enabled !== false;
     faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
+    faults.renamesFailing = command.count === undefined ? null : Number(command.count);
+});
+// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks.
+cli.on('failHardlinks', (command) => {
+    faults.failHardlinks = command.enabled !== false;
+});
+cli.on('failRemoves', (command) => {
+    faults.failRemoves = command.enabled !== false;
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);
@@ -931,14 +981,45 @@ cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });
 // Inserts an entry under a raw name that may be invalid as a path segment, like '..' or 'a/b'.
+/**
+ * ssh2 writes names as UTF-8 strings, so a name whose bytes are no UTF-8 is listed under its ASCII placeholder of the
+ * same length and its bytes are put into the NAME packet in place of the placeholder.
+ */
+function sendNames(sftpStream, reqid, entries) {
+    const rawEntries = entries.filter((entry) => entry.rawName !== undefined);
+    if (rawEntries.length === 0)
+        return sftpStream.name(reqid, entries);
+    const protocol = sftpStream._protocol;
+    const chunks = [];
+    sftpStream._protocol = { channelData: (_id, data) => chunks.push(Buffer.from(data)) };
+    try {
+        sftpStream.name(reqid, entries);
+    } finally {
+        sftpStream._protocol = protocol;
+    }
+    const packet = Buffer.concat(chunks);
+    for (const entry of rawEntries) {
+        const at = packet.indexOf(Buffer.from(entry.filename, 'latin1'));
+        if (at >= 0)
+            entry.rawName.copy(packet, at);
+    }
+    protocol.channelData(sftpStream.outgoing.id, packet);
+}
+
 cli.on('rawName', (command) => {
     const parent = fakeFilesystem.find(command.directory);
     if (parent === undefined || parent.type !== 'directory')
         return;
-    if (command.type === 'directory')
-        parent.insert(directory({ name: command.name }, []));
-    else
-        parent.insert(file(command.name, command.content ?? ''));
+    // nameHex gives bytes that need not be UTF-8, they are listed through a placeholder of the same length.
+    const rawName = command.nameHex === undefined ? undefined : Buffer.from(command.nameHex, 'hex');
+    const name = rawName === undefined
+        ? command.name
+        : Array.from({ length: rawName.length }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
+    const node = command.type === 'directory'
+        ? directory({ name }, [])
+        : file(name, command.content ?? '');
+    node.rawName = rawName;
+    parent.insert(node);
 });
 cli.on('createFile', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
@@ -949,13 +1030,14 @@ cli.on('createFile', (command) => {
     const content = command.size !== undefined
         ? Buffer.alloc(Number(command.size), command.fill ?? 'x')
         : (command.content ?? '');
-    parent.insert(file(name, content));
+    parent.insert(file(name, content, command.mode === undefined ? undefined : { mode: Number(command.mode) }));
 });
 cli.on('createDirectory', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
     if (parent === undefined || parent.type !== 'directory')
         return;
-    parent.insert(directory({ name: pathUtil.posix.basename(command.path) }, []));
+    const stat = command.mode === undefined ? undefined : { mode: Number(command.mode) };
+    parent.insert(directory({ name: pathUtil.posix.basename(command.path), stat }, []));
 });
 cli.on('createSymlink', (command) => {
     const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));

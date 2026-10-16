@@ -47,6 +47,8 @@ namespace SharedData
         ScanIncomplete,
         DirectoryUnreadable,
         InvalidName,
-        LinkInLocalPath
+        LinkInLocalPath,
+        ChannelClosed,
+        ChangedSinceCompare
     );
 }

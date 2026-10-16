@@ -2,7 +2,9 @@
 
 #include <backend/sftp/archive_upload_operation.hpp>
 #include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
+#include <utility/permissions.hpp>
 #include "real_server_tests.hpp"
 
 #include <expected>
@@ -82,6 +84,109 @@ namespace Test
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
     };
 
+    TEST_F(TransferFailureTests, RenameThatTimedOutRunsAfterTheOperationIsGone)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        std::promise<void> release{};
+        auto blocked = sftp->performPromise(
+            [released = release.get_future().share()]()
+            {
+                released.wait();
+            }
+        );
+        {
+            RenameOperation operation{
+                sftp,
+                {
+                    .sourcePath = remote("/home/test/file1.txt"),
+                    .destinationPath = remote("/home/test/moved.txt"),
+                    .futureTimeout = std::chrono::seconds{1},
+                }
+            };
+            const auto result = operation.work();
+            ASSERT_FALSE(result.has_value());
+            EXPECT_EQ(result.error().type, Operation::ErrorType::FutureTimeout);
+        }
+        release.set_value();
+        blocked.wait();
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/moved.txt"), "Fake file content");
+    }
+
+#ifndef _WIN32
+    TEST_F(TransferFailureTests, DownloadGetsItsPermissionsAndTimeBeforeItIsMovedIntoPlace)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/private.txt"}, {"content", "private"}, {"mode", 0640}}
+        ));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        struct Case
+        {
+            bool inheritPermissions;
+            std::optional<std::filesystem::perms> filePermissions;
+            std::filesystem::perms expected;
+        };
+        using std::filesystem::perms;
+        const std::vector<Case> cases{
+            {false, std::nullopt, Utility::newFilePermissions()},
+            {true, std::nullopt, (perms::owner_read | perms::owner_write | perms::group_read) & ~Utility::processUmask()},
+            {false, perms::owner_read | perms::owner_write, perms::owner_read | perms::owner_write},
+        };
+        for (std::size_t index = 0; index < cases.size(); ++index)
+        {
+            auto const& testCase = cases[index];
+            const auto localPath = localDirectory_.path() / fmt::format("private_{}.txt", index);
+            SharedData::DirectoryEntry entry{};
+            entry.name = "private.txt";
+            entry.type = SharedData::FileType::Regular;
+            entry.size = 7u;
+            entry.mtime = 1700000000u;
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/private.txt"),
+                    .localPath = toLocal(localPath),
+                    .inheritPermissions = testCase.inheritPermissions,
+                    .filePermissions = testCase.filePermissions,
+                    .entry = entry,
+                    .markAsDownloaded = false,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), "private");
+            EXPECT_EQ(std::filesystem::status(localPath).permissions(), testCase.expected) << "case " << index;
+            const auto modified = std::chrono::file_clock::to_sys(std::filesystem::last_write_time(localPath));
+            EXPECT_EQ(std::chrono::duration_cast<std::chrono::seconds>(modified.time_since_epoch()).count(), 1700000000);
+        }
+    }
+
+    TEST_F(TransferFailureTests, DownloadTempFileIsOnlyReadableByItsOwner)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = localDirectory_.path() / "large.txt";
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/large.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
+        ASSERT_TRUE(operation.prepare().has_value());
+        EXPECT_EQ(
+            std::filesystem::status(localPath.generic_string() + ".filepart").permissions(),
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+        );
+    }
+#endif
+
     TEST_F(TransferFailureTests, AsyncDownloadReadFailureKeepsExistingFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -92,7 +197,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -117,7 +222,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -142,7 +247,7 @@ namespace Test
         writeLocalFile(localPath, "original content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -171,7 +276,7 @@ namespace Test
             entry.size = 70000u;
 
             DownloadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/large.txt"),
                     .localPath = toLocal(localPath),
@@ -187,6 +292,91 @@ namespace Test
         }
     }
 
+    TEST_F(TransferFailureTests, ReservedDownloadOfFileShorterThanListedKeepsExistingFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        for (const bool bigFileOptimized : {false, true})
+        {
+            const auto localPath = localDirectory_.path() / fmt::format("reserved_{}.txt", bigFileOptimized);
+            writeLocalFile(localPath, "original content");
+
+            SharedData::DirectoryEntry entry{};
+            entry.name = "large.txt";
+            entry.type = SharedData::FileType::Regular;
+            entry.size = 70000u;
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/large.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    .reserveSpace = true,
+                    .bigFileOptimized = bigFileOptimized,
+                    .entry = entry,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << "bigFileOptimized: " << bigFileOptimized;
+            if (!bigFileOptimized)
+                EXPECT_EQ(result.error().type, Operation::ErrorType::SizeMismatch) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), "original content") << "bigFileOptimized: " << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, ReservedDownloadResumesFromPartialFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        for (const bool bigFileOptimized : {false, true})
+        {
+            const auto localPath = localDirectory_.path() / fmt::format("resumed_{}.txt", bigFileOptimized);
+            writeLocalFile(localPath.generic_string() + ".filepart", alphabet(65536).substr(0, 20000));
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/large.txt"),
+                    .localPath = toLocal(localPath),
+                    .reserveSpace = true,
+                    .tryContinue = true,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(readLocalFile(localPath), alphabet(65536)) << "bigFileOptimized: " << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, ReservedCompletePartialFileIsFinalized)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = localDirectory_.path() / "file1.txt";
+        writeLocalFile(localPath.generic_string() + ".filepart", "Fake file content");
+
+        DownloadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+                .reserveSpace = true,
+                .tryContinue = true,
+            }
+        };
+
+        const auto result = runToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
     TEST_F(TransferFailureTests, AsyncDownloadResumesFromPartialFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -196,7 +386,7 @@ namespace Test
         writeLocalFile(localPath.generic_string() + ".filepart", alphabet(65536).substr(0, 20000));
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/large.txt"),
                 .localPath = toLocal(localPath),
@@ -219,7 +409,7 @@ namespace Test
         writeLocalFile(localPath.generic_string() + ".filepart", "Fake file content");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -239,7 +429,7 @@ namespace Test
 
         const auto localPath = localDirectory_.path() / "followed.txt";
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/link_to_file1.txt"),
                 .localPath = toLocal(localPath),
@@ -263,7 +453,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(65536));
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -287,7 +477,7 @@ namespace Test
         writeLocalFile(localPath, "new content");
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -313,7 +503,7 @@ namespace Test
         writeLocalFile(localPath, content);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/resumed.txt"),
                 .localPath = toLocal(localPath),
@@ -339,7 +529,7 @@ namespace Test
         std::filesystem::create_symlink(outside, localPath.generic_string() + ".filepart");
 
         DownloadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/file1.txt"),
                 .localPath = toLocal(localPath),
@@ -365,7 +555,7 @@ namespace Test
             writeLocalFile(localPath, "new content");
 
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -394,7 +584,7 @@ namespace Test
             writeLocalFile(localPath, "new content");
 
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
@@ -405,6 +595,7 @@ namespace Test
             const auto result = runToEnd(operation);
             ASSERT_FALSE(result.has_value());
             EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content");
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>");
         }
     }
 
@@ -419,7 +610,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(4096));
 
         ArchiveUploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),
@@ -445,7 +636,7 @@ namespace Test
         writeLocalFile(localPath, alphabet(4096));
 
         ArchiveUploadOperation refused{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),
@@ -458,7 +649,7 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar"), "old archive");
 
         ArchiveUploadOperation replacing{
-            *sftp,
+            sftp,
             {
                 .localPaths = {toLocal(localPath)},
                 .remoteArchivePath = remote("/home/test/backup.tar"),

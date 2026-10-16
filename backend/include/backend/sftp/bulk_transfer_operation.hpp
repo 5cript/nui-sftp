@@ -1,10 +1,13 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/scan_phase.hpp>
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
+#include <shared_data/file_operations/operation_completed.hpp>
 #include <paths/paths.hpp>
 
 #include <chrono>
@@ -58,6 +61,8 @@ class BulkTransferOperation : public Operation
         Paths::LocalPath local{};
         /** @brief This entry's destination may be replaced even when the bulk's options do not allow it. */
         bool mayOverwrite{false};
+        /** @brief See SharedData::BulkUploadEntry::comparedDestination, kept by a resume. */
+        std::optional<SharedData::ComparedState> comparedDestination{};
     };
 
     ~BulkTransferOperation() override;
@@ -114,6 +119,8 @@ class BulkTransferOperation : public Operation
                 addRejectedEntries(finished.rejectedPaths());
                 if constexpr (requires { finished.unreadableDirectories(); })
                     addUnreadableDirectories(finished.unreadableDirectories());
+                if constexpr (requires { finished.skippedLinks(); })
+                    addSkippedLinks(finished.skippedLinks());
                 setScanResult(finished.ejectEntries(), scannedBytes);
             }
         );
@@ -132,6 +139,11 @@ class BulkTransferOperation : public Operation
     void addRejectedEntries(std::vector<std::string> const& paths);
 
     /**
+     * @brief Records links the scan left out as failed, they are not transferred.
+     */
+    void addSkippedLinks(std::vector<std::string> const& paths);
+
+    /**
      * @brief Records directories the scan could not list as failed, their content is not transferred.
      */
     void addUnreadableDirectories(std::vector<std::string> const& paths);
@@ -141,9 +153,51 @@ class BulkTransferOperation : public Operation
      */
     std::vector<std::pair<std::string, Error>> getFailed() const;
 
+    /**
+     * @brief The entries that were skipped by their index, and why.
+     */
+    std::vector<SharedData::IndexedFailure> const& indexedFailures() const noexcept
+    {
+        return indexedFailures_;
+    }
+
     std::size_t inFlightCount() const noexcept
     {
         return slots_.size();
+    }
+
+    /**
+     * @brief The entries are known: the scan delivered them or a flat list was set.
+     */
+    bool hasEntries() const noexcept
+    {
+        return entrySource_ != EntrySource::None;
+    }
+
+    /**
+     * @brief The indices of the entries a resume has to do again: every entry that was neither transferred, nor
+     *        created as a directory, nor skipped for its type. Failed and in flight entries are among them.
+     */
+    std::vector<std::size_t> unfinishedEntryIndices() const;
+
+    /**
+     * @brief Counts @p progress, what an earlier connection finished of this bulk, as done: its entries and bytes
+     *        are part of the totals and of the progress from the start. Call it after the entries are set.
+     */
+    void countEarlierProgress(BulkResumeProgress progress);
+
+    /**
+     * @brief What a resume of this bulk leaves out: the entries it finished, without the root of a tree, and the
+     *        bytes of their files, with what an earlier connection finished.
+     */
+    BulkResumeProgress finishedProgress() const;
+
+    /**
+     * @brief What an earlier connection finished of this bulk, see @ref countEarlierProgress.
+     */
+    BulkResumeProgress earlierProgress() const noexcept
+    {
+        return earlierProgress_;
     }
 
     std::uint64_t completedCount() const noexcept
@@ -157,10 +211,11 @@ class BulkTransferOperation : public Operation
     }
 
   protected:
-    BulkTransferOperation(SecureShell::SftpSession& sftp, CommonOptions common);
+    BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common);
 
     /**
-     * @brief Flat-list mode: every entry is a file, @p paths holds both of its ends (index aligned).
+     * @brief Flat-list mode: every entry is a file or a directory created without content, @p paths holds both of
+     *        its ends (index aligned). A directory that cannot be created fails only its own entry.
      */
     void setPrescannedEntries(
         std::vector<SharedData::DirectoryEntry> entries,
@@ -174,8 +229,8 @@ class BulkTransferOperation : public Operation
     }
 
     /**
-     * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots,
-     *        so an entry whose name the local side cannot hold fails with InvalidName.
+     * @brief Both ends of the entry at @p entryIndex. In tree mode the entry's names are joined below the roots
+     *        with @ref Detail::treeEntryPaths.
      */
     std::expected<EntryPaths, Error> entryPaths(std::size_t entryIndex) const;
 
@@ -190,6 +245,11 @@ class BulkTransferOperation : public Operation
     std::string failureSource(std::size_t entryIndex) const;
 
     /**
+     * @brief The source of @p paths, the key a failure is reported under.
+     */
+    std::string failureSource(EntryPaths const& paths) const;
+
+    /**
      * @brief The entry below the source root by its names as listed, for entries without valid paths.
      */
     std::string describeEntry(std::size_t entryIndex) const;
@@ -199,9 +259,12 @@ class BulkTransferOperation : public Operation
         return entries_;
     }
 
-    SecureShell::SftpSession& sftp() const noexcept
+    /**
+     * @brief The session the children are given, held weakly like the bulk's own.
+     */
+    std::weak_ptr<SecureShell::SftpSession> const& sftp() const noexcept
     {
-        return *sftp_;
+        return sftp_;
     }
 
     CommonOptions const& common() const noexcept
@@ -212,12 +275,14 @@ class BulkTransferOperation : public Operation
     /**
      * @brief Tree mode only: creates the bulk's root directory from entries()[0].
      */
-    virtual std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) = 0;
+    virtual std::expected<void, Error>
+    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) = 0;
 
     /**
      * @brief Creates the directory described by the entry at @p entryIndex.
      */
-    virtual std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) = 0;
+    virtual std::expected<void, Error>
+    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) = 0;
 
     /**
      * @brief Builds the child transfer for the file at @p entryIndex.
@@ -245,6 +310,14 @@ class BulkTransferOperation : public Operation
     }
 
     /**
+     * @brief Runs once every entry is done, before the bulk completes. A failure fails the bulk.
+     */
+    virtual std::expected<void, Error> finishInStrand()
+    {
+        return {};
+    }
+
+    /**
      * @brief Log prefix, e.g. "BulkDownloadOperation".
      */
     virtual std::string_view logName() const noexcept = 0;
@@ -258,17 +331,22 @@ class BulkTransferOperation : public Operation
     struct Slot
     {
         std::size_t entryIndex;
+        /** @brief Both ends of the entry, built once when it starts. */
+        EntryPaths paths;
         std::unique_ptr<Operation> child;
         std::uint64_t bytes{0};
         std::uint64_t totalBytes{0};
         bool finished{false};
     };
 
-    std::expected<WorkStatus, Error> start();
-    std::expected<WorkStatus, Error> step();
-    std::expected<void, Error> fillSlots();
+    std::expected<WorkStatus, Error> start(SecureShell::SftpSession& sftp);
+    std::expected<WorkStatus, Error> step(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> fillSlots(SecureShell::SftpSession& sftp);
     std::expected<void, Error> stepSlots();
-    void finishSlot(Slot& slot);
+    /**
+     * @brief Counts the entry of @p slot as done, as @p transferred or as a failure recorded for the user.
+     */
+    void finishSlot(Slot& slot, bool transferred);
     void cancelChildrenInStrand(bool adoptCancelState);
     Slot* slotFor(std::size_t entryIndex) noexcept;
     std::uint64_t fileCount() const noexcept;
@@ -296,7 +374,7 @@ class BulkTransferOperation : public Operation
         Flat,
     };
 
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     CommonOptions common_;
     std::unique_ptr<ScanPhaseDriver> scanPhase_{};
     EntrySource entrySource_{EntrySource::None};
@@ -313,8 +391,11 @@ class BulkTransferOperation : public Operation
     std::uint64_t completedBytes_{0};
     std::uint64_t totalBytes_{0};
     int budget_{1};
+    BulkResumeProgress earlierProgress_{};
+    /** @brief Per entry: transferred, created or skipped for its type, so a resume leaves it out. */
+    std::vector<bool> finishedEntries_{};
     std::vector<std::pair<std::string, Error>> failedEntries_{};
-    std::vector<std::uint32_t> failedEntryIndices_{};
+    std::vector<SharedData::IndexedFailure> indexedFailures_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number
     // flicker; sampling the cumulative byte count keeps one coherent rate per bulk.
     std::chrono::steady_clock::time_point lastBpsSampleTime_{};
@@ -322,3 +403,18 @@ class BulkTransferOperation : public Operation
     std::int64_t bulkBytesPerSecond_{0};
     std::chrono::steady_clock::time_point lastEmit_{};
 };
+
+namespace Detail
+{
+    /**
+     * @brief Both ends of the entry @p entryIndex of a scanned tree: its names on the way from the root joined below
+     *        @p remoteRoot and @p localRoot. InvalidName when a name is no path segment or the local side cannot hold
+     *        it, ImplementationError for a missing root or an index out of range.
+     */
+    std::expected<BulkTransferOperation::EntryPaths, Operation::Error> treeEntryPaths(
+        std::vector<SharedData::DirectoryEntry> const& entries,
+        std::size_t entryIndex,
+        Paths::RemotePath const& remoteRoot,
+        Paths::LocalPath const& localRoot
+    );
+}

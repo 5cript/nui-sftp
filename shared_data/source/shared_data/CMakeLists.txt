@@ -2,7 +2,9 @@ add_library(
     shared-data
     STATIC
         directory_entry.cpp
+        file_operations/compared_state.cpp
         ignore_rules.cpp
+        sync/case_fold.cpp
         sync/diff.cpp
         sync/diff_tree_store.cpp
         sync/enqueue_minimizer.cpp

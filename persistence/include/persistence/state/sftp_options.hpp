@@ -2,6 +2,8 @@
 
 #include <persistence/state_core.hpp>
 
+#include <fmt/format.h>
+
 #include <string>
 #include <string_view>
 #include <optional>
@@ -32,6 +34,16 @@ namespace Persistence
         if (!configured || configured->empty() || configured->find_first_of("/\\") != std::string::npos)
             return std::string{defaultTempFileSuffix};
         return *configured;
+    }
+
+    /**
+     * @brief The suffix a destination is moved aside to while a finished transfer replaces it on a server without
+     *        posix-rename.
+     * @param tempFileSuffix The effective temp file suffix, see effectiveTempFileSuffix.
+     */
+    inline std::string asideFileSuffix(std::string_view tempFileSuffix)
+    {
+        return fmt::format("{}.old", tempFileSuffix);
     }
 
     struct CommonTransferOptions : public DefaultMissingMember

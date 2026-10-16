@@ -6,23 +6,41 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <variant>
 
 /**
+ * @brief The request a backup re-issues, its type picks the addBulk* path.
+ */
+using BulkResumeRequest =
+    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest>;
+
+/**
+ * @brief Entries and bytes of a bulk finished on an earlier connection. Its resumed card counts them as done, so it
+ *        shows the whole bulk instead of a smaller one.
+ */
+struct BulkResumeProgress
+{
+    std::uint64_t entries{0};
+    std::uint64_t bytes{0};
+};
+
+/**
  * @brief Carries the state needed to re-enqueue a bulk operation against a
  *        replacement Session after a seamless reconnect.
  *
- *        One entry per frontend card: the request's type picks the addBulk*
- *        path. A transfer entry holds either the files of one bulk card or a
- *        single directory, so adopting it re-issues exactly that card under
- *        its own id.
+ *        One entry per frontend card. A transfer entry holds either the files
+ *        of one bulk card or a single directory, so adopting it re-issues
+ *        exactly that card under its own id.
  */
 struct BulkResumeEntry
 {
-    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest> request;
+    BulkResumeRequest request;
+    /** @brief What the bulk finished before the backup, left out of @ref request. */
+    BulkResumeProgress finished{};
     std::chrono::steady_clock::time_point storedAt{std::chrono::steady_clock::now()};
 };
 

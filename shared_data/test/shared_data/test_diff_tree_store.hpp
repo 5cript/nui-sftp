@@ -342,6 +342,38 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(relKeys(stores.downloads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/b"}));
     }
 
+    TEST(DiffTreeStoreTests, UploadPlanSkipsCaseVariantsOnlyForACaseFoldingServer)
+    {
+        const auto local =
+            makeDir("", {makeDir("new", {makeFile("A.txt", 1, 100), makeFile("a.txt", 1, 100), makeFile("b", 1, 100)})});
+        const DiffStores folding{local, makeDir("", {}), {.direction = Direction::Upload, .remoteCaseInsensitive = true}};
+        EXPECT_EQ(relKeys(folding.uploads.buildPlan({"new"}, folding.trees())), (std::vector<std::string>{"new/b"}));
+
+        const DiffStores sensitive{local, makeDir("", {}), {.direction = Direction::Upload, .localCaseInsensitive = true}};
+        EXPECT_EQ(
+            relKeys(sensitive.uploads.buildPlan({"new"}, sensitive.trees())),
+            (std::vector<std::string>{"new/A.txt", "new/a.txt", "new/b"})
+        );
+    }
+
+    TEST(DiffTreeStoreTests, ComparedStateAtNamesWhatTheScanSaw)
+    {
+        const auto tree = makeDir(
+            "", {makeDir("dir", {makeFile("a.txt", 3, 100), makeSymlink("link", "../x", 7)}), makeFile("b", 1, 2)}
+        );
+        EXPECT_EQ(
+            comparedStateAt(tree, "dir/a.txt"),
+            (ComparedState{.exists = true, .type = FileType::Regular, .size = 3, .mtime = 100})
+        );
+        EXPECT_EQ(
+            comparedStateAt(tree, "dir/link"),
+            (ComparedState{.exists = true, .type = FileType::Symlink, .mtime = 7, .linkTarget = "../x"})
+        );
+        EXPECT_EQ(comparedStateAt(tree, "dir").type, FileType::Directory);
+        EXPECT_FALSE(comparedStateAt(tree, "dir/missing").exists);
+        EXPECT_FALSE(comparedStateAt(tree, "b/below").exists);
+    }
+
     TEST(DiffTreeStoreTests, PlanForAPartlySelectedExpandedDirectory)
     {
         DiffStores stores{

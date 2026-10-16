@@ -83,17 +83,9 @@ struct Session::Implementation
     std::unique_ptr<SessionLayoutInitializer> layoutInitializer;
     SyncDialog syncDialog;
     SyncProgressDialog syncProgressDialog;
-    // Holds the active BackendSyncProvider between progress-dialog open and
-    // sync-dialog close.  Destroyed (→ provider.close() → backend session
-    // released) when replaced or explicitly reset.
-    std::shared_ptr<BackendSyncProvider> syncProvider_;
     // Last local+remote paths given to startSyncFlow; used by the dialog's
     // Recompare path to re-issue the flow without asking the user again.
     std::filesystem::path lastSyncLocalPath_{};
-    /** @brief Names the sync pair of the running flow in State::syncBaselines, unset without a saved session. */
-    std::optional<std::string> syncBaselineKey_{};
-    /** @brief When the running flow started its compare, recorded as the baseline once it is synchronized. */
-    std::uint64_t syncFlowStart_{0};
     std::filesystem::path lastSyncRemotePath_{};
     std::unique_ptr<ConnectionLossOverlay> connectionLossOverlay;
     std::unique_ptr<SessionSnapshotManager> snapshotManager;
@@ -190,25 +182,7 @@ struct Session::Implementation
     {
         // Recompare: rerun the whole scan-and-diff flow with the dialog's current
         // settings, reusing the cached local+remote roots.  The old provider is
-        // replaced by a fresh one; the backend session it held is closed on
-        // destruction.
-        // A synchronized selection makes the time its compare started the baseline of the next sync.
-        syncDialog.setOnSynchronized(
-            [this]()
-            {
-                if (!syncBaselineKey_ || !this->stateHolder)
-                    return;
-                this->stateHolder->loadModifySave(
-                    [key = *syncBaselineKey_, time = syncFlowStart_](Persistence::State& state)
-                    {
-                        if (!state.syncBaselines)
-                            state.syncBaselines.emplace();
-                        (*state.syncBaselines)[key] = time;
-                    }
-                );
-            }
-        );
-
+        // replaced by a fresh one.
         syncDialog.setOnRecompareRequested(
             [this](SyncDialog::RecompareRequest req)
             {
@@ -240,41 +214,20 @@ struct Session::Implementation
         lastSyncLocalPath_ = localPath;
         lastSyncRemotePath_ = remotePath;
 
-        // Only a saved session has a stable identity to remember the last sync of.
-        syncBaselineKey_.reset();
-        std::optional<std::uint64_t> lastSyncTime{};
-        if (persistenceName && !persistenceName->empty())
-        {
-            syncBaselineKey_ =
-                fmt::format("{}\n{}\n{}", *persistenceName, localPath.generic_string(), remotePath.generic_string());
-            if (auto const& baselines = stateHolder->stateCache().syncBaselines; baselines)
-            {
-                if (const auto found = baselines->find(*syncBaselineKey_); found != baselines->end())
-                    lastSyncTime = found->second;
-            }
-        }
-        syncFlowStart_ = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()
-        );
-        initialDiffOptions.lastSyncTime = lastSyncTime;
-
-        // Replace the old provider before opening the progress dialog so its
-        // backend session (if any) is closed before the new one opens.
-        syncProvider_ = std::make_shared<BackendSyncProvider>(&operationQueue);
-
+        // The progress dialog holds the provider while it scans and compares, then hands it to the sync dialog.
         syncProgressDialog.open(
-            syncProvider_,
+            std::make_shared<BackendSyncProvider>(&operationQueue),
             localPath,
             remotePath,
             scan.respectIgnoreFiles,
             scan.recursive,
             scan.ignoreHidden,
             initialDiffOptions,
-            [this, provider = syncProvider_, localPath, remotePath, scan, lastSyncTime](
-                SharedData::Sync::DiffSnapshot snapshot
+            [this, localPath, remotePath, scan](
+                std::shared_ptr<BackendSyncProvider> provider, SharedData::Sync::DiffSnapshot snapshot
             )
             {
-                syncDialog.open(provider, std::move(snapshot), localPath, remotePath, scan, lastSyncTime);
+                syncDialog.open(std::move(provider), std::move(snapshot), localPath, remotePath, scan);
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
@@ -572,6 +525,8 @@ std::optional<nlohmann::json> Session::getLayout() const
 void Session::setupFileGrid()
 {
     impl_->fileExplorerPanel.setup();
+    // Local deletes need no connection, their cards show in this queue from the start.
+    localSideModel().operationQueue(&impl_->operationQueue);
 
     // Sync dialog + progress dialog stay on Session; wire them through the
     // panel's synchronize callback.  Every flow scans and diffs with the

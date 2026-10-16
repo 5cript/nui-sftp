@@ -25,43 +25,30 @@ namespace Paths
 
         static std::expected<RelativePath, PathError> make(std::string_view utf8)
         {
-            RelativePath result;
             if (utf8.empty())
-                return result;
+                return RelativePath{};
             if (utf8.front() == '/')
                 return std::unexpected(PathError{.reason = PathRejection::EscapesRoot, .input = std::string{utf8}});
-
-            std::size_t start = 0;
-            while (start <= utf8.size())
+            for (auto const part : Detail::splitAtSlashes(utf8))
             {
-                const auto end = std::min(utf8.find('/', start), utf8.size());
-                auto segment = PathSegment::make(utf8.substr(start, end - start));
-                if (!segment)
-                    return std::unexpected(PathError{.reason = segment.error().reason, .input = std::string{utf8}});
-                result = result / *segment;
-                start = end + 1;
+                if (const auto rejection = PathSegment::rejectionOf(part); rejection)
+                    return std::unexpected(PathError{.reason = *rejection, .input = std::string{utf8}});
             }
-            return result;
+            return RelativePath{std::string{utf8}};
         }
 
         RelativePath operator/(PathSegment const& segment) const
         {
             RelativePath result{*this};
-            if (!result.value_.empty())
-                result.value_.push_back('/');
-            result.value_ += segment.value();
+            Detail::appendSegment(result.value_, segment.value());
             return result;
         }
 
         RelativePath operator/(RelativePath const& other) const
         {
-            if (other.empty())
-                return *this;
-            if (empty())
-                return other;
             RelativePath result{*this};
-            result.value_.push_back('/');
-            result.value_ += other.value_;
+            if (!other.empty())
+                Detail::appendSegment(result.value_, other.value_);
             return result;
         }
 
@@ -70,16 +57,19 @@ namespace Paths
             return value_.empty();
         }
 
+        /**
+         * @brief The names as views into this path, without copying or validating them again.
+         */
+        auto segmentViews() const
+        {
+            return Detail::splitAtSlashes(value_);
+        }
+
         std::vector<PathSegment> segments() const
         {
             std::vector<PathSegment> result;
-            std::size_t start = 0;
-            while (!value_.empty() && start <= value_.size())
-            {
-                const auto end = std::min(value_.find('/', start), value_.size());
-                result.push_back(*PathSegment::make(std::string_view{value_}.substr(start, end - start)));
-                start = end + 1;
-            }
+            for (auto const part : segmentViews())
+                result.push_back(PathSegment{std::string{part}});
             return result;
         }
 
@@ -88,18 +78,14 @@ namespace Paths
             if (empty())
                 return std::nullopt;
             const auto slash = value_.rfind('/');
-            RelativePath result;
-            if (slash != std::string::npos)
-                result.value_ = value_.substr(0, slash);
-            return result;
+            return RelativePath{slash == std::string::npos ? std::string{} : value_.substr(0, slash)};
         }
 
         std::optional<PathSegment> leaf() const
         {
             if (empty())
                 return std::nullopt;
-            const auto slash = value_.rfind('/');
-            return *PathSegment::make(slash == std::string::npos ? value_ : value_.substr(slash + 1));
+            return PathSegment{std::string{Detail::lastSegment(value_)}};
         }
 
         /**
@@ -126,6 +112,10 @@ namespace Paths
         auto operator<=>(RelativePath const&) const = default;
 
       private:
+        explicit RelativePath(std::string value)
+            : value_{std::move(value)}
+        {}
+
         std::string value_{};
     };
 }

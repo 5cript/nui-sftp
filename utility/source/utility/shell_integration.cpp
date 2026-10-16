@@ -1,4 +1,5 @@
 #include <utility/shell_integration.hpp>
+#include <paths/native.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -99,7 +100,7 @@ namespace ShellIntegration
 
     ShellKind detectShellKind(std::filesystem::path const& command)
     {
-        auto name = command.filename().string();
+        auto name = Paths::nativeToUtf8(command.filename());
         std::ranges::transform(name, name.begin(), [](char character) {
             return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
         });

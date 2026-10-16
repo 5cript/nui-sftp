@@ -8,6 +8,7 @@
 #include <frontend/session_components/operation_queue.hpp>
 #include <persistence/state_holder.hpp>
 #include <shared_data/opener_capabilities.hpp>
+#include <utility/lifetime_token.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
 #include <paths/paths.hpp>
@@ -171,4 +172,6 @@ class SideModel : public NuiFileExplorer::ISideModel
     std::function<void(bool, bool)> refreshCallback_{nullptr};
     bool reapplySelectionOnce_{false};
     std::string dropMetadata_{};
+    /** @brief Guards callbacks that can arrive after the side model is gone, like RPC replies and dialog closes. */
+    Utility::LifetimeToken lifetime_{};
 };

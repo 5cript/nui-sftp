@@ -1,4 +1,6 @@
 #include <backend/theme_finder.hpp>
+#include <paths/native.hpp>
+#include <utility/error_message.hpp>
 #include <utility/resources.hpp>
 #include <log/log.hpp>
 
@@ -9,7 +11,7 @@ ThemeFinder::ThemeFinder(std::filesystem::path const& relativeRoot, AppWideEvent
           events.onReloadThemes,
           [&events, relativeRoot](bool)
           {
-              Log::info("Reloading themes... relativeRoot='{}'", relativeRoot.generic_string());
+              Log::info("Reloading themes... relativeRoot='{}'", Paths::nativeToUtf8(relativeRoot));
               events.availableThemes = findAvailableThemes(relativeRoot);
               Log::info("availableThemes updated, count={}", events.availableThemes.value().size());
               events.availableThemes.eventContext().sync();
@@ -17,15 +19,15 @@ ThemeFinder::ThemeFinder(std::filesystem::path const& relativeRoot, AppWideEvent
           }
       )}
 {
-    Log::info("ThemeFinder constructed with relativeRoot='{}'", relativeRoot.generic_string());
+    Log::info("ThemeFinder constructed with relativeRoot='{}'", Paths::nativeToUtf8(relativeRoot));
 }
 
 std::vector<std::filesystem::path> ThemeFinder::findAvailableThemes(std::filesystem::path const& relativeRoot)
 {
-    Log::info("findAvailableThemes called with relativeRoot='{}'", relativeRoot.generic_string());
+    Log::info("findAvailableThemes called with relativeRoot='{}'", Paths::nativeToUtf8(relativeRoot));
     std::error_code ec;
     const bool rootExists = std::filesystem::exists(relativeRoot, ec);
-    Log::info("relativeRoot exists={}, ec='{}'", rootExists, ec.message());
+    Log::info("relativeRoot exists={}, ec='{}'", rootExists, Utility::errorMessage(ec));
 
     const auto files = findFilesInSearchPaths(relativeRoot, "themes/*.css");
     Log::info("findFilesInSearchPaths returned {} file(s).", files.size());
@@ -33,7 +35,7 @@ std::vector<std::filesystem::path> ThemeFinder::findAvailableThemes(std::filesys
     themes.reserve(files.size());
     for (const auto& file : files)
     {
-        Log::info("Found theme file: '{}', stem='{}'", file.generic_string(), file.stem().generic_string());
+        Log::info("Found theme file: '{}', stem='{}'", Paths::nativeToUtf8(file), Paths::nativeToUtf8(file.stem()));
         themes.push_back(file.stem());
     }
     Log::info("Theme discovery complete, found {} themes.", themes.size());

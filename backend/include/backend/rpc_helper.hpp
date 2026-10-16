@@ -1,9 +1,12 @@
 #pragma once
 
+#include <log/log.hpp>
+#include <utility/error_message.hpp>
+#include <utility/json_utf8.hpp>
+
 #include <nui/rpc.hpp>
 #include <nlohmann/json.hpp>
 #include <fmt/format.h>
-#include <log/log.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -14,7 +17,10 @@
 #include <ranges>
 #include <memory>
 #include <chrono>
+#include <exception>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 // TODO: split and document this file!
 namespace RpcHelper
@@ -56,6 +62,71 @@ namespace RpcHelper
 
         template <typename TupleT>
         using pop_front_t = typename pop_front<TupleT>::type;
+
+        /**
+         * @brief @p argument for a second try of a call: numbers as they are, everything else as JSON with U+FFFD
+         *        for every byte that is not UTF-8.
+         */
+        template <typename T>
+        auto withValidUtf8Argument(T const& argument)
+        {
+            if constexpr (std::is_arithmetic_v<T>)
+                return argument;
+            else
+                return Utility::withValidUtf8(nlohmann::json(argument));
+        }
+    }
+
+    /**
+     * @brief Calls @p name in the frontend like Nui::RpcHub::callRemote, but never throws. Text that is not UTF-8,
+     *        which the JSON dump refuses, is sent again with U+FFFD for every invalid byte; any other failure is
+     *        logged.
+     */
+    template <typename... Args>
+    void callRemoteSafely(Nui::RpcHub const& hub, std::string const& name, Args const&... arguments) noexcept
+    {
+        const auto logFailure = [&name](std::exception const& error) noexcept
+        {
+            try
+            {
+                Log::error("Failed to call '{}' in the frontend: {}", name, Utility::errorMessage(error));
+            }
+            catch (...)
+            {}
+        };
+        constexpr int invalidUtf8 = 316;
+        try
+        {
+            hub.callRemote(name, arguments...);
+            return;
+        }
+        catch (nlohmann::json::type_error const& error)
+        {
+            if (error.id != invalidUtf8)
+                return logFailure(error);
+        }
+        catch (std::exception const& error)
+        {
+            return logFailure(error);
+        }
+
+        try
+        {
+            Log::warn("The call of '{}' in the frontend carries text that is not UTF-8, it is sent replaced.", name);
+            hub.callRemote(name, Detail::withValidUtf8Argument(arguments)...);
+        }
+        catch (std::exception const& error)
+        {
+            logFailure(error);
+        }
+    }
+
+    /**
+     * @brief @ref callRemoteSafely for a JSON value, which may be written as a braced list.
+     */
+    inline void callRemoteSafely(Nui::RpcHub const& hub, std::string const& name, nlohmann::json const& json) noexcept
+    {
+        callRemoteSafely<nlohmann::json>(hub, name, json);
     }
 
     class RpcInCorrectThread
@@ -77,14 +148,7 @@ namespace RpcHelper
             wnd_->runInJavascriptThread(
                 [this, json = std::move(json)]()
                 {
-                    try
-                    {
-                        hub_->callRemote(responseId_, json);
-                    }
-                    catch (const std::exception& e)
-                    {
-                        Log::error("Failed to call rpc respond '{}': {}", responseId_, e.what());
-                    }
+                    callRemoteSafely(*hub_, responseId_, json);
                 }
             );
         }
@@ -103,17 +167,48 @@ namespace RpcHelper
             , hub_{&hub}
             , responseId_{responseId}
         {}
-        RpcOnce(RpcOnce&&) = default;
-        RpcOnce& operator=(RpcOnce&&) = default;
+        /**
+         * @brief Takes over the reply of @p other, which counts as answered from then on, so a reply through it is
+         *        dropped with a warning instead of going out under an empty id.
+         */
+        RpcOnce(RpcOnce&& other) noexcept
+            : wnd_{other.wnd_}
+            , hub_{other.hub_}
+            , responseId_{std::move(other.responseId_)}
+            , called_{std::exchange(other.called_, true)}
+        {}
+        RpcOnce& operator=(RpcOnce&& other) noexcept
+        {
+            if (this != &other)
+            {
+                wnd_ = other.wnd_;
+                hub_ = other.hub_;
+                responseId_ = std::move(other.responseId_);
+                called_ = std::exchange(other.called_, true);
+            }
+            return *this;
+        }
         RpcOnce(RpcOnce const&) = delete;
         RpcOnce& operator=(RpcOnce const&) = delete;
         ~RpcOnce() = default;
+
+        /**
+         * @brief The reply was sent, or handed to another RpcOnce.
+         */
+        bool answered() const noexcept
+        {
+            return called_;
+        }
 
         void operator()(nlohmann::json&& json) const
         {
             if (called_)
             {
-                Log::warn("RPC response with id '{}' already sent. Not sending: {}", responseId_, json.dump(4));
+                Log::warn(
+                    "RPC response with id '{}' already sent. Not sending: {}",
+                    responseId_,
+                    json.dump(4, ' ', false, nlohmann::json::error_handler_t::replace)
+                );
                 return;
             }
             called_ = true;
@@ -121,14 +216,7 @@ namespace RpcHelper
             wnd_->runInJavascriptThread(
                 [hub = hub_, responseId = std::move(responseId_), json = std::move(json)]()
                 {
-                    try
-                    {
-                        hub->callRemote(responseId, json);
-                    }
-                    catch (const std::exception& e)
-                    {
-                        Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
-                    }
+                    callRemoteSafely(*hub, responseId, json);
                 }
             );
         }
@@ -145,14 +233,7 @@ namespace RpcHelper
             wnd_->runInJavascriptThread(
                 [hub = hub_, responseId = std::move(responseId_), message]()
                 {
-                    try
-                    {
-                        hub->callRemote(responseId, {{"success", false}, {"error", message}});
-                    }
-                    catch (const std::exception& e)
-                    {
-                        Log::error("Failed to call rpc respond '{}': {}", responseId, e.what());
-                    }
+                    callRemoteSafely(*hub, responseId, {{"success", false}, {"error", message}});
                 }
             );
         }
@@ -247,7 +328,7 @@ namespace RpcHelper
             }
             catch (const std::exception& e)
             {
-                (*rpcOnce)({{"error", e.what()}});
+                (*rpcOnce)({{"error", Utility::errorMessage(e)}});
             }
         };
     }
@@ -365,7 +446,7 @@ namespace RpcHelper
                 [func = std::forward<decltype(func)>(func)](auto const& ec)
                 {
                     if (ec)
-                        Log::info("Timer canceled in within_strand_do_delayed: {}", ec.message());
+                        Log::info("Timer canceled in within_strand_do_delayed: {}", Utility::errorMessage(ec));
 
                     // Run func anyway, if its because of a shutdown, it will stop early.
                     func();

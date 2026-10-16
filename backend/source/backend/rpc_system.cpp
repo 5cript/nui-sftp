@@ -1,5 +1,6 @@
 #include <backend/rpc_system.hpp>
 #include <log/log.hpp>
+#include <paths/utf8.hpp>
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -48,7 +49,7 @@ std::string RpcSystem::username() const
     DWORD username_len = UNLEN + 1;
     if (GetUserNameW(username, &username_len))
     {
-        usernameMemo_ = Nui::utf16ToUtf8<std::wstring, std::string>(std::wstring(username));
+        usernameMemo_ = Paths::wideToUtf8(std::wstring_view{username});
         return usernameMemo_;
     }
     else
@@ -60,14 +61,14 @@ std::string RpcSystem::username() const
     char username[loginNameMaximum];
     if (getlogin_r(username, sizeof(username)) == 0)
     {
-        usernameMemo_ = std::string(username);
+        usernameMemo_ = Paths::sanitizedUtf8(username);
         return usernameMemo_;
     }
     else
     {
         struct passwd* pwd = getpwuid(getuid());
         if (pwd)
-            return pwd->pw_name;
+            return Paths::sanitizedUtf8(pwd->pw_name);
         Log::error("RpcSystem::username: getlogin_r failed");
         return "unknown";
     }

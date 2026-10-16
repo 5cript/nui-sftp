@@ -1,5 +1,9 @@
 #include <backend/session.hpp>
+#include <utility/error_message.hpp>
+#include <backend/rpc_helper.hpp>
+#include <backend/rpc_path_parameters.hpp>
 #include <paths/native.hpp>
+#include <utility/localized_message.hpp>
 #include <backend/existence_check.hpp>
 
 #include <paths/paths.hpp>
@@ -22,60 +26,40 @@ using namespace std::chrono_literals;
 namespace
 {
     /**
-     * @brief A remote path from the frontend, or the message to reply with when it is not a valid absolute path.
+     * @brief The reply to a request that queued one operation, or why it could not be queued.
      */
-    std::expected<Paths::RemotePath, std::string> parseRemotePath(std::string const& path)
+    std::expected<nlohmann::json, std::string> queuedReply(std::expected<void, Operation::Error> const& queued)
     {
-        return Paths::RemotePath::make(path).transform_error(
-            [](Paths::PathError const& error)
-            {
-                return fmt::format("Invalid remote path: {}", error.toString());
-            }
-        );
+        return queued
+            .transform(
+                []()
+                {
+                    return nlohmann::json{{"success", true}};
+                }
+            )
+            .transform_error(
+                [](Operation::Error const& error)
+                {
+                    return error.toString();
+                }
+            );
     }
 
     /**
-     * @brief A local path from the frontend, or the message to reply with when it is not a valid absolute path.
+     * @brief The reply to a request that queued @p enqueued entries.
      */
-    std::expected<Paths::LocalPath, std::string> parseLocalPath(std::string const& path)
+    nlohmann::json enqueuedReply(std::size_t enqueued)
     {
-        return Paths::LocalPath::fromUtf8(path).transform_error(
-            [](Paths::PathError const& error)
-            {
-                return fmt::format("Invalid local path: {}", error.toString());
-            }
-        );
+        return {{"success", true}, {"enqueued", enqueued}};
     }
 
     /**
-     * @brief A JSON request from the frontend, or the message to reply with when it does not parse. Paths are
-     *        validated while parsing.
+     * @brief Answers a delete request with the localized reason why nothing was deleted.
      */
-    template <typename RequestT>
-    std::expected<RequestT, std::string> parseRequest(nlohmann::json const& json, std::string_view what)
+    void replyRefusal(RpcHelper::RpcOnce const& reply, RemoteDeleteRefusal const& refusal)
     {
-        try
-        {
-            return json.get<RequestT>();
-        }
-        catch (std::exception const& exception)
-        {
-            return std::unexpected(fmt::format("Invalid {}: {}", what, exception.what()));
-        }
-    }
-
-    std::expected<std::vector<Paths::RemotePath>, std::string> parseRemotePaths(std::vector<std::string> const& paths)
-    {
-        std::vector<Paths::RemotePath> result;
-        result.reserve(paths.size());
-        for (auto const& path : paths)
-        {
-            auto parsed = parseRemotePath(path);
-            if (!parsed)
-                return std::unexpected(std::move(parsed).error());
-            result.push_back(*std::move(parsed));
-        }
-        return result;
+        Log::error("Refusing to delete: {}", refusal.toString());
+        reply.error(refusal.toLocalizedMessage());
     }
 }
 
@@ -87,14 +71,26 @@ Session::Session(
     Nui::Window& wnd,
     Nui::RpcHub& hub,
     Persistence::SftpOptions const& sftpOptions,
-    BulkResumeRegistry* bulkResumeRegistry
+    BulkResumeRegistry* bulkResumeRegistry,
+    std::shared_ptr<LocalOperationQueue> localOperationQueue
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
     , session_{std::move(session)}
-    , operationQueue_{std::make_shared<
-          OperationQueue>(executor_, strand_, wnd, hub, sftpOptions, id_, sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency))}
+    , operationQueue_{std::make_shared<OperationQueue>(
+          executor_,
+          strand_,
+          wnd,
+          hub,
+          sftpOptions,
+          id_,
+          sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency)
+      )}
     , bulkResumeRegistry_{bulkResumeRegistry}
+    , remoteTempFileSuffix_{Persistence::effectiveTempFileSuffix(
+          sftpOptions.uploadOptions ? sftpOptions.uploadOptions->tempFileSuffix : std::nullopt
+      )}
+    , localOperationQueue_{std::move(localOperationQueue)}
 {}
 
 Session::~Session()
@@ -136,6 +132,7 @@ void Session::start()
             self->registerRpcSftpAddBulkDownloadOperation();
             self->registerRpcSftpAddBulkUploadOperation();
             self->registerRpcSftpAddBulkDeleteOperation();
+            self->registerRpcAddLocalDeleteOperation();
             self->registerRpcSftpExistsBatch();
             self->registerRpcSftpOpenSyncSession();
             self->registerRpcSftpRecomputeSyncDiff();
@@ -189,6 +186,7 @@ void Session::stop()
             // registry TTL) handle cleanup if no resume occurs.
             if (self->bulkResumeRegistry_)
                 self->operationQueue_->dumpBulkResumes(*self->bulkResumeRegistry_);
+            self->localOperationQueue_->release(self->id_);
             self->operationQueue_->cancelAll();
             self->operationQueue_.reset();
 
@@ -637,7 +635,7 @@ void Session::registerRpcSftpListDirectory()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        const auto remotePath = parseRemotePath(path);
+                        const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
                         auto fut = channel->listDirectory(*remotePath);
@@ -712,7 +710,7 @@ void Session::registerRpcSftpUserDirectories()
                     Ids::makeChannelId(channelIdString),
                     [home](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        const auto homePath = parseRemotePath(home);
+                        const auto homePath = RpcHelper::parseRemotePath(home);
                         if (!homePath)
                             return reply.error(homePath.error());
                         auto fut = channel->userDirectories(*homePath);
@@ -756,33 +754,31 @@ void Session::registerRpcQueuedRemoves()
                 if (!self)
                     return reply.error("Session no longer exists");
 
-                auto parsed = parseRemotePaths(pathStrings);
+                auto parsed = RpcHelper::parseRemotePaths(pathStrings);
                 if (!parsed)
                     return reply.error(parsed.error());
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), paths = *std::move(parsed), recursive, insertRefresh, mode](
-                        RpcHelper::RpcOnce&& reply, auto&& channel
+                    [paths = *std::move(parsed), recursive, insertRefresh, mode](
+                        RpcHelper::RpcOnce&& reply,
+                        Session& self,
+                        std::shared_ptr<SecureShell::SftpSession> const& channel
                     ) mutable
                     {
-                        auto self = weak.lock();
-                        if (!self)
+                        if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
 
-                        // Nothing is queued when one of the targets is protected.
-                        for (auto const& path : paths)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
-                        }
+                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        if (const auto refusal = refuseAnyProtected(guard, paths); refusal)
+                            return replyRefusal(reply, *refusal);
 
                         std::vector<std::string> operationIds;
                         for (auto const& path : paths)
                         {
                             const auto newOperationId = Ids::generateOperationId();
-                            const auto result = self->operationQueue_->addDeleteOperation(
+                            const auto result = self.operationQueue_->addDeleteOperation(
+                                guard,
                                 *channel,
                                 newOperationId,
                                 path,
@@ -822,7 +818,7 @@ void Session::registerRpcSftpCreateDirectory()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        const auto remotePath = parseRemotePath(path);
+                        const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
                         auto fut = channel->createDirectory(*remotePath);
@@ -860,7 +856,7 @@ void Session::registerRpcSftpCreateFile()
                     Ids::makeChannelId(channelIdString),
                     [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        const auto remotePath = parseRemotePath(path);
+                        const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
                         auto fut = channel->createFile(*remotePath);
@@ -899,34 +895,34 @@ void Session::registerRpcSftpAddDownloadOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                auto remote = parseRemotePath(remotePath);
+                auto remote = RpcHelper::parseRemotePath(remotePath);
                 if (!remote)
                     return reply.error(remote.error());
-                auto local = parseLocalPath(localPath);
+                auto local = RpcHelper::parseLocalPath(localPath);
                 if (!local)
                     return reply.error(local.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format(
+                    "the download '{}' of '{}' to '{}'", newOperationIdString, remote->value(), local->toUtf8()
+                );
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        newOperationIdString,
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(newOperationIdString),
                         local = *std::move(local),
                         remote = *std::move(remote),
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
                         createMissingDirectories,
-                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto result = self->operationQueue_->addDownloadOperation(
-                            *channel,
-                            Ids::makeOperationId(newOperationIdString),
+                        return queuedReply(queue.addDownloadOperation(
+                            channel,
+                            operationId,
                             local,
                             remote,
                             allowOverwrite,
@@ -934,30 +930,8 @@ void Session::registerRpcSftpAddDownloadOperation()
                             insertRefresh,
                             createMissingDirectories,
                             static_cast<SharedData::OperationMode>(mode)
-                        );
-
-                        if (!result.has_value())
-                        {
-                            Log::error(
-                                "Failed to add download operation for file '{}' to '{}': {}",
-                                remote.value(),
-                                local.toUtf8(),
-                                result.error().toString()
-                            );
-                            return reply.error("Failed to add download operation: " + result.error().toString());
-                        }
-
-                        Log::info(
-                            "Added download operation with id '{}' for file '{}' to '{}'",
-                            newOperationIdString,
-                            remote.value(),
-                            local.toUtf8()
-                        );
-
-                        self->resetQueueThrottle();
-                        reply({{"success", true}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -966,8 +940,6 @@ void Session::registerRpcSftpAddDownloadOperation()
 void Session::registerRpcSftpAddArchiveDownloadOperation()
 {
     // One RPC to pack N remote files into a single local tar[.ext] archive.
-    // The entries list is trusted (no per-entry lstat) and the operation runs
-    // sequentially on the SFTP strand like a regular DownloadOperation.
     on(fmt::format("Session::{}::sftp::addArchiveDownload", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -984,74 +956,46 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                // An invalid remote path fails the parse.
-                std::vector<SharedData::ArchiveDownloadRoot> roots;
-                try
-                {
-                    roots = nlohmann::json::parse(rootsJson).get<std::vector<SharedData::ArchiveDownloadRoot>>();
-                }
-                catch (std::exception const& exc)
-                {
-                    Log::error("addArchiveDownload: failed to parse roots JSON: {}", exc.what());
-                    return reply({{"error", std::string{"Invalid roots payload: "} + exc.what()}});
-                }
-                auto archivePath = parseLocalPath(localArchivePath);
+                auto roots = RpcHelper::parseRequest<std::vector<SharedData::ArchiveDownloadRoot>>(
+                    nlohmann::json::parse(rootsJson, nullptr, false), "archive roots"
+                );
+                if (!roots)
+                    return reply.error(roots.error());
+                auto archivePath = RpcHelper::parseLocalPath(localArchivePath);
                 if (!archivePath)
                     return reply.error(archivePath.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format(
+                    "the archive download '{}' of {} roots to '{}'",
+                    newOperationIdString,
+                    roots->size(),
+                    archivePath->toUtf8()
+                );
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        newOperationIdString,
-                        roots = std::move(roots),
-                        localArchivePath = *std::move(archivePath),
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(newOperationIdString),
+                        roots = *std::move(roots),
+                        archivePath = *std::move(archivePath),
                         compressionCodec,
                         compressionLevel,
                         mayOverwrite,
-                        mode](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                        mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto codec = static_cast<TarArchive::Compression>(compressionCodec);
-
-                        const auto result = self->operationQueue_->addArchiveDownloadOperation(
-                            *channel,
-                            Ids::makeOperationId(newOperationIdString),
+                        return queuedReply(queue.addArchiveDownloadOperation(
+                            channel,
+                            operationId,
                             std::move(roots),
-                            localArchivePath,
-                            codec,
+                            archivePath,
+                            static_cast<TarArchive::Compression>(compressionCodec),
                             compressionLevel,
                             mayOverwrite,
                             static_cast<SharedData::OperationMode>(mode)
-                        );
-
-                        if (!result.has_value())
-                        {
-                            Log::error(
-                                "Failed to add archive-download operation to '{}': {}",
-                                localArchivePath.toUtf8(),
-                                result.error().toString()
-                            );
-                            return reply.error(
-                                "Failed to add archive-download operation: " + result.error().toString()
-                            );
-                        }
-
-                        Log::info(
-                            "Added archive-download operation '{}' → '{}' ({} roots)",
-                            newOperationIdString,
-                            localArchivePath.toUtf8(),
-                            roots.size()
-                        );
-
-                        self->resetQueueThrottle();
-                        reply({{"success", true}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -1075,65 +1019,44 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                std::vector<Paths::LocalPath> localPaths;
-                localPaths.reserve(localPathStrings.size());
-                for (auto const& pathString : localPathStrings)
-                {
-                    auto localPath = parseLocalPath(pathString);
-                    if (!localPath)
-                        return reply.error(localPath.error());
-                    localPaths.push_back(*std::move(localPath));
-                }
-                auto archivePath = parseRemotePath(remoteArchivePath);
+                auto localPaths = RpcHelper::parseLocalPaths(localPathStrings);
+                if (!localPaths)
+                    return reply.error(localPaths.error());
+                auto archivePath = RpcHelper::parseRemotePath(remoteArchivePath);
                 if (!archivePath)
                     return reply.error(archivePath.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format(
+                    "the archive upload '{}' of {} paths to '{}'",
+                    newOperationIdString,
+                    localPaths->size(),
+                    archivePath->value()
+                );
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        newOperationIdString,
-                        localPaths = std::move(localPaths),
-                        remoteArchivePath = *std::move(archivePath),
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(newOperationIdString),
+                        localPaths = *std::move(localPaths),
+                        archivePath = *std::move(archivePath),
                         compressionCodec,
                         compressionLevel,
                         mayOverwrite,
-                        mode](RpcHelper::RpcOnce&& reply, auto&& channel) mutable
+                        mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto codec = static_cast<TarArchive::Compression>(compressionCodec);
-                        const auto result = self->operationQueue_->addArchiveUploadOperation(
-                            *channel,
-                            Ids::makeOperationId(newOperationIdString),
+                        return queuedReply(queue.addArchiveUploadOperation(
+                            channel,
+                            operationId,
                             std::move(localPaths),
-                            remoteArchivePath,
-                            codec,
+                            archivePath,
+                            static_cast<TarArchive::Compression>(compressionCodec),
                             compressionLevel,
                             mayOverwrite,
                             static_cast<SharedData::OperationMode>(mode)
-                        );
-                        if (!result.has_value())
-                        {
-                            Log::error(
-                                "Failed to add archive-upload operation to '{}': {}",
-                                remoteArchivePath.value(),
-                                result.error().toString()
-                            );
-                            return reply.error("Failed to add archive-upload operation: " + result.error().toString());
-                        }
-                        Log::info(
-                            "Added archive-upload operation '{}' → '{}'",
-                            newOperationIdString,
-                            remoteArchivePath.value()
-                        );
-                        self->resetQueueThrottle();
-                        reply({{"success", true}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -1141,59 +1064,47 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
 
 void Session::registerRpcSftpAddBulkDownloadOperation()
 {
-    // One RPC for a whole batch. The handler performs all queueing inside a
-    // single strand dispatch so the SSH thread-hop cost is paid once per
-    // batch instead of once per file. Files are trusted (no lstat per entry).
+    // One RPC and one strand dispatch for a whole batch. Files are trusted, there is no lstat per entry.
     on(fmt::format("Session::{}::sftp::addBulkDownload", id_.value()))
         .perform(
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
-                std::vector<std::string> const& operationIdStrings,
+                std::vector<std::string>&& operationIdStrings,
                 nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                // Parsed here, so an invalid path is answered with an error instead of no reply at all.
-                auto parsed = parseRequest<SharedData::BulkDownloadRequest>(requestJson, "bulk download");
-                if (!parsed)
-                    return reply.error(parsed.error());
-                auto request = *std::move(parsed);
-
-                // Expect N per-entry ids + 1 dedicated aggregate-bulk-card id at the end.
-                if (operationIdStrings.size() != request.entries.size() + 1)
+                auto request = RpcHelper::parseRequest<SharedData::BulkDownloadRequest>(requestJson, "bulk download");
+                if (!request)
+                    return reply.error(request.error());
+                // An id per entry and the id of the card of the files at the end.
+                if (operationIdStrings.size() != request->entries.size() + 1)
                     return reply.error("addBulkDownload: operationIds and entries length mismatch");
 
-                self->withSftpChannelDo(
+                auto description = fmt::format("the bulk download of {} entries", request->entries.size());
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        operationIdStrings,
-                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    std::move(description),
+                    [operationIds = std::move(operationIdStrings), request = *std::move(request)](
+                        OperationQueue& queue, SecureShell::SftpSession& channel
+                    ) mutable -> std::expected<nlohmann::json, std::string>
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto bulkCardId = Ids::makeOperationId(operationIdStrings.back());
-                        const auto enqueued = self->operationQueue_->addBulkDownloadOperation(
-                            *channel,
-                            request,
-                            [&operationIdStrings](std::size_t idx)
+                        const auto bulkCardId = Ids::makeOperationId(operationIds.back());
+                        return enqueuedReply(queue.addBulkDownloadOperation(
+                            channel,
+                            std::move(request),
+                            [&operationIds](std::size_t index)
                             {
-                                return Ids::makeOperationId(operationIdStrings[idx]);
+                                return Ids::makeOperationId(operationIds[index]);
                             },
                             bulkCardId
-                        );
-
-                        Log::info("addBulkDownload: queued {}/{} entries", enqueued, request.entries.size());
-
-                        self->resetQueueThrottle();
-                        reply({{"success", true}, {"enqueued", enqueued}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -1201,55 +1112,46 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
 
 void Session::registerRpcSftpAddBulkUploadOperation()
 {
-    // See registerRpcSftpAddBulkDownloadOperation — same contract for upload.
+    // Same contract as addBulkDownload.
     on(fmt::format("Session::{}::sftp::addBulkUpload", id_.value()))
         .perform(
             [weak = weak_from_this()](
                 RpcHelper::RpcOnce&& reply,
                 std::string const& channelIdString,
-                std::vector<std::string> const& operationIdStrings,
+                std::vector<std::string>&& operationIdStrings,
                 nlohmann::json const& requestJson
             )
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                // Parsed here, so an invalid path is answered with an error instead of no reply at all.
-                auto parsed = parseRequest<SharedData::BulkUploadRequest>(requestJson, "bulk upload");
-                if (!parsed)
-                    return reply.error(parsed.error());
-                auto request = *std::move(parsed);
-
-                if (operationIdStrings.size() != request.entries.size() + 1)
+                auto request = RpcHelper::parseRequest<SharedData::BulkUploadRequest>(requestJson, "bulk upload");
+                if (!request)
+                    return reply.error(request.error());
+                if (operationIdStrings.size() != request->entries.size() + 1)
                     return reply.error("addBulkUpload: operationIds and entries length mismatch");
 
-                self->withSftpChannelDo(
+                auto description = fmt::format("the bulk upload of {} entries", request->entries.size());
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        operationIdStrings,
-                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    std::move(description),
+                    [operationIds = std::move(operationIdStrings), request = *std::move(request)](
+                        OperationQueue& queue, SecureShell::SftpSession& channel
+                    ) mutable -> std::expected<nlohmann::json, std::string>
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto bulkCardId = Ids::makeOperationId(operationIdStrings.back());
-                        const auto enqueued = self->operationQueue_->addBulkUploadOperation(
-                            *channel,
-                            request,
-                            [&operationIdStrings](std::size_t idx)
+                        const auto bulkCardId = Ids::makeOperationId(operationIds.back());
+                        return enqueuedReply(queue.addBulkUploadOperation(
+                            channel,
+                            std::move(request),
+                            [&operationIds](std::size_t index)
                             {
-                                return Ids::makeOperationId(operationIdStrings[idx]);
+                                return Ids::makeOperationId(operationIds[index]);
                             },
                             bulkCardId
-                        );
-
-                        Log::info("addBulkUpload: queued {}/{} entries", enqueued, request.entries.size());
-                        self->resetQueueThrottle();
-                        reply({{"success", true}, {"enqueued", enqueued}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -1274,34 +1176,34 @@ void Session::registerRpcSftpAddUploadOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                auto local = parseLocalPath(localPath);
+                auto local = RpcHelper::parseLocalPath(localPath);
                 if (!local)
                     return reply.error(local.error());
-                auto remote = parseRemotePath(remotePath);
+                auto remote = RpcHelper::parseRemotePath(remotePath);
                 if (!remote)
                     return reply.error(remote.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format(
+                    "the upload '{}' of '{}' to '{}'", newOperationIdString, local->toUtf8(), remote->value()
+                );
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        newOperationIdString,
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(newOperationIdString),
                         local = *std::move(local),
                         remote = *std::move(remote),
                         allowOverwrite,
                         bigFile,
                         insertRefresh,
                         createMissingDirectories,
-                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto result = self->operationQueue_->addUploadOperation(
-                            *channel,
-                            Ids::makeOperationId(newOperationIdString),
+                        return queuedReply(queue.addUploadOperation(
+                            channel,
+                            operationId,
                             local,
                             remote,
                             allowOverwrite,
@@ -1309,30 +1211,8 @@ void Session::registerRpcSftpAddUploadOperation()
                             insertRefresh,
                             createMissingDirectories,
                             static_cast<SharedData::OperationMode>(mode)
-                        );
-
-                        if (!result.has_value())
-                        {
-                            Log::error(
-                                "Failed to add upload operation for file '{}' to '{}': {}",
-                                local.toUtf8(),
-                                remote.value(),
-                                result.error().toString()
-                            );
-                            return reply.error("Failed to add upload operation: " + result.error().toString());
-                        }
-
-                        Log::info(
-                            "Added upload operation with id '{}' for file '{}' to '{}'",
-                            newOperationIdString,
-                            local.toUtf8(),
-                            remote.value()
-                        );
-
-                        self->resetQueueThrottle();
-                        reply({{"success", true}});
-                    },
-                    std::move(reply)
+                        ));
+                    }
                 );
             }
         );
@@ -1353,57 +1233,31 @@ void Session::registerRpcSftpAddRenameOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                auto source = parseRemotePath(sourcePath);
+                auto source = RpcHelper::parseRemotePath(sourcePath);
                 if (!source)
                     return reply.error(source.error());
-                auto destination = parseRemotePath(destinationPath);
+                auto destination = RpcHelper::parseRemotePath(destinationPath);
                 if (!destination)
                     return reply.error(destination.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format(
+                    "the rename '{}' of '{}' to '{}'", newOperationIdString, source->value(), destination->value()
+                );
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        newOperationIdString,
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(newOperationIdString),
                         source = *std::move(source),
                         destination = *std::move(destination),
-                        mode](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        const auto result = self->operationQueue_->addRenameOperation(
-                            *channel,
-                            Ids::makeOperationId(newOperationIdString),
-                            source,
-                            destination,
-                            static_cast<SharedData::OperationMode>(mode)
-                        );
-
-                        if (!result.has_value())
-                        {
-                            Log::error(
-                                "Failed to add rename operation for '{}' to '{}': {}",
-                                source.value(),
-                                destination.value(),
-                                result.error().toString()
-                            );
-                            return reply.error("Failed to add rename operation: " + result.error().toString());
-                        }
-
-                        Log::info(
-                            "Added rename operation with id '{}' for '{}' to '{}'",
-                            newOperationIdString,
-                            source.value(),
-                            destination.value()
-                        );
-
-                        self->resetQueueThrottle();
-                        reply({{"success", true}});
-                    },
-                    std::move(reply)
+                        return queuedReply(queue.addRenameOperation(
+                            channel, operationId, source, destination, static_cast<SharedData::OperationMode>(mode)
+                        ));
+                    }
                 );
             }
         );
@@ -1429,6 +1283,7 @@ void Session::registerOperationQueuePauseUnpause()
                 }
 
                 self->operationQueue_->paused(pause);
+                self->localOperationQueue_->hold(self->id_, pause);
                 self->resetQueueThrottle();
                 return reply(SharedData::success());
             }
@@ -1456,30 +1311,32 @@ void Session::registerRpcSftpOpenSyncSession()
                     return reply({{"error", "Session no longer exists"}});
 
                 // The roots every synchronized path is resolved against, refused here when they are not absolute.
-                auto remoteRoot = parseRemotePath(remotePath);
+                auto remoteRoot = RpcHelper::parseRemotePath(remotePath);
                 if (!remoteRoot)
                     return reply.error(remoteRoot.error());
-                auto localRoot = Paths::LocalPath::fromUtf8(localPath);
+                auto localRoot = RpcHelper::parseLocalPath(localPath);
                 if (!localRoot)
-                    return reply.error(fmt::format("Invalid local path: {}", localRoot.error().toString()));
+                    return reply.error(localRoot.error());
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        syncSessionIdString,
+                    [syncSessionIdString,
                         remoteScanIdString,
                         localScanIdString,
                         remotePath = *std::move(remoteRoot),
                         localPath = *std::move(localRoot),
                         respectIgnoreFiles,
                         recursive,
-                        ignoreHidden](RpcHelper::RpcOnce&& reply, auto&& channel)
+                        ignoreHidden](
+                        RpcHelper::RpcOnce&& reply,
+                        Session& self,
+                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                    )
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
+                        if (!self.operationQueue_)
+                            return reply.error("Session no longer exists");
 
-                        self->operationQueue_->addSyncScanOperation(
+                        self.operationQueue_->addSyncScanOperation(
                             *channel,
                             Ids::makeSyncSessionId(syncSessionIdString),
                             Ids::makeOperationId(remoteScanIdString),
@@ -1491,7 +1348,7 @@ void Session::registerRpcSftpOpenSyncSession()
                             ignoreHidden
                         );
 
-                        self->resetQueueThrottle();
+                        self.resetQueueThrottle();
                         reply({{"success", true}});
                     },
                     std::move(reply)
@@ -1539,7 +1396,8 @@ void Session::registerRpcSftpRecomputeSyncDiff()
                                     {
                                         // Matches the OperationQueue::rpcName scheme
                                         // the frontend OperationQueue listens on.
-                                        parent->hub_->callRemote(
+                                        RpcHelper::callRemoteSafely(
+                                            *parent->hub_,
                                             fmt::format("OperationQueue::{}::onSyncDiffProgress", parent->id_.value()),
                                             syncSessionId,
                                             std::to_string(compared)
@@ -1608,8 +1466,7 @@ void Session::registerRpcSftpLoadSyncDiffChildren()
 
 void Session::registerRpcSftpExecuteSyncSelection()
 {
-    // The backend plans the selection and resolves every row below its own sync roots, so no absolute path
-    // round-trips through the frontend.
+    // Plans the selection and resolves every row below the sync roots of the session.
     on(fmt::format("Session::{}::sftp::executeSyncSelection", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -1620,15 +1477,11 @@ void Session::registerRpcSftpExecuteSyncSelection()
                 if (!self || !self->operationQueue_)
                     return reply.error("Session no longer exists");
 
-                SharedData::Sync::SyncExecutionRequest request{};
-                try
-                {
-                    request = requestJson.get<SharedData::Sync::SyncExecutionRequest>();
-                }
-                catch (std::exception const& exception)
-                {
-                    return reply.error(fmt::format("Invalid sync request: {}", exception.what()));
-                }
+                auto parsed =
+                    RpcHelper::parseRequest<SharedData::Sync::SyncExecutionRequest>(requestJson, "sync request");
+                if (!parsed)
+                    return reply.error(parsed.error());
+                auto request = *std::move(parsed);
 
                 auto session = self->operationQueue_->syncSession(request.syncSessionId);
                 if (!session)
@@ -1637,24 +1490,32 @@ void Session::registerRpcSftpExecuteSyncSelection()
                 auto replyShared = std::make_shared<RpcHelper::RpcOnce>(std::move(reply));
                 boost::asio::post(
                     session->strand(),
-                    [self, session, request = std::move(request), channelIdString, replyShared]() mutable
+                    [weak, session, request = std::move(request), channelIdString, replyShared]() mutable
                     {
                         if (session->generation() != request.generation)
-                            return replyShared->error("stale generation");
+                            return replyShared->error(Utility::localizedMessage("backend.sync.staleComparison"));
+                        auto self = weak.lock();
+                        if (!self)
+                            return replyShared->error("Session no longer exists");
 
                         auto plan = session->resolvePlanInStrand(
                             request.section, std::unordered_set<std::string>{request.relKeys.begin(), request.relKeys.end()}
                         );
                         self->withSftpChannelDo(
                             Ids::makeChannelId(channelIdString),
-                            [self, session, plan = std::move(plan), request = std::move(request)](
-                                RpcHelper::RpcOnce&& reply, auto&& channel
+                            [session, plan = std::move(plan), request = std::move(request)](
+                                RpcHelper::RpcOnce&& reply,
+                                Session& self,
+                                std::shared_ptr<SecureShell::SftpSession> const& channel
                             ) mutable
                             {
-                                auto result = self->operationQueue_->executeSyncPlan(
-                                    *channel, *session, std::move(plan), request
+                                // A stopped session has no queue any more.
+                                if (!self.operationQueue_)
+                                    return reply.error("Session no longer exists");
+                                auto result = self.operationQueue_->executeSyncPlan(
+                                    *channel, *session, std::move(plan), request, *self.localOperationQueue_
                                 );
-                                self->resetQueueThrottle();
+                                self.resetQueueThrottle();
                                 nlohmann::json json;
                                 SharedData::to_json(json, result);
                                 reply(std::move(json));
@@ -1717,13 +1578,9 @@ void Session::registerRpcSftpPreDeleteChecks()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), directories](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    [directories](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply.error("Session no longer exists");
-
-                        auto remotePaths = parseRemotePaths(directories);
+                        auto remotePaths = RpcHelper::parseRemotePaths(directories);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
                         auto fut = channel->filterOutEmptyDirectories(*std::move(remotePaths));
@@ -1754,21 +1611,20 @@ void Session::registerRpcSftpDeleteFiles()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), paths](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    [paths](
+                        RpcHelper::RpcOnce&& reply,
+                        Session& self,
+                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                    )
                     {
-                        auto self = weak.lock();
-                        if (!self)
+                        if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
-
-                        auto remotePaths = parseRemotePaths(paths);
+                        auto remotePaths = RpcHelper::parseRemotePaths(paths);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
-                        for (auto const& path : *remotePaths)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, path);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", path.value()));
-                        }
+                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        if (const auto refusal = refuseAnyProtected(guard, *remotePaths); refusal)
+                            return replyRefusal(reply, *refusal);
                         auto fut = channel->removeAll(*std::move(remotePaths));
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to delete files: timeout");
@@ -1802,25 +1658,31 @@ void Session::registerRpcSftpRename()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), oldName, newName, overwrite](
-                        RpcHelper::RpcOnce&& reply, auto&& channel
+                    [oldName, newName, overwrite](
+                        RpcHelper::RpcOnce&& reply,
+                        Session& self,
+                        std::shared_ptr<SecureShell::SftpSession> const& channel
                     )
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply.error("Session no longer exists");
-
                         const auto oldPath = Paths::RemotePath::make(oldName);
                         const auto newPath = Paths::RemotePath::make(newName);
                         if (!oldPath || !newPath || !oldPath->parent() || oldPath->parent() != newPath->parent())
                             return reply.error("backend.rename.invalidName");
 
-                        // Never replaces an existing item unless the user confirmed it.
                         auto fut = channel->performPromise(
-                            [channel, oldPath = *oldPath, newPath = *newPath, overwrite]()
+                            [session = std::weak_ptr{channel},
+                                oldPath = *oldPath,
+                                newPath = *newPath,
+                                overwrite,
+                                asideSuffix = Persistence::asideFileSuffix(self.remoteTempFileSuffix_)]()
+                                -> std::expected<void, SecureShell::SftpError>
                             {
-                                return overwrite ? channel->renameReplaceInStrand(oldPath, newPath, ".nui-sftp-old")
-                                                 : channel->renameNoReplaceInStrand(oldPath, newPath);
+                                const auto sftp = session.lock();
+                                if (!sftp)
+                                    return std::unexpected(
+                                        SecureShell::SftpError{.message = "The SFTP channel was closed"}
+                                    );
+                                return sftp->moveIntoPlaceInStrand(oldPath, newPath, overwrite, asideSuffix);
                             }
                         );
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
@@ -1843,9 +1705,7 @@ void Session::registerRpcSftpRename()
 
 void Session::registerRpcSftpAddBulkDeleteOperation()
 {
-    // One RPC for the whole bulk delete.  Frontend pre-allocates a single
-    // OperationId for the aggregate file-bulk card; the backend may also
-    // create extra single-Delete cards for any directory entries.
+    // One RPC and one card for the whole bulk delete, under the operation id the frontend reserved.
     on(fmt::format("Session::{}::sftp::addBulkDelete", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -1857,58 +1717,58 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
             {
                 auto self = weak.lock();
                 if (!self)
-                    return reply({{"error", "Session no longer exists"}});
+                    return reply.error("Session no longer exists");
 
-                // Parsed here, so an invalid target is answered with an error instead of no reply at all.
-                SharedData::BulkDeleteRequest request{};
-                try
-                {
-                    request = requestJson.get<SharedData::BulkDeleteRequest>();
-                }
-                catch (std::exception const& exception)
-                {
-                    return reply.error(fmt::format("Invalid bulk delete: {}", exception.what()));
-                }
+                auto request = RpcHelper::parseRequest<SharedData::BulkDeleteRequest>(requestJson, "bulk delete");
+                if (!request)
+                    return reply.error(request.error());
 
-                self->withSftpChannelDo(
+                auto description = fmt::format("the bulk delete of {} entries", request->entries.size());
+                self->queueOnChannel(
+                    std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(),
-                        bulkOperationIdString,
-                        request](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    std::move(description),
+                    [operationId = Ids::makeOperationId(bulkOperationIdString), request = *std::move(request)](
+                        OperationQueue& queue, SecureShell::SftpSession& channel
+                    ) -> std::expected<nlohmann::json, std::string>
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply({{"error", "Session no longer exists"}});
-
-                        // Nothing is queued when one of the targets is protected.
-                        for (auto const& entry : request.entries)
-                        {
-                            if (auto allowed = self->operationQueue_->refuseProtectedDeleteTarget(*channel, entry.target);
-                                !allowed)
-                                return reply.error(fmt::format("Refusing to delete '{}'", entry.target.value()));
-                        }
-
-                        const auto enqueued = self->operationQueue_->addBulkDeleteOperation(
-                            *channel, request, Ids::makeOperationId(bulkOperationIdString)
-                        );
-
-                        Log::info("addBulkDelete: queued {} entries", enqueued);
-                        self->resetQueueThrottle();
-                        reply({{"success", true}, {"enqueued", enqueued}});
-                    },
-                    std::move(reply)
+                        auto guard = queue.remoteDeleteGuard(channel);
+                        if (const auto refusal =
+                                refuseAnyProtected(guard, request.entries, &SharedData::BulkDeleteEntry::target);
+                            refusal)
+                            return std::unexpected(refusal->toLocalizedMessage());
+                        return enqueuedReply(queue.addBulkDeleteOperation(guard, channel, request, operationId));
+                    }
                 );
+            }
+        );
+}
+
+void Session::registerRpcAddLocalDeleteOperation()
+{
+    on(fmt::format("Session::{}::addLocalDelete", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& operationIdString, std::vector<std::string> const& paths
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply.error("Session no longer exists");
+                const auto added = self->localOperationQueue_->addExplorerDelete(
+                    Ids::makeOperationId(operationIdString), paths, self->id_, self->operationQueue_->paused()
+                );
+                if (!added)
+                    return reply.error(added.error());
+                reply(SharedData::success());
             }
         );
 }
 
 void Session::registerRpcSftpExistsBatch()
 {
-    // Batched existence probe over SFTP.  Lets the frontend ask whether N
-    // remote paths exist in a single round-trip — eliminates the per-file
-    // SFTP stat latency that made multi-file uploads feel slow.  Only "no such
-    // file" is absent, any other failure fails the whole batch: the frontend
-    // overwrites what it takes for absent.
+    // Whether each of N remote paths exists, in one RPC. Only "no such file" is absent, any other failure fails the
+    // whole batch: the frontend overwrites what it takes for absent.
     on(fmt::format("Session::{}::sftp::existsBatch", id_.value()))
         .perform(
             [weak = weak_from_this()](
@@ -1952,13 +1812,9 @@ void Session::registerRpcSftpStat()
 
                 self->withSftpChannelDo(
                     Ids::makeChannelId(channelIdString),
-                    [weak = self->weak_from_this(), path](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    [path](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto self = weak.lock();
-                        if (!self)
-                            return reply.error("Session no longer exists");
-
-                        const auto remotePath = parseRemotePath(path);
+                        const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
                         auto fut = channel->stat(*remotePath);

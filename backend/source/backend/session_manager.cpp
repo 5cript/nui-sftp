@@ -1,4 +1,6 @@
 #include <backend/session_manager.hpp>
+#include <utility/error_message.hpp>
+#include <backend/rpc_helper.hpp>
 #include <log/log.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -103,7 +105,13 @@ SessionManager::SessionManager(
 )
     : RpcHelper::StrandRpc{executor, wnd, hub}
     , stateHolder_{&stateHolder}
+    , localOperationQueue_{std::make_shared<LocalOperationQueue>(executor_, strand_, wnd, hub, localDeletionPrevented_)}
 {}
+
+void SessionManager::preventLocalDeletion(bool prevent)
+{
+    localDeletionPrevented_->store(prevent);
+}
 
 SessionManager::~SessionManager()
 {
@@ -193,14 +201,18 @@ void SessionManager::addSession(
                         {
                             try
                             {
-                                hub_->callRemote(fmt::format("Session::{}::onDisconnect", sessionId.value()));
+                                RpcHelper::callRemoteSafely(
+                                    *hub_, fmt::format("Session::{}::onDisconnect", sessionId.value())
+                                );
                             }
                             catch (const std::exception& e)
                             {
                                 // There should never anything throw here, but lets log just in case and dont let an
                                 // exception escape out of this lambda.
                                 Log::error(
-                                    "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), e.what()
+                                    "Failed to call Session::{}::onDisconnect: {}.",
+                                    sessionId.value(),
+                                    Utility::errorMessage(e)
                                 );
                             }
                         }
@@ -218,7 +230,8 @@ void SessionManager::addSession(
                     *wnd_,
                     *hub_,
                     sessionOptions.sftpOptions.value(),
-                    &bulkResumeRegistry_
+                    &bulkResumeRegistry_,
+                    localOperationQueue_
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)
@@ -265,6 +278,7 @@ void SessionManager::registerRpc()
     registerRpcSessionDisconnect();
     registerRpcAdoptBulkResume();
     registerRpcDiscardBulkResume();
+    localOperationQueue_->registerRpc();
 }
 
 void SessionManager::registerRpcSessionConnect()
@@ -325,8 +339,8 @@ void SessionManager::registerRpcSessionDisconnect()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error disconnecting to ssh server: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error disconnecting to ssh server: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );
@@ -376,8 +390,8 @@ void SessionManager::registerRpcAdoptBulkResume()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error in adoptBulkResume: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error in adoptBulkResume: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );
@@ -401,8 +415,8 @@ void SessionManager::registerRpcDiscardBulkResume()
                 }
                 catch (std::exception const& e)
                 {
-                    Log::error("Error in discardBulkResume: {}", e.what());
-                    return reply({{"error", e.what()}});
+                    Log::error("Error in discardBulkResume: {}", Utility::errorMessage(e));
+                    return reply({{"error", Utility::errorMessage(e)}});
                 }
             }
         );

@@ -1,5 +1,8 @@
 #include <nui-file-explorer/support/windows_drives.hpp>
+#include <paths/native.hpp>
+#include <paths/utf8.hpp>
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -23,12 +26,12 @@ namespace NuiFileExplorer
                 if (!wide.empty())
                 {
                     // "My Label (C:)"
-                    auto letter = std::filesystem::path{rootPath}.root_name().string();
-                    return std::filesystem::path{wide}.string() + " (" + letter + ")";
+                    const auto letter = Paths::nativeToUtf8(std::filesystem::path{rootPath}.root_name());
+                    return fmt::format("{} ({})", Paths::wideToUtf8(wide), letter);
                 }
             }
             // Fallback: just the drive letter
-            return std::filesystem::path{rootPath}.root_name().string();
+            return Paths::nativeToUtf8(std::filesystem::path{rootPath}.root_name());
         }
     }
 
@@ -61,7 +64,7 @@ namespace NuiFileExplorer
                         continue;
 
                     auto displayName = driveDisplayName(root);
-                    auto genericPath = std::filesystem::path{root}.generic_string();
+                    auto genericPath = Paths::nativeToUtf8(std::filesystem::path{root});
 
                     result.push_back({
                         {"name", displayName},

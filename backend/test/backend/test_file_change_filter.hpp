@@ -38,6 +38,8 @@ namespace Test
                 "archive.sb-12345678-short",
                 "DS_Store",
                 "filepart.txt",
+                "Ärger.txt",
+                "東京/報告 \xF0\x9F\x9A\x80.pdf",
             }
         )
             EXPECT_FALSE(isTransientFile(name, filepart)) << name;

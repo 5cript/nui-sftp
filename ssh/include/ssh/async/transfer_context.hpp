@@ -68,7 +68,6 @@ namespace SecureShell
 
       private:
         std::atomic<Outcome> outcome_{Outcome::Running};
-        std::atomic_bool ended_{false};
         mutable std::mutex errorMutex_{};
         std::optional<SftpError> error_{};
         std::atomic_bool paused_{false};

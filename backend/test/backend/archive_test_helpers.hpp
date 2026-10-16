@@ -30,6 +30,7 @@ namespace Test
         std::string path{};
         SharedData::FileType type{};
         std::string contents{};
+        std::filesystem::perms permissions{std::filesystem::perms::unknown};
     };
 
     inline SharedData::ArchiveDownloadRoot makeFileEntry(std::string_view path, std::uint64_t size)
@@ -77,6 +78,7 @@ namespace Test
             RecoveredEntry recovered{};
             recovered.path = entry.header().path;
             recovered.type = entry.header().type;
+            recovered.permissions = entry.header().permissions;
 
             if (recovered.type == SharedData::FileType::Regular)
             {

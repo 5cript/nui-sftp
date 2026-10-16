@@ -286,7 +286,7 @@ std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::remotePathOf
 {
     if (item.isParentLink)
         return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::DotOrDotDot, .input = ".."});
-    return Paths::PathSegment::make(item.name)
+    return item.nameSegment()
         .and_then(
             [&item](Paths::PathSegment const&)
             {
@@ -514,10 +514,8 @@ void RemoteSideModel::enqueueDeletes(
     std::vector<Paths::RemotePath> filesAndEmptyDirs
 )
 {
-    // Combine into a single bulk-delete request.  File / empty-dir entries
-    // become one bulk-delete card; non-empty directories become individual
-    // Scan+Delete pairs (their isDirectory=true triggers the recursive flow
-    // backend-side).  One RPC for the whole user action.
+    // One bulk-delete request and card for the whole user action. Non-empty directories are scanned and deleted
+    // with their content by the backend (isDirectory), files and empty directories are deleted as they are.
     std::vector<SharedData::BulkDeleteEntry> entries;
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
     for (auto& path : filesAndEmptyDirs)
@@ -542,7 +540,8 @@ void RemoteSideModel::enqueueDeletes(
                     .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
                     .headerText = language->get("remoteSideModel", "deleteFailed"),
                     .text = fmt::format(
-                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")), info
+                        fmt::runtime(language->get("remoteSideModel", "failedToCreateDeleteOperation")),
+                        language->translate(info)
                     ),
                     .buttons = ConfirmDialog::Button::Ok,
                 });

@@ -1,4 +1,5 @@
 #include <backend/program_options.hpp>
+#include <utility/error_message.hpp>
 
 #include <boost/program_options.hpp>
 
@@ -34,7 +35,7 @@ std::optional<ProgramOptions> parseProgramOptions(int argc, char const* const* a
     }
     catch (std::exception& e)
     {
-        std::cerr << "Error parsing program options: " << e.what() << "\n";
+        std::cerr << "Error parsing program options: " << Utility::errorMessage(e) << "\n";
         return std::nullopt;
     }
 }

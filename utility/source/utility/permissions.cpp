@@ -4,7 +4,10 @@
 #include <string>
 
 #ifndef _WIN32
+#    include <cerrno>
+#    include <fcntl.h>
 #    include <sys/stat.h>
+#    include <unistd.h>
 #endif
 
 namespace Utility
@@ -31,6 +34,33 @@ namespace Utility
             return static_cast<std::filesystem::perms>(mask);
 #endif
         }
+
+#ifndef _WIN32
+        class UniqueDescriptor
+        {
+          public:
+            explicit UniqueDescriptor(int descriptor)
+                : descriptor_{descriptor}
+            {}
+            ~UniqueDescriptor()
+            {
+                if (descriptor_ >= 0)
+                    ::close(descriptor_);
+            }
+            UniqueDescriptor(UniqueDescriptor const&) = delete;
+            UniqueDescriptor& operator=(UniqueDescriptor const&) = delete;
+            UniqueDescriptor(UniqueDescriptor&&) = delete;
+            UniqueDescriptor& operator=(UniqueDescriptor&&) = delete;
+
+            int get() const
+            {
+                return descriptor_;
+            }
+
+          private:
+            int descriptor_;
+        };
+#endif
     }
 
     std::optional<std::filesystem::perms> sanitizePermissions(std::filesystem::perms permissions)
@@ -52,6 +82,31 @@ namespace Utility
         if (!sanitized)
             return std::nullopt;
         return *sanitized & ~processUmask();
+    }
+
+    std::filesystem::perms newFilePermissions()
+    {
+        constexpr auto readWrite = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+            std::filesystem::perms::group_read | std::filesystem::perms::group_write |
+            std::filesystem::perms::others_read | std::filesystem::perms::others_write;
+        return readWrite & ~processUmask();
+    }
+
+    std::expected<void, std::error_code> restrictToOwner(std::filesystem::path const& path)
+    {
+#ifdef _WIN32
+        static_cast<void>(path);
+        return {};
+#else
+        const UniqueDescriptor descriptor{
+            ::open(path.c_str(), O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        };
+        if (descriptor.get() < 0)
+            return std::unexpected(std::error_code{errno, std::generic_category()});
+        if (::fchmod(descriptor.get(), S_IRUSR | S_IWUSR) != 0)
+            return std::unexpected(std::error_code{errno, std::generic_category()});
+        return {};
+#endif
     }
 
     std::filesystem::perms localPermissions(std::filesystem::file_status const& status)

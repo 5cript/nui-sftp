@@ -49,3 +49,23 @@ struct ScanPhaseStatus
     Nui::Observed<std::uint64_t> totalBytes{0u};
     Nui::Observed<std::uint64_t> totalScanned{0u};
 };
+
+/**
+ * @brief The part of a card whose operation scans before its own work: the scan status and its progress setter.
+ */
+class ScanningCard
+{
+  public:
+    explicit ScanningCard(bool scanning)
+        : scanPhase_{scanning}
+    {}
+
+    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
+    {
+        scanPhase_.setProgress(scannedBytes, scannedEntries);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
+  protected:
+    ScanPhaseStatus scanPhase_;
+};

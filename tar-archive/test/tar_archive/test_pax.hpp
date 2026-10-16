@@ -63,6 +63,34 @@ namespace TarArchive::Test
         EXPECT_EQ(entry.header().size, contents.size());
     }
 
+    TEST(TarPax, NonAsciiPathRoundTrips)
+    {
+        const std::string name = "Grüße/東京 \xF0\x9F\x9A\x80.txt";
+        TarArchive::MemberHeader meta{};
+        meta.path = name;
+        meta.type = SharedData::FileType::Regular;
+        meta.size = 0u;
+        meta.permissions = static_cast<std::filesystem::perms>(0644u);
+
+        const auto path = paxDirectory() / "nonascii.tar";
+        Archive archive{path};
+        {
+            auto writer = archive.openWriter();
+            ASSERT_TRUE(writer.has_value());
+            auto entry = writer->beginEntry(meta);
+            ASSERT_TRUE(entry.has_value());
+            ASSERT_TRUE(std::move(*entry).close().has_value());
+            ASSERT_TRUE(writer->finalize().has_value());
+        }
+
+        auto reader = archive.openReader();
+        ASSERT_TRUE(reader.has_value());
+        auto next = reader->nextEntry();
+        ASSERT_TRUE(next.has_value());
+        ASSERT_TRUE(next->has_value());
+        EXPECT_EQ((**next).header().path, name);
+    }
+
     TEST(TarPax, LongSymlinkTargetRoundTripsViaExtendedHeader)
     {
         const std::string linkText = std::string(250u, 'x');

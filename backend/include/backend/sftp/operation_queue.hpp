@@ -1,7 +1,9 @@
 #pragma once
 
 #include <backend/sftp/all_operations.hpp>
+#include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sync/sync_session.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
@@ -151,8 +153,8 @@ class OperationQueue
     );
 
     /**
-     * @brief Queues the delete of @p remotePath, refused for the root and for the home directory or any directory
-     *        that contains it.
+     * @brief Queues the delete of @p remotePath, refused by a @ref remoteDeleteGuard for the root and for the home
+     *        directory or any directory that contains it.
      */
     std::expected<void, Operation::Error> addDeleteOperation(
         SecureShell::SftpSession& sftp,
@@ -164,54 +166,61 @@ class OperationQueue
     );
 
     /**
-     * @brief Bulk-add download operations from a pre-known entry list.
-     *        Files are taken at face value (no lstat — sizes come from the
-     *        caller) and turned into individual DownloadOperation cards.
-     *        Directory entries fall back to the existing Scan+BulkDownload
-     *        flow. Everything happens inside a single strand dispatch so
-     *        only one SSH-thread context switch is paid for the batch.
-     *
-     * @param sftp           SFTP session to use.
-     * @param request        Full bulk request (file + directory entries).
-     * @param operationIdFor Callback producing a fresh OperationId per entry
-     *                       index (frontend reserves them so it can register
-     *                       completion callbacks before the RPC returns).
-     * @return Number of entries successfully enqueued.
+     * @brief @ref addDeleteOperation checking with @p guard, so a caller that checked the target with it already
+     *        costs no further round trip.
      */
-    std::size_t addBulkDownloadOperation(
+    std::expected<void, Operation::Error> addDeleteOperation(
+        RemoteDeleteGuard& guard,
         SecureShell::SftpSession& sftp,
-        SharedData::BulkDownloadRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor,
-        Ids::OperationId bulkCardId
-    );
-
-    /** @brief Upload analogue of addBulkDownloadOperation.  File entries skip
-     *         the per-file local lstat + RPC round-trip; directories fall
-     *         back to the existing LocalScan+BulkUpload flow.
-     *
-     *  @param bulkCardId  Separate id reserved by the frontend for the aggregate
-     *                     BulkUpload card that covers all file entries. Must not
-     *                     collide with any of the per-entry ids produced by
-     *                     @p operationIdFor. */
-    std::size_t addBulkUploadOperation(
-        SecureShell::SftpSession& sftp,
-        SharedData::BulkUploadRequest const& request,
-        std::function<Ids::OperationId(std::size_t)> operationIdFor,
-        Ids::OperationId bulkCardId
+        Ids::OperationId operationId,
+        Paths::RemotePath const& remotePath,
+        bool recursive,
+        bool insertRefresh,
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
     /**
-     * @brief Bulk-delete: collapse N file entries (and any directory entries)
-     *        into a single delete operation card on the frontend.  File
-     *        entries are pre-known so no SFTP stat is needed.  Directory
-     *        entries get the existing Scan+Delete pair so descendants are
-     *        recursively removed.
+     * @brief Queues the entries of @p request: each directory with its content as a bulk of its own that scans it
+     *        first, under the id @p operationIdFor gives its index; all files, and directories created without their
+     *        content, as one bulk under @p bulkCardId. Sizes and times of files are taken as given, without an lstat.
+     *        Each queued part keeps a resume backup under its id.
      *
-     * @param sftp           SFTP session to use.
-     * @param request        The remote items; directories are scanned and deleted with their content.
-     * @param bulkOperationId  Single OperationId for the aggregate file-bulk
-     *                         card.  Per-directory ids are generated locally.
-     * @return Number of entries successfully enqueued.
+     * @param sftp SFTP session to use.
+     * @param request The entries; the card of the files works below its roots, unset the closest directories
+     *        holding every source and every destination.
+     * @param operationIdFor The id of the entry at an index, reserved by the frontend so it can register callbacks
+     *        before the reply.
+     * @param bulkCardId The id of the card of the files, reserved by the frontend apart from the entry ids.
+     * @return Number of entries queued: the files and directories of the card and the directories queued on their
+     *         own. A request without any entry still queues the card, which then completes at once.
+     */
+    std::size_t addBulkDownloadOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkDownloadRequest request,
+        std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+        Ids::OperationId const& bulkCardId
+    );
+
+    /**
+     * @brief Upload analogue of @ref addBulkDownloadOperation.
+     */
+    std::size_t addBulkUploadOperation(
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkUploadRequest request,
+        std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
+        Ids::OperationId const& bulkCardId
+    );
+
+    /**
+     * @brief Queues the remote items of @p request as one delete operation with one card, labelled with the
+     *        directory they lie in. Entries a @ref remoteDeleteGuard refuses, and directories that could not be
+     *        looked up in time, are failed entries of that card.
+     *
+     * @param sftp SFTP session to use.
+     * @param request The remote items; directories are scanned and deleted with their content, unless the request
+     *        deletes listed content only.
+     * @param bulkOperationId Operation id of the one card.
+     * @return Number of entries queued for deletion; zero queues nothing, not even the card.
      */
     std::size_t addBulkDeleteOperation(
         SecureShell::SftpSession& sftp,
@@ -220,32 +229,34 @@ class OperationQueue
     );
 
     /**
-     * @brief Queues a resolved sync plan under the operation ids of @p request: files of each direction as one
-     *        bulk transfer, remote and local deletes as one operation each. Directories without content are created
-     *        right away. Every path comes from @p plan, which resolved them below the sync roots.
+     * @brief @ref addBulkDeleteOperation checking with @p guard, so a caller that checked the targets with it
+     *        already costs no further round trip.
+     */
+    std::size_t addBulkDeleteOperation(
+        RemoteDeleteGuard& guard,
+        SecureShell::SftpSession& sftp,
+        SharedData::BulkDeleteRequest const& request,
+        Ids::OperationId bulkOperationId
+    );
+
+    /**
+     * @brief Queues a resolved sync plan under the operation ids of @p request: files and directories without
+     *        content of each direction as one bulk transfer below the sync roots, remote deletes as one operation
+     *        and local deletes as one operation of @p localDeleteQueue, held while this queue is paused. Every path
+     *        comes from @p plan, which resolved them below the sync roots.
      */
     SharedData::Sync::SyncExecutionResult executeSyncPlan(
         SecureShell::SftpSession& sftp,
         SyncSession const& session,
         SyncSession::ResolvedPlan plan,
-        SharedData::Sync::SyncExecutionRequest const& request
+        SharedData::Sync::SyncExecutionRequest const& request,
+        LocalOperationQueue& localDeleteQueue
     );
 
     /**
-     * @brief Queues the delete of local items as one operation with one card. Refused as a whole when one of them
-     *        is a root directory or contains the home directory.
+     * @brief A guard for the remote deletes of one request, sharing the home directory this queue looked up.
      */
-    std::expected<void, Operation::Error> addLocalDeleteOperation(
-        Ids::OperationId operationId,
-        std::vector<Paths::LocalPath> targets,
-        SharedData::OperationMode mode = SharedData::OperationMode::Queued
-    );
-
-    /**
-     * @brief Refuses an unset delete target, the root, and the home directory or any directory that contains it.
-     */
-    std::expected<void, Operation::Error>
-    refuseProtectedDeleteTarget(SecureShell::SftpSession& sftp, Paths::RemotePath const& target);
+    RemoteDeleteGuard remoteDeleteGuard(SecureShell::SftpSession& sftp);
 
     std::expected<void, Operation::Error> addRenameOperation(
         SecureShell::SftpSession& sftp,
@@ -255,19 +266,16 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
-    /** @brief Queues a remote scan and a local scan as priority operations for sync comparison.
-     *         When each scan completes the results are sent to the frontend via onSyncScanResult.
+    /**
+     * @brief Opens a @ref SyncSession and kicks off both scans as priority operations. The scans build
+     *        ScanNode trees directly and feed them into the session on completion.
+     *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
      *
      * @param sftp          SFTP session to use for the remote scan.
      * @param remoteScanId  Pre-assigned operation ID for the remote scan.
      * @param localScanId   Pre-assigned operation ID for the local scan.
      * @param remotePath    Remote directory root to scan.
      * @param localPath     Local directory root to scan.
-     */
-    /**
-     * @brief Opens a @ref SyncSession and kicks off both scans. The scans build
-     *        ScanNode trees directly and feed them into the session on completion.
-     *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
      */
     void addSyncScanOperation(
         SecureShell::SftpSession& sftp,
@@ -301,31 +309,29 @@ class OperationQueue
     void paused(bool pause);
 
     /**
-     * @brief Observes every completion right before it is sent to the frontend. Used by tests.
+     * @brief Test hook: @p observer sees every completion right before it is sent to the frontend. The application
+     *        never sets one.
      */
     void setCompletionObserver(std::function<void(OperationCompleted const&)> observer);
 
     bool hasPriorityWork() const;
 
     /**
-     * @brief Moves every still-tracked bulk-operation backup into @p
-     *        registry, keyed by the bulk's OperationId.  Called by Session
-     *        during teardown so a seamless reconnect can adopt them.
+     * @brief Moves every resume backup into @p registry, keyed by the id of its card. Called by Session during
+     *        teardown so a seamless reconnect can adopt them.
      *
-     *        Covers both queued-not-started bulks and bulks already running
-     *        — for the latter we re-issue the full original entry list and
-     *        rely on the per-file tryContinue path to skip whole files
-     *        already present (the in-progress file's bytes are not
-     *        byte-checkpointed here).
+     *        A bulk transfer that has its entries already leaves only the entries it has not finished, as a flat
+     *        list below its roots, and records how many entries and bytes it finished, which the resumed card counts
+     *        as done; a running file in it starts over unless its partial file can be continued. A bulk that did not
+     *        start yet or is still scanning keeps its request.
      */
     void dumpBulkResumes(BulkResumeRegistry& registry);
 
     /**
-     * @brief Re-enqueues the bulk operation described by @p entry against
-     *        this queue, reusing @p operationId as the bulk-card id so the
-     *        frontend's existing card surface stays attached.  Called from
-     *        Session::adoptBulkResumes after pulling @p entry out of the
-     *        registry.
+     * @brief Re-enqueues the backup @p entry under @p operationId as the id of every part, so the frontend's card
+     *        stays attached. Refuses a backup of more than one directory, or of a directory and other entries,
+     *        which would complete the card more than once. Called from Session::adoptBulkResumes after pulling
+     *        @p entry out of the registry.
      */
     void adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
 
@@ -340,18 +346,75 @@ class OperationQueue
 
     auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId) -> BulkProgressCallback;
 
+    /**
+     * @brief Sends the delete progress of @p operationId (current item, items handled, items in all) to the frontend.
+     */
+    auto makeDeleteProgressCallback(Ids::OperationId operationId)
+        -> std::function<void(std::string const&, std::uint64_t, std::uint64_t)>;
+
   private:
     bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
 
     /**
+     * @brief The queue an operation of @p mode goes to.
+     */
+    auto queueFor(SharedData::OperationMode mode)
+        -> std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>&;
+
+    /**
+     * @brief Shared part of the bulk transfer requests: each directory with content goes to @p queueDirectory as
+     *        (index, entry, request options) and counts when it returns true, every other entry into one request that
+     *        @p queueFiles queues as the card @p bulkCardId and sets the roots of. That request is the card's backup.
+     *
+     * @return Number of entries queued.
+     */
+    template <typename RequestT, typename QueueDirectoryT, typename QueueFilesT>
+    std::size_t splitBulkRequest(
+        RequestT request,
+        Ids::OperationId const& bulkCardId,
+        QueueDirectoryT&& queueDirectory,
+        QueueFilesT&& queueFiles
+    );
+
+    /**
+     * @brief The queued or running operation @p operationId, none when there is none.
+     */
+    Operation* findOperation(Ids::OperationId const& operationId);
+
+    /**
+     * @brief Reduces the backup @p entry of @p operation to what the operation has not finished yet and records
+     *        what it left out in @p entry, which the resumed card counts as done.
+     */
+    static void leaveOutFinished(Operation const& operation, BulkResumeEntry& entry);
+
+    /**
      * @brief Tells the sync session waiting for the scan @p id, if any, that it failed or was cancelled.
+     * @param reason A localized message, see Utility::localizedMessage.
      */
     void failSyncScan(Ids::OperationId const& id, std::string const& reason);
+
+    /**
+     * @brief Drops the scan @p id of a sync whose other scan failed, without telling its session again.
+     */
+    void cancelSiblingScan(Ids::OperationId const& id);
 
     /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
      */
     void deliverSyncScan(Ids::OperationId const& id, Operation& operation);
+
+    /**
+     * @brief The callback of the scan of one side of a sync: hands the tree to @p session through @p setTree on the
+     *        session's strand and tells the frontend the side is done, or cancels the other scan @p siblingScanId and
+     *        reports the failure.
+     */
+    auto makeSyncScanCallback(
+        Ids::SyncSessionId syncSessionId,
+        std::weak_ptr<SyncSession> session,
+        Ids::OperationId siblingScanId,
+        bool isLocal,
+        void (SyncSession::*setTree)(SharedData::Sync::ScanNode)
+    ) -> std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>;
 
   private:
     Persistence::SftpOptions sftpOpts_{};
@@ -370,9 +433,7 @@ class OperationQueue
     std::map<std::string, std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>>
         syncScanCallbacks_{};
 
-    // SyncSessions active on this channel.  Keyed by SyncSessionId.value() because
-    // Ids::IdHash isn't specialized on the strongly-typed id; the existing
-    // bulkResumeStash_ does the specialization — we stay string-keyed for simplicity.
+    // SyncSessions active on this channel, keyed by SyncSessionId.value().
     std::map<std::string, std::shared_ptr<SyncSession>> syncSessions_{};
 
     // Per-bulk backup snapshot, populated when a bulk-add path enqueues an
@@ -380,6 +441,6 @@ class OperationQueue
     // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
     std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
 
-    /** @brief The server's home directory, asked once for the delete guard. */
+    /** @brief The canonical home directory of the server, asked once for the delete guards. */
     std::optional<Paths::RemotePath> remoteHome_{};
 };

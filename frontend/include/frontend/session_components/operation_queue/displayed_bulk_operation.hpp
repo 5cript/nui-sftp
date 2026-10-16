@@ -13,7 +13,9 @@
 #include <optional>
 #include <vector>
 
-struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
+struct DisplayedBulkOperation
+    : public OperationCard<DisplayedBulkOperation>
+    , public ScanningCard
 {
   public:
     DisplayedBulkOperation(
@@ -35,9 +37,9 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
               std::move(doDeletionCountdown),
               std::move(onCompleteAction)
           }
+        , ScanningCard{scanning}
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
-        , scanPhase_{scanning}
         , totalProgressBar_({
               .height = std::string{progressHeight},
               .min = 0,
@@ -50,12 +52,6 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
     bool warrantsCancelConfirm() const override
     {
         return true;
-    }
-
-    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
-    {
-        scanPhase_.setProgress(scannedBytes, scannedEntries);
-        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     void setProgress(SharedData::BulkProgress const& progress)
@@ -342,7 +338,6 @@ struct DisplayedBulkOperation : public OperationCard<DisplayedBulkOperation>
   private:
     Paths::LocalPath localPath_;
     Paths::RemotePath remotePath_;
-    ScanPhaseStatus scanPhase_;
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};

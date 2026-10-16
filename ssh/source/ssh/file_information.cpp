@@ -1,19 +1,29 @@
 #include <ssh/file_information.hpp>
 
+#include <paths/utf8.hpp>
+
+#include <string>
+#include <string_view>
+
 namespace SecureShell
 {
     FileInformation fromSftpAttributes(sftp_attributes attributes)
     {
+        const auto serverText = [](char const* text)
+        {
+            return text ? Paths::sanitizedUtf8(text) : std::string{};
+        };
         return FileInformation{
             SharedData::DirectoryEntry{
-                .name = attributes->name ? std::string{attributes->name} : std::string{},
+                .name = serverText(attributes->name),
+                .nameIsValidUtf8 = attributes->name == nullptr || Paths::isValidUtf8(attributes->name),
                 .flags = attributes->flags,
                 .type = static_cast<SharedData::FileType>(attributes->type),
                 .size = attributes->size,
                 .uid = attributes->uid,
                 .gid = attributes->gid,
-                .owner = attributes->owner ? std::string{attributes->owner} : std::string{},
-                .group = attributes->group ? std::string{attributes->group} : std::string{},
+                .owner = serverText(attributes->owner),
+                .group = serverText(attributes->group),
                 .permissions = static_cast<std::filesystem::perms>(attributes->permissions),
                 .atime = attributes->atime,
                 .atimeNsec = attributes->atime_nseconds,
@@ -22,7 +32,7 @@ namespace SecureShell
                 .mtime = attributes->mtime,
                 .mtimeNsec = attributes->mtime_nseconds,
                 .acl = attributes->acl
-                    ? std::string{ssh_string_get_char(attributes->acl), ssh_string_len(attributes->acl)}
+                    ? Paths::sanitizedUtf8({ssh_string_get_char(attributes->acl), ssh_string_len(attributes->acl)})
                     : std::string{},
             },
         };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <paths/common_parent.hpp>
 #include <paths/paths.hpp>
 
 #include <gtest/gtest.h>
@@ -19,6 +20,37 @@ namespace Paths::Test
         EXPECT_EQ(RemotePath::make("").error().reason, PathRejection::Empty);
         EXPECT_EQ(RemotePath::make("/home/..").error().reason, PathRejection::DotOrDotDot);
         EXPECT_EQ(RemotePath::make("/a/../b").error().reason, PathRejection::DotOrDotDot);
+    }
+
+    TEST(RemotePathTests, RefusesNulAndInvalidUtf8)
+    {
+        EXPECT_EQ(RemotePath::make(std::string{"/a\0b", 4}).error().reason, PathRejection::ContainsNul);
+        EXPECT_EQ(RemotePath::make("/home/\xC3").error().reason, PathRejection::InvalidUtf8);
+        EXPECT_EQ(RemotePath::make("/\xED\xA0\x80").error().reason, PathRejection::InvalidUtf8);
+        EXPECT_EQ(RemotePath::make("/home/t\xC3\xA4st")->value(), "/home/t\xC3\xA4st");
+    }
+
+    TEST(RemotePathTests, JoiningOntoAnUnsetPathStaysUnset)
+    {
+        const RemotePath unset{};
+        EXPECT_TRUE((unset / PathSegment::make("a").value()).empty());
+        EXPECT_TRUE((unset / RelativePath::make("a/b").value()).empty());
+        EXPECT_TRUE((unset / RelativePath{}).empty());
+        EXPECT_EQ((RemotePath::root() / RelativePath{}).value(), "/");
+        EXPECT_EQ((RemotePath::root() / PathSegment::make("a").value()).value(), "/a");
+    }
+
+    TEST(RemotePathTests, SegmentsAndRelativePathsRoundTripThroughJson)
+    {
+        const nlohmann::json segment = PathSegment::make("a\\b").value();
+        EXPECT_EQ(segment.get<PathSegment>().value(), "a\\b");
+        EXPECT_THROW(nlohmann::json{"a/b"}.at(0).get<PathSegment>(), std::invalid_argument);
+
+        const nlohmann::json relative = RelativePath::make("a/b").value();
+        EXPECT_EQ(relative.get<std::string>(), "a/b");
+        EXPECT_EQ(relative.get<RelativePath>().value(), "a/b");
+        EXPECT_EQ(nlohmann::json{""}.at(0).get<RelativePath>().value(), "");
+        EXPECT_THROW(nlohmann::json{"a/../b"}.at(0).get<RelativePath>(), std::invalid_argument);
     }
 
     TEST(RemotePathTests, BackslashesAndColonsAreOrdinaryCharacters)
@@ -95,5 +127,22 @@ namespace Paths::Test
         EXPECT_FALSE(unset.parent().has_value());
         EXPECT_FALSE(unset.isWithin(RemotePath::root()));
         EXPECT_FALSE(RemotePath::root().isWithin(unset));
+    }
+
+    TEST(RemotePathTests, CommonParentHoldsEveryPathBelowIt)
+    {
+        const auto path = [](std::string_view text)
+        {
+            return RemotePath::make(text).value();
+        };
+        const std::vector siblings{path("/r/src/a.cpp"), path("/r/README.md")};
+        EXPECT_EQ(commonParentOf(std::span{siblings}), path("/r"));
+        const std::vector nested{path("/r/a/b/c"), path("/r/a/d")};
+        EXPECT_EQ(commonParentOf(std::span{nested}), path("/r/a"));
+        const std::vector single{path("/r/x")};
+        EXPECT_EQ(commonParentOf(std::span{single}), path("/r"));
+        const std::vector root{RemotePath::root()};
+        EXPECT_EQ(commonParentOf(std::span{root}), RemotePath::root());
+        EXPECT_FALSE(commonParentOf(std::span<RemotePath const>{}));
     }
 }

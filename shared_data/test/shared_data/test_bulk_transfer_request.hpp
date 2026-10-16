@@ -36,18 +36,27 @@ namespace SharedData::Test
                 {
                     {.source = local("a.txt"), .destination = remote("/srv/a\\b"), .sizeBytes = 3},
                     {.source = local("dir"), .destination = remote("/srv/dir"), .isDirectory = true},
+                    {.source = local("empty"),
+                        .destination = remote("/srv/empty"),
+                        .isDirectory = true,
+                        .withoutContent = true},
                 },
             .allowOverwrite = true,
             .insertRefresh = true,
             .mode = OperationMode::PriorityQueued,
+            .remoteRoot = remote("/srv"),
         };
         const nlohmann::json json = request;
         const auto read = json.get<BulkUploadRequest>();
-        ASSERT_EQ(read.entries.size(), 2u);
+        ASSERT_EQ(read.entries.size(), 3u);
         EXPECT_EQ(read.entries[0].source, local("a.txt"));
         EXPECT_EQ(read.entries[0].destination.value(), "/srv/a\\b");
         EXPECT_EQ(read.entries[0].sizeBytes, 3u);
         EXPECT_TRUE(read.entries[1].isDirectory);
+        EXPECT_FALSE(read.entries[1].withoutContent);
+        EXPECT_TRUE(read.entries[2].withoutContent);
+        EXPECT_EQ(read.remoteRoot, remote("/srv"));
+        EXPECT_FALSE(read.localRoot);
         EXPECT_TRUE(read.allowOverwrite);
         EXPECT_TRUE(read.insertRefresh);
         EXPECT_EQ(read.mode, OperationMode::PriorityQueued);
@@ -59,11 +68,12 @@ namespace SharedData::Test
             .entries =
                 {
                     {.source = remote("/srv/a.txt"),
-                     .destination = local("a.txt"),
-                     .sizeBytes = 7,
-                     .mtime = 1700000000u,
-                     .mtimeNsec = 5u},
+                        .destination = local("a.txt"),
+                        .sizeBytes = 7,
+                        .mtime = 1700000000u,
+                        .mtimeNsec = 5u},
                 },
+            .localRoot = local(""),
         };
         const nlohmann::json json = request;
         const auto read = json.get<BulkDownloadRequest>();
@@ -73,6 +83,8 @@ namespace SharedData::Test
         EXPECT_EQ(read.entries[0].sizeBytes, 7u);
         EXPECT_EQ(read.entries[0].mtime, 1700000000u);
         EXPECT_EQ(read.entries[0].mtimeNsec, 5u);
+        EXPECT_EQ(read.localRoot, local(""));
+        EXPECT_FALSE(read.remoteRoot);
     }
 
     TEST(BulkTransferRequestTests, InvalidPathsAreRefusedOnRead)

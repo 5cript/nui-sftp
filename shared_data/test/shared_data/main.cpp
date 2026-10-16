@@ -1,5 +1,6 @@
 #include "test_bulk_delete_request.hpp"
 #include "test_bulk_transfer_request.hpp"
+#include "test_compared_state.hpp"
 #include "test_operation_added.hpp"
 #include "test_diff.hpp"
 #include "test_diff_tree_store.hpp"

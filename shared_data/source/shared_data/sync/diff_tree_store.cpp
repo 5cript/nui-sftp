@@ -1,3 +1,4 @@
+#include <shared_data/sync/case_fold.hpp>
 #include <shared_data/sync/diff_tree_store.hpp>
 #include <shared_data/sync/enqueue_minimizer.hpp>
 
@@ -73,6 +74,20 @@ namespace SharedData::Sync
             relKey = slash == std::string_view::npos ? std::string_view{} : relKey.substr(slash + 1);
         }
         return current;
+    }
+
+    ComparedState comparedStateAt(ScanNode const& root, std::string_view relKey)
+    {
+        auto const* node = findScanNode(root, relKey);
+        if (!node)
+            return ComparedState{};
+        return ComparedState{
+            .exists = true,
+            .type = node->type,
+            .size = node->size,
+            .mtime = node->mtime,
+            .linkTarget = node->type == FileType::Symlink ? node->linkTarget : std::nullopt,
+        };
     }
 
     bool actionSourceIsLocal(Action action)
@@ -192,9 +207,7 @@ namespace SharedData::Sync
         keys.reserve(directory->children.size());
         for (auto const& child : directory->children)
         {
-            if (options_.ignoreHidden && isHiddenName(child.name))
-                continue;
-            if (child.availability != Availability::Listed)
+            if (!isPlannable(child, options_))
                 continue;
             auto childKey = joinRelKey(parentRelKey, child.name);
             nodes_.insert_or_assign(childKey, makeOneSidedRow(child, childKey, parent.action, sourceIsLocal));
@@ -224,33 +237,23 @@ namespace SharedData::Sync
             };
         };
 
-        // Downloaded onto a case folding filesystem, names that differ only in case would meet as one file.
+        // Transferred onto a case folding filesystem, names that differ only in case would meet as one file.
         std::unordered_map<std::string, int> foldedCounts;
-        const bool foldsCase = action == Action::Download && options_.localCaseInsensitive;
-        const auto folded = [](std::string name)
-        {
-            for (auto& character : name)
-            {
-                if (character >= 'A' && character <= 'Z')
-                    character = static_cast<char>(character - 'A' + 'a');
-            }
-            return name;
-        };
+        const bool foldsCase = (action == Action::Download && options_.localCaseInsensitive) ||
+            (action == Action::Upload && options_.remoteCaseInsensitive);
         if (foldsCase)
         {
             for (auto const& child : directory.children)
-                ++foldedCounts[folded(child.name)];
+                ++foldedCounts[caseFoldedName(child.name)];
         }
 
         bool anyChild = false;
         for (auto const& child : directory.children)
         {
-            if (options_.ignoreHidden && isHiddenName(child.name))
-                continue;
             // Unknown or untransferable entries are never planned, not even inside a transferred directory.
-            if (child.availability != Availability::Listed)
+            if (!isPlannable(child, options_))
                 continue;
-            if (foldsCase && foldedCounts[folded(child.name)] > 1)
+            if (foldsCase && foldedCounts[caseFoldedName(child.name)] > 1)
                 continue;
             anyChild = true;
             auto childKey = joinRelKey(relKey, child.name);
@@ -282,9 +285,7 @@ namespace SharedData::Sync
         );
         for (auto const& child : directory.children)
         {
-            if (options_.ignoreHidden && isHiddenName(child.name))
-                continue;
-            if (child.availability != Availability::Listed)
+            if (!isPlannable(child, options_))
                 continue;
             auto childKey = joinRelKey(relKey, child.name);
             if (child.type == FileType::Directory)

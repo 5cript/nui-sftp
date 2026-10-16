@@ -93,8 +93,9 @@ namespace TarArchive
     };
 
     /**
-     * @brief Build the on-disk tar records for a DirectoryEntry, emitting PAX extended
-     * headers when the entry's path, link target, or size exceed plain USTAR limits.
+     * @brief Build the on-disk tar records for a member, emitting PAX extended headers when its path, link
+     * target, or size exceed plain USTAR limits. Unknown permissions are written as 0755 for a directory,
+     * 0777 for a symlink and 0644 otherwise.
      */
     std::expected<BuiltEntry, TarError> buildRecords(MemberHeader const& meta);
 

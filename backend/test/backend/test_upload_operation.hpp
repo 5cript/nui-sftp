@@ -33,14 +33,14 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        UploadOperation operation{*sftp, {}};
+        UploadOperation operation{sftp, {}};
     }
 
     TEST_F(UploadOperationTests, UploadOperationTypeIsUpload)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        UploadOperation operation{*sftp, {}};
+        UploadOperation operation{sftp, {}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::Upload);
     }
 
@@ -50,7 +50,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -79,7 +79,7 @@ namespace Test
         for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remotePath,
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -109,7 +109,7 @@ namespace Test
         ASSERT_TRUE(createResult.has_value());
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -139,7 +139,7 @@ namespace Test
         std::ofstream{temporaryRoot / "windows.txt"} << "text";
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/windows.txt"),
                 .localPath = toLocal(temporaryRoot / "windows.txt"),
@@ -172,7 +172,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -230,7 +230,7 @@ namespace Test
         // First upload
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -255,7 +255,7 @@ namespace Test
         // Second upload without overwrite
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -277,7 +277,7 @@ namespace Test
         // First upload
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -302,7 +302,7 @@ namespace Test
         // Second upload with overwrite
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -354,7 +354,7 @@ namespace Test
         // Second upload continuing the partial file
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -431,7 +431,7 @@ namespace Test
         // Second upload continuing the partial file
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -488,7 +488,7 @@ namespace Test
         emptyFile.close();
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/emptyfile.txt"),
                 .localPath = toLocal(temporaryRoot / "emptyfile.txt"),
@@ -522,7 +522,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -557,7 +557,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -586,7 +586,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
@@ -607,7 +607,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/nonexistent_dir/file.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -625,7 +625,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
@@ -634,7 +634,7 @@ namespace Test
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
-        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::NotAFile);
+        EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::FileNotFound);
     }
 
     TEST_F(UploadOperationTests, UploadLocalDirectoryFails)
@@ -643,7 +643,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(programDirectory),
@@ -668,7 +668,7 @@ namespace Test
         }
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/largefile.txt"),
                 .localPath = toLocal(temporaryRoot / "largefile.txt"),
@@ -751,7 +751,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/uploaded_sym_to_file"),
                 .localPath = toLocal(linkPath),
@@ -788,7 +788,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/uploaded_sym_to_dir"),
                 .localPath = toLocal(linkPath),
@@ -820,7 +820,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/uploaded_dangling"),
                 .localPath = toLocal(linkPath),
@@ -851,7 +851,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/uploaded_sym_skip"),
                 .localPath = toLocal(linkPath),
@@ -880,7 +880,7 @@ namespace Test
         // First put a regular file in place.
         {
             UploadOperation first{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/sym_overwrite_target"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -896,7 +896,7 @@ namespace Test
             temporaryRoot / "testfile.txt"
         );
         UploadOperation symOp{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/sym_overwrite_target"),
                 .localPath = toLocal(linkPath),
@@ -928,7 +928,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/sym_prepare_check"),
                 .localPath = toLocal(linkPath),
@@ -961,7 +961,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/newly_created/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -990,7 +990,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/a/b/c/d/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -1023,7 +1023,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -1043,7 +1043,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/still_missing_dir/testfile.txt"),
                 .localPath = toLocal(temporaryRoot / "testfile.txt"),
@@ -1072,7 +1072,7 @@ namespace Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         UploadOperation operation{
-            *sftp,
+            sftp,
             {
                 .remotePath = remote("/home/test/missing/for/symlink/uploaded_link"),
                 .localPath = toLocal(linkPath),
@@ -1119,7 +1119,7 @@ namespace Test
         // Second upload attempting to continue the partial file
         {
             UploadOperation operation{
-                *sftp,
+                sftp,
                 {
                     .remotePath = remote("/home/test/testfile.txt"),
                     .localPath = toLocal(temporaryRoot / "testfile.txt"),

@@ -14,9 +14,12 @@
 #include <utility/user_directories.hpp>
 
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <memory>
 #include <future>
+#include <optional>
+#include <string_view>
 #include <expected>
 #include <filesystem>
 #include <utility>
@@ -69,18 +72,22 @@ namespace SecureShell
          * @brief Lists the contents of a directory.
          *
          * @param path
+         * @param resolveLinks Reads the literal and the target of every symlink, two more round trips each. Without
+         *        it a symlink is listed as the link itself only.
          * @return std::future<std::expected<std::vector<FileInformation>, Error>>
          */
         std::future<std::expected<std::vector<FileInformation>, Error>>
-        listDirectory(Paths::RemotePath const& path);
+        listDirectory(Paths::RemotePath const& path, bool resolveLinks = true);
 
         /**
          * @brief In-strand variant of listDirectory. Must be called from within the processing thread.
          *
          * @param path
+         * @param resolveLinks See @ref listDirectory.
          * @return std::expected<std::vector<FileInformation>, Error>
          */
-        std::expected<std::vector<FileInformation>, Error> listDirectoryInStrand(Paths::RemotePath const& path);
+        std::expected<std::vector<FileInformation>, Error>
+        listDirectoryInStrand(Paths::RemotePath const& path, bool resolveLinks = true);
 
         /**
          * @brief Create a directory.
@@ -271,21 +278,43 @@ namespace SecureShell
         renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
 
         /**
-         * @brief Renames without ever replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it
-         *        exists. Regular files move atomically through hardlink@openssh.com where the server has it.
+         * @brief Renames without replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it exists.
+         *
+         * A regular file moves atomically through hardlink@openssh.com where the server has it and the link
+         * succeeds. Otherwise a server without posix-rename@openssh.com refuses an existing destination itself,
+         * and on one with it the destination is checked before the rename, which leaves a window.
+         *
+         * @param sourceType The type of @p source when the caller knows it, saves an lstat.
          */
-        std::expected<void, Error>
-        renameNoReplaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
+        std::expected<void, Error> renameNoReplaceInStrand(
+            Paths::RemotePath const& source,
+            Paths::RemotePath const& destination,
+            std::optional<SharedData::FileType> sourceType = std::nullopt
+        );
 
         /**
-         * @brief Renames over an existing @p destination without a moment where it is missing: atomically with
-         *        posix-rename@openssh.com, otherwise by moving the destination aside to @p asideSuffix and
-         *        back if the rename fails.
+         * @brief Renames over an existing @p destination.
+         *
+         * Atomic with posix-rename@openssh.com. Otherwise the destination is moved aside to @p asideSuffix first
+         * and moved back when the rename fails; if moving it back fails too, the error names where it is kept.
+         * A leftover aside is removed when the destination exists, and put back when it does not.
          */
         std::expected<void, Error> renameReplaceInStrand(
             Paths::RemotePath const& source,
             Paths::RemotePath const& destination,
             std::string_view asideSuffix
+        );
+
+        /**
+         * @brief Moves a finished transfer from @p source to @p destination with @ref renameReplaceInStrand when
+         *        @p replace is set, otherwise with @ref renameNoReplaceInStrand.
+         */
+        std::expected<void, Error> moveIntoPlaceInStrand(
+            Paths::RemotePath const& source,
+            Paths::RemotePath const& destination,
+            bool replace,
+            std::string_view asideSuffix,
+            std::optional<SharedData::FileType> sourceType = std::nullopt
         );
 
         /**
@@ -325,6 +354,19 @@ namespace SecureShell
          * @brief In-strand variant of homeDirectory. Must be called from within the processing thread.
          */
         std::expected<Paths::RemotePath, Error> homeDirectoryInStrand();
+
+        /**
+         * @brief The directory the server starts the user in, resolved by the server (realpath of "." on OpenSSH),
+         *        without any fallback: an error when the server does not answer with an absolute path. Must be
+         *        called from within the processing thread.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalHomeDirectoryInStrand();
+
+        /**
+         * @brief The server's canonical form of the existing @p path, with every symlink resolved (realpath on
+         *        OpenSSH). Must be called from within the processing thread.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalPathInStrand(Paths::RemotePath const& path);
 
         /**
          * @brief Reads the XDG user directories from <home>/.config/user-dirs.dirs. A missing file yields no
@@ -393,6 +435,12 @@ namespace SecureShell
         std::expected<DeepLinkResult, Error> readLinkDeepInStrand(Paths::RemotePath const& path, int maxDepth = 10);
 
         /**
+         * @brief The literal of the symlink @p path, valid UTF-8 like a listed link target (U+FFFD for every invalid
+         *        byte). Must be called from within the processing thread.
+         */
+        std::expected<std::string, Error> readLinkInStrand(Paths::RemotePath const& path);
+
+        /**
          * @brief Creates a symlink at @p linkPath with the content @p target, which may be relative.
          */
         std::future<std::expected<void, Error>>
@@ -405,9 +453,38 @@ namespace SecureShell
 
       private:
         /**
-         * @brief Refuses an unset path before it reaches the server.
+         * @brief Asserts the call runs in the processing thread and refuses an unset path before it reaches the
+         *        server, where an empty path would mean the start directory.
          */
-        static std::expected<void, Error> requireSet(Paths::RemotePath const& path);
+        template <typename... PathTs>
+        std::expected<void, Error> requireSetInStrand(PathTs const&... paths) const
+        {
+            assert(strand_->withinProcessingThread());
+            if ((paths.empty() || ...))
+                return std::unexpected(unsetPathError());
+            return {};
+        }
+
+        static SftpError unsetPathError();
+
+        /**
+         * @brief The absolute path the server canonicalizes @p path to.
+         */
+        std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
+
+        static SftpError alreadyExists(Paths::RemotePath const& destination);
+
+        /**
+         * @brief Moves the regular file @p source to @p destination by a hard link and removing @p source, or by a
+         *        rename when the server refuses the link and @p destination does not exist.
+         */
+        std::expected<void, Error>
+        hardlinkIntoPlaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
+
+        /**
+         * @brief Renames @p destination to @p aside, removing a file left at @p aside first when the rename fails.
+         */
+        std::expected<void, Error> moveAsideInStrand(Paths::RemotePath const& destination, Paths::RemotePath const& aside);
 
         /**
          * @brief Reads a file into a string, stopping after maximumSize bytes.

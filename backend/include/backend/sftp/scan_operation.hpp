@@ -2,6 +2,7 @@
 
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_walkers.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -11,6 +12,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <cstdint>
 
@@ -46,7 +48,7 @@ class ScanOperation : public Operation
         return false;
     }
 
-    ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOptions options);
+    ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options);
     ~ScanOperation() override;
     ScanOperation(ScanOperation const&) = delete;
     ScanOperation(ScanOperation&&) = delete;
@@ -79,14 +81,7 @@ class ScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(std::move(scan));
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withFlatWalkerDo(*this, walker_, std::forward<decltype(fn)>(fn));
     }
 
     /**
@@ -95,23 +90,9 @@ class ScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](Paths::RelativePath const& relative)
-        {
-            return scanner(relative);
-        };
-        using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
-        if (!walker_)
-            walker_ = std::make_unique<WalkerType>(
-                std::move(scan),
-                recursive_,
-                [](Error const& error)
-                {
-                    return error.type == ErrorType::DirectoryUnreadable;
-                },
-                /*requireLocalNames=*/true,
-                excludedSuffixes_
-            );
-        return fn(static_cast<WalkerType&>(*walker_));
+        return ScanWalkers::withTreeWalkerDo(
+            *this, walker_, recursive_, /*requireLocalNames=*/true, excludedSuffixes_, std::forward<decltype(fn)>(fn)
+        );
     }
 
     /**
@@ -137,11 +118,7 @@ class ScanOperation : public Operation
         return withWalkerDo(
             [this](auto& walker)
             {
-                std::vector<std::string> paths;
-                const auto root = remotePath_.isRoot() ? std::string{} : remotePath_.value();
-                for (auto const& entry : walker.rejectedEntries())
-                    paths.push_back(root + "/" + walker.describeRejected(entry));
-                return paths;
+                return ScanWalkers::rejectedPaths(walker, remotePath_.value());
             }
         );
     }
@@ -172,7 +149,7 @@ class ScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Paths::RemotePath remotePath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

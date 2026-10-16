@@ -1,5 +1,7 @@
 
 #include <backend/windows/windows_drag_drop.hpp>
+#include <utility/error_message.hpp>
+#include <backend/rpc_helper.hpp>
 #include <paths/native.hpp>
 #include <backend/windows/cotask_mem_string.hpp>
 #include <backend/dropped_entry.hpp>
@@ -73,7 +75,7 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                 catch (std::exception const& exc)
                 {
                     std::wcout << L"Failed to parse message as JSON." << std::endl;
-                    std::cout << exc.what();
+                    std::cout << Utility::errorMessage(exc);
                     return S_OK;
                 }
 
@@ -141,12 +143,12 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                     if (messageJson.contains("subdir"))
                         reply["subdir"] = messageJson["subdir"];
 
-                    hub.callRemote("SessionArea::onFilesDropped", reply);
+                    RpcHelper::callRemoteSafely(hub, "SessionArea::onFilesDropped", reply);
                 }
                 catch (std::exception const& exc)
                 {
                     std::wcout << L"Failed to send drop message to RPC hub." << std::endl;
-                    std::cout << exc.what();
+                    std::cout << Utility::errorMessage(exc);
                 }
 
                 return S_OK;

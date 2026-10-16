@@ -1,6 +1,8 @@
 #include <log/logger_backend.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
 #include <constants/persistence.hpp>
+#include <paths/native.hpp>
+#include <paths/utf8.hpp>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -29,16 +31,17 @@ namespace Log
         // ---- File sink (optional) ----
         if (!disableFileLog)
         {
-            fs::path log_dir =
-                fmt::format(fmt::runtime(sinkDir.generic_string()), fmt::arg("appName", Constants::appName));
+            const auto logDirectory = Paths::nativeFromUtf8(
+                fmt::format(fmt::runtime(Paths::nativeToUtf8(sinkDir)), fmt::arg("appName", Constants::appName))
+            );
             std::error_code ec;
-            fs::create_directories(log_dir, ec); // best-effort
+            fs::create_directories(logDirectory, ec); // best-effort
 
-            fs::path log_file = log_dir / (std::string{Constants::appName} + ".log");
+            const auto logFile = logDirectory / Paths::nativeFromUtf8(fmt::format("{}.log", Constants::appName));
 
-            // 5 MB per file, keep 3 rotated files
+            // 5 MB per file, keep 3 rotated files. The native name is wide on Windows (SPDLOG_WCHAR_FILENAMES).
             auto file_sink =
-                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_file.string(), 5 * 1024 * 1024, 3, true);
+                std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logFile.native(), 5 * 1024 * 1024, 3, true);
 
             file_sink->set_level(spdlogLevel);
             dist_sink->add_sink(file_sink);
@@ -135,7 +138,7 @@ namespace Log
         {
             try
             {
-                hub->callRemote("log", static_cast<int>(level), msg);
+                hub->callRemote("log", static_cast<int>(level), Paths::sanitizedUtf8(msg));
             }
             catch (const std::exception& e)
             {

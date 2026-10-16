@@ -6,8 +6,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -185,5 +188,31 @@ namespace Test
 
         EXPECT_FALSE(session.resolve(Paths::RelativePath::make("dir/CON").value()).has_value());
         EXPECT_EQ(session.resolve(Paths::RelativePath{})->remote.value(), "/srv/sync");
+    }
+
+    TEST(SyncSessionCaseTests, CaseVariantsBlockOnlyTowardsASideThatFoldsCase)
+    {
+        using namespace SyncSessionTestDetail;
+        boost::asio::io_context context{};
+        const auto blockedWith = [&](bool localFoldsCase, bool remoteFoldsCase, Direction direction)
+        {
+            SyncSession session{
+                SyncSession::Options{
+                    .localRoot = Paths::LocalPath::fromUtf8("/local", Paths::LocalPlatform::Posix).value(),
+                    .remoteRoot = remote("/remote"),
+                    .localFoldsCase = localFoldsCase,
+                    .remoteFoldsCase = remoteFoldsCase,
+                },
+                context.get_executor()
+            };
+            session.setLocalTreeInStrand(directory("", {file("Readme", 1, 200)}));
+            session.setRemoteTreeInStrand(directory("", {file("readme", 1, 100)}));
+            return session.recomputeDiffInStrand({.direction = direction}, {}).blockedCount;
+        };
+        EXPECT_EQ(blockedWith(false, false, Direction::Both), 0u);
+        EXPECT_EQ(blockedWith(true, false, Direction::Upload), 0u);
+        EXPECT_EQ(blockedWith(true, false, Direction::Download), 2u);
+        EXPECT_EQ(blockedWith(false, true, Direction::Upload), 2u);
+        EXPECT_EQ(blockedWith(false, true, Direction::Download), 0u);
     }
 }

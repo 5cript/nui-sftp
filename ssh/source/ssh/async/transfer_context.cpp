@@ -6,7 +6,6 @@ namespace SecureShell
     {
         auto expected = Outcome::Running;
         outcome_.compare_exchange_strong(expected, outcome);
-        ended_.store(true);
     }
 
     void AsyncTransferContext::cancel()
@@ -32,7 +31,7 @@ namespace SecureShell
 
     bool AsyncTransferContext::hasEnded() const
     {
-        return ended_.load();
+        return outcome_.load() != Outcome::Running;
     }
 
     AsyncTransferContext::Outcome AsyncTransferContext::outcome() const

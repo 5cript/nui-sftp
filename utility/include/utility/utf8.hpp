@@ -6,8 +6,8 @@
 namespace Utility::Utf8
 {
     /**
-     * @brief Decodes UTF-8 into code points. Malformed or truncated sequences, overlong forms and surrogates each
-     * become one U+FFFD, so arbitrary bytes never fail to decode.
+     * @brief Decodes UTF-8 into code points. Every byte that is not part of a valid sequence (malformed, truncated,
+     * overlong, surrogate) becomes one U+FFFD, so arbitrary bytes never fail to decode.
      *
      * @param utf8 The text to decode.
      */

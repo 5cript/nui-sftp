@@ -2,6 +2,9 @@
 #include <tar_archive/compression.hpp>
 
 #include "compression_internal.hpp"
+#include <paths/native.hpp>
+
+#include <fmt/format.h>
 
 #include <utility>
 
@@ -18,7 +21,7 @@ namespace TarArchive
         {
             if (!std::filesystem::exists(path_))
                 return std::unexpected(makeError(
-                    TarErrorCode::FileNotFound, "archive does not exist: " + path_.string()
+                    TarErrorCode::FileNotFound, fmt::format("archive does not exist: {}", Paths::nativeToUtf8(path_))
                 ));
             const Compression byExtension = compressionFromExtension(path_);
             auto byMagic = detectCompressionByMagic(path_);

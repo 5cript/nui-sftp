@@ -58,6 +58,14 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
         /// Number of scan entries (sum of both sides) above which
         /// @ref SharedData::Sync::DiffSummary::heavyCompare is set to true.
         std::uint64_t heavyCompareThreshold{5000};
+        /** @brief The local filesystem folds case, the platform default: Windows and macOS do, others do not. */
+#if defined(_WIN32) || defined(__APPLE__)
+        bool localFoldsCase{true};
+#else
+        bool localFoldsCase{false};
+#endif
+        /** @brief The server looks like it folds case, see RemoteDeleteGuardDetail::looksCaseFolding. */
+        bool remoteFoldsCase{false};
     };
 
     SyncSession(Options options, boost::asio::any_io_executor executor);
@@ -160,20 +168,16 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
         std::string const& parentRelKey
     );
 
-    /**
-     * @brief Computes the enqueue plan from a SPARSE selection set: an entry X in
-     *        @p selectedRelKeys means "X and every descendant is selected".  See
-     *        @ref SharedData::Sync::DiffTreeStore::buildPlan.  Precondition: running on @ref strand().
-     */
-    std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
-        SharedData::Sync::DiffSection section,
-        std::unordered_set<std::string> const& selectedRelKeys
-    ) const;
-
     struct ResolvedPlanEntry
     {
         SharedData::Sync::EnqueuePlanEntry entry;
         ResolvedPaths paths;
+        /**
+         * @brief What the compare saw at the path the entry replaces (the destination of a transfer) or deletes,
+         *        which it may then only replace or delete while the path still holds it. A changed source is
+         *        transferred as it is.
+         */
+        SharedData::ComparedState compared{};
     };
 
     struct ResolvedPlan
@@ -184,7 +188,8 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     };
 
     /**
-     * @brief @ref buildEnqueuePlanInStrand with every entry resolved below the session roots.
+     * @brief The plan of a sparse selection (an entry in @p selectedRelKeys selects it and everything below it, see
+     *        @ref SharedData::Sync::DiffTreeStore::buildPlan) with every entry resolved below the session roots.
      *        Precondition: running on @ref strand().
      */
     ResolvedPlan resolvePlanInStrand(
@@ -193,6 +198,10 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     ) const;
 
   private:
+    std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
+        SharedData::Sync::DiffSection section,
+        std::unordered_set<std::string> const& selectedRelKeys
+    ) const;
     SharedData::Sync::DiffTreeStore& storeFor(SharedData::Sync::DiffSection section);
     SharedData::Sync::DiffTreeStore const& storeFor(SharedData::Sync::DiffSection section) const;
     SharedData::Sync::ScanTrees scanTrees() const;

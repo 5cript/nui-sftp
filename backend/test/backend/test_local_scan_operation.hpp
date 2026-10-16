@@ -378,6 +378,34 @@ namespace Test
         EXPECT_EQ(operation.strand(), nullptr);
     }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+    TEST_F(LocalScanOperationTests, NamesThatAreNotUtf8AreShownButRejected)
+    {
+        const auto latin1 = scanRoot_.path() / std::filesystem::path{std::string{"Fran\xE7ois.txt"}};
+        writeFile(latin1, "latin1");
+        std::error_code error{};
+        if (!std::filesystem::exists(latin1, error))
+            GTEST_SKIP() << "The filesystem refuses names that are not UTF-8";
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = false}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        const auto rejected = operation.rejectedPaths();
+        ASSERT_EQ(rejected.size(), 1u);
+        EXPECT_TRUE(Paths::isValidUtf8(rejected.front()));
+        EXPECT_TRUE(rejected.front().ends_with("/Fran\xEF\xBF\xBDois.txt")) << rejected.front();
+        const auto entries = operation.ejectEntries();
+        EXPECT_FALSE(hasEntryNamed(entries, "Fran\xEF\xBF\xBDois.txt"));
+        EXPECT_TRUE(hasEntryNamed(entries, "file1.txt"));
+
+        LocalScanOperation treeScan{{.localPath = toLocal(scanRoot_.path()), .recursive = false, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(treeScan), LocalScanOperation::WorkStatus::Complete);
+        const auto tree = treeScan.ejectScanTree();
+        auto const* node = SharedData::Sync::findScanNode(tree, "Fran\xEF\xBF\xBDois.txt");
+        ASSERT_NE(node, nullptr);
+        EXPECT_EQ(node->availability, SharedData::Sync::Availability::InvalidName);
+    }
+#endif
+
     TEST_F(LocalScanOperationTests, BuildTreeNestsAndSortsEntries)
     {
         LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};

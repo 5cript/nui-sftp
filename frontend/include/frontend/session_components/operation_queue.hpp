@@ -39,6 +39,7 @@
 
 class LocalSideModel;
 class RemoteSideModel;
+class LocalOperationRouter;
 
 class OperationQueue
 {
@@ -60,7 +61,7 @@ class OperationQueue
         RemoteSideModel* remoteModel
     );
 
-    ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
+    ROAR_PIMPL_SPECIAL_FUNCTIONS_NO_MOVE(OperationQueue);
 
     void activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId);
 
@@ -187,15 +188,38 @@ class OperationQueue
         std::function<void(Ids::OperationId const& bulkOpId)> onEnqueued = {}
     );
 
-    void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
-    /** @brief Register a callback that receives the source paths of the entries a bulk operation
-     *         could not transfer.  Runs on completion, before the completion callback, because the
-     *         final BulkProgress can arrive after the completion and is dropped then.
+    /**
+     * @brief Queues the delete of local items with their content in the backend's local operation queue, as one
+     *        operation whose card shows here and refreshes the local listing when it ends. Needs no connection; with
+     *        one the delete waits while this queue is paused. @p onAck gets the error when the backend refused it,
+     *        nothing when it was queued.
      */
-    void addFailedEntriesCallback(
-        Ids::OperationId const& opId,
-        std::function<void(std::vector<std::string> const& failedPaths)> callback
+    void enqueueLocalDelete(
+        std::vector<Paths::LocalPath> const& targets,
+        std::function<void(std::optional<std::string> const& error)> onAck
     );
+
+    /**
+     * @brief The queue belongs to a connected session and can take operations.
+     */
+    bool isActive() const;
+
+    void addCompletionCallback(Ids::OperationId const& opId, std::function<void(bool success)> callback);
+
+    /**
+     * @brief Receives the entries a bulk operation could not transfer or delete with why: by source path and, for a
+     *        prescanned bulk transfer, by entry index.
+     */
+    using FailedEntriesCallback = std::function<void(
+        std::vector<std::pair<std::string, SharedData::OperationError>> const& failedEntries,
+        std::vector<SharedData::IndexedFailure> const& indexedFailures
+    )>;
+
+    /** @brief Register a callback that receives the entries a bulk operation could not transfer or
+     *         delete. Runs on completion, before the completion callback, because the final BulkProgress
+     *         can arrive after the completion and is dropped then.
+     */
+    void addFailedEntriesCallback(Ids::OperationId const& opId, FailedEntriesCallback callback);
     /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
      *         Automatically removed when the operation completes.
      */
@@ -313,6 +337,8 @@ class OperationQueue
     Nui::ElementRenderer operator()();
 
   private:
+    friend class LocalOperationRouter;
+
     template <typename OperationCard>
     void cancelOperation(OperationCard const& operation);
     void cancelAll();
@@ -330,6 +356,7 @@ class OperationQueue
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
+    void onOperationCompleted(SharedData::OperationCompleted completed);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
     void onOperationsReordered(SharedData::OperationsReordered const& evt);
     void requestMoveOperation(Ids::OperationId const& opId, std::size_t newIndex);

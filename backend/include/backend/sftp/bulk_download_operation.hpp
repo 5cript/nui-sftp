@@ -2,9 +2,11 @@
 
 #include <backend/sftp/bulk_transfer_operation.hpp>
 #include <backend/sftp/download_operation.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 class BulkDownloadOperation : public BulkTransferOperation
@@ -28,7 +30,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::chrono::milliseconds progressEmitInterval{100};
     };
 
-    BulkDownloadOperation(SecureShell::SftpSession& sftp, BulkDownloadOperationOptions options);
+    BulkDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, BulkDownloadOperationOptions options);
     ~BulkDownloadOperation() override;
     BulkDownloadOperation(BulkDownloadOperation const&) = delete;
     BulkDownloadOperation(BulkDownloadOperation&&) = delete;
@@ -51,12 +53,26 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         bool mayOverwrite{false};
+        /** @brief A directory created without its content, with the link check of every local directory. */
+        bool isDirectory{false};
+        /** @brief See SharedData::BulkDownloadEntry::comparedDestination. */
+        std::optional<SharedData::ComparedState> comparedDestination{};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 
+    /**
+     * @brief The request that resumes this bulk on another connection: the entries it has not finished, as a flat
+     *        list below its roots, with the options of @p request. None while the entries are not known yet, the
+     *        backup then stays as it is. Also none when a remote symlink is among them, which a flat list could only
+     * follow.
+     */
+    std::optional<SharedData::BulkDownloadRequest> resumeRequest(SharedData::BulkDownloadRequest request) const;
+
   protected:
-    std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) override;
+    std::expected<void, Error>
+    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;
+    std::expected<void, Error>
+    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) override;
     std::unique_ptr<Operation> makeChild(
         std::size_t entryIndex,
         EntryPaths const& paths,
@@ -64,6 +80,7 @@ class BulkDownloadOperation : public BulkTransferOperation
     ) override;
     bool isSkippableError(Error const& error) const override;
     bool isSkippableDirectoryError(Error const& error) const override;
+    std::expected<void, Error> finishInStrand() override;
 
     bool sourceIsRemote() const noexcept override
     {
@@ -78,9 +95,14 @@ class BulkDownloadOperation : public BulkTransferOperation
   private:
     std::expected<void, Error>
     createLocalDirectory(Paths::LocalPath const& path, SharedData::DirectoryEntry const& entry);
-    std::expected<void, Error>
-    applyPermsToDirectory(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
+    /**
+     * @brief Remembers the permissions @p path gets once the bulk is done, so a directory without write
+     *        permission still receives its content.
+     */
+    void deferDirectoryPermissions(std::filesystem::path const& path, SharedData::DirectoryEntry const& entryToInheritFrom);
 
   private:
     DownloadOperation::DownloadOperationOptions individualOptions_;
+    /** @brief Created directories with the permissions they get at the end, parents before their children. */
+    std::vector<std::pair<std::filesystem::path, std::filesystem::perms>> deferredDirectoryPermissions_{};
 };

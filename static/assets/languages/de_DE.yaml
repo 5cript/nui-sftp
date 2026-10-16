@@ -153,6 +153,9 @@ operationQueue:
   deletingItem: "Lösche: '{}'"
   deletingSelectedIn: "Lösche ausgewählte Elemente in {}"
   deletingLocallyIn: "Lösche lokale Elemente in {}"
+  localDeleteDone: "Die lokalen Elemente in {} wurden gelöscht."
+  localDeletePartlyDone: "Nicht alle lokalen Elemente in {} konnten gelöscht werden."
+  localDeleteFailed: "Die lokalen Elemente in {} konnten nicht gelöscht werden: {}"
   entriesFailed: "{} Einträge fehlgeschlagen:\n"
   errorButton: "Fehler!"
   livePage: "Live"
@@ -197,16 +200,17 @@ syncDialog:
   deleteSideLocal: "lokal"
   confirmDeleteRowHeader: "Jetzt löschen"
   confirmDeleteRow: "'{}' {} jetzt löschen?"
-  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden oder sie sich seit der letzten Synchronisation so geändert haben, dass Daten verloren gingen. Zum Anzeigen klicken."
+  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft oder sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden. Zum Anzeigen klicken."
   blockedTitle: "Unveränderte Einträge"
+  synchronizeUnavailable: "Der Vergleich läuft noch oder wurde abgebrochen. Vergleichen Sie erneut, um zu synchronisieren."
+  executionRejected: "Diese Einträge wurden nicht synchronisiert: {}"
+  changedSinceCompare: "Nach dem Vergleich geändert und deshalb unverändert gelassen. Erneut vergleichen, um es zu synchronisieren."
   blockReason:
     Unreadable: "nicht lesbar"
     Excluded: "nicht übertragbar"
     InvalidName: "ungültiger Name"
     TypeConflict: "Verzeichnis gegen symbolischen Link"
     CaseConflict: "Namen unterscheiden sich nur in der Groß- und Kleinschreibung"
-    ChangedOnBothSides: "seit der letzten Synchronisation auf beiden Seiten geändert"
-    ChangedOnDestination: "seit der letzten Synchronisation auf der Seite geändert, die ersetzt oder gelöscht würde"
   tree:
     loading: "Lädt…"
     loadFailed: "Fehlgeschlagen: {}"
@@ -1151,6 +1155,12 @@ terminalPanel:
   saveDialogTitle: "Terminalinhalt speichern"
   saveToFile: "Terminal in Datei speichern"
 backend:
+  deleteGuard:
+    noPath: "Es wurde nichts gelöscht. Ein Pfad fehlt."
+    root: "Es wurde nichts gelöscht. '{}' ist das Wurzelverzeichnis."
+    containsHome: "Es wurde nichts gelöscht. '{}' ist oder enthält das Heimatverzeichnis '{}'."
+    windowsName: "Es wurde nichts gelöscht. Der Server verwendet Windows-Pfade, unter denen '{}' ein anderes Element bezeichnen könnte."
+    notVerified: "Es wurde nichts gelöscht, weil der Server nicht rechtzeitig beantwortet hat, ob '{}' das Heimatverzeichnis enthält."
   rename:
     targetExists: "Ein Eintrag mit diesem Namen existiert bereits."
     invalidName: "Der neue Name muss ein einfacher Name im selben Verzeichnis sein."
@@ -1196,3 +1206,8 @@ backend:
     connectFailedUnspecified: "Verbindung zum SSH-Server aus unbekanntem Grund fehlgeschlagen."
   persistence:
     saveFailed: "Der Zustand konnte nicht gespeichert werden: {}"
+  sync:
+    staleComparison: "der Vergleich hat sich seit der Anzeige geändert, bitte erneut vergleichen"
+    scanCancelled: "Das Auflisten wurde abgebrochen."
+    localScanFailed: "Das lokale Verzeichnis konnte nicht aufgelistet werden: {}"
+    remoteScanFailed: "Das Verzeichnis auf dem Server konnte nicht aufgelistet werden: {}"

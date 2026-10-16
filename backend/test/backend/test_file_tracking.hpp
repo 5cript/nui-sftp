@@ -4,6 +4,7 @@
 #include <backend/file_tracking/instance_watch.hpp>
 #include <backend/file_tracking/temp_dir_instancing.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
+#include <paths/native.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -422,6 +423,18 @@ namespace Test
     {
         auto inst = makeInstance();
         auto subdir = inst->instanceDir() / "watched";
+        fs::create_directory(subdir);
+
+        auto watch = inst->addWatch(subdir);
+        ASSERT_TRUE(watch.has_value());
+        EXPECT_TRUE(watch->isValid());
+        EXPECT_EQ(watch->path(), subdir);
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, AddWatchReturnsValidHandleForANonAsciiSubdir)
+    {
+        auto inst = makeInstance();
+        auto subdir = inst->instanceDir() / Paths::nativeFromUtf8("Größe 東京");
         fs::create_directory(subdir);
 
         auto watch = inst->addWatch(subdir);

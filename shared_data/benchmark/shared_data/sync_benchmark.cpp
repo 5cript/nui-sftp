@@ -177,7 +177,7 @@ int main(int argc, char** argv)
                 {
                     return listing.at(relative.empty() ? std::string{"/root"} : "/root/" + relative.value());
                 };
-                TreeDirectoryWalker<int, decltype(scanner), false> walker{std::move(scanner)};
+                TreeDirectoryWalker<int, decltype(scanner)> walker{std::move(scanner)};
                 if (!walker.walkAll())
                     std::abort();
                 auto tree = std::move(walker).ejectTree();

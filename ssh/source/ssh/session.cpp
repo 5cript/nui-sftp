@@ -3,6 +3,7 @@
 #include <ssh/sftp_session.hpp>
 #include <paths/native.hpp>
 #include <ssh/ssh_key.hpp>
+#include <ssh/key_file.hpp>
 
 #include <fmt/format.h>
 #include <libssh/sftp.h>
@@ -12,22 +13,8 @@ namespace SecureShell
     namespace
     {
         /**
-         * @brief Overwrite the contents of a string buffer in place so sensitive
-         *        data does not linger in process memory after use.
-         * @param target String whose storage will be overwritten with zero bytes
-         *               through a volatile pointer to prevent optimizer elision.
-         */
-        void secureWipe(std::string& target)
-        {
-            volatile char* volatilePtr = target.data();
-            for (std::size_t index = 0; index < target.size(); ++index)
-                volatilePtr[index] = '\0';
-            target.clear();
-        }
-
-        /**
          * @brief Describes why reading a key file failed, libssh only returns SSH_EOF or SSH_ERROR for it.
-         * @param importResult Return value of ssh_pki_import_pubkey_file or ssh_pki_import_privkey_file.
+         * @param importResult Return value of importPublicKeyFile or importPrivateKeyFile.
          * @param keyKind "public" or "private".
          * @param keyFile The key file that was read.
          */
@@ -352,7 +339,7 @@ namespace SecureShell
                 {
                     lastAttemptedAppliedOption = "SSH Directory";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_SSH_DIR, sshOptions.sshDirectory.value().generic_string().c_str()
+                        SSH_OPTIONS_SSH_DIR, Paths::nativeToUtf8(sshOptions.sshDirectory.value()).c_str()
                     );
                 }
                 return 0;
@@ -378,7 +365,7 @@ namespace SecureShell
                 {
                     lastAttemptedAppliedOption = "Known Hosts File";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_KNOWNHOSTS, sshOptions.knownHostsFile.value().generic_string().c_str()
+                        SSH_OPTIONS_KNOWNHOSTS, Paths::nativeToUtf8(sshOptions.knownHostsFile.value()).c_str()
                     );
                 }
                 return 0;
@@ -634,9 +621,7 @@ namespace SecureShell
                 {
                     if (maybeSshKeyPublic)
                     {
-                        return ssh_pki_import_pubkey_file(
-                            Paths::nativeToUtf8(*maybeSshKeyPublic).c_str(), &publicKey.underlyingReferenced()
-                        );
+                        return importPublicKeyFile(*maybeSshKeyPublic, &publicKey.underlyingReferenced());
                     }
                     return SSH_OK;
                 },
@@ -654,12 +639,8 @@ namespace SecureShell
                 },
                 [&sshKeyPrivate, &privateKey, askPass, askPassUserDataKeyPhrase]()
                 {
-                    return ssh_pki_import_privkey_file(
-                        Paths::nativeToUtf8(sshKeyPrivate).c_str(),
-                        nullptr,
-                        askPass,
-                        askPassUserDataKeyPhrase,
-                        &privateKey.underlyingReferenced()
+                    return importPrivateKeyFile(
+                        sshKeyPrivate, nullptr, askPass, askPassUserDataKeyPhrase, &privateKey.underlyingReferenced()
                     );
                 },
                 [&privateKey, &session]()
@@ -699,7 +680,7 @@ namespace SecureShell
                         if (pwFromCache.has_value())
                         {
                             buf = pwFromCache.value();
-                            secureWipe(*pwFromCache);
+                            Detail::secureWipe(*pwFromCache);
                             pwFromCache.reset();
                             const auto result = static_cast<ssh::Session&>(*session).userauthPassword(buf.data());
                             if (result == SSH_AUTH_SUCCESS)
@@ -721,7 +702,7 @@ namespace SecureShell
                     return (int)SSH_AUTH_DENIED;
                 }
             );
-            secureWipe(buf);
+            Detail::secureWipe(buf);
         }
 
         if (keyFailure && result.result == SSH_EOF)

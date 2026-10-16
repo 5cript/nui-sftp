@@ -4,14 +4,19 @@
 #include <ssh/sftp_session.hpp>
 #include <ids/ids.hpp>
 #include <backend/sftp/operation_queue.hpp>
+#include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/rpc_helper.hpp>
 #include <persistence/state_holder.hpp>
 
-#include <unordered_map>
-#include <memory>
 #include <atomic>
+#include <exception>
+#include <expected>
+#include <memory>
 #include <optional>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
 
 /**
  * @brief This session is the implementation equivalent of one tab in the UI.
@@ -36,7 +41,8 @@ class Session
         Nui::Window& wnd,
         Nui::RpcHub& hub,
         Persistence::SftpOptions const& sftpOptions,
-        BulkResumeRegistry* bulkResumeRegistry
+        BulkResumeRegistry* bulkResumeRegistry,
+        std::shared_ptr<LocalOperationQueue> localOperationQueue
     );
 
     Session(const Session&) = delete;
@@ -205,6 +211,13 @@ class Session
     void registerRpcSftpAddBulkDownloadOperation();
     void registerRpcSftpAddBulkUploadOperation();
     void registerRpcSftpAddBulkDeleteOperation();
+
+    /**
+     * @brief Handles "Session::{id}::addLocalDelete" (operation id, local paths): queues the recursive delete of the
+     *        local items in the local operation queue, held while the queue of this session is paused, see
+     *        LocalOperationQueue::addExplorerDelete.
+     */
+    void registerRpcAddLocalDeleteOperation();
     void registerRpcSftpExistsBatch();
     void registerRpcSftpOpenSyncSession();
     void registerRpcSftpRecomputeSyncDiff();
@@ -218,65 +231,121 @@ class Session
 
     void removeSftpChannel(Ids::ChannelId channelId);
 
-    template <typename FunctionT, typename ReplyCallable>
-    void withChannelDo(Ids::ChannelId channelId, FunctionT&& func, ReplyCallable&& reply)
+    /**
+     * @brief Runs @p func on the strand with the channel @p channelId of @p channels, as (reply, channel) or
+     *        (reply, session, channel). @p reply is always answered: when the session is gone, when there is no such
+     *        channel, and with the message of an exception @p func throws.
+     */
+    template <typename ChannelT, typename FunctionT>
+    void withLockedChannelDo(
+        std::unordered_map<Ids::ChannelId, std::weak_ptr<ChannelT>, Ids::IdHash> Session::* channels,
+        void (Session::*remove)(Ids::ChannelId),
+        Ids::ChannelId channelId,
+        FunctionT&& func,
+        RpcHelper::RpcOnce&& reply
+    )
     {
         within_strand_do(
-            [this,
+            [weak = weak_from_this(),
+                channels,
+                remove,
                 channelId = std::move(channelId),
                 func = std::forward<FunctionT>(func),
-                reply = std::forward<ReplyCallable>(reply)]() mutable
+                reply = std::move(reply)]() mutable
             {
-                if (auto iter = channels_.find(channelId); iter != channels_.end())
-                {
-                    if (auto channel = iter->second.lock(); channel)
-                    {
-                        func(std::move(reply), std::move(channel));
-                    }
-                    else
-                    {
-                        Log::error("Failed to lock channel with id: {}", channelId.value());
-                        removeChannel(channelId);
-                        return reply({{"error", "Failed to lock channel"}});
-                    }
-                }
-                else
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+                auto& map = (*self).*channels;
+                const auto iter = map.find(channelId);
+                if (iter == map.end())
                 {
                     Log::error("No channel found with id: {}", channelId.value());
-                    return reply({{"error", "No channel found with id"}});
+                    return reply.error("No channel found with id");
+                }
+                auto channel = iter->second.lock();
+                if (!channel)
+                {
+                    Log::error("Failed to lock channel with id: {}", channelId.value());
+                    ((*self).*remove)(channelId);
+                    return reply.error("Failed to lock channel");
+                }
+                try
+                {
+                    if constexpr (
+                        std::is_invocable_v<FunctionT&, RpcHelper::RpcOnce&&, Session&, std::shared_ptr<ChannelT>>
+                    )
+                        func(std::move(reply), *self, std::move(channel));
+                    else
+                        func(std::move(reply), std::move(channel));
+                }
+                catch (std::exception const& exception)
+                {
+                    Log::error(
+                        "A call on channel '{}' failed: {}", channelId.value(), Utility::errorMessage(exception)
+                    );
+                    reply.error(Utility::errorMessage(exception));
+                }
+                catch (...)
+                {
+                    Log::error("A call on channel '{}' failed with an unknown exception", channelId.value());
+                    reply.error("Unknown error");
                 }
             }
         );
     }
 
-    template <typename FunctionT, typename ReplyCallable>
-    void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, ReplyCallable&& reply)
+    template <typename FunctionT>
+    void withChannelDo(Ids::ChannelId channelId, FunctionT&& func, RpcHelper::RpcOnce&& reply)
     {
-        within_strand_do(
-            [this,
-                channelId = std::move(channelId),
-                func = std::forward<FunctionT>(func),
-                reply = std::forward<ReplyCallable>(reply)]() mutable
+        withLockedChannelDo(
+            &Session::channels_,
+            &Session::removeChannel,
+            std::move(channelId),
+            std::forward<FunctionT>(func),
+            std::move(reply)
+        );
+    }
+
+    template <typename FunctionT>
+    void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, RpcHelper::RpcOnce&& reply)
+    {
+        withLockedChannelDo(
+            &Session::sftpChannels_,
+            &Session::removeSftpChannel,
+            std::move(channelId),
+            std::forward<FunctionT>(func),
+            std::move(reply)
+        );
+    }
+
+    /**
+     * @brief Queues operations on the SFTP channel @p channelId with @p queue, called on the strand with the operation
+     *        queue and the channel, and answers @p reply with the JSON it returns or with the message it fails with,
+     *        which the log names as the failure to queue @p description. A queued request resets the queue throttle.
+     */
+    template <typename QueueT>
+    void queueOnChannel(RpcHelper::RpcOnce&& reply, Ids::ChannelId channelId, std::string description, QueueT&& queue)
+    {
+        withSftpChannelDo(
+            std::move(channelId),
+            [description = std::move(description), queue = std::forward<QueueT>(queue)](
+                RpcHelper::RpcOnce&& reply, Session& self, std::shared_ptr<SecureShell::SftpSession> const& channel
+            ) mutable
             {
-                if (auto iter = sftpChannels_.find(channelId); iter != sftpChannels_.end())
+                if (!self.operationQueue_)
+                    return reply.error("Session no longer exists");
+                std::expected<nlohmann::json, std::string> queued = queue(*self.operationQueue_, *channel);
+                if (!queued)
                 {
-                    if (auto channel = iter->second.lock(); channel)
-                    {
-                        func(std::move(reply), std::move(channel));
-                    }
-                    else
-                    {
-                        Log::error("Failed to lock channel with id: {}", channelId.value());
-                        removeSftpChannel(channelId);
-                        return reply({{"error", "Failed to lock channel"}});
-                    }
+                    Log::error("Failed to queue {}: {}", description, queued.error());
+                    return reply.error(queued.error());
                 }
-                else
-                {
-                    Log::error("No channel found with id: {}", channelId.value());
-                    return reply({{"error", "No channel found with id"}});
-                }
-            }
+                Log::info("Queued {}", description);
+                self.resetQueueThrottle();
+                reply(*std::move(queued));
+            },
+            std::move(reply)
         );
     }
 
@@ -297,4 +366,8 @@ class Session
     BulkResumeRegistry* bulkResumeRegistry_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
+    /** @brief The temp file suffix of uploads, which names where a replaced item is kept during a rename. */
+    std::string remoteTempFileSuffix_;
+    /** @brief Runs the local deletes of this session, which go on when it ends. */
+    std::shared_ptr<LocalOperationQueue> localOperationQueue_;
 };

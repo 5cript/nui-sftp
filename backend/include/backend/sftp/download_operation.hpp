@@ -8,9 +8,12 @@
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
+#include <utility/link_safe_remove.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 class DownloadOperation : public Operation
@@ -51,16 +54,24 @@ class DownloadOperation : public Operation
          *        a link planted inside a downloaded tree cannot redirect the download out of it.
          */
         Paths::LocalPath linkFreeRoot{};
+        /** @brief Directories below @ref linkFreeRoot already found to be no links, shared by a bulk download. */
+        std::shared_ptr<Utility::VerifiedDirectories> verifiedDirectories{};
+        /**
+         * @brief What a sync compare saw at the destination. The transfer then fails with ChangedSinceCompare
+         *        instead of replacing a destination that no longer holds it. A source that changed since is still
+         *        transferred as it is now. Unset outside of sync.
+         */
+        std::optional<SharedData::ComparedState> comparedDestination{std::nullopt};
     };
 
     SecureShell::ProcessingStrand* strand() const override
     {
         if (auto stream = fileStream_.lock(); stream)
             return stream->strand();
-        return sftp_ ? sftp_->strand() : nullptr;
+        return strandOf(sftp_);
     }
 
-    DownloadOperation(SecureShell::SftpSession& sftp, DownloadOperationOptions options);
+    DownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DownloadOperationOptions options);
     ~DownloadOperation() override;
     DownloadOperation(DownloadOperation const&) = delete;
     DownloadOperation(DownloadOperation&&) = delete;
@@ -122,12 +133,12 @@ class DownloadOperation : public Operation
     std::expected<bool, Error> readOnceInStrand();
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand();
+    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
 
     bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
 
     /// Runs the remote-heavy portion of prepare() under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand();
+    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
@@ -138,24 +149,46 @@ class DownloadOperation : public Operation
     std::expected<void, Error> refuseLinkedPath(std::filesystem::path const& path) const;
 
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
+    readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& remoteFullPath);
+
+    /**
+     * @brief The error of a file that ended before its listed size arrived.
+     */
+    Error sizeMismatch() const;
+
+    /**
+     * @brief Creates the temp file, or limits an existing one, to its owner until the final permissions are set.
+     */
+    std::expected<void, Error> restrictTempFile() const;
+
+    /**
+     * @brief The permissions of the finished file: inherited, configured, or those of a new file.
+     */
+    std::expected<std::filesystem::perms, Error> finalPermissionsInStrand();
+
+    /**
+     * @brief Gives @p path the modification time of the remote file. A failure is only logged.
+     */
+    void applyModificationTime(std::filesystem::path const& path) const;
 
     void cleanup();
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     DownloadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */
     Paths::RemotePath remotePath_{};
     /** @brief options_.localPath for the filesystem calls, empty when none was given. */
     std::filesystem::path localNativePath_{};
+    /** @brief Where the download is written before it replaces localNativePath_, empty when no local path was given. */
+    std::filesystem::path tempNativePath_{};
     std::ofstream localFile_;
     SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
     /** @brief Bytes already present in an adopted partial file. */
     std::uint64_t resumeOffset_{0u};
-    /** @brief Bytes in the temp file so far, counted instead of tellp, which append mode misreports on Windows. */
+    /** @brief Bytes of the content in the temp file so far, an adopted partial file included. */
     std::uint64_t bytesInFile_{0u};
     /** @brief An adopted partial file already holds the whole content. */
     bool transferComplete_{false};

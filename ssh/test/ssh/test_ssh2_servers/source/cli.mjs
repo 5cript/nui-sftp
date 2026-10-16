@@ -18,7 +18,7 @@ class CommandLineInterface {
 
             const command = JSON.parse(input);
             if (Object.hasOwnProperty.call(command, 'command')) {
-                // Exit runs once: a second run wrote to the closed log and the crash waited for stdin on Windows.
+                // Exit runs its handler once and closes stdin.
                 if (command.command === 'exit') {
                     if (this.eventMap.has('exit')) {
                         this.eventMap.get('exit')();

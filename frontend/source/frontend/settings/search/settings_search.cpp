@@ -4,6 +4,7 @@
 #include <frontend/svgs/it-system.hpp>
 #include <frontend/svgs/settings.hpp>
 #include <persistence/state/state.hpp>
+#include <paths/utf8.hpp>
 #include <utility/fuzzy_search.hpp>
 #include <utility/language.hpp>
 
@@ -137,7 +138,7 @@ namespace
     {
         auto text = value.is_string() ? value.get<std::string>() : value.dump();
         if (text.size() > maximumValueLength)
-            text = text.substr(0, maximumValueLength) + "...";
+            return fmt::format("{}...", Paths::truncatedUtf8(text, maximumValueLength));
         return text;
     }
 
@@ -506,8 +507,8 @@ struct SettingsSearch::Implementation
         const auto key = event["key"].as<std::string>();
         const auto count = selectableCount();
         const auto caret = inputElement.isUndefined() ? 0 : inputElement["selectionStart"].as<int>();
-        const auto valueLength =
-            inputElement.isUndefined() ? 0 : static_cast<int>(inputElement["value"].as<std::string>().size());
+        // selectionStart counts UTF-16 code units, like the length of the JavaScript string.
+        const auto valueLength = inputElement.isUndefined() ? 0 : inputElement["value"]["length"].as<int>();
 
         const auto consume = [&event]()
         {

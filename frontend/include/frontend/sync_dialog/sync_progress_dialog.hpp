@@ -32,10 +32,11 @@ class SyncProgressDialog
      *        The dialog keeps showing the Comparing spinner during the diff walk;
      *        light diffs finish within a frame so the phase effectively flashes.
      *
-     * @param provider         Non-owning handle to the sync session.  Lifetime must
-     *                         outlive this call (typically owned by @c Session).
+     * @param provider         The sync session, held until the first diff landed, a scan failed or the
+     *                         dialog was cancelled.
      * @param initialOptions   The diff options to apply for the first recompute.
-     * @param onDone           Called exactly once on success.  Not invoked on cancel.
+     * @param onDone           Called exactly once on success with the provider, which this dialog lets go
+     *                         of then.  Not invoked on cancel or failure.
      */
     void open(
         std::shared_ptr<BackendSyncProvider> provider,
@@ -45,7 +46,7 @@ class SyncProgressDialog
         bool recursive,
         bool ignoreHidden,
         SharedData::Sync::DiffOptions initialOptions,
-        std::function<void(SharedData::Sync::DiffSnapshot)> onDone
+        std::function<void(std::shared_ptr<BackendSyncProvider>, SharedData::Sync::DiffSnapshot)> onDone
     );
 
     /**

@@ -12,6 +12,8 @@ namespace SharedData
             {"mtime", entry.mtime},
             {"mtimeNsec", entry.mtimeNsec},
         };
+        if (!entry.nameIsValidUtf8)
+            j["nameIsValidUtf8"] = false;
         if (entry.flags != 0)
             j["flags"] = entry.flags;
         if (entry.uid != 0)
@@ -46,6 +48,7 @@ namespace SharedData
 
         j.at("name").get_to(entry.name);
         j.at("type").get_to(entry.type);
+        getOptional("nameIsValidUtf8", entry.nameIsValidUtf8);
         getOptional("flags", entry.flags);
         getOptional("size", entry.size);
         getOptional("uid", entry.uid);

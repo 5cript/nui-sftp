@@ -88,7 +88,12 @@ void BackendSyncProvider::recompute(
 )
 {
     if (!queue_ || closed_)
+    {
+        SharedData::Sync::DiffSnapshot nothing{};
+        nothing.summary.cancelled = true;
+        onSnapshot(std::move(nothing));
         return;
+    }
 
     queue_->recomputeSyncDiff(
         sessionId_,
@@ -115,7 +120,7 @@ void BackendSyncProvider::loadChildren(
 )
 {
     if (!queue_ || closed_)
-        return;
+        return onRejected("closed");
 
     const auto expectedGeneration = generation_;
     queue_->loadSyncDiffChildren(
@@ -135,7 +140,11 @@ void BackendSyncProvider::loadChildren(
                 return;
             onResolved(std::move(nodes));
         },
-        std::move(onRejected)
+        [alive = std::weak_ptr{alive_}, onRejected = std::move(onRejected)](std::string const& message)
+        {
+            if (alive.lock())
+                onRejected(message);
+        }
     );
 }
 
@@ -146,19 +155,24 @@ void BackendSyncProvider::executeSelection(
 )
 {
     if (!queue_ || closed_)
-        return;
+        return onRejected("closed");
 
     request.syncSessionId = sessionId_;
     request.generation = generation_;
     queue_->executeSyncSelection(
         std::move(request),
-        [alive = std::weak_ptr{alive_}, onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
+        [alive = std::weak_ptr{alive_},
+            onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
         {
             // The operations are queued either way, the reply only maps them to rows of a dialog that may be gone.
             if (alive.lock())
                 onResolved(std::move(result));
         },
-        std::move(onRejected)
+        [alive = std::weak_ptr{alive_}, onRejected = std::move(onRejected)](std::string const& message)
+        {
+            if (alive.lock())
+                onRejected(message);
+        }
     );
 }
 

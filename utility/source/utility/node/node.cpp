@@ -1,4 +1,6 @@
 #include <utility/node/node.hpp>
+#include <utility/error_message.hpp>
+#include <paths/native.hpp>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -45,7 +47,7 @@ namespace SecureShell::Test
         boost::asio::write(stdinPipe, boost::asio::buffer(commandWithNewline), ec);
         if (ec)
         {
-            std::cerr << "Failed to write command: " << ec.message() << std::endl;
+            std::cerr << "Failed to write command: " << Utility::errorMessage(ec) << std::endl;
             return;
         }
         // Node on Windows cannot finish exiting while a read on its stdin pipe is pending.
@@ -71,7 +73,7 @@ namespace SecureShell::Test
         boost::asio::write(stdinPipe, boost::asio::buffer(commandWithNewline), ec);
         if (ec)
         {
-            std::cerr << "Failed to write command: " << ec.message() << std::endl;
+            std::cerr << "Failed to write command: " << Utility::errorMessage(ec) << std::endl;
             return false;
         }
 
@@ -82,7 +84,7 @@ namespace SecureShell::Test
             const auto readAmount = stdoutPipe.read_some(boost::asio::buffer(buffer), ec);
             if (ec || readAmount == 0)
             {
-                std::cerr << "Failed to read command acknowledgement: " << ec.message() << std::endl;
+                std::cerr << "Failed to read command acknowledgement: " << Utility::errorMessage(ec) << std::endl;
                 return false;
             }
             received.append(buffer.data(), readAmount);
@@ -103,7 +105,7 @@ namespace SecureShell::Test
         const int exitCode = process(*this)->wait(errc);
         if (errc && errc != boost::system::errc::no_child_process)
         {
-            std::cerr << "node process wait failed: " << errc.message() << std::endl;
+            std::cerr << "node process wait failed: " << Utility::errorMessage(errc) << std::endl;
         }
         return exitCode;
     }
@@ -119,7 +121,7 @@ namespace SecureShell::Test
         }
         catch (std::exception const& e)
         {
-            std::cerr << "Failed to terminate process: " << e.what() << std::endl;
+            std::cerr << "Failed to terminate process: " << Utility::errorMessage(e) << std::endl;
         }
     }
 
@@ -134,7 +136,7 @@ namespace SecureShell::Test
             packageJsonFile << packageJson.dump(4);
         }
 
-        const auto command = "\"cd "s + directory.generic_string() + " && npm install\"";
+        const auto command = fmt::format("\"cd {} && npm install\"", Paths::nativeToUtf8(directory));
 #ifdef _WIN32
         const auto shell = MSYS2_BASH;
         const auto npmShellArgs = std::vector<std::string>{
@@ -156,7 +158,7 @@ namespace SecureShell::Test
             shell,
             npmShellArgs,
             bp2::process_environment{bp2::environment::current()},
-            bp2::process_start_dir{directory.generic_string()}};
+            bp2::process_start_dir{directory.native()}};
         child.wait();
     }
 
@@ -201,7 +203,7 @@ namespace SecureShell::Test
                 node,
                 std::vector<std::string>{"main.mjs", "--log-file=./log.txt"},
                 bp2::process_environment{bp2::environment::current()},
-                bp2::process_start_dir{isolateDirectory.path().generic_string()},
+                bp2::process_start_dir{isolateDirectory.path().native()},
                 bp2::process_stdio{
                     .in = result->stdinPipe,
                     .out = result->stdoutPipe,
@@ -223,7 +225,7 @@ namespace SecureShell::Test
                 }
                 catch (std::exception const& e)
                 {
-                    std::cerr << "Failed to terminate process: " << e.what() << std::endl;
+                    std::cerr << "Failed to terminate process: " << Utility::errorMessage(e) << std::endl;
                 }
             }
         });
@@ -236,7 +238,7 @@ namespace SecureShell::Test
             int readAmount = result->stdoutPipe.read_some(boost::asio::buffer(buffer), ec);
             if (ec)
             {
-                std::cerr << "Failed to read port: " << ec.message() << std::endl;
+                std::cerr << "Failed to read port: " << Utility::errorMessage(ec) << std::endl;
                 return result;
             }
             if (readAmount == 0)
@@ -249,7 +251,7 @@ namespace SecureShell::Test
         }
         catch (std::exception const& e)
         {
-            std::cerr << "Failed to parse port object: " << e.what() << std::endl;
+            std::cerr << "Failed to parse port object: " << Utility::errorMessage(e) << std::endl;
             return result;
         }
 

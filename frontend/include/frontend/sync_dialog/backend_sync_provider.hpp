@@ -30,9 +30,10 @@ class OperationQueue;
  *  - @ref cancelDiff flips the backend cancel flag.
  *  - @ref close releases backend memory.  Idempotent.
  *
- * The provider owns the lifecycle — callers should construct it once per sync flow
- * and destroy it when the dialog closes.  The destructor calls @ref close, replies that
- * arrive afterwards are dropped.
+ * The provider owns the lifecycle: one per sync flow, held by the progress dialog until the
+ * first diff landed and then by the sync dialog until it closes or opens with another one.
+ * The destructor calls @ref close, replies that arrive afterwards are dropped. A call on a
+ * closed provider rejects (or reports a cancelled diff) right away.
  */
 class BackendSyncProvider
 {

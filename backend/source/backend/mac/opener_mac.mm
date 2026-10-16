@@ -1,4 +1,5 @@
 #include <backend/opener.hpp>
+#include <paths/native.hpp>
 #include <log/log.hpp>
 #include <utility/localized_message.hpp>
 
@@ -82,7 +83,7 @@ std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) con
     static constexpr std::string_view runnable[] = {
         ".command", ".tool", ".terminal", ".pkg", ".mpkg", ".workflow", ".scpt", ".applescript", ".jar", ".webloc",
     };
-    auto extension = path.extension().string();
+    auto extension = Paths::nativeToUtf8(path.extension());
     std::ranges::transform(extension, extension.begin(), [](unsigned char character) { return std::tolower(character); });
     if (std::ranges::find(runnable, std::string_view{extension}) != std::end(runnable))
         return std::string{"backend.opener.risk.dangerousType"};
@@ -104,7 +105,7 @@ Opener& Opener::operator=(Opener&&) noexcept = default;
 
 std::expected<void, std::string> Opener::openFile(std::filesystem::path const& path, bool openWith)
 {
-    Log::info("Opener: openFile path='{}' openWith={}", path.string(), openWith);
+    Log::info("Opener: openFile path='{}' openWith={}", Paths::nativeToUtf8(path), openWith);
 
     std::error_code existsError;
     if (!path.is_absolute() || !std::filesystem::exists(path, existsError))
@@ -123,7 +124,7 @@ std::expected<void, std::string> Opener::openFile(std::filesystem::path const& p
         }
 
         if (![[NSWorkspace sharedWorkspace] openURL:url])
-            return std::unexpected{Utility::localizedMessage("backend.opener.mac.openFailed", path.string())};
+            return std::unexpected{Utility::localizedMessage("backend.opener.mac.openFailed", Paths::nativeToUtf8(path))};
     }
     return {};
 }
@@ -136,7 +137,7 @@ SharedData::OpenerCapabilities Opener::capabilities() const
 
 std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path const& path)
 {
-    Log::info("Opener: openInFileManager path='{}'", path.string());
+    Log::info("Opener: openInFileManager path='{}'", Paths::nativeToUtf8(path));
 
     std::error_code directoryCheckError;
     const bool isDirectory = std::filesystem::is_directory(path, directoryCheckError);
@@ -148,7 +149,7 @@ std::expected<void, std::string> Opener::openInFileManager(std::filesystem::path
         {
             NSString* const pathString = [NSString stringWithUTF8String:path.c_str()];
             if (![workspace selectFile:nil inFileViewerRootedAtPath:pathString])
-                return std::unexpected{Utility::localizedMessage("backend.opener.mac.openFailed", path.string())};
+                return std::unexpected{Utility::localizedMessage("backend.opener.mac.openFailed", Paths::nativeToUtf8(path))};
             return {};
         }
         [workspace activateFileViewerSelectingURLs:@[fileUrl(path, false)]];

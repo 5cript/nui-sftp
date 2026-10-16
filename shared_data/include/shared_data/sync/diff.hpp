@@ -8,7 +8,6 @@
 #include <utility/enum_string_convert.hpp>
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -33,17 +32,28 @@ namespace SharedData::Sync
         bool recursive{true};
         /// When true, entries with any path segment starting with '.' are dropped.
         bool ignoreHidden{false};
-        /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
-        /// case would land on one local file then.
+        /**
+         * @brief The local filesystem folds case (Windows, macOS), set by the backend. Names that differ only in case
+         *        or normalization would land on one local file then.
+         */
         bool localCaseInsensitive{false};
-        /// When this pair was last synchronized (seconds since the epoch); a side whose modification time is later
-        /// changed since. Unset for the first sync, newest wins then.
-        std::optional<std::uint64_t> lastSyncTime{};
+        /**
+         * @brief The server looks like it folds case (Windows or macOS paths), set by the backend. Names that differ
+         *        only in case or normalization would land on one remote file then.
+         */
+        bool remoteCaseInsensitive{false};
     };
     BOOST_DESCRIBE_STRUCT(
         DiffOptions,
         (),
-        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden, localCaseInsensitive, lastSyncTime)
+        (direction,
+         actionUpload,
+         actionDownload,
+         actionDelete,
+         recursive,
+         ignoreHidden,
+         localCaseInsensitive,
+         remoteCaseInsensitive)
     )
 
     /**
@@ -103,6 +113,12 @@ namespace SharedData::Sync
     bool isHiddenName(std::string_view name);
 
     /**
+     * @brief Whether a child inside a directory that is transferred or deleted as a whole is part of it: listed and
+     *        not dropped as hidden.
+     */
+    bool isPlannable(ScanNode const& child, DiffOptions const& options);
+
+    /**
      * @brief Parallel merge walk of two sorted scan trees.
      *
      * Assumes both @p local and @p remote have children sorted ascending by name
@@ -114,14 +130,11 @@ namespace SharedData::Sync
      *    whose @ref ScanNode::childrenKnown is false,
      *  - `options.ignoreHidden` filters per-name at every level.
      *
+     * A file that differs on both sides goes from the newer side to the other one in Both mode.
+     *
      * @see DiffSink::onProgress heartbeats fire every 512 compares.
      */
-    void diffScanTrees(
-        ScanNode const& local,
-        ScanNode const& remote,
-        DiffOptions const& options,
-        DiffSink& sink
-    );
+    void diffScanTrees(ScanNode const& local, ScanNode const& remote, DiffOptions const& options, DiffSink& sink);
 
     inline void to_json(nlohmann::json& j, DiffOptions const& s)
     {

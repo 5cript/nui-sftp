@@ -1,7 +1,9 @@
 #pragma once
 
-#include <vector>
+#include <utility/algorithm/case_convert.hpp>
+
 #include <string>
+#include <vector>
 
 namespace Utility
 {
@@ -19,7 +21,7 @@ namespace Utility
             {
                 if (!normalizedSegments[i].empty())
                 {
-                    result += std::toupper(normalizedSegments[i][0]);
+                    result += Algorithm::asciiToUpper(normalizedSegments[i][0]);
                     result += normalizedSegments[i].substr(1);
                 }
             }
@@ -36,7 +38,7 @@ namespace Utility
             {
                 if (!segment.empty())
                 {
-                    result += std::toupper(segment[0]);
+                    result += Algorithm::asciiToUpper(segment[0]);
                     result += segment.substr(1);
                 }
             }
@@ -67,7 +69,7 @@ namespace Utility
             {
                 result += '_';
                 for (auto const& ch : normalizedSegments[i])
-                    result += std::toupper(ch);
+                    result += Algorithm::asciiToUpper(ch);
             }
             return result;
         }
@@ -110,12 +112,12 @@ namespace Utility
         std::string currentSegment{};
         for (auto const& ch : input)
         {
-            if (std::isupper(ch) && !currentSegment.empty())
+            if (Algorithm::isAsciiUpper(ch) && !currentSegment.empty())
             {
                 result.normalizedSegments.push_back(currentSegment);
                 currentSegment.clear();
             }
-            currentSegment += std::tolower(ch);
+            currentSegment += Algorithm::asciiToLower(ch);
         }
         if (!currentSegment.empty())
             result.normalizedSegments.push_back(currentSegment);
@@ -131,12 +133,12 @@ namespace Utility
         std::string currentSegment{};
         for (auto const& ch : input)
         {
-            if (std::isupper(ch) && !currentSegment.empty())
+            if (Algorithm::isAsciiUpper(ch) && !currentSegment.empty())
             {
                 result.normalizedSegments.push_back(currentSegment);
                 currentSegment.clear();
             }
-            currentSegment += std::tolower(ch);
+            currentSegment += Algorithm::asciiToLower(ch);
         }
         if (!currentSegment.empty())
             result.normalizedSegments.push_back(currentSegment);
@@ -159,7 +161,7 @@ namespace Utility
             }
             else
             {
-                currentSegment += std::tolower(ch);
+                currentSegment += Algorithm::asciiToLower(ch);
             }
         }
         if (!currentSegment.empty())
@@ -183,7 +185,7 @@ namespace Utility
             }
             else
             {
-                currentSegment += std::tolower(ch);
+                currentSegment += Algorithm::asciiToLower(ch);
             }
         }
         if (!currentSegment.empty())

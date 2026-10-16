@@ -34,7 +34,7 @@ namespace SharedData::Sync
      * No second pass is needed. Each directory's children are assigned once, sorted, before any of
      * them is queued, so the queued pointers stay valid.
      */
-    template <typename WalkErrorType, typename ScannerT, bool ScannerIncludesDotAndDotDot>
+    template <typename WalkErrorType, typename ScannerT>
     requires std::is_invocable_r_v<
         std::expected<std::vector<SharedData::DirectoryEntry>, WalkErrorType>,
         ScannerT,
@@ -145,9 +145,9 @@ namespace SharedData::Sync
                 if (raw.type == SharedData::FileType::Regular)
                     totalBytes_ += raw.size;
 
-                // The listed name as it is, "x/.." stays an invalid name.
+                // The listed name as it is, "x/.." or a name that was not UTF-8 stays an invalid name.
+                const auto availability = nameAvailability(raw);
                 std::string nameUtf8 = std::move(raw.name);
-                const auto availability = nameAvailability(nameUtf8, raw.type);
                 children.push_back(
                     ScanNode{
                         .name = std::move(nameUtf8),
@@ -244,9 +244,11 @@ namespace SharedData::Sync
                 type == SharedData::FileType::Symlink;
         }
 
-        Availability nameAvailability(std::string const& name, SharedData::FileType type) const
+        Availability nameAvailability(SharedData::DirectoryEntry const& entry) const
         {
-            const auto segment = Paths::PathSegment::make(name);
+            auto const& name = entry.name;
+            const auto type = entry.type;
+            const auto segment = entry.nameSegment();
             if (!segment)
                 return Availability::InvalidName;
             if (requireLocalNames_ && !Paths::LocalPathSegment::make(*segment).has_value())

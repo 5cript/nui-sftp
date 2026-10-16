@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
 
 class RenameOperation : public Operation
 {
@@ -17,7 +18,7 @@ class RenameOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    RenameOperation(SecureShell::SftpSession& sftp, RenameOperationOptions options);
+    RenameOperation(std::weak_ptr<SecureShell::SftpSession> sftp, RenameOperationOptions options);
     ~RenameOperation() override = default;
 
     RenameOperation(RenameOperation const&) = delete;
@@ -63,7 +64,7 @@ class RenameOperation : public Operation
     }
 
   private:
-    SecureShell::SftpSession* sftp_;
+    std::weak_ptr<SecureShell::SftpSession> sftp_;
     Paths::RemotePath sourcePath_;
     Paths::RemotePath destinationPath_;
     std::chrono::seconds futureTimeout_;

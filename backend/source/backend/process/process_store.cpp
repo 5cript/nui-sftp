@@ -1,4 +1,6 @@
 #include <backend/process/process_store.hpp>
+#include <utility/error_message.hpp>
+#include <backend/rpc_helper.hpp>
 
 #include <backend/process/boost_process.hpp>
 #include <csignal>
@@ -171,7 +173,9 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
         wnd_->runInJavascriptThread(
             [this, procId, msg]()
             {
-                hub_->callRemote(msg["responseId"].get<std::string>(), nlohmann::json{{"id", procId}});
+                RpcHelper::callRemoteSafely(
+                    *hub_, msg["responseId"].get<std::string>(), nlohmann::json{{"id", procId}}
+                );
             }
         );
     }
@@ -185,7 +189,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
         wnd_->runInJavascriptThread(
             [this, receptacle, procId, data]()
             {
-                hub_->callRemote(receptacle, nlohmann::json{{"id", procId}, {"data", data}});
+                RpcHelper::callRemoteSafely(*hub_, receptacle, nlohmann::json{{"id", procId}, {"data", data}});
             }
         );
     }
@@ -198,7 +202,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
         wnd_->runInJavascriptThread(
             [this, procId]()
             {
-                hub_->callRemote("execTerminalExit_" + procId, nlohmann::json{{"id", procId}});
+                RpcHelper::callRemoteSafely(*hub_, "execTerminalExit_" + procId, nlohmann::json{{"id", procId}});
             }
         );
     }
@@ -211,7 +215,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
             wnd_->runInJavascriptThread(
                 [this, responseId, errMsg]()
                 {
-                    hub_->callRemote(responseId, nlohmann::json{{"error", errMsg}});
+                    RpcHelper::callRemoteSafely(*hub_, responseId, nlohmann::json{{"error", errMsg}});
                 }
             );
             return;
@@ -222,7 +226,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
             {
                 if (procsList.empty())
                 {
-                    hub_->callRemote(responseId, nlohmann::json{{"error", "No processes found"}});
+                    RpcHelper::callRemoteSafely(*hub_, responseId, nlohmann::json{{"error", "No processes found"}});
                     return;
                 }
                 nlohmann::json j = nlohmann::json::object();
@@ -231,7 +235,7 @@ void ProcessStore::handleWorkerMessage(nlohmann::json const& msg)
                     {"cmdline", procsList.front()["cmdline"]},
                 };
                 j["all"] = procsList;
-                hub_->callRemote(responseId, j);
+                RpcHelper::callRemoteSafely(*hub_, responseId, j);
             }
         );
     }
@@ -268,7 +272,7 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, std::string const& id)
 
     process->second->exit();
     processes_.erase(process);
-    hub.callRemote("execTerminalExit_" + id, nlohmann::json{{"id", id}});
+    RpcHelper::callRemoteSafely(hub, "execTerminalExit_" + id, nlohmann::json{{"id", id}});
 }
 
 void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
@@ -280,7 +284,9 @@ void ProcessStore::notifyChildExit(Nui::RpcHub& hub, long long pid)
             process->exit();
             const auto idCopy = id;
             processes_.erase(id);
-            hub.callRemote("execTerminalExit_" + idCopy, nlohmann::json{{"id", idCopy}, {"pid", pid}});
+            RpcHelper::callRemoteSafely(
+                hub, "execTerminalExit_" + idCopy, nlohmann::json{{"id", idCopy}, {"pid", pid}}
+            );
             return;
         }
     }
@@ -368,7 +374,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 using PtyType = PTY::PseudoTerminal;
 #endif
 
-                hub->callRemote(responseId, nlohmann::json{{"id", processId}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"id", processId}});
 
                 if (processes_[processId]->getState<ProcessInfo>(ProcessAttachedState::ProcessInfo).isPty)
                 {
@@ -380,8 +386,10 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                             wnd->runInJavascriptThread(
                                 [hub, stdoutReceptacle, id, msg = std::string{message}]()
                                 {
-                                    hub->callRemote(
-                                        stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    RpcHelper::callRemoteSafely(
+                                        *hub,
+                                        stdoutReceptacle,
+                                        nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
                                     );
                                 }
                             );
@@ -391,8 +399,10 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                             wnd->runInJavascriptThread(
                                 [hub, stderrReceptacle, id, msg = std::string{message}]()
                                 {
-                                    hub->callRemote(
-                                        stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    RpcHelper::callRemoteSafely(
+                                        *hub,
+                                        stderrReceptacle,
+                                        nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
                                     );
                                 }
                             );
@@ -408,8 +418,10 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                             wnd->runInJavascriptThread(
                                 [hub, stdoutReceptacle, id, msg = std::string{message}]()
                                 {
-                                    hub->callRemote(
-                                        stdoutReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    RpcHelper::callRemoteSafely(
+                                        *hub,
+                                        stdoutReceptacle,
+                                        nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
                                     );
                                 }
                             );
@@ -420,8 +432,10 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                             wnd->runInJavascriptThread(
                                 [hub, stderrReceptacle, id, msg = std::string{message}]()
                                 {
-                                    hub->callRemote(
-                                        stderrReceptacle, nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
+                                    RpcHelper::callRemoteSafely(
+                                        *hub,
+                                        stderrReceptacle,
+                                        nlohmann::json{{"id", *id}, {"data", Roar::base64Encode(msg)}}
                                     );
                                 }
                             );
@@ -432,8 +446,8 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
             }
             catch (std::exception const& e)
             {
-                Log::error("Failed to spawn process: {}", e.what());
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                Log::error("Failed to spawn process: {}", Utility::errorMessage(e));
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
@@ -456,7 +470,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                         if (forkPool_)
                             forkPool_->send(nlohmann::json{{"id", id}, {"command", "kill"}});
                         forkPoolProcesses_.erase(iter);
-                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
                         return;
                     }
                 }
@@ -464,7 +478,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
                 auto& proc = process->second;
@@ -475,12 +489,12 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
 
                 process->second->exit(0s);
                 processes_.erase(process);
-                hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
 #endif
             }
             catch (std::exception const& e)
             {
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
@@ -502,7 +516,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                         if (forkPool_)
                             forkPool_->send(nlohmann::json{{"id", id}, {"command", "kill"}});
                         forkPoolProcesses_.erase(iter);
-                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
                         return;
                     }
                 }
@@ -510,7 +524,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
                 auto& proc = process->second;
@@ -521,12 +535,12 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
 
                 process->second->exit();
                 processes_.erase(process);
-                hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
 #endif
             }
             catch (std::exception const& e)
             {
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
@@ -551,7 +565,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                                     {"payload", {{"data", data}}},
                                 }
                             );
-                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
                         return;
                     }
                 }
@@ -560,7 +574,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
 
@@ -578,11 +592,11 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 else
                     process->second->write(Roar::base64Decode(data) + "\r");
 
-                hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
             }
             catch (std::exception const& e)
             {
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
@@ -608,7 +622,9 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                                 }
                             );
                         else
-                            hub->callRemote(responseId, nlohmann::json{{"error", "No fork pool available"}});
+                            RpcHelper::callRemoteSafely(
+                                *hub, responseId, nlohmann::json{{"error", "No fork pool available"}}
+                            );
                         return;
                     }
                 }
@@ -616,7 +632,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
 
@@ -629,13 +645,13 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 if (process->second->getState<ProcessInfo>(ProcessAttachedState::ProcessInfo).isPty)
                 {
 #ifdef _WIN32
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Not implemented"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Not implemented"}});
 #else
                     auto& pty = process->second->getState<PtyType>(ProcessAttachedState::PseudoConsole);
                     const auto procs = pty.listProcessesUnderPty();
                     if (procs.empty())
                     {
-                        hub->callRemote(responseId, nlohmann::json{{"error", "No processes found"}});
+                        RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "No processes found"}});
                         return;
                     }
                     nlohmann::json j = nlohmann::json::object();
@@ -651,17 +667,17 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                             {"cmdline", p.cmdline},
                         });
                     }
-                    hub->callRemote(responseId, j);
+                    RpcHelper::callRemoteSafely(*hub, responseId, j);
 #endif
                 }
                 else
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process is not a PTY"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process is not a PTY"}});
                 }
             }
             catch (std::exception const& e)
             {
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
@@ -688,7 +704,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                                     {"payload", {{"cols", cols}, {"rows", rows}}},
                                 }
                             );
-                        hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                        RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
                         return;
                     }
                 }
@@ -697,7 +713,7 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 auto process = processes_.find(id);
                 if (process == processes_.end())
                 {
-                    hub->callRemote(responseId, nlohmann::json{{"error", "Process not found"}});
+                    RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", "Process not found"}});
                     return;
                 }
 
@@ -718,11 +734,11 @@ void ProcessStore::registerRpc(Nui::Window& wnd, Nui::RpcHub& hub)
                 process->second->signal(SIGWINCH);
 #endif
 
-                hub->callRemote(responseId, nlohmann::json{{"success", true}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"success", true}});
             }
             catch (std::exception const& e)
             {
-                hub->callRemote(responseId, nlohmann::json{{"error", e.what()}});
+                RpcHelper::callRemoteSafely(*hub, responseId, nlohmann::json{{"error", Utility::errorMessage(e)}});
                 return;
             }
         }
